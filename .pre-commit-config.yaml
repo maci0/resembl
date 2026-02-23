@@ -31,4 +31,4 @@ repos:
         entry: uv run pylint
         language: system
         types: [python]
-        args: ["asmatch/", "tests/"]
+        args: ["resembl/", "tests/"]

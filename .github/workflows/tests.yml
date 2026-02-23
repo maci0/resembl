@@ -25,7 +25,7 @@ jobs:
         run: uv pip install -e .[dev]
 
       - name: Run mypy
-        run: uv run mypy asmatch
+        run: uv run mypy resembl
 
       - name: Run ruff
         run: uv run ruff check .
