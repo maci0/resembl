@@ -235,7 +235,7 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
                 "word",
                 "byte",
                 "qword",
-                "dword ptr",
+                "ptr",
             ]:
                 output_tokens.append("MEM_SIZE")
             elif ttype not in Punctuation and value.strip():
@@ -248,13 +248,23 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
 
 
 def code_create_minhash(code_snippet: str, normalize: bool = True) -> MinHash:
-    """Return a MinHash object representing the given code snippet."""
+    """Return a MinHash object representing the given code snippet.
+
+    Uses 3-gram shingling to preserve token ordering so that
+    structurally different snippets produce distinct fingerprints.
+    """
     tokens = code_tokenize(code_snippet, normalize)
     m = MinHash(num_perm=NUM_PERMUTATIONS)
     if not tokens:
         return m
-    for token in set(tokens):
-        m.update(token.encode("utf8"))
+    if len(tokens) < 3:
+        m.update(" ".join(tokens).encode("utf8"))
+        return m
+    shingles: set[str] = set()
+    for i in range(len(tokens) - 2):
+        shingles.add(" ".join(tokens[i : i + 3]))
+    for shingle in shingles:
+        m.update(shingle.encode("utf8"))
     return m
 
 
@@ -444,14 +454,13 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     total_similarity: float = 0.0
     num_comparisons: int = 0
 
+    # Deserialize MinHash objects once to avoid O(n²) pickle.loads calls
+    minhashes = [s.get_minhash_obj() for s in sample_snippets]
+
     num_snippets = len(sample_snippets)
     for i in range(num_snippets):
-        snippet_i = sample_snippets[i]
         for j in range(i + 1, num_snippets):
-            snippet_j = sample_snippets[j]
-            m1 = snippet_i.get_minhash_obj()
-            m2 = snippet_j.get_minhash_obj()
-            total_similarity += m1.jaccard(m2)
+            total_similarity += minhashes[i].jaccard(minhashes[j])
             num_comparisons += 1
 
     return total_similarity / num_comparisons if num_comparisons > 0 else 1.0

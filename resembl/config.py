@@ -7,13 +7,13 @@ import tempfile
 import tomli
 import tomli_w
 
-DEFAULT_CONFIG_DIR = "~/.config/asmatch"
+DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
 
 def config_dir_get() -> str:
-    """Return the config directory, respecting the ASMATCH_CONFIG_DIR env var."""
+    """Return the config directory, respecting the RESEMBL_CONFIG_DIR env var."""
     return os.path.expanduser(
-        os.environ.get("ASMATCH_CONFIG_DIR", DEFAULT_CONFIG_DIR)
+        os.environ.get("RESEMBL_CONFIG_DIR", DEFAULT_CONFIG_DIR)
     )
 
 
@@ -34,8 +34,7 @@ def save_config(config: dict) -> None:
     """Write ``config`` to the config file atomically."""
     cfg_dir = config_dir_get()
     cfg_path = config_path_get()
-    if not os.path.exists(cfg_dir):
-        os.makedirs(cfg_dir)
+    os.makedirs(cfg_dir, exist_ok=True)
 
     with tempfile.NamedTemporaryFile("wb", dir=cfg_dir, delete=False) as tmp:
         tomli_w.dump(config, tmp)

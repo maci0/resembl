@@ -34,7 +34,7 @@ class TestCache(unittest.TestCase):
     def test_lsh_cache_save_and_load(self):
         """Test saving and loading the LSH cache."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 lsh = {"test": "data"}
                 self.session.exec.return_value.one.return_value = 1
                 self.session.exec.return_value.first.return_value = Snippet(
@@ -48,14 +48,14 @@ class TestCache(unittest.TestCase):
     def test_load_nonexistent_cache(self):
         """Test loading a nonexistent cache file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 loaded_lsh = lsh_cache_load(self.session, 0.5)
                 self.assertIsNone(loaded_lsh)
 
     def test_load_corrupted_cache(self):
         """Test loading a corrupted cache file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 lsh = {"test": "data"}
                 self.session.exec.return_value.one.return_value = 1
                 self.session.exec.return_value.first.return_value = Snippet(
@@ -74,7 +74,7 @@ class TestCache(unittest.TestCase):
     def test_cache_invalidation(self):
         """Test that the cache can be invalidated."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 lsh = {"test": "data"}
                 self.session.exec.return_value.one.return_value = 1
                 self.session.exec.return_value.first.return_value = Snippet(
@@ -100,7 +100,7 @@ class TestCache(unittest.TestCase):
     def test_cache_dir_respects_env_override(self):
         """Verify that cache_dir_get reads the env var at call time."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 self.assertEqual(cache_dir_get(), tmpdir)
                 self.assertTrue(db_checksum_path_get().startswith(tmpdir))
 

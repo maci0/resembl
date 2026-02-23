@@ -1,6 +1,6 @@
-# asmatch Flowcharts
+# resembl Flowcharts
 
-This document contains Mermaid charts illustrating the core workflows of the `asmatch` tool.
+This document contains Mermaid charts illustrating the core workflows of the `resembl` tool.
 
 ## Add Snippet Flow
 
@@ -9,7 +9,7 @@ This chart describes the process of adding a new snippet to the database.
 ```mermaid
 graph LR
     subgraph "Input"
-        A[asmatch add 'name' 'code']
+        A[resembl add 'name' 'code']
     end
 
     subgraph "Processing"
@@ -43,7 +43,7 @@ This chart illustrates the process of finding similar snippets.
 ```mermaid
 graph LR
     subgraph "Input"
-        A[asmatch find --query 'code']
+        A[resembl find --query 'code']
     end
 
     subgraph "Query Processing"
@@ -78,7 +78,7 @@ This chart describes the bulk import process.
 ```mermaid
 graph LR
     subgraph "Input"
-        A[asmatch import 'directory']
+        A[resembl import 'directory']
     end
 
     subgraph "Confirmation"
@@ -118,7 +118,7 @@ This chart describes the snippet export process.
 ```mermaid
 graph LR
     subgraph "Input"
-        A[asmatch export 'directory']
+        A[resembl export 'directory']
     end
 
     subgraph "Confirmation"

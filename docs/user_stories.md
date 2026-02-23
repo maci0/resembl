@@ -1,6 +1,6 @@
 # User Stories & Personas
 
-This document outlines the features of the `asmatch` CLI from a user's perspective.
+This document outlines the features of the `resembl` CLI from a user's perspective.
 
 ---
 
@@ -26,7 +26,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 
 ### Persona 3: Chris, the Database Maintainer
 
-*   **Role:** A senior engineer on a team that uses `asmatch` as a shared resource.
+*   **Role:** A senior engineer on a team that uses `resembl` as a shared resource.
 *   **Motivation:** Chris is responsible for the health and quality of the team's shared snippet database. The goal is to ensure that the database is well-organized, up-to-date, and free of errors.
 *   **Key Needs:**
     *   Tools for bulk-importing and exporting snippets.
@@ -44,7 +44,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** quickly identify if it matches a known function in my database.
 
 **Acceptance Criteria:**
-- `asmatch find --query "..."` returns a list of the most similar snippets.
+- `resembl find --query "..."` returns a list of the most similar snippets.
 - The search is robust against changes in register allocation and immediate values.
 - The user can specify the number of results with `--top-n`.
 - The user can provide the query from a file with `--file`.
@@ -61,7 +61,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that** my team and I can find it later.
 
 **Acceptance Criteria:**
-- `asmatch add <name> "<code>"` adds a new snippet.
+- `resembl add <name> "<code>"` adds a new snippet.
 - If the code already exists, the new name is added as an alias to the existing snippet.
 
 ---
@@ -73,8 +73,8 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** keep the database organized and up-to-date.
 
 **Acceptance Criteria:**
-- `asmatch name add <checksum> <new_name>` adds a new name to an existing snippet.
-- `asmatch name remove <checksum> <name_to_remove>` removes a name from a snippet.
+- `resembl name add <checksum> <new_name>` adds a new name to an existing snippet.
+- `resembl name remove <checksum> <name_to_remove>` removes a name from a snippet.
 - The tool prevents removing the last name from a snippet.
 
 ---
@@ -86,7 +86,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** quickly build a searchable library from my existing collection.
 
 **Acceptance Criteria:**
-- `asmatch import <directory>` imports all `.asm` and `.txt` files.
+- `resembl import <directory>` imports all `.asm` and `.txt` files.
 - The filename (without extension) is used as the snippet name.
 - The user is prompted for confirmation before the import begins.
 - The user can bypass the confirmation prompt with the `--force` flag.
@@ -100,7 +100,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** easily back up or share my database.
 
 **Acceptance Criteria:**
-- `asmatch export <directory>` exports all snippets to the specified directory.
+- `resembl export <directory>` exports all snippets to the specified directory.
 - Each snippet is saved as a separate `.asm` file.
 - The filename is the primary name of the snippet.
 - The user is prompted for confirmation before the export begins.
@@ -115,7 +115,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** understand their structural and code-level similarities.
 
 **Acceptance Criteria:**
-- `asmatch compare <checksum1> <checksum2>` displays a side-by-side comparison.
+- `resembl compare <checksum1> <checksum2>` displays a side-by-side comparison.
 - The comparison includes Jaccard similarity, Levenshtein score, and shared token count.
 - The output is color-coded for readability.
 - The user can disable colored output with the `--no-color` flag.
@@ -130,8 +130,8 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** ensure the tool is running efficiently.
 
 **Acceptance Criteria:**
-- `asmatch clean` removes all LSH cache files from the current directory.
-- `asmatch clean` vacuums the database to reclaim unused space.
+- `resembl clean` removes all LSH cache files from the current directory.
+- `resembl clean` vacuums the database to reclaim unused space.
 
 ---
 
@@ -142,7 +142,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that** the search results remain clean and accurate.
 
 **Acceptance Criteria:**
-- `asmatch rm <checksum>` removes a snippet from the database.
+- `resembl rm <checksum>` removes a snippet from the database.
 - The tool prompts for confirmation before deleting.
 
 ---
@@ -154,7 +154,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** understand the size and complexity of the dataset.
 
 **Acceptance Criteria:**
-- `asmatch stats` displays the total number of snippets, average snippet size, vocabulary size, and average in-dataset similarity.
+- `resembl stats` displays the total number of snippets, average snippet size, vocabulary size, and average in-dataset similarity.
 - The output can be formatted as JSON with `--json`.
 
 ---
@@ -166,7 +166,7 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** apply changes to the hashing or normalization algorithm to all existing entries.
 
 **Acceptance Criteria:**
-- `asmatch reindex` recalculates all hashes.
+- `resembl reindex` recalculates all hashes.
 - The user is prompted for confirmation before starting.
 - The tool displays statistics about the re-indexing process.
 
@@ -179,10 +179,10 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** customize the tool's behavior without using flags for every command.
 
 **Acceptance Criteria:**
-- `asmatch config path` shows the location of the config file.
-- `asmatch config list` displays the current settings.
-- `asmatch config set <key> <value>` sets a new default value.
-- The tool reads default values for `lsh_threshold` and `top_n` from `~/.config/asmatch/config.toml`. This location can be changed with the `ASMATCH_CONFIG_DIR` environment variable.
+- `resembl config path` shows the location of the config file.
+- `resembl config list` displays the current settings.
+- `resembl config set <key> <value>` sets a new default value.
+- The tool reads default values for `lsh_threshold` and `top_n` from `~/.config/resembl/config.toml`. This location can be changed with the `RESEMBL_CONFIG_DIR` environment variable.
 
 ---
 
@@ -193,9 +193,9 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that I can** undo a previous customization without having to look up the default.
 
 **Acceptance Criteria:**
-- `asmatch config unset <key>` removes the key from the config file.
+- `resembl config unset <key>` removes the key from the config file.
 - The setting reverts to its default value.
-- `asmatch config list` confirms the default is restored.
+- `resembl config list` confirms the default is restored.
 
 ---
 
@@ -206,6 +206,6 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 **so that** I can verify the tool and cache are working.
 
 **Acceptance Criteria:**
-- `asmatch add my_snippet "MOV EAX, EBX"` stores the snippet and updates the LSH index.
-- `asmatch find --query "MOV EAX, EBX"` returns that snippet among the results.
+- `resembl add my_snippet "MOV EAX, EBX"` stores the snippet and updates the LSH index.
+- `resembl find --query "MOV EAX, EBX"` returns that snippet among the results.
 - Each result includes a similarity score.

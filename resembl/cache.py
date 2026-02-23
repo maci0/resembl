@@ -12,12 +12,12 @@ from .models import Snippet
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CACHE_DIR = "~/.cache/asmatch"
+DEFAULT_CACHE_DIR = "~/.cache/resembl"
 
 
 def cache_dir_get() -> str:
-    """Return the cache directory, respecting the ASMATCH_CACHE_DIR env var."""
-    return os.path.expanduser(os.environ.get("ASMATCH_CACHE_DIR", DEFAULT_CACHE_DIR))
+    """Return the cache directory, respecting the RESEMBL_CACHE_DIR env var."""
+    return os.path.expanduser(os.environ.get("RESEMBL_CACHE_DIR", DEFAULT_CACHE_DIR))
 
 
 def db_checksum_path_get() -> str:
@@ -52,8 +52,7 @@ def lsh_index_build(session: Session, threshold: float, num_perm: int) -> MinHas
 def lsh_cache_save(session: Session, lsh: MinHashLSH, threshold: float) -> None:
     """Save the LSH index and the current DB checksum to the cache."""
     cache_dir = cache_dir_get()
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
+    os.makedirs(cache_dir, exist_ok=True)
 
     lsh_cache_path = lsh_cache_path_get(threshold)
     with open(lsh_cache_path, "wb") as f:

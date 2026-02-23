@@ -1,12 +1,13 @@
 """Command line interface for the resembl tool."""
 
+from __future__ import annotations
+
 import glob
 import json
 import logging
 import os
 import sys
 import time
-from typing import Optional
 
 import typer
 from sqlmodel import Session
@@ -58,7 +59,6 @@ class State:
     session: Session
     config: dict
     quiet: bool = False
-    json_output: bool = False
     no_color: bool = False
 
 
@@ -168,8 +168,7 @@ def import_cmd(
         fname = os.path.splitext(os.path.basename(file_path))[0]
         with open(file_path, "r", encoding="utf-8") as f:
             code = f.read()
-        checksum = string_checksum(code)
-        existing = snippet_get(state.session, checksum)
+        existing = snippet_get(state.session, string_checksum(code))
         snippet = snippet_add(state.session, fname, code)
         if snippet and not existing:
             snippets_added += 1
@@ -186,7 +185,7 @@ def import_cmd(
         _echo_json(stats)
     else:
         _echo("--- Import Complete ---")
-        _echo(f"  Snippets processed: {stats['num_imported']}")
+        _echo(f"  Snippets imported: {stats['num_imported']}")
         _echo(f"  Total time elapsed: {stats['time_elapsed']:.4f} seconds")
         if stats["num_imported"] > 0:
             _echo(f"  Average time per snippet: {stats['avg_time_per_snippet'] * 1000:.4f} ms")
@@ -194,7 +193,7 @@ def import_cmd(
 
 @app.command("list")
 def list_cmd(
-    range_str: Optional[str] = typer.Option(None, "--range", help="A range of snippets to list (e.g., 10-30)."),
+    range_str: str | None = typer.Option(None, "--range", help="A range of snippets to list (e.g., 10-30)."),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     """List all snippets."""
@@ -290,10 +289,10 @@ def reindex(
 
 @app.command()
 def find(
-    query: Optional[str] = typer.Option(None, "--query", help="The query string to search for."),
-    file: Optional[typer.FileText] = typer.Option(None, "--file", help="Path to a file containing the query. Use '-' for stdin."),
-    top_n: Optional[int] = typer.Option(None, "--top-n", help="Number of top matches to return."),
-    threshold: Optional[float] = typer.Option(None, "--threshold", help="LSH threshold override (0.0-1.0)."),
+    query: str | None = typer.Option(None, "--query", help="The query string to search for."),
+    file: typer.FileText | None = typer.Option(None, "--file", help="Path to a file containing the query. Use '-' for stdin."),
+    top_n: int | None = typer.Option(None, "--top-n", help="Number of top matches to return."),
+    threshold: float | None = typer.Option(None, "--threshold", help="LSH threshold override (0.0-1.0)."),
     json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
     no_normalization: bool = typer.Option(False, "--no-normalization", help="Disable token normalization for this query."),
 ) -> None:
@@ -305,7 +304,7 @@ def find(
         typer.echo("Error: --threshold must be between 0.0 and 0.99 (exclusive).", err=True)
         raise typer.Exit(code=1)
 
-    query_string: Optional[str] = None
+    query_string: str | None = None
     if query:
         query_string = query
     elif file:

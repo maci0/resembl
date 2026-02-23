@@ -30,7 +30,7 @@ This approach provides several advantages:
 
 ### LSH Caching
 
-To make searches nearly instantaneous, `resembl` caches the LSH index to a file in `~/.cache/asmatch/`. The location can be overridden with the `ASMATCH_CACHE_DIR` environment variable. The cache is automatically invalidated and rebuilt whenever the database is modified.
+To make searches nearly instantaneous, `resembl` caches the LSH index to a file in `~/.cache/resembl/`. The location can be overridden with the `RESEMBL_CACHE_DIR` environment variable. The cache is automatically invalidated and rebuilt whenever the database is modified.
 
 ## How It Works
 
@@ -117,7 +117,7 @@ By using `rapidfuzz`, `resembl` can accurately score the similarity between the 
 
 ### Lookup Flow
 
-When you run `asmatch find`, the tool processes your query in several stages:
+When you run `resembl find`, the tool processes your query in several stages:
 
 1. **Load metadata** – The SQLite database and the cached LSH index are loaded. If the index is missing or stale it is rebuilt from the stored MinHash fingerprints.
 2. **Normalize query** – The query assembly is lexed and normalized unless `--no-normalization` is specified.
@@ -132,7 +132,7 @@ This pipeline lets `resembl` search large datasets in milliseconds while ranking
 
 ```
 resembl/
-├── asmatch/
+├── resembl/
 │   ├── __init__.py
 │   ├── __main__.py
 │   ├── cache.py
@@ -175,8 +175,8 @@ uv run pre-commit install
 
 ### 2. Configuration
 
-You can create a configuration file at `~/.config/asmatch/config.toml` to set
-default values. Set `ASMATCH_CONFIG_DIR` to override this location.
+You can create a configuration file at `~/.config/resembl/config.toml` to set
+default values. Set `RESEMBL_CONFIG_DIR` to override this location.
 
 | Key               | Default | Description |
 |-------------------|--------:|-------------|
@@ -190,7 +190,7 @@ lsh_threshold = 0.8
 top_n = 5
 ```
 
-You can manage this file with the `asmatch config` command.
+You can manage this file with the `resembl config` command.
 
 ### 3. Usage
 
@@ -199,10 +199,10 @@ The CLI can be invoked through uv or by running the module directly after activa
 **Examples:**
 ```bash
 # Run commands through uv
-uv run asmatch add my_memcpy "MOV EAX, EBX; ..."
+uv run resembl add my_memcpy "MOV EAX, EBX; ..."
 
 # Or, after activating the virtual environment, you can call it directly
-asmatch find --query "MOV EAX"
+resembl find --query "MOV EAX"
 
 Global options:
 ```
@@ -213,7 +213,7 @@ Global options:
 
 For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
 ```bash
-uv run asmatch --help
+uv run resembl --help
 ```
 
 ### 4. Example with test_data
@@ -222,17 +222,17 @@ This is an example of how to import the provided `test_data` and then search for
 
 ```bash
 # import the data
-uv run asmatch import tests/test_data
+uv run resembl import tests/test_data
 ```
 
 ```bash
 # search for a snippet
-uv run asmatch find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
+uv run resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
 ```
 
 ```bash
 # search for a function
-uv run asmatch find --file tests/test_data/1000A0A0.asm
+uv run resembl find --file tests/test_data/1000A0A0.asm
 ```
 
 ### 5. Running Tests
@@ -248,7 +248,7 @@ This project uses `pytest-cov` to measure test coverage. A GitHub Actions workfl
 
 You can run the coverage report locally with:
 ```bash
-uv run pytest --cov=asmatch
+uv run pytest --cov=resembl
 ```
 
 ## Advanced Usage
@@ -290,9 +290,9 @@ uv run python tests/generate_data.py
 uv run python tests/generate_data.py --num-files 500 --data-dir custom_data/
 ```
 
-You can then import the generated files into `asmatch` using the `import` command:
+You can then import the generated files into `resembl` using the `import` command:
 ```bash
-uv run asmatch import data/
+uv run resembl import data/
 ```
 
 ## Visual Flowcharts
