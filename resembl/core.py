@@ -247,22 +247,22 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     return output_tokens
 
 
-def code_create_minhash(code_snippet: str, normalize: bool = True) -> MinHash:
+def code_create_minhash(code_snippet: str, normalize: bool = True, ngram_size: int = 3) -> MinHash:
     """Return a MinHash object representing the given code snippet.
 
-    Uses 3-gram shingling to preserve token ordering so that
+    Uses configurable n-gram shingling to preserve token ordering so that
     structurally different snippets produce distinct fingerprints.
     """
     tokens = code_tokenize(code_snippet, normalize)
     m = MinHash(num_perm=NUM_PERMUTATIONS)
     if not tokens:
         return m
-    if len(tokens) < 3:
+    if len(tokens) < ngram_size:
         m.update(" ".join(tokens).encode("utf8"))
         return m
     shingles: set[str] = set()
-    for i in range(len(tokens) - 2):
-        shingles.add(" ".join(tokens[i : i + 3]))
+    for i in range(len(tokens) - ngram_size + 1):
+        shingles.add(" ".join(tokens[i : i + ngram_size]))
     for shingle in shingles:
         m.update(shingle.encode("utf8"))
     return m
@@ -271,7 +271,7 @@ def code_create_minhash(code_snippet: str, normalize: bool = True) -> MinHash:
 # --- Application Logic Functions ---
 
 
-def snippet_add(session: Session, name: str, code: str) -> Snippet | None:
+def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> Snippet | None:
     """Add a new snippet or alias to the database."""
     if not code.strip():
         return None
@@ -291,7 +291,7 @@ def snippet_add(session: Session, name: str, code: str) -> Snippet | None:
         return existing_snippet
 
     # Snippet with this code does not exist, create a new one
-    minhash_obj = code_create_minhash(code)
+    minhash_obj = code_create_minhash(code, ngram_size=ngram_size)
     minhash_bytes = pickle.dumps(minhash_obj)
 
     new_snippet = Snippet(
@@ -313,6 +313,7 @@ def snippet_find_matches(
     top_n: int = 3,
     threshold: float | None = None,
     normalize: bool = True,
+    ngram_size: int = 3,
 ) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string."""
     if threshold is None:
@@ -327,7 +328,7 @@ def snippet_find_matches(
     if lsh is None:
         return 0, []  # Error handled in build_lsh_index
 
-    query_minhash = code_create_minhash(query_string, normalize)
+    query_minhash = code_create_minhash(query_string, normalize, ngram_size=ngram_size)
     candidate_keys = lsh.query(query_minhash)
 
     if not candidate_keys:
@@ -371,7 +372,7 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
     return True
 
 
-def db_reindex(session: Session) -> dict:
+def db_reindex(session: Session, ngram_size: int = 3) -> dict:
     """Recalculate the MinHash for every snippet in the database."""
     start_time = time.time()
     snippets = Snippet.get_all(session)
@@ -381,7 +382,7 @@ def db_reindex(session: Session) -> dict:
         return {"num_reindexed": 0, "time_elapsed": 0, "avg_time_per_snippet": 0}
 
     for snippet in snippets:
-        minhash_obj = code_create_minhash(snippet.code)
+        minhash_obj = code_create_minhash(snippet.code, ngram_size=ngram_size)
         snippet.minhash = pickle.dumps(minhash_obj)
         session.add(snippet)
 
@@ -496,6 +497,14 @@ def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet
     if end > 0:
         return session.exec(select(Snippet).offset(start).limit(end - start)).all()
     return Snippet.get_all(session)
+
+
+def snippet_search_by_name(session: Session, pattern: str) -> list[Snippet]:
+    """Search for snippets where any name matches the pattern (case-insensitive)."""
+    # The JSON structure means names are embedded in the string,
+    # so a standard LIKE '%pattern%' will match anywhere in the names list.
+    query_pattern = f"%{pattern}%"
+    return list(session.exec(select(Snippet).where(Snippet.names.like(query_pattern))).all())
 
 
 def snippet_export(session: Session, export_dir: str) -> dict:

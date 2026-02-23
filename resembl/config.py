@@ -25,6 +25,7 @@ DEFAULTS = {
     "lsh_threshold": 0.5,
     "num_permutations": 128,
     "top_n": 5,
+    "ngram_size": 3,
 }
 
 logger = logging.getLogger(__name__)

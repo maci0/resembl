@@ -2,6 +2,7 @@
 
 import os
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, func, select
 
 from .models import Snippet
@@ -10,6 +11,15 @@ from .models import Snippet
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///assembly.db")
 
 engine = create_engine(DATABASE_URL, echo=False)
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL mode for better performance."""
+    if DATABASE_URL.startswith("sqlite"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 def db_create() -> None:

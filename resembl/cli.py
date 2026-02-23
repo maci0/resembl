@@ -14,6 +14,8 @@ import time
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import track
+from rich.syntax import Syntax
 from rich.table import Table
 from sqlmodel import Session
 
@@ -37,6 +39,7 @@ from .core import (
     snippet_list,
     snippet_name_add,
     snippet_name_remove,
+    snippet_search_by_name,
     string_checksum,
 )
 from .database import db_create, engine
@@ -130,7 +133,7 @@ def add(
     json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
     """Add a new snippet or an alias to existing code."""
-    snippet = snippet_add(state.session, name, code)
+    snippet = snippet_add(state.session, name, code, ngram_size=state.config.get("ngram_size", 3))
     if snippet:
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
@@ -192,12 +195,17 @@ def import_cmd(
     file_paths = glob.glob(os.path.join(directory, "**", "*.asm"), recursive=True)
     file_paths += glob.glob(os.path.join(directory, "**", "*.txt"), recursive=True)
 
-    for file_path in file_paths:
+    for file_path in track(
+        file_paths,
+        description="Importing snippets...",
+        disable=state.quiet or json_output,
+        console=err_console,
+    ):
         fname = os.path.splitext(os.path.basename(file_path))[0]
         with open(file_path, "r", encoding="utf-8") as f:
             code = f.read()
         existing = snippet_get(state.session, string_checksum(code))
-        snippet = snippet_add(state.session, fname, code)
+        snippet = snippet_add(state.session, fname, code, ngram_size=state.config.get("ngram_size", 3))
         if snippet and not existing:
             snippets_added += 1
 
@@ -263,7 +271,8 @@ def show(
     if json_output:
         _echo_json({"checksum": snippet.checksum, "names": snippet.name_list, "code": snippet.code})
     else:
-        _echo(Panel(snippet.code, title=f"[bold]{', '.join(snippet.name_list)}[/bold]", subtitle=snippet.checksum[:16] + "…", border_style="cyan"))
+        syntax = Syntax(snippet.code, "nasm", theme="monokai", wrap=True)
+        _echo(Panel(syntax, title=f"[bold]{', '.join(snippet.name_list)}[/bold]", subtitle=snippet.checksum[:16] + "…", border_style="cyan"))
 
 
 @app.command()
@@ -313,7 +322,7 @@ def reindex(
             abort=True,
         )
 
-    result = db_reindex(state.session)
+    result = db_reindex(state.session, ngram_size=state.config.get("ngram_size", 3))
     if json_output:
         _echo_json(result)
     else:
@@ -355,7 +364,7 @@ def find(
         raise typer.Exit(code=1)
 
     num_candidates, matches = snippet_find_matches(
-        state.session, query_string, effective_top_n, effective_threshold, not no_normalization
+        state.session, query_string, effective_top_n, effective_threshold, not no_normalization, ngram_size=state.config.get("ngram_size", 3)
     )
 
     if json_output:
@@ -387,6 +396,28 @@ def find(
             _echo(table)
         else:
             _echo("[yellow]No matches found after ranking.[/yellow]")
+
+
+@app.command()
+def search(
+    pattern: str = typer.Argument(help="The name pattern to search for."),
+    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
+) -> None:
+    """Search for snippets by matching their names."""
+    snippets = snippet_search_by_name(state.session, pattern)
+
+    if json_output:
+        _echo_json([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
+    else:
+        _echo(f"[dim]Found {len(snippets)} snippets matching '{pattern}'.[/dim]")
+        if snippets:
+            table = Table(title="Search Results", title_style="bold cyan")
+            table.add_column("#", style="dim", justify="right")
+            table.add_column("Checksum", style="bold")
+            table.add_column("Names")
+            for i, snippet in enumerate(snippets, 1):
+                table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
+            _echo(table)
 
 
 @app.command()
