@@ -12,6 +12,9 @@ import sys
 import time
 
 import typer
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 from sqlmodel import Session
 
 from .config import (
@@ -40,14 +43,20 @@ from .database import db_create, engine
 
 logger = logging.getLogger(__name__)
 
+# --- Rich Consoles ---
+
+console = Console()
+err_console = Console(stderr=True)
+
 # --- Typer apps ---
 
 app = typer.Typer(
     help="A CLI for finding similar assembly code snippets.",
     add_completion=False,
+    rich_markup_mode="rich",
 )
-config_app = typer.Typer(help="Manage user configuration.")
-name_app = typer.Typer(help="Manage snippet names.")
+config_app = typer.Typer(help="Manage user configuration.", rich_markup_mode="rich")
+name_app = typer.Typer(help="Manage snippet names.", rich_markup_mode="rich")
 app.add_typer(config_app, name="config")
 app.add_typer(name_app, name="name")
 
@@ -67,16 +76,16 @@ class State:
 state = State()
 
 
-def _echo(message: str) -> None:
+def _echo(message: object, **kwargs: object) -> None:
     """Print a message unless ``--quiet`` is set."""
     if not state.quiet:
-        typer.echo(message)
+        console.print(message, **kwargs)
 
 
 def _echo_json(data: object) -> None:
     """Print data as JSON unless ``--quiet`` is set."""
     if not state.quiet:
-        typer.echo(json.dumps(data, indent=2))
+        console.print_json(json.dumps(data, indent=2))
 
 
 # --- Callbacks ---
@@ -89,8 +98,14 @@ def app_callback(
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
 ) -> None:
     """Set up logging and shared state."""
+    global console, err_console
+
     state.quiet = quiet
     state.no_color = no_color
+
+    if no_color:
+        console = Console(no_color=True, highlight=False)
+        err_console = Console(stderr=True, no_color=True, highlight=False)
 
     log_level = logging.INFO
     if quiet:
@@ -120,12 +135,15 @@ def add(
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
         else:
-            _echo(f"Snippet with checksum {snippet.checksum} now has names: {snippet.name_list}")
+            _echo(
+                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+                f"now has names: {snippet.name_list}"
+            )
     else:
         if json_output:
             _echo_json({"error": "Failed to add snippet."})
         else:
-            typer.echo("Error: Snippet could not be added (empty code?).", err=True)
+            err_console.print("[red]Error:[/red] Snippet could not be added (empty code?).")
             raise typer.Exit(code=1)
 
 
@@ -141,16 +159,19 @@ def export_cmd(
             f"Are you sure you want to export all snippets to '{directory}'?", abort=True
         )
 
-    stats = snippet_export(state.session, directory)
+    result = snippet_export(state.session, directory)
 
     if json_output:
-        _echo_json(stats)
+        _echo_json(result)
     else:
-        _echo("--- Export Complete ---")
-        _echo(f"  Snippets exported: {stats['num_exported']}")
-        _echo(f"  Total time elapsed: {stats['time_elapsed']:.4f} seconds")
-        if stats["num_exported"] > 0:
-            _echo(f"  Average time per snippet: {stats['avg_time_per_snippet'] * 1000:.4f} ms")
+        table = Table(title="Export Complete", show_header=False, title_style="bold cyan")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        table.add_row("Snippets exported", str(result["num_exported"]))
+        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+        if result["num_exported"] > 0:
+            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
+        _echo(table)
 
 
 @app.command("import")
@@ -191,11 +212,14 @@ def import_cmd(
     if json_output:
         _echo_json(stats)
     else:
-        _echo("--- Import Complete ---")
-        _echo(f"  Snippets imported: {stats['num_imported']}")
-        _echo(f"  Total time elapsed: {stats['time_elapsed']:.4f} seconds")
+        table = Table(title="Import Complete", show_header=False, title_style="bold cyan")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        table.add_row("Snippets imported", str(stats["num_imported"]))
+        table.add_row("Time elapsed", f"{stats['time_elapsed']:.4f}s")
         if stats["num_imported"] > 0:
-            _echo(f"  Average time per snippet: {stats['avg_time_per_snippet'] * 1000:.4f} ms")
+            table.add_row("Avg per snippet", f"{stats['avg_time_per_snippet'] * 1000:.4f}ms")
+        _echo(table)
 
 
 @app.command("list")
@@ -208,7 +232,7 @@ def list_cmd(
     if range_str:
         parts = range_str.split("-")
         if len(parts) != 2 or not all(part.isdigit() for part in parts):
-            typer.echo("Error: Invalid range format. Use start-end (e.g., 10-30).", err=True)
+            err_console.print("[red]Error:[/red] Invalid range format. Use start-end (e.g., 10-30).")
             raise typer.Exit(code=1)
         start, end = map(int, parts)
 
@@ -216,8 +240,13 @@ def list_cmd(
     if json_output:
         _echo_json([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
-        for snippet in snippets:
-            _echo(f"Checksum: {snippet.checksum}, Names: {snippet.name_list}")
+        table = Table(title="Snippets", title_style="bold cyan")
+        table.add_column("#", style="dim", justify="right")
+        table.add_column("Checksum", style="bold")
+        table.add_column("Names")
+        for i, snippet in enumerate(snippets, 1):
+            table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
+        _echo(table)
 
 
 @app.command()
@@ -228,15 +257,13 @@ def show(
     """Show detailed information for a specific snippet."""
     snippet = snippet_get(state.session, checksum)
     if not snippet:
-        typer.echo(f"Snippet with checksum {checksum} not found.", err=True)
+        err_console.print(f"[red]Error:[/red] Snippet with checksum {checksum} not found.")
         raise typer.Exit(code=1)
 
     if json_output:
         _echo_json({"checksum": snippet.checksum, "names": snippet.name_list, "code": snippet.code})
     else:
-        _echo(f"Checksum: {snippet.checksum}")
-        _echo(f"Names: {snippet.name_list}")
-        _echo(f"Code:\n{snippet.code}")
+        _echo(Panel(snippet.code, title=f"[bold]{', '.join(snippet.name_list)}[/bold]", subtitle=snippet.checksum[:16] + "…", border_style="cyan"))
 
 
 @app.command()
@@ -251,7 +278,7 @@ def rm(
             abort=True,
         )
     if not snippet_delete(state.session, checksum, quiet=state.quiet):
-        typer.echo(f"Error: Snippet with checksum '{checksum}' not found.", err=True)
+        err_console.print(f"[red]Error:[/red] Snippet with checksum '{checksum}' not found.")
         raise typer.Exit(code=1)
 
 
@@ -264,11 +291,14 @@ def stats(
     if json_output:
         _echo_json(result)
     else:
-        _echo("--- Database Statistics ---")
-        _echo(f"  Number of snippets: {result['num_snippets']}")
-        _echo(f"  Average snippet size: {result['avg_snippet_size']:.2f} characters")
-        _echo(f"  Vocabulary size: {result['vocabulary_size']} unique tokens")
-        _echo(f"  Average Jaccard similarity (sample): {result['avg_jaccard_similarity']:.2f}")
+        table = Table(title="Database Statistics", show_header=False, title_style="bold cyan")
+        table.add_column("Metric", style="dim")
+        table.add_column("Value", justify="right")
+        table.add_row("Number of snippets", str(result["num_snippets"]))
+        table.add_row("Avg snippet size", f"{result['avg_snippet_size']:.2f} chars")
+        table.add_row("Vocabulary size", f"{result['vocabulary_size']} tokens")
+        table.add_row("Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}")
+        _echo(table)
 
 
 @app.command()
@@ -287,11 +317,14 @@ def reindex(
     if json_output:
         _echo_json(result)
     else:
-        _echo("--- Re-indexing Complete ---")
-        _echo(f"  Snippets re-indexed: {result['num_reindexed']}")
-        _echo(f"  Total time elapsed: {result['time_elapsed']:.4f} seconds")
+        table = Table(title="Re-indexing Complete", show_header=False, title_style="bold cyan")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        table.add_row("Snippets re-indexed", str(result["num_reindexed"]))
+        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
         if result["num_reindexed"] > 0:
-            _echo(f"  Average time per snippet: {result['avg_time_per_snippet'] * 1000:.4f} ms")
+            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
+        _echo(table)
 
 
 @app.command()
@@ -308,7 +341,7 @@ def find(
     effective_threshold = threshold if threshold is not None else state.config.get("lsh_threshold", 0.5)
 
     if not 0.0 <= effective_threshold < 0.99:
-        typer.echo("Error: --threshold must be between 0.0 and 0.99 (exclusive).", err=True)
+        err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
         raise typer.Exit(code=1)
 
     query_string: str | None = None
@@ -318,7 +351,7 @@ def find(
         query_string = file.read()
 
     if not query_string:
-        typer.echo("Error: No query provided. Use --query, --file, or stdin.", err=True)
+        err_console.print("[red]Error:[/red] No query provided. Use --query, --file, or stdin.")
         raise typer.Exit(code=1)
 
     num_candidates, matches = snippet_find_matches(
@@ -336,13 +369,24 @@ def find(
             }
         )
     else:
-        _echo(f"Found {num_candidates} candidates via LSH.")
+        _echo(f"[dim]Found {num_candidates} candidates via LSH.[/dim]")
         if matches:
-            _echo("--- Top Matches ---")
-            for s, score in matches:
-                _echo(f"  - Checksum: {s.checksum}, Names: {s.name_list}, Score: {score:.2f}")
+            table = Table(title="Top Matches", title_style="bold cyan")
+            table.add_column("#", style="dim", justify="right")
+            table.add_column("Checksum", style="bold")
+            table.add_column("Names")
+            table.add_column("Score", justify="right")
+            for i, (s, score) in enumerate(matches, 1):
+                score_color = "green" if score >= 80 else "yellow" if score >= 50 else "red"
+                table.add_row(
+                    str(i),
+                    s.checksum[:12] + "…",
+                    ", ".join(s.name_list),
+                    f"[{score_color}]{score:.2f}[/{score_color}]",
+                )
+            _echo(table)
         else:
-            _echo("No matches found after ranking.")
+            _echo("[yellow]No matches found after ranking.[/yellow]")
 
 
 @app.command()
@@ -354,7 +398,7 @@ def compare(
     """Compare two snippets directly."""
     comparison = snippet_compare(state.session, checksum1, checksum2)
     if not comparison:
-        typer.echo("Error: One or both snippets could not be found.", err=True)
+        err_console.print("[red]Error:[/red] One or both snippets could not be found.")
         raise typer.Exit(code=1)
 
     if json_output:
@@ -365,19 +409,22 @@ def compare(
     s2 = comparison["snippet2"]
     comp = comparison["comparison"]
 
-    def format_output(label: str, value: str, color: str = "") -> str:
-        if state.no_color or not color:
-            return f"{label}{value}"
-        return f"\033[{color}m{label}{value}\033[0m"
+    _echo(
+        Panel(
+            f"[bold]Snippet 1:[/bold] {s1['names']} [dim]({s1['checksum'][:12]}…)[/dim]\n"
+            f"[bold]Snippet 2:[/bold] {s2['names']} [dim]({s2['checksum'][:12]}…)[/dim]",
+            title="Snippet Comparison",
+            border_style="cyan",
+        )
+    )
 
-    _echo("--- Snippet Comparison ---")
-    _echo(format_output("Snippet 1: ", f"{s1['names']} ({s1['checksum'][:12]}...)", "1"))
-    _echo(format_output("Snippet 2: ", f"{s2['names']} ({s2['checksum'][:12]}...)", "1"))
-
-    _echo("\n--- Similarity Metrics ---")
-    _echo(format_output("  Jaccard Similarity (Structure): ", f"{comp['jaccard_similarity']:.2f}", "92"))
-    _echo(format_output("  Levenshtein Score (Code):       ", f"{comp['levenshtein_score']:.2f}", "93"))
-    _echo(format_output("  Shared Normalized Tokens:       ", str(comp["shared_normalized_tokens"]), "94"))
+    table = Table(title="Similarity Metrics", title_style="bold cyan")
+    table.add_column("Metric", style="dim")
+    table.add_column("Value", justify="right")
+    table.add_row("Jaccard Similarity (Structure)", f"[magenta]{comp['jaccard_similarity']:.2f}[/magenta]")
+    table.add_row("Levenshtein Score (Code)", f"[yellow]{comp['levenshtein_score']:.2f}[/yellow]")
+    table.add_row("Shared Normalized Tokens", f"[cyan]{comp['shared_normalized_tokens']}[/cyan]")
+    _echo(table)
 
 
 @app.command()
@@ -389,11 +436,14 @@ def clean(
     if json_output:
         _echo_json(result)
     else:
-        _echo("--- Database and Cache Cleaned ---")
+        table = Table(title="Database and Cache Cleaned", show_header=False, title_style="bold cyan")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
         if result.get("vacuum_success"):
-            _echo("  Database vacuumed successfully.")
-        _echo("  Cache invalidated.")
-        _echo(f"  Total time elapsed: {result['time_elapsed']:.4f} seconds")
+            table.add_row("Database", "[green]Vacuumed successfully[/green]")
+        table.add_row("Cache", "[green]Invalidated[/green]")
+        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+        _echo(table)
 
 
 # --- Name sub-commands ---
@@ -410,11 +460,16 @@ def name_add_cmd(
     if snippet:
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
+        else:
+            _echo(
+                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+                f"now has names: {snippet.name_list}"
+            )
     else:
         if json_output:
             _echo_json({"error": "Failed to add name to snippet."})
         elif not state.quiet:
-            typer.echo("Error: Failed to add name to snippet.", err=True)
+            err_console.print("[red]Error:[/red] Failed to add name to snippet.")
             raise typer.Exit(code=1)
 
 
@@ -429,11 +484,16 @@ def name_remove_cmd(
     if snippet:
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
+        else:
+            _echo(
+                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+                f"now has names: {snippet.name_list}"
+            )
     else:
         if json_output:
             _echo_json({"error": "Failed to remove name from snippet."})
         elif not state.quiet:
-            typer.echo("Error: Failed to remove name from snippet.", err=True)
+            err_console.print("[red]Error:[/red] Failed to remove name from snippet.")
             raise typer.Exit(code=1)
 
 
@@ -443,15 +503,19 @@ def name_remove_cmd(
 @config_app.command("path")
 def config_path_cmd() -> None:
     """Show the path to the config file."""
-    typer.echo(config_path_get())
+    console.print(config_path_get())
 
 
 @config_app.command("list")
 def config_list_cmd() -> None:
     """List current settings."""
     full_config = load_config()
+    table = Table(title="Configuration", title_style="bold cyan")
+    table.add_column("Key", style="bold")
+    table.add_column("Value", justify="right")
     for key, value in full_config.items():
-        typer.echo(f"{key} = {value}")
+        table.add_row(key, str(value))
+    console.print(table)
 
 
 @config_app.command("get")
@@ -460,7 +524,7 @@ def config_get_cmd(
 ) -> None:
     """Get a configuration value."""
     value = load_config().get(key)
-    typer.echo(value)
+    console.print(value)
 
 
 @config_app.command("set")
@@ -470,12 +534,12 @@ def config_set_cmd(
 ) -> None:
     """Set a configuration value."""
     if key not in DEFAULTS:
-        typer.echo(f"Invalid configuration key: '{key}'", err=True)
+        err_console.print(f"[red]Error:[/red] Invalid configuration key: '{key}'")
         raise typer.Exit(code=1)
     default_value = DEFAULTS[key]
     typed_value: int | float = type(default_value)(value)
     new_config = update_config(key, typed_value)
-    _echo(f"Set {key} to {new_config[key]}")
+    _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
     state.config.update(new_config)
 
 
@@ -485,7 +549,7 @@ def config_unset_cmd(
 ) -> None:
     """Unset a configuration value."""
     new_config = remove_config_key(key)
-    _echo(f"Unset {key}, returning to default.")
+    _echo(f"[green]✓[/green] Unset [bold]{key}[/bold], returning to default.")
     state.config.clear()
     state.config.update(new_config)
 

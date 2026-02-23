@@ -11,6 +11,7 @@ dependencies = [
     "pygments>=2.19.2",
     "datasketch>=1.6.5",
     "rapidfuzz>=3.13.0",
+    "rich>=13.0.0",
     "tomli>=2.2.1",
     "tomli_w>=1.2.0",
     "typer>=0.9.0",
