@@ -1,4 +1,4 @@
-"""Entry point for running `python -m asmatch`."""
+"""Entry point for running `python -m resembl`."""
 
 from .cli import main
 

@@ -186,6 +186,19 @@ This document outlines the features of the `asmatch` CLI from a user's perspecti
 
 ---
 
+### Title: Unset a configuration value
+
+**As a** security researcher (Ben),
+**I want to** use the `config unset` command to reset a setting to its default value,
+**so that I can** undo a previous customization without having to look up the default.
+
+**Acceptance Criteria:**
+- `asmatch config unset <key>` removes the key from the config file.
+- The setting reverts to its default value.
+- `asmatch config list` confirms the default is restored.
+
+---
+
 ### Title: Perform a quick end-to-end lookup
 
 **As a** reverse engineer (Alex),

@@ -1,4 +1,4 @@
-"""Database models used by asmatch."""
+"""Database models used by resembl."""
 
 import json
 import pickle
@@ -29,8 +29,11 @@ class Snippet(SQLModel, table=True):  # type: ignore
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> "Snippet | None":
         """Return the snippet containing the given name, if any."""
-        snippets = session.exec(select(cls)).all()
-        for snippet in snippets:
+        # Use SQL LIKE to narrow candidates, then verify in Python
+        candidates = session.exec(
+            select(cls).where(cls.names.like(f'%"{name}"%'))  # type: ignore[attr-defined]
+        ).all()
+        for snippet in candidates:
             if name in snippet.name_list:
                 return snippet
         return None

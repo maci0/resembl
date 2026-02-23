@@ -1,5 +1,6 @@
 """Core functions for tokenizing and comparing assembly snippets."""
 
+from __future__ import annotations
 import hashlib
 import json
 import logging
@@ -103,6 +104,38 @@ REGISTERS = {
     "ymm5",
     "ymm6",
     "ymm7",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+    "r8d",
+    "r9d",
+    "r10d",
+    "r11d",
+    "r12d",
+    "r13d",
+    "r14d",
+    "r15d",
+    "r8w",
+    "r9w",
+    "r10w",
+    "r11w",
+    "r12w",
+    "r13w",
+    "r14w",
+    "r15w",
+    "r8b",
+    "r9b",
+    "r10b",
+    "r11b",
+    "r12b",
+    "r13b",
+    "r14b",
+    "r15b",
 }
 
 
@@ -120,7 +153,7 @@ def string_normalize(code_snippet: str) -> str:
 
 def snippet_name_add(
     session: Session, checksum: str, new_name: str, quiet: bool = False
-):
+) -> Snippet | None:
     """Add a new name to an existing snippet."""
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
@@ -144,7 +177,7 @@ def snippet_name_add(
 
 def snippet_name_remove(
     session: Session, checksum: str, name_to_remove: str, quiet: bool = False
-):
+) -> Snippet | None:
     """Remove a name from a snippet."""
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
@@ -228,7 +261,7 @@ def code_create_minhash(code_snippet: str, normalize: bool = True) -> MinHash:
 # --- Application Logic Functions ---
 
 
-def snippet_add(session: Session, name: str, code: str):
+def snippet_add(session: Session, name: str, code: str) -> Snippet | None:
     """Add a new snippet or alias to the database."""
     if not code.strip():
         return None
@@ -245,7 +278,6 @@ def snippet_add(session: Session, name: str, code: str):
             session.add(existing_snippet)
             session.commit()
             session.refresh(existing_snippet)
-            lsh_cache_invalidate()
         return existing_snippet
 
     # Snippet with this code does not exist, create a new one
@@ -271,7 +303,7 @@ def snippet_find_matches(
     top_n: int = 3,
     threshold: float | None = None,
     normalize: bool = True,
-):
+) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string."""
     if threshold is None:
         threshold = LSH_THRESHOLD
@@ -312,7 +344,7 @@ def snippet_find_matches(
     return len(candidate_keys), top_matches
 
 
-def snippet_delete(session: Session, checksum: str, quiet: bool = False):
+def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool:
     """Delete a snippet by its checksum."""
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
@@ -329,7 +361,7 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False):
     return True
 
 
-def db_reindex(session: Session):
+def db_reindex(session: Session) -> dict:
     """Recalculate the MinHash for every snippet in the database."""
     start_time = time.time()
     snippets = Snippet.get_all(session)
@@ -356,7 +388,7 @@ def db_reindex(session: Session):
     }
 
 
-def snippet_get(session: Session, checksum: str):
+def snippet_get(session: Session, checksum: str) -> Snippet | None:
     """Return a snippet by its checksum."""
     return Snippet.get_by_checksum(session, checksum)
 
@@ -400,18 +432,23 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
 
 def db_calculate_average_similarity(session: Session, sample_size: int = 100) -> float:
     """Estimate average Jaccard similarity from a random sample."""
-    snippets = Snippet.get_all(session)
-    if len(snippets) < 2:
+    all_snippets = Snippet.get_all(session)
+    if len(all_snippets) < 2:
         return 1.0
 
-    if len(snippets) > sample_size:
-        snippets = random.sample(snippets, sample_size)
+    if len(all_snippets) > sample_size:
+        sample_snippets = random.sample(list(all_snippets), sample_size)
+    else:
+        sample_snippets = list(all_snippets)
 
-    total_similarity = 0
-    num_comparisons = 0
+    total_similarity: float = 0.0
+    num_comparisons: int = 0
 
-    for i, snippet_i in enumerate(snippets):
-        for snippet_j in snippets[i + 1 :]:
+    num_snippets = len(sample_snippets)
+    for i in range(num_snippets):
+        snippet_i = sample_snippets[i]
+        for j in range(i + 1, num_snippets):
+            snippet_j = sample_snippets[j]
             m1 = snippet_i.get_minhash_obj()
             m2 = snippet_j.get_minhash_obj()
             total_similarity += m1.jaccard(m2)
@@ -420,7 +457,7 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     return total_similarity / num_comparisons if num_comparisons > 0 else 1.0
 
 
-def db_stats(session: Session):
+def db_stats(session: Session) -> dict:
     """Return a dictionary of database statistics."""
     snippets = Snippet.get_all(session)
     if not snippets:
@@ -445,7 +482,7 @@ def db_stats(session: Session):
     }
 
 
-def snippet_list(session: Session, start: int = 0, end: int = 0):
+def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet]:
     """List snippets, optionally within a given range."""
     if end > 0:
         return session.exec(select(Snippet).offset(start).limit(end - start)).all()
@@ -460,10 +497,24 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 
     os.makedirs(export_dir, exist_ok=True)
 
+    abs_export_dir = os.path.realpath(export_dir)
+
     for snippet in snippets:
-        # Use the first name as the primary name
+        # Use the first name as the primary name, sanitized for safety
         primary_name = snippet.name_list[0]
-        file_path = os.path.join(export_dir, f"{primary_name}.asm")
+        # Strip path separators to prevent directory traversal
+        safe_name = os.path.basename(primary_name.replace("..", "_"))
+        if not safe_name:
+            safe_name = snippet.checksum[:12]
+        file_path = os.path.join(abs_export_dir, f"{safe_name}.asm")
+
+        # Final guard: ensure the resolved path is within the export directory
+        if not os.path.realpath(file_path).startswith(abs_export_dir):
+            logger.warning(
+                "Skipping snippet '%s': resolved path is outside export directory.",
+                primary_name,
+            )
+            continue
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(snippet.code)
         num_exported += 1

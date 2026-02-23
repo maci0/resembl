@@ -1,4 +1,4 @@
-"""Unit tests for the asmatch core module."""
+"""Unit tests for the resembl core module."""
 
 import os
 import tempfile
@@ -6,7 +6,7 @@ import unittest
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from asmatch.core import (
+from resembl.core import (
     code_create_minhash,
     code_tokenize,
     db_calculate_average_similarity,
@@ -24,7 +24,7 @@ from asmatch.core import (
     snippet_name_remove,
     string_checksum,
 )
-from asmatch.models import Snippet
+from resembl.models import Snippet
 
 # Use an in-memory SQLite database for testing
 DATABASE_URL = "sqlite:///:memory:"
@@ -345,6 +345,19 @@ class TestSnippetCoreFunctions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = snippet_export(self.session, temp_dir)
             self.assertEqual(result["num_exported"], 0)
+
+    def test_snippet_export_sanitizes_names(self):
+        """Verify that path-traversal snippet names are sanitized on export."""
+        snippet_add(self.session, "../../evil", "MOV EAX, 0xDEAD")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = snippet_export(self.session, temp_dir)
+            self.assertEqual(result["num_exported"], 1)
+            # The file should be inside temp_dir, not outside
+            for fname in os.listdir(temp_dir):
+                full_path = os.path.join(temp_dir, fname)
+                self.assertTrue(
+                    os.path.realpath(full_path).startswith(os.path.realpath(temp_dir))
+                )
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Test utilities for the asmatch test suite."""
+"""Test utilities for the resembl test suite."""
 
 from contextlib import contextmanager
 

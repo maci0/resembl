@@ -24,17 +24,13 @@ graph LR
 
     subgraph "New Snippet Path"
         D -- No --> F{Generate MinHash from Tokens}
-        G[Store Snippet in DB: Checksum, Names, Code, MinHash]
-        F --> G
-    end
-
-    subgraph "Cache Management"
-        E --> H{Invalidate LSH Cache}
-        G --> H
+        F --> G[Store Snippet in DB: Checksum, Names, Code, MinHash]
+        G --> H{Invalidate LSH Cache}
     end
 
     subgraph "Output"
-        H --> I[Show Confirmation]
+        E --> I[Show Confirmation]
+        H --> I
     end
 
     A --> B --> C --> D
@@ -73,4 +69,83 @@ graph LR
     end
 
     A --> B --> C
+```
+
+## Import Snippets Flow
+
+This chart describes the bulk import process.
+
+```mermaid
+graph LR
+    subgraph "Input"
+        A[asmatch import 'directory']
+    end
+
+    subgraph "Confirmation"
+        B{--force flag set?}
+        B -- No --> C[Prompt User for Confirmation]
+        C --> D{User Confirmed?}
+        D -- No --> E[Abort]
+        B -- Yes --> F[Proceed]
+        D -- Yes --> F
+    end
+
+    subgraph "File Discovery"
+        F --> G["Glob for *.asm and *.txt files recursively"]
+    end
+
+    subgraph "Per-File Processing"
+        G --> H[Read File Content]
+        H --> I{Calculate Checksum}
+        I --> J{Snippet Already Exists?}
+        J -- Yes --> K[Add Filename as Alias]
+        J -- No --> L[Add New Snippet to DB]
+        L --> M[Increment New Count]
+    end
+
+    subgraph "Output"
+        K --> N[Report Import Statistics]
+        M --> N
+    end
+
+    A --> B
+```
+
+## Export Snippets Flow
+
+This chart describes the snippet export process.
+
+```mermaid
+graph LR
+    subgraph "Input"
+        A[asmatch export 'directory']
+    end
+
+    subgraph "Confirmation"
+        B{--force flag set?}
+        B -- No --> C[Prompt User for Confirmation]
+        C --> D{User Confirmed?}
+        D -- No --> E[Abort]
+        B -- Yes --> F[Proceed]
+        D -- Yes --> F
+    end
+
+    subgraph "Export Processing"
+        F --> G[Create Export Directory]
+        G --> H[Load All Snippets from DB]
+    end
+
+    subgraph "Per-Snippet Processing"
+        H --> I["Sanitize Primary Name for Filesystem Safety"]
+        I --> J{Resolved Path Within Export Dir?}
+        J -- No --> K[Skip and Warn]
+        J -- Yes --> L["Write Code to 'name.asm' File"]
+    end
+
+    subgraph "Output"
+        L --> M[Report Export Statistics]
+        K --> M
+    end
+
+    A --> B
 ```

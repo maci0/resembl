@@ -1,4 +1,4 @@
-"""Integration tests for the asmatch CLI."""
+"""Integration tests for the resembl CLI."""
 
 import os
 import random
@@ -10,8 +10,8 @@ import unittest
 import tomli
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from asmatch.core import snippet_add
-from asmatch.models import Snippet
+from resembl.core import snippet_add
+from resembl.models import Snippet
 
 
 class BaseCLITest(unittest.TestCase):
@@ -42,7 +42,7 @@ class BaseCLITest(unittest.TestCase):
             env.update(extra_env)
 
         result = subprocess.run(
-            ["python", "-m", "asmatch.cli", *shlex.split(command)],
+            ["python", "-m", "resembl.cli", *shlex.split(command)],
             shell=False,
             capture_output=True,
             text=True,
@@ -60,7 +60,7 @@ class TestCLICommands(BaseCLITest):
         """Test that the --help message is displayed correctly."""
         result = self.run_command("--help")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("usage:", result.stdout)
+        self.assertIn("Usage", result.stdout)
 
     def test_stats_command(self):
         """Test the stats command."""
@@ -87,13 +87,13 @@ class TestCLICommands(BaseCLITest):
         """Invalid threshold values should return an error."""
         result = self.run_command("find --threshold 2.0 --query 'x'")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("threshold", result.stdout)
+        self.assertIn("threshold", result.stderr)
 
     def test_compare_missing_snippet(self):
         """Comparing unknown checksums should fail."""
         result = self.run_command("compare deadbeef cafebabe")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not be found", result.stdout)
+        self.assertIn("not be found", result.stderr)
 
     def test_add_command(self):
         """Test the add command."""
@@ -159,6 +159,20 @@ class TestCLICommands(BaseCLITest):
         with Session(self.engine) as session:
             snippet = Snippet.get_by_checksum(session, checksum)
             self.assertNotIn("new_name", snippet.name_list)
+
+    def test_rm_with_force_flag(self):
+        """Removing with --force should skip confirmation."""
+        with Session(self.engine) as session:
+            snippet = Snippet.get_by_name(session, "test_snippet")
+            self.assertIsNotNone(snippet)
+            checksum = snippet.checksum
+
+        rm_result = self.run_command(f"rm --force {checksum}")
+        self.assertEqual(rm_result.returncode, 0)
+
+        with Session(self.engine) as session:
+            snippet = Snippet.get_by_checksum(session, checksum)
+            self.assertIsNone(snippet)
 
 
 class TestCLIConfig(BaseCLITest):
@@ -269,6 +283,31 @@ class TestCLIOptions(BaseCLITest):
         result = self.run_command(f"--no-color compare {s1.checksum} {s2.checksum}")
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("\033[1m", result.stdout)
+
+
+class TestCLIImport(BaseCLITest):
+    """Tests for the import command."""
+
+    def test_import_counts_only_new_snippets(self):
+        """Re-importing the same files should report 0 new snippets."""
+        with tempfile.TemporaryDirectory() as import_dir:
+            file_path = os.path.join(import_dir, "existing.asm")
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("PUSH EBP; MOV EBP, ESP; POP EBP; RET")
+
+            # First import – should report 1 new snippet
+            result = self.run_command(f"import --force --json {import_dir}")
+            self.assertEqual(result.returncode, 0)
+            import json
+
+            data = json.loads(result.stdout)
+            self.assertEqual(data["num_imported"], 1)
+
+            # Second import of the same file – should report 0 new snippets
+            result = self.run_command(f"import --force --json {import_dir}")
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["num_imported"], 0)
 
 
 class TestCLIAddSnippet(BaseCLITest):

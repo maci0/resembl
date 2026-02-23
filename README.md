@@ -1,12 +1,16 @@
-# Assembly Code Similarity Search (asmatch)
+<p align="center">
+  <img src="docs/resembl_mascot.png" alt="resembl mascot" width="200">
+</p>
 
-[![codecov](https://codecov.io/gh/maci0/asmatch/branch/main/graph/badge.svg)](https://codecov.io/gh/maci0/asmatch)
+# resembl — Assembly Code Similarity Search
+
+[![codecov](https://codecov.io/gh/maci0/resembl/branch/main/graph/badge.svg)](https://codecov.io/gh/maci0/resembl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Linting: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![GitHub license](https://img.shields.io/github/license/maci0/asmatch)](https://github.com/maci0/asmatch/blob/main/LICENSE)
-[![GitHub last commit](https://img.shields.io/github/last-commit/maci0/asmatch)](https://github.com/maci0/asmatch/commits/main)
+[![GitHub license](https://img.shields.io/github/license/maci0/resembl)](https://github.com/maci0/resembl/blob/main/LICENSE)
+[![GitHub last commit](https://img.shields.io/github/last-commit/maci0/resembl)](https://github.com/maci0/resembl/commits/main)
 
-`asmatch` is a command-line tool designed to find similar assembly code snippets within a database. It uses a combination of hashing and fuzzy string matching to provide fast and accurate results, even when the query is a small fragment of a larger function.
+`resembl` is a command-line tool designed to find similar assembly code snippets within a database. It uses a combination of hashing and fuzzy string matching to provide fast and accurate results, even when the query is a small fragment of a larger function.
 
 This tool is ideal for tasks such as:
 - Identifying known functions from a binary dump.
@@ -26,7 +30,7 @@ This approach provides several advantages:
 
 ### LSH Caching
 
-To make searches nearly instantaneous, `asmatch` caches the LSH index to a file in `~/.cache/asmatch/`. The location can be overridden with the `ASMATCH_CACHE_DIR` environment variable. The cache is automatically invalidated and rebuilt whenever the database is modified.
+To make searches nearly instantaneous, `resembl` caches the LSH index to a file in `~/.cache/asmatch/`. The location can be overridden with the `ASMATCH_CACHE_DIR` environment variable. The cache is automatically invalidated and rebuilt whenever the database is modified.
 
 ## How It Works
 
@@ -105,11 +109,11 @@ The key insight is that the similarity of two MinHash signatures is a good estim
 
 #### The RapidFuzz Algorithm
 
-After the LSH index provides a list of potential candidates, `asmatch` uses the `rapidfuzz` library to perform a more precise similarity calculation. `rapidfuzz` is a high-performance library that implements a variety of string similarity algorithms in C++.
+After the LSH index provides a list of potential candidates, `resembl` uses the `rapidfuzz` library to perform a more precise similarity calculation. `rapidfuzz` is a high-performance library that implements a variety of string similarity algorithms in C++.
 
 The primary algorithm used is a variation of the **Levenshtein distance**, which measures the number of edits (insertions, deletions, or substitutions) needed to change one string into another. `rapidfuzz` calculates a normalized similarity ratio based on this distance, which gives a score from 0 to 100, where 100 is a perfect match.
 
-By using `rapidfuzz`, `asmatch` can accurately score the similarity between the query and candidate snippets, ensuring that the final results are ranked by their true similarity, not just the approximation from the LSH step.
+By using `rapidfuzz`, `resembl` can accurately score the similarity between the query and candidate snippets, ensuring that the final results are ranked by their true similarity, not just the approximation from the LSH step.
 
 ### Lookup Flow
 
@@ -122,26 +126,31 @@ When you run `asmatch find`, the tool processes your query in several stages:
 5. **Score** – Each candidate is compared to the original query with RapidFuzz and assigned a similarity score.
 6. **Display results** – Candidates are sorted by score and the top results are shown or output as JSON.
 
-This pipeline lets `asmatch` search large datasets in milliseconds while ranking results accurately.
+This pipeline lets `resembl` search large datasets in milliseconds while ranking results accurately.
 
 ## Project Structure
 
 ```
-asmatch/
+resembl/
 ├── asmatch/
 │   ├── __init__.py
+│   ├── __main__.py
+│   ├── cache.py
 │   ├── cli.py
 │   ├── config.py
 │   ├── core.py
 │   ├── database.py
 │   └── models.py
 ├── docs/
-|   └── user_stories.md
+│   ├── custom_database.md
+│   ├── flowcharts.md
+│   └── user_stories.md
+├── fuzzers/
 ├── tests/
 ├── .gitignore
-├── AGENTS.md
+├── CONTRIBUTING.md
 ├── README.md
-└── setup.py
+└── pyproject.toml
 ```
 
 ## Setup and Usage
@@ -235,7 +244,7 @@ uv run pytest
 
 #### Code Coverage
 
-This project uses `pytest-cov` to measure test coverage. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/asmatch).
+This project uses `pytest-cov` to measure test coverage. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
 
 You can run the coverage report locally with:
 ```bash
@@ -244,7 +253,7 @@ uv run pytest --cov=asmatch
 
 ## Advanced Usage
 
-- **[Using a Custom Database](./docs/custom_database.md)**: Learn how to integrate `asmatch` with your own application's database.
+- **[Using a Custom Database](./docs/custom_database.md)**: Learn how to integrate `resembl` with your own application's database.
 
 ## Benchmarking
 

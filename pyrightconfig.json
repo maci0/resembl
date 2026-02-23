@@ -1,0 +1,6 @@
+{
+  "include": ["asmatch", "tests"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11"
+}

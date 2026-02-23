@@ -1,5 +1,5 @@
 """
-A simple benchmarking script for asmatch.
+A simple benchmarking script for resembl.
 
 This script measures the performance of two key operations:
 1. `import`: How long it takes to bulk-import a large number of files.
@@ -34,7 +34,7 @@ def run_command(command, extra_env=None):
 
     start_time = time.monotonic()
     subprocess.run(
-        ["python", "-m", "asmatch.cli", *command.split()],
+        ["python", "-m", "resembl.cli", *command.split()],
         shell=False,
         capture_output=True,
         text=True,

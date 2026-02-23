@@ -9,7 +9,7 @@ import atheris
 # This is needed to allow the fuzzer to import the target module
 # and any dependencies it has.
 with atheris.instrument_imports():
-    from asmatch.core import string_checksum
+    from resembl.core import string_checksum
 
 
 def test_one_input(data):

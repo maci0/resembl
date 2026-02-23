@@ -1,7 +1,7 @@
 [project]
-name = "asmatch"
+name = "resembl"
 version = "0.1.0"
-description = "Assembly Code Similarity Search (asmatch)"
+description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
 license = { text = "GPLv3" }
 readme = "README.md"
@@ -13,11 +13,12 @@ dependencies = [
     "rapidfuzz>=3.13.0",
     "tomli>=2.2.1",
     "tomli_w>=1.2.0",
+    "typer>=0.9.0",
 ]
 
 [project.urls]
-homepage = "https://github.com/maci0/asmatch"
-repository = "https://github.com/maci0/asmatch"
+homepage = "https://github.com/maci0/resembl"
+repository = "https://github.com/maci0/resembl"
 
 [project.optional-dependencies]
 dev = [
@@ -32,7 +33,7 @@ dev = [
 ]
 
 [project.scripts]
-asmatch = "asmatch.cli:main"
+resembl = "resembl.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -52,7 +53,13 @@ max-line-length = 120
 select = ["I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["asmatch"]
+known-first-party = ["resembl"]
+
+[tool.pyright]
+include = ["resembl", "tests"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
 
 [tool.mypy]
 python_version = "3.11"

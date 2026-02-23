@@ -6,15 +6,17 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from asmatch.cache import (
+from resembl.cache import (
+    cache_dir_get,
+    db_checksum_path_get,
     lsh_cache_invalidate,
     lsh_cache_load,
     lsh_cache_path_get,
     lsh_cache_save,
     lsh_index_build,
 )
-from asmatch.database import db_checksum_get
-from asmatch.models import Snippet
+from resembl.database import db_checksum_get
+from resembl.models import Snippet
 
 
 class TestCache(unittest.TestCase):
@@ -85,7 +87,7 @@ class TestCache(unittest.TestCase):
 
     def test_lsh_index_build_invalid_params(self):
         """Test that building LSH with invalid params returns None."""
-        with self.assertLogs("asmatch", level="ERROR"):
+        with self.assertLogs("resembl", level="ERROR"):
             lsh = lsh_index_build(self.session, 2.0, 128)
             self.assertIsNone(lsh)
 
@@ -94,6 +96,13 @@ class TestCache(unittest.TestCase):
         self.session.exec.return_value.one.return_value = 0
         checksum = db_checksum_get(self.session)
         self.assertEqual(checksum, "empty")
+
+    def test_cache_dir_respects_env_override(self):
+        """Verify that cache_dir_get reads the env var at call time."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"ASMATCH_CACHE_DIR": tmpdir}):
+                self.assertEqual(cache_dir_get(), tmpdir)
+                self.assertTrue(db_checksum_path_get().startswith(tmpdir))
 
 
 if __name__ == "__main__":
