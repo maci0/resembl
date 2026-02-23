@@ -64,7 +64,7 @@ graph LR
     end
 
     subgraph "Ranking & Output"
-        H --> I{Rank Candidates with Levenshtein Similarity Score}
+        H --> I{Rank Candidates by Hybrid Score}
         I --> J[Display Top N Matches to User]
     end
 

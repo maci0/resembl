@@ -1,15 +1,33 @@
-"""Command line interface for the resembl tool."""
+"""Command-line interface for the resembl assembly similarity tool.
+
+This module wires together the ``core``, ``config``, ``database``, and
+``models`` modules into a user-facing CLI built with Typer.  Every
+command respects the ``--quiet``, ``--no-color``, and ``--format``
+global options.
+
+Key design choices
+------------------
+* **Checksum prefix resolution** – Any command that accepts a checksum
+  also accepts a unique prefix, resolved via ``_resolve_checksum``.
+* **Structured output** – Every command supports ``--format json`` and
+  ``--format csv`` in addition to the default Rich table output.
+* **Quiet mode** – ``_echo`` is used instead of ``console.print`` so
+  that ``--quiet`` suppresses all informational output.
+"""
 
 from __future__ import annotations
 
 import atexit
 
+import difflib
 import glob
+import csv
 import json
 import logging
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import typer
 from rich.console import Console
@@ -21,25 +39,36 @@ from sqlmodel import Session
 
 from .config import (
     DEFAULTS,
+    ResemblConfig,
     config_path_get,
     load_config,
     remove_config_key,
     update_config,
 )
 from .core import (
+    collection_add_snippet,
+    collection_create,
+    collection_delete,
+    collection_list,
+    collection_remove_snippet,
     db_clean,
+    db_merge,
     db_reindex,
     db_stats,
     snippet_add,
     snippet_compare,
     snippet_delete,
     snippet_export,
+    snippet_export_yara,
     snippet_find_matches,
     snippet_get,
     snippet_list,
     snippet_name_add,
     snippet_name_remove,
     snippet_search_by_name,
+    snippet_tag_add,
+    snippet_tag_remove,
+    snippet_version_list,
     string_checksum,
 )
 from .database import db_create, engine
@@ -60,8 +89,12 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Manage user configuration.", rich_markup_mode="rich")
 name_app = typer.Typer(help="Manage snippet names.", rich_markup_mode="rich")
+tag_app = typer.Typer(help="Manage snippet tags.", rich_markup_mode="rich")
+collection_app = typer.Typer(help="Manage snippet collections.", rich_markup_mode="rich")
 app.add_typer(config_app, name="config")
 app.add_typer(name_app, name="name")
+app.add_typer(tag_app, name="tag")
+app.add_typer(collection_app, name="collection")
 
 
 # --- State ---
@@ -71,9 +104,10 @@ class State:
     """Shared state for all commands."""
 
     session: Session
-    config: dict
+    config: ResemblConfig
     quiet: bool = False
     no_color: bool = False
+    format: str = "table"
 
 
 state = State()
@@ -85,13 +119,64 @@ def _echo(message: object, **kwargs: object) -> None:
         console.print(message, **kwargs)
 
 
-def _echo_json(data: object) -> None:
-    """Print data as JSON unless ``--quiet`` is set."""
-    if not state.quiet:
+def _echo_format(data: object) -> None:
+    """Print data in the requested format (JSON/CSV) unless ``--quiet``."""
+    if state.quiet:
+        return
+    if state.format == "csv":
+        import sys
+        if isinstance(data, dict) and "matches" in data:
+            data = data["matches"]
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            for row in data:
+                if "names" in row and isinstance(row["names"], list):
+                    row["names"] = ", ".join(row["names"])
+            writer = csv.DictWriter(sys.stdout, fieldnames=data[0].keys())
+            writer.writeheader()
+            writer.writerows(data)
+        elif isinstance(data, dict):
+             for k, v in data.items():
+                 if isinstance(v, list):
+                     data[k] = ", ".join(v)
+             writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
+             writer.writeheader()
+             writer.writerow(data)
+        else:
+             console.print(json.dumps(data, indent=2))
+    else:
+        # JSON is the default structured format
         console.print_json(json.dumps(data, indent=2))
 
 
-# --- Callbacks ---
+def _resolve_checksum(prefix: str) -> str | None:
+    """Resolve a checksum prefix to a full checksum.
+
+    If *prefix* matches exactly one snippet, return its full checksum.
+    If it matches zero or more than one, print an error and return ``None``.
+    """
+    from .models import Snippet as SnippetModel
+    from sqlmodel import select  # Local import — only needed for prefix LIKE query
+    # Try exact match first
+    exact = SnippetModel.get_by_checksum(state.session, prefix)
+    if exact:
+        return exact.checksum
+
+    # Prefix search
+    candidates = state.session.exec(
+        select(SnippetModel).where(
+            SnippetModel.checksum.like(f"{prefix}%")  # type: ignore[attr-defined]
+        )
+    ).all()
+
+    if len(candidates) == 0:
+        err_console.print(f"[red]Error:[/red] No snippet found matching '{prefix}'.")
+        return None
+    if len(candidates) > 1:
+        err_console.print(
+            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches {len(candidates)} snippets."
+        )
+        return None
+    return candidates[0].checksum
 
 
 @app.callback()
@@ -99,6 +184,7 @@ def app_callback(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational output."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Increase output verbosity."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
+    format_opt: str | None = typer.Option(None, "--format", help="Output format: table, json, csv. Overrides config."),
 ) -> None:
     """Set up logging and shared state."""
     global console, err_console
@@ -118,6 +204,7 @@ def app_callback(
     logging.basicConfig(level=log_level, stream=sys.stdout)
 
     state.config = load_config()
+    state.format = format_opt or state.config.get("format", "table")
     db_create()
     state.session = Session(engine)
     atexit.register(state.session.close)
@@ -130,21 +217,20 @@ def app_callback(
 def add(
     name: str = typer.Argument(help="The name or alias for the snippet."),
     code: str = typer.Argument(help="The assembly code of the snippet."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
     """Add a new snippet or an alias to existing code."""
     snippet = snippet_add(state.session, name, code, ngram_size=state.config.get("ngram_size", 3))
     if snippet:
-        if json_output:
-            _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
+        if state.format in ("json", "csv"):
+            _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
         else:
             _echo(
                 f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
                 f"now has names: {snippet.name_list}"
             )
     else:
-        if json_output:
-            _echo_json({"error": "Failed to add snippet."})
+        if state.format in ("json", "csv"):
+            _echo_format({"error": "Failed to add snippet."})
         else:
             err_console.print("[red]Error:[/red] Snippet could not be added (empty code?).")
             raise typer.Exit(code=1)
@@ -153,7 +239,6 @@ def add(
 @app.command("export")
 def export_cmd(
     directory: str = typer.Argument(help="The directory to export snippets to."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
     """Export all snippets to a directory."""
@@ -164,8 +249,8 @@ def export_cmd(
 
     result = snippet_export(state.session, directory)
 
-    if json_output:
-        _echo_json(result)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
     else:
         table = Table(title="Export Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
@@ -177,10 +262,36 @@ def export_cmd(
         _echo(table)
 
 
+@app.command("export-yara")
+def export_yara_cmd(
+    output_file: str = typer.Argument(help="The output file to save YARA rules to."),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+) -> None:
+    """Export snippets as YARA string patterns."""
+    if not force:
+        typer.confirm(
+            f"Are you sure you want to export YARA rules to '{output_file}'?", abort=True
+        )
+
+    result = snippet_export_yara(state.session, output_file)
+
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+        return
+
+    table = Table(title="YARA Export Complete", show_header=False, title_style="bold cyan")
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+    table.add_row("Rules exported", str(result["num_exported"]))
+    table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+    if result["num_exported"] > 0:
+        table.add_row("Avg per rule", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
+    _echo(table)
+
+
 @app.command("import")
 def import_cmd(
     directory: str = typer.Argument(help="The directory containing .asm or .txt files."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
     """Bulk import snippets from a directory."""
@@ -194,20 +305,40 @@ def import_cmd(
 
     file_paths = glob.glob(os.path.join(directory, "**", "*.asm"), recursive=True)
     file_paths += glob.glob(os.path.join(directory, "**", "*.txt"), recursive=True)
+    ngram_size = state.config.get("ngram_size", 3)
 
-    for file_path in track(
-        file_paths,
-        description="Importing snippets...",
-        disable=state.quiet or json_output,
-        console=err_console,
-    ):
+    def process_file(file_path: str) -> bool:
         fname = os.path.splitext(os.path.basename(file_path))[0]
-        with open(file_path, "r", encoding="utf-8") as f:
-            code = f.read()
-        existing = snippet_get(state.session, string_checksum(code))
-        snippet = snippet_add(state.session, fname, code, ngram_size=state.config.get("ngram_size", 3))
-        if snippet and not existing:
-            snippets_added += 1
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            with Session(engine) as session:
+                checksum = string_checksum(code)
+                existing = snippet_get(session, checksum)
+                snippet = snippet_add(session, fname, code, ngram_size=ngram_size)
+                if snippet and not existing:
+                    return True
+            return False
+        except Exception:
+            return False
+
+    if state.quiet or state.format in ("json", "csv"):
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_file, fp) for fp in file_paths]
+            for future in as_completed(futures):
+                if future.result():
+                    snippets_added += 1
+    else:
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_file, fp) for fp in file_paths]
+            for future in track(
+                as_completed(futures),
+                total=len(futures),
+                description="Importing snippets...",
+                console=err_console,
+            ):
+                if future.result():
+                    snippets_added += 1
 
     end_time = time.time()
     time_elapsed = end_time - start_time
@@ -217,8 +348,8 @@ def import_cmd(
         "avg_time_per_snippet": (time_elapsed / snippets_added) if snippets_added > 0 else 0,
     }
 
-    if json_output:
-        _echo_json(stats)
+    if state.format in ("json", "csv"):
+        _echo_format(stats)
     else:
         table = Table(title="Import Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
@@ -233,7 +364,6 @@ def import_cmd(
 @app.command("list")
 def list_cmd(
     range_str: str | None = typer.Option(None, "--range", help="A range of snippets to list (e.g., 10-30)."),
-    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     """List all snippets."""
     start, end = 0, 0
@@ -245,8 +375,8 @@ def list_cmd(
         start, end = map(int, parts)
 
     snippets = snippet_list(state.session, start, end)
-    if json_output:
-        _echo_json([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
+    if state.format in ("json", "csv"):
+        _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
         table = Table(title="Snippets", title_style="bold cyan")
         table.add_column("#", style="dim", justify="right")
@@ -259,19 +389,22 @@ def list_cmd(
 
 @app.command()
 def show(
-    checksum: str = typer.Argument(help="The checksum of the snippet."),
-    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
+    checksum: str = typer.Argument(help="The checksum (or prefix) of the snippet."),
 ) -> None:
     """Show detailed information for a specific snippet."""
-    snippet = snippet_get(state.session, checksum)
-    if not snippet:
-        err_console.print(f"[red]Error:[/red] Snippet with checksum {checksum} not found.")
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
         raise typer.Exit(code=1)
 
-    if json_output:
-        _echo_json({"checksum": snippet.checksum, "names": snippet.name_list, "code": snippet.code})
+    snippet = snippet_get(state.session, resolved)
+    if not snippet:
+        err_console.print(f"[red]Error:[/red] Snippet with checksum {resolved} not found.")
+        raise typer.Exit(code=1)
+
+    if state.format in ("json", "csv"):
+        _echo_format({"checksum": snippet.checksum, "names": snippet.name_list, "code": snippet.code})
     else:
-        syntax = Syntax(snippet.code, "nasm", theme="monokai", wrap=True)
+        syntax = Syntax(snippet.code, "nasm", theme="monokai", word_wrap=True)
         _echo(Panel(syntax, title=f"[bold]{', '.join(snippet.name_list)}[/bold]", subtitle=snippet.checksum[:16] + "…", border_style="cyan"))
 
 
@@ -280,25 +413,27 @@ def rm(
     checksum: str = typer.Argument(help="The checksum of the snippet to remove."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
-    """Remove a snippet by its checksum."""
+    """Remove a snippet by its checksum (or prefix)."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        raise typer.Exit(code=1)
     if not force:
         typer.confirm(
-            f"Are you sure you want to delete the snippet with checksum '{checksum}'?",
+            f"Are you sure you want to delete the snippet with checksum '{resolved}'?",
             abort=True,
         )
-    if not snippet_delete(state.session, checksum, quiet=state.quiet):
-        err_console.print(f"[red]Error:[/red] Snippet with checksum '{checksum}' not found.")
+    if not snippet_delete(state.session, resolved, quiet=state.quiet):
+        err_console.print(f"[red]Error:[/red] Snippet with checksum '{resolved}' not found.")
         raise typer.Exit(code=1)
 
 
 @app.command()
 def stats(
-    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
 ) -> None:
     """Show database statistics."""
     result = db_stats(state.session)
-    if json_output:
-        _echo_json(result)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
     else:
         table = Table(title="Database Statistics", show_header=False, title_style="bold cyan")
         table.add_column("Metric", style="dim")
@@ -312,7 +447,6 @@ def stats(
 
 @app.command()
 def reindex(
-    json_output: bool = typer.Option(False, "--json", help="Output in JSON format."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
     """Re-calculate all MinHashes in the database."""
@@ -323,8 +457,8 @@ def reindex(
         )
 
     result = db_reindex(state.session, ngram_size=state.config.get("ngram_size", 3))
-    if json_output:
-        _echo_json(result)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
     else:
         table = Table(title="Re-indexing Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
@@ -342,7 +476,6 @@ def find(
     file: typer.FileText | None = typer.Option(None, "--file", help="Path to a file containing the query. Use '-' for stdin."),
     top_n: int | None = typer.Option(None, "--top-n", help="Number of top matches to return."),
     threshold: float | None = typer.Option(None, "--threshold", help="LSH threshold override (0.0-1.0)."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
     no_normalization: bool = typer.Option(False, "--no-normalization", help="Disable token normalization for this query."),
 ) -> None:
     """Find similar snippets."""
@@ -367,8 +500,8 @@ def find(
         state.session, query_string, effective_top_n, effective_threshold, not no_normalization, ngram_size=state.config.get("ngram_size", 3)
     )
 
-    if json_output:
-        _echo_json(
+    if state.format in ("json", "csv"):
+        _echo_format(
             {
                 "lsh_candidates": num_candidates,
                 "matches": [
@@ -384,7 +517,7 @@ def find(
             table.add_column("#", style="dim", justify="right")
             table.add_column("Checksum", style="bold")
             table.add_column("Names")
-            table.add_column("Score", justify="right")
+            table.add_column("Score (Hybrid)", justify="right")
             for i, (s, score) in enumerate(matches, 1):
                 score_color = "green" if score >= 80 else "yellow" if score >= 50 else "red"
                 table.add_row(
@@ -401,13 +534,12 @@ def find(
 @app.command()
 def search(
     pattern: str = typer.Argument(help="The name pattern to search for."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
     """Search for snippets by matching their names."""
     snippets = snippet_search_by_name(state.session, pattern)
 
-    if json_output:
-        _echo_json([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
+    if state.format in ("json", "csv"):
+        _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
         _echo(f"[dim]Found {len(snippets)} snippets matching '{pattern}'.[/dim]")
         if snippets:
@@ -424,16 +556,20 @@ def search(
 def compare(
     checksum1: str = typer.Argument(help="The checksum of the first snippet."),
     checksum2: str = typer.Argument(help="The checksum of the second snippet."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
-    """Compare two snippets directly."""
-    comparison = snippet_compare(state.session, checksum1, checksum2)
+    """Compare two snippets directly (supports checksum prefixes)."""
+    resolved1 = _resolve_checksum(checksum1)
+    resolved2 = _resolve_checksum(checksum2)
+    if not resolved1 or not resolved2:
+        raise typer.Exit(code=1)
+
+    comparison = snippet_compare(state.session, resolved1, resolved2)
     if not comparison:
         err_console.print("[red]Error:[/red] One or both snippets could not be found.")
         raise typer.Exit(code=1)
 
-    if json_output:
-        _echo_json(comparison)
+    if state.format in ("json", "csv"):
+        _echo_format(comparison)
         return
 
     s1 = comparison["snippet1"]
@@ -454,18 +590,36 @@ def compare(
     table.add_column("Value", justify="right")
     table.add_row("Jaccard Similarity (Structure)", f"[magenta]{comp['jaccard_similarity']:.2f}[/magenta]")
     table.add_row("Levenshtein Score (Code)", f"[yellow]{comp['levenshtein_score']:.2f}[/yellow]")
+    table.add_row("Hybrid Score", f"[bold green]{comp['hybrid_score']:.2f}[/bold green]")
+    table.add_row("CFG Similarity", f"[blue]{comp['cfg_similarity']:.2f}[/blue]")
     table.add_row("Shared Normalized Tokens", f"[cyan]{comp['shared_normalized_tokens']}[/cyan]")
     _echo(table)
+
+    _echo("")
+    diff = list(
+        difflib.unified_diff(
+            snippet_get(state.session, resolved1).code.splitlines(keepends=True),
+            snippet_get(state.session, resolved2).code.splitlines(keepends=True),
+            fromfile=s1["checksum"][:12],
+            tofile=s2["checksum"][:12],
+            n=3,
+        )
+    )
+    if diff:
+        diff_text = "".join(diff)
+        syntax = Syntax(diff_text, "diff", theme="monokai", word_wrap=True)
+        _echo(Panel(syntax, title="[bold]Code Diff[/bold]", border_style="cyan"))
+    else:
+        _echo(Panel("[italic]Code is identical.[/italic]", title="[bold]Code Diff[/bold]", border_style="cyan"))
 
 
 @app.command()
 def clean(
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
     """Clean the LSH cache and vacuum the database."""
     result = db_clean(state.session)
-    if json_output:
-        _echo_json(result)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
     else:
         table = Table(title="Database and Cache Cleaned", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
@@ -477,6 +631,38 @@ def clean(
         _echo(table)
 
 
+@app.command()
+def merge(
+    source: str = typer.Argument(help="Path to the source resembl database file."),
+) -> None:
+    """Merge snippets from another resembl database into this one."""
+    source_path = os.path.abspath(source)
+    if not os.path.exists(source_path):
+        err_console.print(f"[red]Error:[/red] File not found: {source_path}")
+        raise typer.Exit(code=1)
+
+    if state.format not in ("json", "csv"):
+        _echo(f"Merging from [bold]{source_path}[/bold]...")
+    result = db_merge(state.session, source_path)
+
+    if "error" in result:
+        err_console.print(f"[red]Error:[/red] {result['error']}")
+        raise typer.Exit(code=1)
+
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+    else:
+        table = Table(title="Merge Complete", show_header=False, title_style="bold cyan")
+        table.add_column("Key", style="dim")
+        table.add_column("Value")
+        table.add_row("Added", f"[green]{result['added']}[/green] new snippets")
+        table.add_row("Updated", f"[yellow]{result['updated']}[/yellow] snippets (merged names/tags)")
+        table.add_row("Skipped", f"[dim]{result['skipped']}[/dim] already present")
+        table.add_row("Total in source", str(result["total_source"]))
+        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+        _echo(table)
+
+
 # --- Name sub-commands ---
 
 
@@ -484,21 +670,23 @@ def clean(
 def name_add_cmd(
     checksum: str = typer.Argument(help="The checksum of the snippet."),
     name: str = typer.Argument(help="The new name for the snippet."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
-    """Add a new name to a snippet."""
-    snippet = snippet_name_add(state.session, checksum, name, quiet=state.quiet)
+    """Add a new name to a snippet (supports checksum prefixes)."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        raise typer.Exit(code=1)
+    snippet = snippet_name_add(state.session, resolved, name, quiet=state.quiet)
     if snippet:
-        if json_output:
-            _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
+        if state.format in ("json", "csv"):
+            _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
         else:
             _echo(
                 f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
                 f"now has names: {snippet.name_list}"
             )
     else:
-        if json_output:
-            _echo_json({"error": "Failed to add name to snippet."})
+        if state.format in ("json", "csv"):
+            _echo_format({"error": "Failed to add name to snippet."})
         elif not state.quiet:
             err_console.print("[red]Error:[/red] Failed to add name to snippet.")
             raise typer.Exit(code=1)
@@ -508,24 +696,218 @@ def name_add_cmd(
 def name_remove_cmd(
     checksum: str = typer.Argument(help="The checksum of the snippet."),
     name: str = typer.Argument(help="The name to remove."),
-    json_output: bool = typer.Option(False, "--json", help="Output results in JSON format."),
 ) -> None:
-    """Remove a name from a snippet."""
-    snippet = snippet_name_remove(state.session, checksum, name, quiet=state.quiet)
+    """Remove a name from a snippet (supports checksum prefixes)."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        raise typer.Exit(code=1)
+    snippet = snippet_name_remove(state.session, resolved, name, quiet=state.quiet)
     if snippet:
-        if json_output:
-            _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
+        if state.format in ("json", "csv"):
+            _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
         else:
             _echo(
                 f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
                 f"now has names: {snippet.name_list}"
             )
     else:
-        if json_output:
-            _echo_json({"error": "Failed to remove name from snippet."})
+        if state.format in ("json", "csv"):
+            _echo_format({"error": "Failed to remove name from snippet."})
         elif not state.quiet:
             err_console.print("[red]Error:[/red] Failed to remove name from snippet.")
             raise typer.Exit(code=1)
+
+
+# --- Tag sub-commands ---
+
+
+@tag_app.command("add")
+def tag_add_cmd(
+    checksum: str = typer.Argument(help="The checksum of the snippet."),
+    tag: str = typer.Argument(help="The tag to add."),
+) -> None:
+    """Add a tag to a snippet (supports checksum prefixes)."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        raise typer.Exit(code=1)
+    snippet = snippet_tag_add(state.session, resolved, tag, quiet=state.quiet)
+    if snippet:
+        if state.format in ("json", "csv"):
+            _echo_format({"checksum": snippet.checksum, "tags": snippet.tag_list})
+        else:
+            _echo(
+                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+                f"now has tags: {snippet.tag_list}"
+            )
+    else:
+        if state.format in ("json", "csv"):
+            _echo_format({"error": "Failed to add tag to snippet."})
+        elif not state.quiet:
+            err_console.print("[red]Error:[/red] Failed to add tag to snippet.")
+            raise typer.Exit(code=1)
+
+
+@tag_app.command("remove")
+def tag_remove_cmd(
+    checksum: str = typer.Argument(help="The checksum of the snippet."),
+    tag: str = typer.Argument(help="The tag to remove."),
+) -> None:
+    """Remove a tag from a snippet (supports checksum prefixes)."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        raise typer.Exit(code=1)
+    snippet = snippet_tag_remove(state.session, resolved, tag, quiet=state.quiet)
+    if snippet:
+        if state.format in ("json", "csv"):
+            _echo_format({"checksum": snippet.checksum, "tags": snippet.tag_list})
+        else:
+            _echo(
+                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+                f"now has tags: {snippet.tag_list}"
+            )
+    else:
+        if state.format in ("json", "csv"):
+            _echo_format({"error": "Failed to remove tag from snippet."})
+        elif not state.quiet:
+            err_console.print("[red]Error:[/red] Failed to remove tag from snippet.")
+            raise typer.Exit(code=1)
+
+
+# --- Collection sub-commands ---
+
+
+@collection_app.command("create")
+def collection_create_cmd(
+    name: str = typer.Argument(help="Name for the new collection."),
+    description: str = typer.Option("", "--description", "-d", help="Description of the collection."),
+) -> None:
+    """Create a new snippet collection."""
+    try:
+        col = collection_create(state.session, name, description)
+        _echo(f"[green]✓[/green] Created collection [bold]{col.name}[/bold]")
+    except Exception as e:
+        err_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+
+@collection_app.command("delete")
+def collection_delete_cmd(
+    name: str = typer.Argument(help="Name of the collection to delete."),
+) -> None:
+    """Delete a collection (snippets are kept but unassigned)."""
+    if collection_delete(state.session, name, quiet=state.quiet):
+        _echo(f"[green]✓[/green] Deleted collection [bold]{name}[/bold]")
+    else:
+        err_console.print(f"[red]Error:[/red] Collection '{name}' not found.")
+        raise typer.Exit(code=1)
+
+
+@collection_app.command("list")
+def collection_list_cmd() -> None:
+    """List all collections."""
+    cols = collection_list(state.session)
+    if not cols:
+        _echo("[dim]No collections found.[/dim]")
+        return
+
+    if state.format != "table":
+        _echo_format(cols)
+        return
+
+    table = Table(title="Collections", title_style="bold cyan")
+    table.add_column("Name", style="bold")
+    table.add_column("Description")
+    table.add_column("Snippets", justify="right")
+    table.add_column("Created", style="dim")
+    for col in cols:
+        table.add_row(col["name"], col["description"], str(col["snippet_count"]), col["created_at"][:10])
+    _echo(table)
+
+
+@collection_app.command("show")
+def collection_show_cmd(
+    name: str = typer.Argument(help="Name of the collection to show."),
+) -> None:
+    """Show all snippets in a collection."""
+    from .models import Snippet as SnippetModel  # noqa: F811
+    snippets = SnippetModel.get_by_collection(state.session, name)
+    if not snippets:
+        _echo(f"[dim]No snippets in collection '{name}'.[/dim]")
+        return
+
+    if state.format != "table":
+        _echo_format([{"checksum": s.checksum, "names": s.name_list, "collection": s.collection} for s in snippets])
+        return
+
+    table = Table(title=f"Collection: {name}", title_style="bold cyan")
+    table.add_column("Checksum", style="dim")
+    table.add_column("Names", style="bold")
+    for s in snippets:
+        table.add_row(s.checksum[:12] + "…", ", ".join(s.name_list))
+    _echo(table)
+
+
+@collection_app.command("add")
+def collection_add_cmd(
+    collection_name: str = typer.Argument(help="Name of the collection."),
+    checksum: str = typer.Argument(help="Checksum (or prefix) of the snippet to add."),
+) -> None:
+    """Add a snippet to a collection."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        return
+    snippet = collection_add_snippet(state.session, collection_name, resolved, quiet=state.quiet)
+    if snippet:
+        _echo(f"[green]✓[/green] Added [bold]{', '.join(snippet.name_list)}[/bold] to collection [bold]{collection_name}[/bold]")
+    else:
+        if not state.quiet:
+            err_console.print("[red]Error:[/red] Failed to add snippet to collection.")
+        raise typer.Exit(code=1)
+
+
+@collection_app.command("remove")
+def collection_remove_cmd(
+    checksum: str = typer.Argument(help="Checksum (or prefix) of the snippet to remove from its collection."),
+) -> None:
+    """Remove a snippet from its collection."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        return
+    snippet = collection_remove_snippet(state.session, resolved, quiet=state.quiet)
+    if snippet:
+        _echo(f"[green]✓[/green] Removed [bold]{', '.join(snippet.name_list)}[/bold] from its collection")
+    else:
+        if not state.quiet:
+            err_console.print("[red]Error:[/red] Failed to remove snippet from collection.")
+        raise typer.Exit(code=1)
+
+
+# --- Version commands ---
+
+
+@app.command("version")
+def version_cmd(
+    checksum: str = typer.Argument(help="Checksum (or prefix) of the snippet."),
+) -> None:
+    """Show version history for a snippet."""
+    resolved = _resolve_checksum(checksum)
+    if not resolved:
+        return
+    versions = snippet_version_list(state.session, resolved)
+    if not versions:
+        _echo("[dim]No version history for this snippet.[/dim]")
+        return
+
+    if state.format != "table":
+        _echo_format(versions)
+        return
+
+    table = Table(title="Version History", title_style="bold cyan")
+    table.add_column("ID", justify="right")
+    table.add_column("Created At")
+    for v in versions:
+        table.add_row(str(v["id"]), v["created_at"])
+    _echo(table)
 
 
 # --- Config sub-commands ---
@@ -541,12 +923,15 @@ def config_path_cmd() -> None:
 def config_list_cmd() -> None:
     """List current settings."""
     full_config = load_config()
-    table = Table(title="Configuration", title_style="bold cyan")
-    table.add_column("Key", style="bold")
-    table.add_column("Value", justify="right")
-    for key, value in full_config.items():
-        table.add_row(key, str(value))
-    console.print(table)
+    if state.format in ("json", "csv"):
+        _echo_format(dict(full_config.items()))
+    else:
+        table = Table(title="Configuration", title_style="bold cyan")
+        table.add_column("Key", style="bold")
+        table.add_column("Value", justify="right")
+        for key, value in full_config.items():
+            table.add_row(key, str(value))
+        _echo(table)
 
 
 @config_app.command("get")
@@ -555,7 +940,10 @@ def config_get_cmd(
 ) -> None:
     """Get a configuration value."""
     value = load_config().get(key)
-    console.print(value)
+    if state.format in ("json", "csv"):
+        _echo_format({key: value})
+    else:
+        _echo(str(value))
 
 
 @config_app.command("set")

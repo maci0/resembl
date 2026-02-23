@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from resembl.config import (
     DEFAULTS,
+    ResemblConfig,
     config_dir_get,
     config_path_get,
     load_config,
@@ -24,7 +25,7 @@ class TestConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 config = load_config()
-        self.assertEqual(config, DEFAULTS)
+        self.assertEqual(config.to_dict(), DEFAULTS)
 
     def test_load_malformed_config(self):
         """If the config file is malformed, load_config should return defaults."""
@@ -34,7 +35,7 @@ class TestConfig(unittest.TestCase):
                 f.write("this is not valid toml")
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 config = load_config()
-        self.assertEqual(config, DEFAULTS)
+        self.assertEqual(config.to_dict(), DEFAULTS)
 
     def test_update_and_load_config(self):
         """Test that update_config correctly writes a value and load_config reads it."""

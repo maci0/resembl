@@ -49,6 +49,33 @@ def lsh_index_build(session: Session, threshold: float, num_perm: int) -> MinHas
     return lsh
 
 
+def lsh_index_insert(lsh: MinHashLSH, snippet: Snippet) -> None:
+    """Insert a single snippet into an existing LSH index.
+
+    Skips insertion if the key already exists (idempotent).
+    """
+    try:
+        lsh.insert(snippet.checksum, snippet.get_minhash_obj())
+    except ValueError:
+        # Key already exists in the LSH — safe to ignore.
+        pass
+
+
+def lsh_index_insert_batch(lsh: MinHashLSH, snippets: list[Snippet]) -> int:
+    """Insert multiple snippets into an existing LSH index.
+
+    Returns the number of newly inserted entries.
+    """
+    inserted = 0
+    for snippet in snippets:
+        try:
+            lsh.insert(snippet.checksum, snippet.get_minhash_obj())
+            inserted += 1
+        except ValueError:
+            pass
+    return inserted
+
+
 def lsh_cache_save(session: Session, lsh: MinHashLSH, threshold: float) -> None:
     """Save the LSH index and the current DB checksum to the cache."""
     cache_dir = cache_dir_get()

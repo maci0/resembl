@@ -48,7 +48,8 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 - The search is robust against changes in register allocation and immediate values.
 - The user can specify the number of results with `--top-n`.
 - The user can provide the query from a file with `--file`.
-- The output can be formatted as JSON with `--json`.
+- The output can be formatted as JSON with `--format json`.
+- Results are ranked by a hybrid score combining Jaccard and Levenshtein similarity.
 - The LSH cache is used to speed up searches.
 - The user can disable normalization with `--no-normalization`.
 
@@ -116,10 +117,53 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **Acceptance Criteria:**
 - `resembl compare <checksum1> <checksum2>` displays a side-by-side comparison.
-- The comparison includes Jaccard similarity, Levenshtein score, and shared token count.
+- The comparison includes Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared token count.
 - The output is color-coded for readability.
 - The user can disable colored output with the `--no-color` flag.
-- The output can be formatted as JSON with `--json`.
+- The output can be formatted as JSON with `--format json`.
+- Checksum prefixes are accepted for convenience.
+
+---
+
+### Title: Search for snippets by name
+
+**As a** reverse engineer (Alex),
+**I want to** use the `search` command to find snippets by their name,
+**so that I can** quickly locate a snippet I know the name of.
+
+**Acceptance Criteria:**
+- `resembl search <pattern>` finds snippets whose names match the pattern.
+- The search is case-insensitive.
+- The output can be formatted as JSON with `--format json`.
+
+---
+
+### Title: Tag snippets for cross-cutting concerns
+
+**As a** security researcher (Ben),
+**I want to** use the `tag` command to add tags to snippets,
+**so that I can** categorize and filter snippets by attributes like vulnerability status.
+
+**Acceptance Criteria:**
+- `resembl tag add <checksum> <tag>` adds a tag to a snippet.
+- `resembl tag remove <checksum> <tag>` removes a tag.
+- Checksum prefixes are accepted.
+
+---
+
+### Title: Organize snippets into collections
+
+**As a** database maintainer (Chris),
+**I want to** use the `collection` command to group related snippets,
+**so that I can** manage them as logical sets.
+
+**Acceptance Criteria:**
+- `resembl collection create <name>` creates a new collection.
+- `resembl collection add <collection> <checksum>` adds a snippet to a collection.
+- `resembl collection remove <checksum>` removes a snippet from its collection.
+- `resembl collection show <name>` displays all snippets in a collection.
+- `resembl collection list` lists all collections with snippet counts.
+- `resembl collection delete <name>` deletes a collection without removing snippets.
 
 ---
 

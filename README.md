@@ -10,7 +10,7 @@
 [![GitHub license](https://img.shields.io/github/license/maci0/resembl)](https://github.com/maci0/resembl/blob/main/LICENSE)
 [![GitHub last commit](https://img.shields.io/github/last-commit/maci0/resembl)](https://github.com/maci0/resembl/commits/main)
 
-`resembl` is a command-line tool designed to find similar assembly code snippets within a database. It uses a combination of hashing and fuzzy string matching to provide fast and accurate results, even when the query is a small fragment of a larger function.
+`resembl` is a command-line tool designed to find similar assembly code snippets within a database. It uses a combination of MinHash, Locality-Sensitive Hashing, weighted shingling, and hybrid scoring to provide fast and accurate results, even when the query is a small fragment of a larger function.
 
 This tool is ideal for tasks such as:
 - Identifying known functions from a binary dump.
@@ -83,13 +83,14 @@ Here’s how it works:
 
 This technique is effective because it balances the trade-off between false positives and false negatives. By requiring an entire band to match, we reduce the chance of accidental collisions (false positives). At the same time, by allowing a match in *any* of the bands, we increase the chance of finding truly similar items, even if their MinHash signatures are not identical (avoiding false negatives). This makes the LSH process both fast and effective at finding likely matches in a very large dataset.
 
-### 2. Accurate Ranking with RapidFuzz
+### 2. Accurate Ranking with Hybrid Scoring
 
-The LSH step gives us a small list of candidates, but it's not perfectly accurate. The second step is to precisely rank these candidates.
+The LSH step gives us a small list of candidates, but it's not perfectly accurate. The second step is to precisely rank these candidates using a **hybrid scoring** system.
 
-- **Fuzzy String Matching:** We use the `rapidfuzz` library to calculate the similarity score between the original query and the full code of each candidate snippet. This comparison is more computationally expensive, but since we only run it on a few candidates, it remains very fast.
-
-- **Ranking:** The candidates are then ranked by their similarity score, and the top results are presented to the user.
+- **Jaccard Similarity:** Each candidate's MinHash is compared to the query's MinHash to estimate structural (set-level) similarity.
+- **Levenshtein Similarity:** We use the `rapidfuzz` library to calculate the edit-distance-based similarity score between the original query and the full code of each candidate snippet.
+- **Hybrid Score:** The two scores are combined into a single 0–100 composite score: `hybrid = (jaccard × 100 × w) + (levenshtein × (1 − w))`, where `w` is the `jaccard_weight` config setting (default 0.4).
+- **Ranking:** Candidates are sorted by hybrid score. The top results are presented to the user.
 
 ### Algorithm Details
 
@@ -99,11 +100,17 @@ The MinHash algorithm is a technique for quickly estimating how similar two sets
 
 1.  **Shingling:** The normalized code is first broken down into a set of overlapping "shingles" (or n-grams). For example, a 3-shingle of the tokens `['MOV', 'REG', 'IMM']` would be `('MOV', 'REG', 'IMM')`. This creates a set of all unique shingles in the snippet.
 
-2.  **Hashing:** Each unique shingle is then hashed to an integer. This converts the set of shingles into a set of numbers.
+2.  **Weighted Insertion:** Each shingle is assigned a weight based on the instructions it contains:
+    - **3×** if the shingle contains a rare/distinctive instruction (e.g., `CPUID`, `RDTSC`, `SYSENTER`).
+    - **1×** if the shingle is composed entirely of common instructions (e.g., `MOV`, `PUSH`, `ADD`).
+    - **2×** otherwise.
+    The shingle is inserted into the MinHash multiple times equal to its weight, boosting the influence of distinctive patterns.
 
-3.  **Min-Hashing:** A fixed number of different hash functions (in our case, 128, as defined by `num_permutations`) are applied to each number in the set of hashed shingles. For each hash function, we only keep the *minimum* hash value produced across all shingles.
+3.  **Hashing:** Each unique shingle is then hashed to an integer. This converts the set of shingles into a set of numbers.
 
-4.  **Signature:** The collection of these 128 minimum hash values becomes the "MinHash signature" for the snippet.
+4.  **Min-Hashing:** A fixed number of different hash functions (in our case, 128, as defined by `num_permutations`) are applied to each number in the set of hashed shingles. For each hash function, we only keep the *minimum* hash value produced across all shingles.
+
+5.  **Signature:** The collection of these 128 minimum hash values becomes the "MinHash signature" for the snippet.
 
 The key insight is that the similarity of two MinHash signatures is a good estimate of the Jaccard similarity of the original shingle sets. This allows us to compare fingerprints instead of the full code, which is significantly faster.
 
@@ -113,7 +120,17 @@ After the LSH index provides a list of potential candidates, `resembl` uses the 
 
 The primary algorithm used is a variation of the **Levenshtein distance**, which measures the number of edits (insertions, deletions, or substitutions) needed to change one string into another. `rapidfuzz` calculates a normalized similarity ratio based on this distance, which gives a score from 0 to 100, where 100 is a perfect match.
 
-By using `rapidfuzz`, `resembl` can accurately score the similarity between the query and candidate snippets, ensuring that the final results are ranked by their true similarity, not just the approximation from the LSH step.
+By using `rapidfuzz`, `resembl` can accurately score the similarity between the query and candidate snippets. This Levenshtein score is then combined with the Jaccard similarity into a **hybrid score** for final ranking.
+
+### Control-Flow Graph (CFG) Similarity
+
+In addition to token-level comparison, `resembl compare` extracts the **control-flow graph** from each snippet. Lines are split into basic blocks at labels and branch instructions, and an adjacency list is built. The CFG similarity (0.0–1.0) is computed from three sub-metrics:
+
+1. **Block-count ratio** – min/max of block counts.
+2. **Edge-count ratio** – min/max of edge counts.
+3. **Block-size histogram cosine similarity** – measures how similar the distribution of instructions per block is.
+
+This structural metric is displayed in `compare` output alongside Jaccard, Levenshtein, and Hybrid scores.
 
 ### Lookup Flow
 
@@ -123,8 +140,8 @@ When you run `resembl find`, the tool processes your query in several stages:
 2. **Normalize query** – The query assembly is lexed and normalized unless `--no-normalization` is specified.
 3. **MinHash lookup** – The query's MinHash is hashed into the LSH buckets to retrieve candidate checksums.
 4. **Retrieve candidates** – Snippets matching those checksums are loaded from the database.
-5. **Score** – Each candidate is compared to the original query with RapidFuzz and assigned a similarity score.
-6. **Display results** – Candidates are sorted by score and the top results are shown or output as JSON.
+5. **Score** – Each candidate is scored by both Jaccard similarity and Levenshtein distance, combined into a hybrid score.
+6. **Display results** – Candidates are sorted by hybrid score and the top results are shown or output as JSON/CSV.
 
 This pipeline lets `resembl` search large datasets in milliseconds while ranking results accurately.
 
@@ -142,8 +159,12 @@ resembl/
 │   ├── database.py
 │   └── models.py
 ├── docs/
+│   ├── adr/
+│   ├── api_reference.md
 │   ├── custom_database.md
 │   ├── flowcharts.md
+│   ├── man.md
+│   ├── tutorial.md
 │   └── user_stories.md
 ├── fuzzers/
 ├── tests/
@@ -183,11 +204,15 @@ default values. Set `RESEMBL_CONFIG_DIR` to override this location.
 | `lsh_threshold`   | `0.5`   | Minimum Jaccard similarity used when querying the LSH index. Lower values yield more candidates. |
 | `num_permutations`| `128`   | Number of permutations used when building MinHash fingerprints. |
 | `top_n`           | `5`     | Number of matches returned by the `find` command. |
+| `ngram_size`      | `3`     | Token n-gram size for shingling. |
+| `jaccard_weight`  | `0.4`   | Weight of Jaccard similarity in the hybrid score (0.0–1.0). |
+| `format`          | `table` | Default output format (`table`, `json`, or `csv`). |
 
 **Example `config.toml`:**
 ```toml
 lsh_threshold = 0.8
 top_n = 5
+jaccard_weight = 0.5
 ```
 
 You can manage this file with the `resembl config` command.
@@ -244,11 +269,11 @@ uv run pytest
 
 #### Code Coverage
 
-This project uses `pytest-cov` to measure test coverage. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
+This project uses `slipcover` for line-level coverage measurement. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
 
 You can run the coverage report locally with:
 ```bash
-uv run pytest --cov=resembl
+uv run python -m slipcover --source resembl -m pytest
 ```
 
 ## Advanced Usage

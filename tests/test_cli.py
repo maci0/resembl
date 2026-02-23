@@ -93,7 +93,7 @@ class TestCLICommands(BaseCLITest):
         """Comparing unknown checksums should fail."""
         result = self.run_command("compare deadbeef cafebabe")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not be found", result.stderr)
+        self.assertIn("No snippet found matching", result.stderr)
 
     def test_add_command(self):
         """Test the add command."""
@@ -266,7 +266,7 @@ class TestCLIConfig(BaseCLITest):
 
 
 class TestCLIOptions(BaseCLITest):
-    """Tests for global command-line options like --quiet and --no-color."""
+    """--no-color Tests for global command-line options like --quiet and."""
 
     def test_quiet_option(self):
         """Test that --quiet suppresses informational output."""
@@ -275,7 +275,7 @@ class TestCLIOptions(BaseCLITest):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_no_color_flag(self):
-        """Test that the --no-color flag disables colored output."""
+        """--no-color Test that the flag disables colored output."""
         with Session(self.engine) as session:
             snippet_add(session, "snippet2", "MOV EBX, 2")
             s1 = Snippet.get_by_name(session, "test_snippet")
@@ -297,7 +297,7 @@ class TestCLIImport(BaseCLITest):
                 f.write("PUSH EBP; MOV EBP, ESP; POP EBP; RET")
 
             # First import – should report 1 new snippet
-            result = self.run_command(f"import --force --json {import_dir}")
+            result = self.run_command(f"--format json import --force {import_dir}")
             self.assertEqual(result.returncode, 0)
             import json
 
@@ -305,7 +305,7 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(data["num_imported"], 1)
 
             # Second import of the same file – should report 0 new snippets
-            result = self.run_command(f"import --force --json {import_dir}")
+            result = self.run_command(f"--format json import --force {import_dir}")
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 0)

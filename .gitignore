@@ -30,3 +30,4 @@ data/
 
 # Type hinting
 .mypy_cache/
+.hypothesis/
