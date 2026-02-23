@@ -237,7 +237,7 @@ uv run resembl find --file tests/test_data/1000A0A0.asm
 
 ### 5. Running Tests
 
-To ensure everything is working correctly, you can run the test suite using Poetry:
+To ensure everything is working correctly, you can run the test suite:
 ```bash
 uv run pytest
 ```

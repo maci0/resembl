@@ -31,7 +31,7 @@ DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(DATABASE_URL)
 
 
-class TestAsmatch(unittest.TestCase):
+class TestResembl(unittest.TestCase):
     """Tests for core snippet operations."""
 
     def setUp(self):

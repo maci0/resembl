@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import atexit
+
 import glob
 import json
 import logging
@@ -100,6 +102,7 @@ def app_callback(
     state.config = load_config()
     db_create()
     state.session = Session(engine)
+    atexit.register(state.session.close)
 
 
 # --- Snippet commands ---
@@ -118,8 +121,12 @@ def add(
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
         else:
             _echo(f"Snippet with checksum {snippet.checksum} now has names: {snippet.name_list}")
-    elif json_output:
-        _echo_json({"error": "Failed to add snippet."})
+    else:
+        if json_output:
+            _echo_json({"error": "Failed to add snippet."})
+        else:
+            typer.echo("Error: Snippet could not be added (empty code?).", err=True)
+            raise typer.Exit(code=1)
 
 
 @app.command("export")
@@ -403,8 +410,12 @@ def name_add_cmd(
     if snippet:
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
-    elif json_output:
-        _echo_json({"error": "Failed to add name to snippet."})
+    else:
+        if json_output:
+            _echo_json({"error": "Failed to add name to snippet."})
+        elif not state.quiet:
+            typer.echo("Error: Failed to add name to snippet.", err=True)
+            raise typer.Exit(code=1)
 
 
 @name_app.command("remove")
@@ -418,8 +429,12 @@ def name_remove_cmd(
     if snippet:
         if json_output:
             _echo_json({"checksum": snippet.checksum, "names": snippet.name_list})
-    elif json_output:
-        _echo_json({"error": "Failed to remove name from snippet."})
+    else:
+        if json_output:
+            _echo_json({"error": "Failed to remove name from snippet."})
+        elif not state.quiet:
+            typer.echo("Error: Failed to remove name from snippet.", err=True)
+            raise typer.Exit(code=1)
 
 
 # --- Config sub-commands ---
@@ -457,10 +472,8 @@ def config_set_cmd(
     if key not in DEFAULTS:
         typer.echo(f"Invalid configuration key: '{key}'", err=True)
         raise typer.Exit(code=1)
-    if key == "lsh_threshold":
-        typed_value: int | float = float(value)
-    else:
-        typed_value = int(value)
+    default_value = DEFAULTS[key]
+    typed_value: int | float = type(default_value)(value)
     new_config = update_config(key, typed_value)
     _echo(f"Set {key} to {new_config[key]}")
     state.config.update(new_config)

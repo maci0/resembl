@@ -2,7 +2,7 @@
 
 import json
 import pickle
-from typing import Sequence
+from collections.abc import Sequence
 
 from datasketch import MinHash
 from sqlmodel import Field, Session, SQLModel, select
