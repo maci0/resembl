@@ -34,9 +34,12 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
   permutations, `RMLH`-prefixed, self-describing) instead of pickles.
 
 ## Rationale
-- **Constant-time warm queries:** a search is a handful of indexed point
-  lookups (one per band) plus a chunked `IN` fetch — independent of database
-  size (measured ~0.5 s wall including interpreter startup at 100k snippets).
+- **Constant-time warm queries:** a search is all band lookups in a single
+  `UNION ALL` round trip (each branch an indexed point lookup) plus a chunked
+  `IN` fetch — independent of database size (~1.4 ms in-process per query;
+  ~0.5 s wall including interpreter startup).  The banding parameters are
+  cached per `(threshold, num_perm)`, avoiding a ~13 ms scipy optimization on
+  every query.
 - **Incremental maintenance:** `add`, `import`, `merge`, and `rm` update only
   the affected snippets' bucket rows, so a search never requires a rebuild.
 - **Streaming builds:** rows are inserted in batches; on SQLite the build

@@ -328,15 +328,20 @@ Measured on a development workstation (shared, under load) with `tests/benchmark
 | Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex --jobs` |
 |--------:|------------:|------------:|----------------------------------:|-----------------:|
 | 5,000   | ~2 s        | ~0.45 s     | ~1.0 s                            | ~2 s             |
-| 20,000  | ~5.6 s      | ~0.45 s     | ~3.0 s                            | ~4 s             |
+| 20,000  | ~4.5 s      | ~0.45 s     | ~3.0 s                            | ~2.9 s           |
 | 100,000 | ~25 s       | ~0.6 s      | ~14 s                             | ~11 s            |
 | 500,000 | ~2 min      | ~0.6 s      | ~1.8 min (one-time)               | ~53 s            |
 
 Key properties that keep these numbers flat as the database grows:
 
-- **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup) — queries
-  hit a handful of indexed LSH bucket lookups plus a chunked candidate fetch, independent of size.
-- **Bulk import is linear and parallel** (~4,000 files/s with `--jobs`) with bounded memory.
+- **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup; the query
+  itself is ~1.4 ms in-process) — queries hit a handful of indexed LSH bucket lookups (all in a
+  single round trip) plus a chunked candidate fetch, independent of size.  The banding parameters
+  are computed once and cached (the underlying scipy optimization would otherwise run per query).
+- **Bulk import is linear and parallel** (~4,000 files/s with `--jobs`, ~4,450/s at 20k) with bounded
+  memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the snippet is
+  lexed once (the checksum string and the MinHash tokens are derived from the same token stream) and
+  the MinHash permutations are cloned from a cached template instead of regenerated (~260 µs saved).
 - **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
   incrementally — `add`/`rm` never trigger a full rebuild.
 - **The one-time index build is near-linear**: rows are inserted band-major sorted by bucket so the
@@ -345,10 +350,14 @@ Key properties that keep these numbers flat as the database grows:
   cache for the build.  A 500k cold build takes ~1.8 min versus ~27 min before this optimization.
 - `reindex --jobs N` recomputes fingerprints in parallel (≈5× faster with 8 workers) and commits
   periodically on SQLite so the WAL stays bounded.
+- **CLI startup is lean**: datasketch/scipy and the database engine are imported lazily, so commands
+  that never touch fingerprints (`list`, `stats`, `export`, …) skip ~200 ms of startup.
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses
-~2 KB assembly bodies per snippet.
+~2 KB assembly bodies per snippet.  The 20k import/reindex rows reflect the hot-path optimizations
+(they were ~5.6 s / ~4 s before); larger datasets scale the same way but were not re-measured after
+the optimization.
 
 ## Development
 

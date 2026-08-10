@@ -1,14 +1,19 @@
 """Database models used by resembl."""
 
+from __future__ import annotations
+
 import json
 import operator
 import pickle
 import struct
 from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-from datasketch import MinHash
 from sqlmodel import Field, Session, SQLModel, select
+
+if TYPE_CHECKING:
+    from datasketch import MinHash
 
 #: Magic prefix for the compact MinHash byte format.  A stored fingerprint
 #: either starts with this prefix (``struct``-packed uint32 hash values,
@@ -20,6 +25,32 @@ MINHASH_MAGIC = b"RMLH"
 #: corrupt or hostile.  The bound also keeps ``struct`` format strings and
 #: ``MinHash`` allocations sane on malformed input.
 _MAX_NUM_PERM = 1 << 12
+
+#: Cached MinHash templates keyed by num_perm, used to skip datasketch's
+#: per-construction permutation regeneration (~260 µs — the dominant cost of
+#: building a fingerprint).  Permutations depend only on (num_perm, seed),
+#: so cloning a template produces identical fingerprints.
+_MINHASH_TEMPLATES: dict[int, object] = {}
+
+
+def minhash_new(num_perm: int = 128) -> MinHash:
+    """Return a fresh all-max MinHash without regenerating permutations.
+
+    datasketch's constructor draws the permutation arrays from a numpy
+    random stream on every call (~260 µs at 128 perms — most of the import
+    worker's CPU).  Cloning a cached template (deepcopy of two small numpy
+    arrays) is ~15x faster and yields identical permutations (seed 1), so
+    fingerprints are byte-for-byte the same.
+    """
+    import copy
+
+    from datasketch import MinHash
+
+    template = _MINHASH_TEMPLATES.get(num_perm)
+    if template is None:
+        template = MinHash(num_perm=num_perm)
+        _MINHASH_TEMPLATES[num_perm] = template
+    return copy.deepcopy(template)
 
 
 def minhash_num_perm(data: bytes) -> int:
@@ -65,6 +96,8 @@ def minhash_unpack(data: bytes) -> MinHash:
     packed payloads raise ``ValueError`` (never low-level ``struct`` errors).
     """
     if data.startswith(MINHASH_MAGIC):
+        from datasketch import MinHash
+
         num_perm = minhash_num_perm(data)
         values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
         return MinHash(num_perm=num_perm, hashvalues=list(values))

@@ -123,7 +123,7 @@ structure — band buckets live in the `lsh_bucket` table with parameters in
 `lsh_meta`.
 
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
-A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob.
+A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the underlying scipy optimization would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.
 
 ### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[bytes]`
 Compute the canonical bucket key for each band of a packed fingerprint (big-endian uint32s), matching datasketch's banding math. Malformed blobs raise `ValueError`.
@@ -136,6 +136,9 @@ Drop the bucket table and metadata (the next find rebuilds), and read the `(thre
 
 ### `minhash_pack(m) → bytes` / `minhash_unpack(data) → MinHash` / `minhash_jaccard(a, b) → float` / `minhash_ensure_packed(data) → bytes`
 Packed uint32 fingerprint serialization (520 bytes at 128 permutations, `RMLH`-prefixed, self-describing) and a fast Jaccard computed directly from packed blobs — legacy pickles load transparently. Malformed packed blobs raise `ValueError` (never low-level `struct` errors), so hostile or corrupted data cannot crash the query path.
+
+### `minhash_new(num_perm: int = 128) → MinHash`
+Return a fresh all-max `MinHash` by cloning a cached template instead of calling datasketch's constructor, which regenerates the permutation arrays with numpy random on every call (~260 µs — the dominant cost of building a fingerprint). The permutations depend only on `(num_perm, seed)`, so cloned fingerprints are byte-identical to directly constructed ones — this is what makes bulk import and `reindex` fast (~80 µs/snippet end to end).
 
 ### `Snippet.iter_minhash_batches(session, batch_size=1000)`
 Keyset-paginated iterator over `(checksum, minhash)` pairs only — the projected read the index build uses, so building never loads the (much larger) code bodies.

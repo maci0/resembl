@@ -450,6 +450,32 @@ class TestResemblLSH(BaseScalingTest):
         with self.assertRaises(ValueError):
             ResemblLSH(self.session, 0.5, 1)
 
+    def test_banding_params_are_cached(self):
+        """The scipy banding computation must run once per (threshold, perms).
+
+        ``_optimal_param`` is a ~13 ms numerical integration; recomputing it
+        on every ResemblLSH construction made it ~88% of query time.
+        """
+        from unittest.mock import patch
+
+        from datasketch.lsh import _optimal_param as _real_optimal_param
+
+        from resembl.lsh import ResemblLSH, _banding_params
+
+        _banding_params.cache_clear()  # deterministic: cache may be warm from other tests
+        # The lazy import resolves the name from datasketch.lsh at call time,
+        # so patch there.
+        with patch(
+            "datasketch.lsh._optimal_param", side_effect=_real_optimal_param
+        ) as mock:
+            r1 = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+            r2 = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+            self.assertEqual((r1.b, r1.r), (r2.b, r2.r))
+            self.assertEqual(mock.call_count, 1)  # second construction is a cache hit
+        # Different parameters compute a different banding.
+        b3, r3 = _banding_params(0.8, NUM_PERMUTATIONS)
+        self.assertNotEqual((b3, r3), (r1.b, r1.r))
+
     def test_insert_query_with_minhash_object(self):
         from resembl.lsh import ResemblLSH
 

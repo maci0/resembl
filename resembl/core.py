@@ -16,11 +16,14 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING
 
-from datasketch import MinHash
 from pygments.lexers.asm import NasmLexer
 from pygments.token import Comment, Name, Number, Punctuation, Text
+
+if TYPE_CHECKING:
+    from datasketch import MinHash
 from rapidfuzz import fuzz, process
 from sqlmodel import Session, func, select, text
 
@@ -550,6 +553,9 @@ RISCV_REGISTERS = {
 # ensuring that register renaming does not affect similarity scoring.
 ALL_REGISTERS = REGISTERS | ARM_REGISTERS | MIPS_REGISTERS | RISCV_REGISTERS
 
+#: Lower-cased memory-size qualifiers recognized during token normalization.
+_MEM_SIZE_WORDS = frozenset(("dword", "word", "byte", "qword", "ptr"))
+
 #: System, privileged, or uncommon instructions that are highly distinctive.
 #: Shingles containing these get boosted weight during MinHash construction.
 RARE_INSTRUCTIONS = {
@@ -670,8 +676,8 @@ BRANCH_INSTRUCTIONS = {
 # ---------------------------------------------------------------------------
 
 
-def shingle_weight(shingle: str) -> int:
-    """Return the insertion weight for a shingle.
+def _shingle_weight_tokens(tokens: Sequence[str]) -> int:
+    """Return the insertion weight for a shingle given its token list.
 
     - **3** if the shingle contains at least one rare instruction.
     - **1** if every token in the shingle is a common instruction.
@@ -681,14 +687,17 @@ def shingle_weight(shingle: str) -> int:
     MinHash, increasing its probability of being selected as a minimum
     hash value and thus boosting its influence on similarity.
     """
-    tokens = shingle.split()
     has_rare = any(t in RARE_INSTRUCTIONS for t in tokens)
     if has_rare:
         return 3
-    all_common = all(t in COMMON_INSTRUCTIONS for t in tokens)
-    if all_common:
+    if all(t in COMMON_INSTRUCTIONS for t in tokens):
         return 1
     return 2
+
+
+def shingle_weight(shingle: str) -> int:
+    """Return the insertion weight for a shingle (see ``_shingle_weight_tokens``)."""
+    return _shingle_weight_tokens(shingle.split())
 
 
 # ---------------------------------------------------------------------------
@@ -878,13 +887,21 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
 # ---------------------------------------------------------------------------
 
 
-def string_normalize(code_snippet: str) -> str:
-    """Normalize an assembly snippet and return a canonical string."""
-    tokens = lexer.get_tokens(code_snippet)
-    # Join tokens, but only if they are not comments or pure whitespace
+def _string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
+    """Normalize a lexer token stream to a canonical string (no lexing).
+
+    Shares the normalization logic between :func:`string_normalize` and the
+    import hot path, which lexes each snippet once and derives both the
+    checksum string and the tokens from the same stream.
+    """
     return " ".join(
         value for ttype, value in tokens if ttype not in Comment and ttype != Text
     ).strip()
+
+
+def string_normalize(code_snippet: str) -> str:
+    """Normalize an assembly snippet and return a canonical string."""
+    return _string_normalize_lexed(lexer.get_tokens(code_snippet))
 
 
 def snippet_name_add(
@@ -1002,36 +1019,44 @@ def token_is_label(token_type, value: str) -> bool:
     return token_type in Name.Label or (token_type in Name and value.endswith(":"))
 
 
-def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
-    """Return a list of tokens from a code snippet."""
-    tokens = lexer.get_tokens(code_snippet)
-    output_tokens = []
+def _code_tokenize_lexed(
+    tokens: Iterable[tuple[object, str]], normalize: bool = True
+) -> list[str]:
+    """Tokenize an already-lexed token stream (no re-lexing)."""
+    output_tokens: list[str] = []
+    append = output_tokens.append
     for ttype, value in tokens:
         if ttype in Comment:
             continue
 
         if normalize:
-            if ttype in Name.Register or value.lower() in ALL_REGISTERS:
-                output_tokens.append("REG")
+            if ttype in Name.Register:
+                append("REG")
+                continue
+            # Pygments already classifies registers; the string check covers
+            # register spellings the lexer misses.  ``lower`` is computed
+            # once and reused instead of per-branch.
+            lower = value.lower()
+            if lower in ALL_REGISTERS:
+                append("REG")
             elif ttype in Number:
-                output_tokens.append("IMM")
+                append("IMM")
             elif token_is_label(ttype, value):
-                output_tokens.append("LABEL")
-            elif value.lower() in [
-                "dword",
-                "word",
-                "byte",
-                "qword",
-                "ptr",
-            ]:
-                output_tokens.append("MEM_SIZE")
+                append("LABEL")
+            elif lower in _MEM_SIZE_WORDS:
+                append("MEM_SIZE")
             elif ttype not in Punctuation and value.strip():
-                output_tokens.append(value.upper())
+                append(value if value.isupper() else value.upper())
         else:
             if ttype not in Punctuation and value.strip():
-                output_tokens.append(value.upper())
+                append(value if value.isupper() else value.upper())
 
     return output_tokens
+
+
+def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
+    """Return a list of tokens from a code snippet."""
+    return _code_tokenize_lexed(lexer.get_tokens(code_snippet), normalize)
 
 
 def code_create_minhash(
@@ -1042,21 +1067,34 @@ def code_create_minhash(
     Uses configurable n-gram shingling to preserve token ordering so that
     structurally different snippets produce distinct fingerprints.
     """
-    tokens = code_tokenize(code_snippet, normalize)
-    m = MinHash(num_perm=NUM_PERMUTATIONS)
+    return _minhash_from_tokens(code_tokenize(code_snippet, normalize), ngram_size)
+
+
+def _minhash_from_tokens(tokens: list[str], ngram_size: int = 3) -> MinHash:
+    """Build a MinHash from an already-tokenized snippet.
+
+    Shares the shingling/weighting logic with :func:`code_create_minhash`
+    (the import hot path tokenizes once and reuses the tokens here).
+    Shingles are deduplicated as token tuples — no per-shingle string join —
+    and the weight check runs directly on the tokens instead of re-splitting
+    the joined string.
+    """
+    from .models import minhash_new
+
+    m = minhash_new(NUM_PERMUTATIONS)
     if not tokens:
         return m
     if len(tokens) < ngram_size:
         m.update(" ".join(tokens).encode("utf8"))
         return m
-    shingles: set[str] = set()
+    shingles: set[tuple[str, ...]] = set()
     for i in range(len(tokens) - ngram_size + 1):
-        shingles.add(" ".join(tokens[i : i + ngram_size]))
-    for shingle in shingles:
+        shingles.add(tuple(tokens[i : i + ngram_size]))
+    for shingle_tokens in shingles:
         # Weighted insertion: rare-instruction shingles are inserted multiple
         # times to boost their influence on the MinHash signature.
-        weight = shingle_weight(shingle)
-        encoded = shingle.encode("utf8")
+        weight = _shingle_weight_tokens(shingle_tokens)
+        encoded = " ".join(shingle_tokens).encode("utf8")
         for _ in range(weight):
             m.update(encoded)
     return m
@@ -1075,23 +1113,7 @@ def code_create_minhash_batch(
     results: list[MinHash] = []
     for code_snippet in snippets:
         tokens = code_tokenize(code_snippet, normalize)
-        m = MinHash(num_perm=NUM_PERMUTATIONS)
-        if not tokens:
-            results.append(m)
-            continue
-        if len(tokens) < ngram_size:
-            m.update(" ".join(tokens).encode("utf8"))
-            results.append(m)
-            continue
-        shingles: set[str] = set()
-        for i in range(len(tokens) - ngram_size + 1):
-            shingles.add(" ".join(tokens[i : i + ngram_size]))
-        for shingle in shingles:
-            weight = shingle_weight(shingle)
-            encoded = shingle.encode("utf8")
-            for _ in range(weight):
-                m.update(encoded)
-        results.append(m)
+        results.append(_minhash_from_tokens(tokens, ngram_size))
     return results
 
 
@@ -1108,16 +1130,31 @@ def snippet_prepare(
     Returns ``(checksum, name, code, minhash_bytes)`` or ``None`` for empty
     code.  This is a pure function with no database access, so it is safe to
     run in worker processes when bulk-importing many files.
+
+    The snippet is lexed exactly once: the normalized string (for the
+    checksum) and the token list (for the MinHash) are both derived from the
+    same token stream.  Lexing with Pygments is the dominant per-snippet
+    cost, so this halves it on the import hot path.
     """
     if not code.strip():
         return None
-    checksum = string_checksum(code)
-    minhash_bytes = minhash_pack(code_create_minhash(code, ngram_size=ngram_size))
+    # Materialize the token stream: it is consumed twice (once for the
+    # normalized checksum string, once for the MinHash tokens).
+    tokens = list(lexer.get_tokens(code))
+    normalized = _string_normalize_lexed(tokens)
+    checksum = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    minhash_bytes = minhash_pack(
+        _minhash_from_tokens(_code_tokenize_lexed(tokens), ngram_size)
+    )
     return checksum, name, code, minhash_bytes
 
 
-def _checksum_chunks(checksums: list[str], batch_size: int = 500) -> list[list[str]]:
-    """Split checksums into chunks small enough for one SQL ``IN`` clause."""
+def _checksum_chunks(checksums: list[str], batch_size: int = 900) -> list[list[str]]:
+    """Split checksums into chunks small enough for one SQL ``IN`` clause.
+
+    900 stays comfortably under SQLite's variable limit (999 by default,
+    32766 on modern builds), halving the round trips of the old 500.
+    """
     return [checksums[i : i + batch_size] for i in range(0, len(checksums), batch_size)]
 
 

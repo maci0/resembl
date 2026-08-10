@@ -74,7 +74,7 @@ from .core import (
     snippet_tag_remove,
     snippet_version_list,
 )
-from .database import db_create, engine
+from .database import db_create, get_engine
 from .lsh import lsh_meta_get
 
 logger = logging.getLogger(__name__)
@@ -240,7 +240,7 @@ def app_callback(
     state.config = load_config()
     state.format = format_opt or state.config.get("format", "table")
     db_create()
-    state.session = Session(engine)
+    state.session = Session(get_engine())
     atexit.register(state.session.close)
 
 

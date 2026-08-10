@@ -72,12 +72,14 @@ By following this pattern, you can seamlessly integrate `resembl`'s functionalit
 
 ## Scaling to Millions of Snippets and Beyond
 
-The architecture is designed to keep the **query path constant-time** regardless of database size: a search is a handful of indexed LSH bucket lookups (one per band) plus a chunked candidate fetch, so warm `find` latency stays ~0.6 s from 5k to 500k snippets.  Measured on a shared machine (busy, under load):
+The architecture is designed to keep the **query path constant-time** regardless of database size: a search is a handful of indexed LSH bucket lookups (all in a single round trip, with banding parameters cached) plus a chunked candidate fetch, so warm `find` latency stays ~0.6 s from 5k to 500k snippets (the query itself is ~1.4 ms in-process; the rest is interpreter startup).  The per-snippet import preparation (lexing + fingerprint) runs at ~80 µs/snippet, since MinHash permutations are cloned from a cached template instead of regenerated.  Measured on a shared machine (busy, under load):
 
 | Dataset | Bulk import | Warm `find` | Cold `find` (one-time index build) | `reindex --jobs` |
 |--------:|------------:|------------:|-----------------------------------:|-----------------:|
 | 100,000 | ~25 s | ~0.6 s | ~14 s | ~11 s |
 | 500,000 | ~2 min | ~0.6 s | ~1.8 min | ~53 s |
+
+(The 100k/500k rows predate the hot-path optimizations; at 20k the measured import and reindex improved ~15–25% — ~4.5 s and ~2.9 s respectively.)
 
 What the code already supports:
 

@@ -42,13 +42,25 @@ def create_db_engine(url: str | None = None):
     return eng
 
 
-# Module-level default engine (used by the CLI)
-engine = create_db_engine()
+_engine: object | None = None
+
+
+def get_engine():
+    """Return the module-level engine, creating it on first use.
+
+    Creating the engine opens a SQLite connection and applies the WAL
+    pragmas (~30-50 ms), so it is deferred until a command actually touches
+    the database — ``--help``, ``version`` and similar never pay for it.
+    """
+    global _engine
+    if _engine is None:
+        _engine = create_db_engine()
+    return _engine
 
 
 def db_create() -> None:
     """Create database tables if they do not already exist."""
-    SQLModel.metadata.create_all(engine)
+    SQLModel.metadata.create_all(get_engine())
 
 
 def db_checksum_get(session: Session) -> str:
