@@ -337,3 +337,20 @@ class LSHMeta(SQLModel, table=True):  # type: ignore
     id: int = Field(default=1, primary_key=True)
     threshold: float
     num_perm: int
+
+
+#: Version of the fingerprint algorithm.  Bumped whenever stored MinHash
+#: blobs would differ from a re-computation (e.g. the weighted-shingling
+#: fix).  The value is stamped into ``app_meta`` by index builds/reindexes;
+#: a mismatch makes ``find`` reindex the database once instead of silently
+#: matching old fingerprints against new query fingerprints.
+FINGERPRINT_VERSION = 2
+
+
+class AppMeta(SQLModel, table=True):  # type: ignore
+    """Small key-value store for application metadata (e.g. fingerprint version)."""
+
+    __tablename__ = "app_meta"  # noqa: N815
+
+    key: str = Field(primary_key=True)
+    value: str

@@ -328,7 +328,7 @@ Measured on a development workstation (shared, under load) with `tests/benchmark
 | Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex --jobs` |
 |--------:|------------:|------------:|----------------------------------:|-----------------:|
 | 5,000   | ~2 s        | ~0.45 s     | ~1.0 s                            | ~2 s             |
-| 20,000  | ~4.5 s      | ~0.45 s     | ~3.0 s                            | ~2.9 s           |
+| 20,000  | ~3.6 s      | ~0.45 s     | ~3.0 s                            | ~2.9 s           |
 | 100,000 | ~25 s       | ~0.6 s      | ~14 s                             | ~11 s            |
 | 500,000 | ~2 min      | ~0.6 s      | ~1.8 min (one-time)               | ~53 s            |
 
@@ -338,14 +338,16 @@ Key properties that keep these numbers flat as the database grows:
   itself is ~1.4 ms in-process) — queries hit a handful of indexed LSH bucket lookups (all in a
   single round trip) plus a chunked candidate fetch, independent of size.  The banding parameters
   are computed once and cached (the underlying scipy optimization would otherwise run per query).
-- **Bulk import is linear and parallel** (~4,000 files/s with `--jobs`, ~4,450/s at 20k) with bounded
-  memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the snippet is
-  lexed once (the checksum string and the MinHash tokens are derived from the same token stream) and
-  the MinHash permutations are cloned from a cached template instead of regenerated (~260 µs saved).
+- **Bulk import is linear and parallel** (~4,000–5,500 files/s with `--jobs`, ~5,560/s at 20k) with
+  bounded memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the
+  snippet is lexed once (the checksum string and the MinHash tokens are derived from the same token
+  stream), the MinHash permutations are cloned from a cached template instead of regenerated
+  (~260 µs saved), and the write path is a raw ``executemany`` bulk insert.
 - **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
   incrementally — `add`/`rm` never trigger a full rebuild.  *Note:* the weighted-shingling fix
-  (rare-instruction shingles now really boost the signature) changes fingerprint values — databases
-  created before that fix should be rebuilt once with `resembl reindex --force`.
+  (rare-instruction shingles now really boost the signature) changed the fingerprint format; the
+  first `find` on a database created before that fix automatically reindexes once (the format
+  version is stamped in the database, so this happens exactly one time).
 - **The one-time index build is near-linear**: rows are inserted band-major sorted by bucket so the
   primary key grows by sequential append (random inserts into a deep b-tree decay ~4× by the tail
   of a 12.5M-row build), with periodic commits keeping the SQLite WAL bounded and a raised page

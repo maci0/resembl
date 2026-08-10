@@ -822,9 +822,14 @@ def find(
         return
 
     # The LSH index is built lazily (and rebuilt when threshold/permutation
-    # settings change).  Give the user a heads-up in table mode, since that
-    # one-time build can take a while on large databases.
-    build_progress = None
+    # settings change), and fingerprints may need a one-time migration
+    # reindex.  Pass a progress printer in table mode so long-running
+    # operations report progress (it is a no-op below 100k snippets).
+    build_progress = (
+        _build_progress_printer()
+        if state.format == "table" and not state.quiet
+        else None
+    )
     if state.format == "table" and not state.quiet:
         meta = lsh_meta_get(state.session)
         num_perm = cast(int, state.config.get("num_permutations", 128))
@@ -834,7 +839,6 @@ def find(
             or meta[1] != num_perm
         ):
             _echo("[dim]Building LSH index (first search on this database)…[/dim]")
-            build_progress = _build_progress_printer()
 
     num_candidates, matches = snippet_find_matches(
         state.session,

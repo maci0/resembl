@@ -100,6 +100,32 @@ def lsh_meta_clear(session: Session) -> None:
     session.commit()
 
 
+def fingerprint_version_get(session: Session) -> int | None:
+    """Return the stored fingerprint-format version, or ``None`` if unset."""
+    row = session.execute(
+        text("SELECT value FROM app_meta WHERE key = 'fingerprint_version'")
+    ).one_or_none()
+    return int(row[0]) if row is not None else None
+
+
+def fingerprint_version_set(session: Session, version: int) -> None:
+    """Stamp the fingerprint-format version (current algorithm)."""
+    session.execute(
+        text(
+            "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+            "ON CONFLICT(key) DO UPDATE SET value = :v"
+        ),
+        {"v": str(version)},
+    )
+    session.commit()
+
+
+def fingerprint_version_clear(session: Session) -> None:
+    """Remove the version stamp (blobs may be stale; force a reindex)."""
+    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_version'"))
+    session.commit()
+
+
 def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[bytes]:
     """Compute the bucket key for each band of a packed fingerprint.
 

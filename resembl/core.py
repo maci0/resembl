@@ -36,8 +36,14 @@ from .cache import (
     lsh_index_clear,
     lsh_index_remove,
 )
-from .lsh import ResemblLSH
+from .lsh import (
+    ResemblLSH,
+    fingerprint_version_clear,
+    fingerprint_version_get,
+    fingerprint_version_set,
+)
 from .models import (
+    FINGERPRINT_VERSION,
     Collection,
     Snippet,
     SnippetVersion,
@@ -1364,11 +1370,23 @@ def snippet_find_matches(
 ) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string.
 
-    ``progress`` is forwarded to the lazy index build (see
-    ``lsh_index_build``) when one is triggered.
+    ``progress`` is forwarded to the lazy index build and to a one-time
+    automatic reindex (see below) when either is triggered.
     """
     if threshold is None:
         threshold = LSH_THRESHOLD
+
+    # Fingerprint-format migration: if the stored blobs were written by an
+    # older algorithm (stamp missing or outdated), recompute them once so
+    # queries never silently match old fingerprints against new ones.
+    # Reindexing current-format blobs is idempotent (identical fingerprints).
+    if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+        db_reindex(
+            session,
+            ngram_size=ngram_size,
+            jobs=max(1, os.cpu_count() or 1),
+            progress=progress,
+        )
 
     lsh = lsh_cache_load(session, threshold, NUM_PERMUTATIONS)
     if not lsh:
@@ -1521,6 +1539,7 @@ def db_reindex(
     num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
 
     if num_snippets == 0:
+        fingerprint_version_set(session, FINGERPRINT_VERSION)
         return {"num_reindexed": 0, "time_elapsed": 0, "avg_time_per_snippet": 0}
 
     reindexed = 0
@@ -1583,6 +1602,9 @@ def db_reindex(
             codes = [snippet.code for snippet in batch]
             apply_batch(batch, _reindex_prepare((codes, ngram_size)))
     session.commit()
+    # Fingerprints are now current — stamp the format version so `find`
+    # does not reindex again.
+    fingerprint_version_set(session, FINGERPRINT_VERSION)
 
     end_time = time.time()
     time_elapsed = end_time - start_time
@@ -1951,6 +1973,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     updated = 0
     skipped = 0
     added_minhashes: list[tuple[str, bytes]] = []
+    new_rows: list[dict[str, object]] = []
 
     try:
         # Import collections first
@@ -2005,24 +2028,39 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     existing.collection = src_snippet.collection
                     session.add(existing)
             else:
-                # New snippet — insert it
-                new_snippet = Snippet(
-                    checksum=src_snippet.checksum,
-                    names=src_snippet.names,
-                    code=src_snippet.code,
-                    minhash=src_snippet.minhash,
-                    tags=src_snippet.tags,
-                    collection=src_snippet.collection,
+                # New snippet — collect for a bulk executemany insert.
+                new_rows.append(
+                    {
+                        "checksum": src_snippet.checksum,
+                        "names": src_snippet.names,
+                        "code": src_snippet.code,
+                        "minhash": src_snippet.minhash,
+                        "tags": src_snippet.tags,
+                        "collection": src_snippet.collection,
+                    }
                 )
-                session.add(new_snippet)
                 added += 1
                 added_minhashes.append(
                     (src_snippet.checksum, minhash_ensure_packed(src_snippet.minhash))
                 )
 
+        # Bulk-insert the new rows (executemany) instead of per-object ORM
+        # adds — the same ~30x write-path win as snippet_add_batch.
+        for i in range(0, len(new_rows), 500):
+            session.execute(
+                text(
+                    "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
+                    "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
+                ),
+                new_rows[i : i + 500],
+            )
         session.commit()
         # Keep the DB-backed LSH index in sync if one is already built.
         lsh_index_add_batch(session, added_minhashes)
+        # The source blobs were copied verbatim and may be from an older
+        # fingerprint format — drop the version stamp so the next `find`
+        # reindexes once and normalizes everything.
+        fingerprint_version_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e)
         return {"error": str(e)}

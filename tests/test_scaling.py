@@ -30,6 +30,7 @@ from resembl.core import (
     NUM_PERMUTATIONS,
     code_create_minhash,
     code_create_minhash_batch,
+    db_merge,
     db_reindex,
     snippet_add,
     snippet_add_batch,
@@ -617,6 +618,88 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(calls[-1], (50, 50))
         self.assertTrue(all(done <= total for done, total in calls))
         self.assertTrue(all(a <= b for (a, _), (b, _) in zip(calls, calls[1:])))
+
+
+class TestFingerprintVersion(BaseScalingTest):
+    """Fingerprint-format version stamping and one-time auto-reindex."""
+
+    def _add(self, n: int = 10) -> None:
+        items = [
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+            for i in range(n)
+        ]
+        snippet_add_batch(self.session, [x for x in items if x])
+
+    def test_find_auto_reindexes_when_unstamped(self):
+        """A DB with blobs but no stamp is migrated on the first find."""
+        from resembl.lsh import fingerprint_version_get
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add()
+        self.assertIsNone(fingerprint_version_get(self.session))
+        _, matches = snippet_find_matches(
+            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+        )
+        self.assertGreater(len(matches), 0)
+        self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
+
+    def test_find_fixes_stale_stamp(self):
+        """A wrong (old) stamp triggers exactly one migration reindex."""
+        from unittest.mock import patch
+
+        from resembl.lsh import fingerprint_version_get, fingerprint_version_set
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add()
+        fingerprint_version_set(self.session, 1)  # pre-weighting format
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            _, matches = snippet_find_matches(
+                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+            )
+            self.assertEqual(mock.call_count, 1)
+        self.assertGreater(len(matches), 0)
+        self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
+        # Second find: stamp is current — no reindex.
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            snippet_find_matches(
+                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+            )
+            mock.assert_not_called()
+
+    def test_reindex_stamps_version(self):
+        from resembl.lsh import fingerprint_version_get
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add()
+        db_reindex(self.session, jobs=1)
+        self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
+
+    def test_merge_clears_stamp(self):
+        """Merge copies source blobs verbatim — the stamp must be cleared."""
+        import os
+        import tempfile
+
+        from sqlmodel import Session as _Session
+        from sqlmodel import SQLModel, create_engine
+
+        from resembl.database import create_db_engine
+        from resembl.lsh import fingerprint_version_get, fingerprint_version_set
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add()
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        src = tempfile.mktemp(suffix=".db")
+        try:
+            source_engine = create_db_engine(f"sqlite:///{src}")
+            SQLModel.metadata.create_all(source_engine)
+            with _Session(source_engine) as source_session:
+                snippet_add(source_session, "src", "mov eax, 1; ret")
+            db_merge(self.session, src)
+            self.assertIsNone(fingerprint_version_get(self.session))
+        finally:
+            for path in (src, src + "-wal", src + "-shm"):
+                if os.path.exists(path):
+                    os.remove(path)
 
 
 class TestLegacyMigration(BaseScalingTest):

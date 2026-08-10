@@ -23,11 +23,12 @@ from .lsh import (
     ResemblLSH,
     _insert_sql,
     band_buckets,
+    fingerprint_version_set,
     lsh_index_clear,
     lsh_meta_get,
     lsh_meta_set,
 )
-from .models import Snippet, minhash_ensure_packed
+from .models import FINGERPRINT_VERSION, Snippet, minhash_ensure_packed
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,7 @@ def lsh_index_build(
         session.commit()
 
     lsh_meta_set(session, threshold, num_perm)
+    fingerprint_version_set(session, FINGERPRINT_VERSION)
     return lsh
 
 
