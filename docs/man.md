@@ -67,6 +67,15 @@ The `compare` command also reports control-flow graph similarity.
 
 ### Database
 
+**serve** [--host HOST] [--port PORT]
+:   Start a warm server for this database (default: loopback, auto-assigned
+    port).  `find` then talks to it over localhost in a few milliseconds
+    instead of paying ~450 ms of interpreter startup per query; the port file
+    is written to the cache directory and removed on exit.  Stop with
+    Ctrl+C.  For repeated queries, the thin client
+    `resembl-find --query "…"` (or `python -m resembl.find_client`) is the
+    fastest path.
+
 **reindex**
 :   Recalculate MinHash fingerprints for all snippets.
     Accepts `--jobs N` to run the CPU-bound recomputation in parallel

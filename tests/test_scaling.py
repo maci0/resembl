@@ -103,6 +103,23 @@ class TestMinHashStorage(BaseScalingTest):
             places=6,
         )
 
+    def test_surrogate_input_does_not_crash(self):
+        """Checksum/minhash must be total over any str (fuzzer-found crash).
+
+        ``find --query`` receives argv decoded with surrogateescape, so a
+        stray invalid byte can produce a lone surrogate.  Previously the
+        UTF-8 encode raised UnicodeEncodeError; the encode now uses
+        ``surrogatepass`` so these functions never crash on any input.
+        """
+        from resembl.core import code_create_minhash, snippet_prepare, string_checksum
+
+        nasty = "push ebx\nmov eax, \udb6b\npop ebx\nret"
+        self.assertIsInstance(string_checksum(nasty), str)
+        m = code_create_minhash(nasty)
+        self.assertEqual(m.jaccard(code_create_minhash(nasty)), 1.0)  # deterministic
+        prepared = snippet_prepare("f", nasty)
+        self.assertIsNotNone(prepared)
+
     def test_unpack_legacy_pickle(self):
         """Databases written by older versions (pickled MinHash) still load."""
         m = code_create_minhash("mov eax, 1")
@@ -146,6 +163,38 @@ class TestBatchConsistency(BaseScalingTest):
         m_common = code_create_minhash_batch([common])[0]
         # Distinct enough that they are far apart in fingerprint space.
         self.assertLess(m_rare.jaccard(m_common), 0.5)
+
+    def test_weighted_shingling_actually_weights(self):
+        """A rare-instruction shingle must change the fingerprint.
+
+        Regression test: datasketch's update takes the per-position minimum,
+        so hashing the *same* bytes multiple times is a no-op.  The weighted
+        insertion hashes w distinct pseudo-elements per weight-w shingle; a
+        shingle containing a rare instruction must therefore produce a
+        different fingerprint than the same shingle unweighted.
+        """
+        from datasketch import MinHash
+
+        from resembl.models import minhash_new
+
+        rare_shingle = ("CPUID", "REG", "RDTSC")
+        common_shingle = ("MOV", "REG", "IMM")
+
+        def build(weighted: bool) -> MinHash:
+            m = minhash_new(NUM_PERMUTATIONS)
+            inputs: list[bytes] = []
+            for shingle in (rare_shingle, common_shingle):
+                base = " ".join(shingle).encode("utf8")
+                if weighted and shingle == rare_shingle:
+                    inputs.extend(base + b"|" + str(k).encode("utf8") for k in range(3))
+                else:
+                    inputs.append(base)
+            m.update_batch(inputs)
+            return m
+
+        weighted = build(weighted=True)
+        unweighted = build(weighted=False)
+        self.assertLess(weighted.jaccard(unweighted), 1.0)
 
     def test_reindex_preserves_fingerprints(self):
         code = "push esi; mov esi, dword [esp+0CH]; push edi; mov edi, dword [esp+0CH]"

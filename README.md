@@ -110,9 +110,9 @@ The MinHash algorithm is a technique for quickly estimating how similar two sets
     - **3×** if the shingle contains a rare/distinctive instruction (e.g., `CPUID`, `RDTSC`, `SYSENTER`).
     - **1×** if the shingle is composed entirely of common instructions (e.g., `MOV`, `PUSH`, `ADD`).
     - **2×** otherwise.
-    The shingle is inserted into the MinHash multiple times equal to its weight, boosting the influence of distinctive patterns.
+    A weight-`w` shingle is inserted as `w` distinct pseudo-elements, so its hash values are `w` times as likely to be the minimum — boosting the influence of distinctive patterns. (Hashing the same bytes repeatedly would be a no-op: MinHash keeps the per-position minimum, which duplicates never change.)
 
-3.  **Hashing:** Each unique shingle is then hashed to an integer. This converts the set of shingles into a set of numbers.
+3.  **Hashing:** Each unique shingle (and each weighted pseudo-element) is then hashed to an integer. This converts the set of shingles into a set of numbers.
 
 4.  **Min-Hashing:** A fixed number of different hash functions (in our case, 128, as defined by `num_permutations`) are applied to each number in the set of hashed shingles. For each hash function, we only keep the *minimum* hash value produced across all shingles.
 
@@ -343,7 +343,9 @@ Key properties that keep these numbers flat as the database grows:
   lexed once (the checksum string and the MinHash tokens are derived from the same token stream) and
   the MinHash permutations are cloned from a cached template instead of regenerated (~260 µs saved).
 - **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
-  incrementally — `add`/`rm` never trigger a full rebuild.
+  incrementally — `add`/`rm` never trigger a full rebuild.  *Note:* the weighted-shingling fix
+  (rare-instruction shingles now really boost the signature) changes fingerprint values — databases
+  created before that fix should be rebuilt once with `resembl reindex --force`.
 - **The one-time index build is near-linear**: rows are inserted band-major sorted by bucket so the
   primary key grows by sequential append (random inserts into a deep b-tree decay ~4× by the tail
   of a 12.5M-row build), with periodic commits keeping the SQLite WAL bounded and a raised page
@@ -352,6 +354,9 @@ Key properties that keep these numbers flat as the database grows:
   periodically on SQLite so the WAL stays bounded.
 - **CLI startup is lean**: datasketch/scipy and the database engine are imported lazily, so commands
   that never touch fingerprints (`list`, `stats`, `export`, …) skip ~200 ms of startup.
+- **Instant warm finds with `serve`**: start `resembl serve` once and `find` (or the stdlib-only
+  `resembl-find` client) answers in ~40 ms instead of ~450 ms — the interpreter and libraries stay
+  warm in the server process.  The port file lives in the cache directory and is cleaned up on exit.
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses

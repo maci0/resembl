@@ -32,11 +32,13 @@ dev = [
     "pylint>=3.3.7",
     "slipcover>=1.0.17",
     "hypothesis>=6.0.0",
+    "pg8000>=1.31.0",
     "pytest-benchmark>=4.0.0",
 ]
 
 [project.scripts]
 resembl = "resembl.cli:main"
+resembl-find = "resembl.find_client:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

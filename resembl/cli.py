@@ -29,7 +29,7 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import cast
+from typing import Any, cast
 
 import typer
 from rich.console import Console
@@ -37,6 +37,7 @@ from rich.panel import Panel
 from rich.progress import track
 from rich.syntax import Syntax
 from rich.table import Table
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from .config import (
@@ -119,7 +120,7 @@ class State:
 state = State()
 
 
-def _echo(message: object, **kwargs: object) -> None:
+def _echo(message: object, **kwargs: Any) -> None:
     """Print a message unless ``--quiet`` is set."""
     if not state.quiet:
         console.print(message, **kwargs)
@@ -172,6 +173,115 @@ def _build_progress_printer() -> Callable[[int, int], None]:
             _echo(f"[dim]  indexed {done:,}/{total:,} snippets…[/dim]")
 
     return _report
+
+
+def _find_via_server(
+    query: str,
+    top_n: int,
+    threshold: float | None,
+    normalize: bool,
+    ngram_size: int,
+) -> dict | None:
+    """Query a running ``serve`` process for the current database.
+
+    Returns the JSON payload on success, or ``None`` if no server is running
+    (the caller falls back to the in-process path).  Any connection or
+    protocol error is treated as "no server" — a stale port file is removed.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    from .server import server_port_path
+
+    db_url = str(cast(Engine, state.session.get_bind()).url)
+    port_file = server_port_path(db_url)
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            port = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+    body = _json.dumps(
+        {
+            "query": query,
+            "top_n": top_n,
+            "threshold": threshold,
+            "normalize": normalize,
+            "ngram_size": ngram_size,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/find",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = _json.loads(response.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        # Server gone (stale port file) — clean it up and fall back.
+        try:
+            os.remove(port_file)
+        except OSError:
+            pass
+        return None
+    if "error" in payload:
+        return None
+    return payload
+
+
+def _render_find_payload(payload: dict) -> None:
+    """Render a ``{lsh_candidates, matches}`` payload in the current format."""
+    if state.format in ("json", "csv"):
+        _echo_format(payload)
+        return
+    _echo(f"[dim]Found {payload['lsh_candidates']} candidates via LSH.[/dim]")
+    matches = payload["matches"]
+    if matches:
+        table = Table(title="Top Matches", title_style="bold cyan")
+        table.add_column("#", style="dim", justify="right")
+        table.add_column("Checksum", style="bold")
+        table.add_column("Names")
+        table.add_column("Score (Hybrid)", justify="right")
+        for i, match in enumerate(matches, 1):
+            score = match["score"]
+            score_color = "green" if score >= 80 else "yellow" if score >= 50 else "red"
+            table.add_row(
+                str(i),
+                match["checksum"][:12] + "…",
+                ", ".join(match["names"]),
+                f"[{score_color}]{score:.2f}[/{score_color}]",
+            )
+        _echo(table)
+    else:
+        _echo("[yellow]No matches found after ranking.[/yellow]")
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1", "--host", help="Interface to bind (default: loopback only)."
+    ),
+    port: int = typer.Option(0, "--port", help="Port to bind (0 = auto-assign)."),
+) -> None:
+    """Serve find queries from a warm process (instant warm finds).
+
+    Start this once per database; ``resembl find`` then talks to it over
+    localhost instead of paying ~450 ms of interpreter startup per query.
+    The port is written to the cache directory and removed on exit.
+    """
+    from .server import serve as serve_start
+
+    db_url = str(cast(Engine, state.session.get_bind()).url)
+    httpd = serve_start(db_url, host=host, port=port)
+    _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
 
 
 def _resolve_checksum(prefix: str) -> str | None:
@@ -347,7 +457,8 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             code = f.read()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Unreadable or non-UTF-8 files are rejected, never fatal.
         return None
     name = os.path.splitext(os.path.basename(file_path))[0]
     return snippet_prepare(name, code, ngram_size)
@@ -695,6 +806,21 @@ def find(
         )
         raise typer.Exit(code=1)
 
+    # Fast path: if a `serve` process is running for this database, ask it
+    # (~ms) instead of paying interpreter startup (~450 ms).  Falls back to
+    # the in-process path when no server is reachable.
+    ngram_size = cast(int, state.config.get("ngram_size", 3))
+    server_payload = _find_via_server(
+        query_string,
+        effective_top_n,
+        effective_threshold,
+        not no_normalization,
+        ngram_size,
+    )
+    if server_payload is not None:
+        _render_find_payload(server_payload)
+        return
+
     # The LSH index is built lazily (and rebuilt when threshold/permutation
     # settings change).  Give the user a heads-up in table mode, since that
     # one-time build can take a while on large databases.
@@ -716,41 +842,19 @@ def find(
         effective_top_n,
         effective_threshold,
         not no_normalization,
-        ngram_size=state.config.get("ngram_size", 3),
+        ngram_size=ngram_size,
         progress=build_progress,
     )
 
-    if state.format in ("json", "csv"):
-        _echo_format(
-            {
-                "lsh_candidates": num_candidates,
-                "matches": [
-                    {"checksum": s.checksum, "names": s.name_list, "score": score}
-                    for s, score in matches
-                ],
-            }
-        )
-    else:
-        _echo(f"[dim]Found {num_candidates} candidates via LSH.[/dim]")
-        if matches:
-            table = Table(title="Top Matches", title_style="bold cyan")
-            table.add_column("#", style="dim", justify="right")
-            table.add_column("Checksum", style="bold")
-            table.add_column("Names")
-            table.add_column("Score (Hybrid)", justify="right")
-            for i, (s, score) in enumerate(matches, 1):
-                score_color = (
-                    "green" if score >= 80 else "yellow" if score >= 50 else "red"
-                )
-                table.add_row(
-                    str(i),
-                    s.checksum[:12] + "…",
-                    ", ".join(s.name_list),
-                    f"[{score_color}]{score:.2f}[/{score_color}]",
-                )
-            _echo(table)
-        else:
-            _echo("[yellow]No matches found after ranking.[/yellow]")
+    _render_find_payload(
+        {
+            "lsh_candidates": num_candidates,
+            "matches": [
+                {"checksum": s.checksum, "names": s.name_list, "score": score}
+                for s, score in matches
+            ],
+        }
+    )
 
 
 @app.command()
@@ -831,8 +935,9 @@ def compare(
     _echo("")
     diff = list(
         difflib.unified_diff(
-            snippet_get(state.session, resolved1).code.splitlines(keepends=True),
-            snippet_get(state.session, resolved2).code.splitlines(keepends=True),
+            # Both snippets are guaranteed to exist (guarded above).
+            snippet_get(state.session, resolved1).code.splitlines(keepends=True),  # type: ignore[union-attr]
+            snippet_get(state.session, resolved2).code.splitlines(keepends=True),  # type: ignore[union-attr]
             fromfile=s1["checksum"][:12],
             tofile=s2["checksum"][:12],
             n=3,
