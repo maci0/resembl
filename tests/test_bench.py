@@ -18,9 +18,7 @@ from resembl.core import (
 # Load a real-world .asm sample for benchmarking.
 _SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "test_data")
 _SAMPLE_FILES = sorted(
-    os.path.join(_SAMPLE_DIR, f)
-    for f in os.listdir(_SAMPLE_DIR)
-    if f.endswith(".asm")
+    os.path.join(_SAMPLE_DIR, f) for f in os.listdir(_SAMPLE_DIR) if f.endswith(".asm")
 )
 
 # Read the first sample file for single-snippet benchmarks.

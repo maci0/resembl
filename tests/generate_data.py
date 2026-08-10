@@ -105,10 +105,77 @@ def generate_control_flow_block(label_id: str, function_names: list[str]) -> lis
 
 
 # --- Main Generation Logic ---
+
+
+def _generate_one(args: tuple[str, int, int, str]) -> None:
+    """Worker: generate and write a single function file.
+
+    Pure function (no shared state) so it can run in a process pool.
+    """
+    name, i, num_files, data_dir = args
+    function_names_sample = [
+        f"generated_func_{random.randrange(num_files):04d}" for _ in range(20)
+    ]
+
+    # --- Build the function body ---
+    body = []
+    num_blocks = random.randint(3, 8)
+    block_generators = [
+        generate_arithmetic_block,
+        generate_stack_block,
+        generate_data_block,
+        generate_bitwise_block,
+    ]
+
+    for j in range(num_blocks):
+        # Decide whether to generate a conditional block or a standard one
+        if random.random() < 0.3:  # 30% chance of a control flow block
+            body.extend(generate_control_flow_block(f"{i}_{j}", function_names_sample))
+        else:
+            generator = random.choice(block_generators)
+            body.extend(generator(random.randint(1, 3)))
+        body.append("")  # Add a blank line for spacing
+
+    # --- Assemble the final file content ---
+    content = (
+        [
+            f"; Function: {name}",
+            "; Description: A highly randomized, auto-generated function.",
+            "section .text",
+            f"global {name}",
+            f"{name}:",
+            "    push    ebp",
+            "    mov     ebp, esp",
+            f"    sub     esp, {random.randint(4, 64)} ; Allocate stack space",
+        ]
+        + body
+        + [
+            "    mov     esp, ebp",
+            "    pop     ebp",
+            "    ret",
+        ]
+    )
+
+    # Write the file
+    file_path = os.path.join(data_dir, f"{name}.asm")
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(textwrap.indent(line, "    ") for line in content))
+
+
 def generate_files(
-    data_dir: str = DEFAULT_DATA_DIR, num_files: int = DEFAULT_NUM_FILES
+    data_dir: str = DEFAULT_DATA_DIR,
+    num_files: int = DEFAULT_NUM_FILES,
+    jobs: int | None = None,
 ):
-    """Generate random assembly files in data_dir."""
+    """Generate random assembly files in data_dir.
+
+    Generation is embarrassingly parallel (each file is independent), so a
+    process pool is used by default.  Pass ``jobs=1`` to force a single
+    process (e.g. inside a fork-sensitive environment).
+    """
+    import multiprocessing as _mp
+    from concurrent.futures import ProcessPoolExecutor
+
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
@@ -119,51 +186,26 @@ def generate_files(
 
     function_names = [f"generated_func_{i:04d}" for i in range(num_files)]
 
-    for i, name in enumerate(function_names):
-        # --- Build the function body ---
-        body = []
-        num_blocks = random.randint(3, 8)
-        block_generators = [
-            generate_arithmetic_block,
-            generate_stack_block,
-            generate_data_block,
-            generate_bitwise_block,
-        ]
+    # Generation is now O(n); the process pool only pays off for large runs
+    # (spawning workers costs a couple of seconds regardless of size).
+    if jobs is None:
+        jobs = max(1, os.cpu_count() or 1) if num_files > 50_000 else 1
+    jobs = min(jobs, max(1, num_files))
 
-        for j in range(num_blocks):
-            # Decide whether to generate a conditional block or a standard one
-            if random.random() < 0.3:  # 30% chance of a control flow block
-                other_funcs = function_names[:i] + function_names[i + 1 :]
-                body.extend(generate_control_flow_block(f"{i}_{j}", other_funcs))
-            else:
-                generator = random.choice(block_generators)
-                body.extend(generator(random.randint(1, 3)))
-            body.append("")  # Add a blank line for spacing
+    args = [(name, i, num_files, data_dir) for i, name in enumerate(function_names)]
 
-        # --- Assemble the final file content ---
-        content = (
-            [
-                f"; Function: {name}",
-                "; Description: A highly randomized, auto-generated function.",
-                "section .text",
-                f"global {name}",
-                f"{name}:",
-                "    push    ebp",
-                "    mov     ebp, esp",
-                f"    sub     esp, {random.randint(4, 64)} ; Allocate stack space",
-            ]
-            + body
-            + [
-                "    mov     esp, ebp",
-                "    pop     ebp",
-                "    ret",
-            ]
-        )
-
-        # Write the file
-        file_path = os.path.join(data_dir, f"{name}.asm")
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(textwrap.indent(line, "    ") for line in content))
+    if jobs == 1:
+        for a in args:
+            _generate_one(a)
+    else:
+        ctx = _mp.get_context("spawn")
+        try:
+            with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as executor:
+                list(executor.map(_generate_one, args))
+        except Exception:
+            # Fall back to in-process generation if the pool is unavailable.
+            for a in args:
+                _generate_one(a)
 
     print(
         f"Successfully generated {num_files} new, more random assembly files in '{data_dir}/'"

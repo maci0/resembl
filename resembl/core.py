@@ -14,19 +14,34 @@ import hashlib
 import json
 import logging
 import os
-import pickle
-import random
 import re
 import time
+from collections.abc import Callable, Iterator
 
 from datasketch import MinHash
 from pygments.lexers.asm import NasmLexer
 from pygments.token import Comment, Name, Number, Punctuation, Text
 from rapidfuzz import fuzz, process
-from sqlmodel import Session, select, text
+from sqlmodel import Session, func, select, text
 
-from .cache import lsh_cache_invalidate, lsh_cache_load, lsh_cache_save, lsh_index_build
-from .models import Collection, Snippet, SnippetVersion
+from .cache import (
+    lsh_cache_load,
+    lsh_cache_save,
+    lsh_index_add,
+    lsh_index_add_batch,
+    lsh_index_build,
+    lsh_index_clear,
+    lsh_index_remove,
+)
+from .lsh import ResemblLSH
+from .models import (
+    Collection,
+    Snippet,
+    SnippetVersion,
+    minhash_ensure_packed,
+    minhash_jaccard,
+    minhash_pack,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,67 +172,377 @@ REGISTERS = {
 # ARM registers (AArch32 general-purpose + AArch64 general-purpose + NEON/FP)
 ARM_REGISTERS = {
     # AArch32 general purpose
-    "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
-    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-    "sp", "lr", "pc", "cpsr", "spsr", "fpscr",
+    "r0",
+    "r1",
+    "r2",
+    "r3",
+    "r4",
+    "r5",
+    "r6",
+    "r7",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+    "sp",
+    "lr",
+    "pc",
+    "cpsr",
+    "spsr",
+    "fpscr",
     # AArch64 general purpose
-    "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
-    "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
-    "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
-    "x24", "x25", "x26", "x27", "x28", "x29", "x30",
-    "w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7",
-    "w8", "w9", "w10", "w11", "w12", "w13", "w14", "w15",
-    "w16", "w17", "w18", "w19", "w20", "w21", "w22", "w23",
-    "w24", "w25", "w26", "w27", "w28", "w29", "w30",
-    "xzr", "wzr",
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5",
+    "x6",
+    "x7",
+    "x8",
+    "x9",
+    "x10",
+    "x11",
+    "x12",
+    "x13",
+    "x14",
+    "x15",
+    "x16",
+    "x17",
+    "x18",
+    "x19",
+    "x20",
+    "x21",
+    "x22",
+    "x23",
+    "x24",
+    "x25",
+    "x26",
+    "x27",
+    "x28",
+    "x29",
+    "x30",
+    "w0",
+    "w1",
+    "w2",
+    "w3",
+    "w4",
+    "w5",
+    "w6",
+    "w7",
+    "w8",
+    "w9",
+    "w10",
+    "w11",
+    "w12",
+    "w13",
+    "w14",
+    "w15",
+    "w16",
+    "w17",
+    "w18",
+    "w19",
+    "w20",
+    "w21",
+    "w22",
+    "w23",
+    "w24",
+    "w25",
+    "w26",
+    "w27",
+    "w28",
+    "w29",
+    "w30",
+    "xzr",
+    "wzr",
     # NEON / FP
-    "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7",
-    "d8", "d9", "d10", "d11", "d12", "d13", "d14", "d15",
-    "q0", "q1", "q2", "q3", "q4", "q5", "q6", "q7",
-    "q8", "q9", "q10", "q11", "q12", "q13", "q14", "q15",
-    "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
-    "s8", "s9", "s10", "s11", "s12", "s13", "s14", "s15",
+    "d0",
+    "d1",
+    "d2",
+    "d3",
+    "d4",
+    "d5",
+    "d6",
+    "d7",
+    "d8",
+    "d9",
+    "d10",
+    "d11",
+    "d12",
+    "d13",
+    "d14",
+    "d15",
+    "q0",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "q5",
+    "q6",
+    "q7",
+    "q8",
+    "q9",
+    "q10",
+    "q11",
+    "q12",
+    "q13",
+    "q14",
+    "q15",
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9",
+    "s10",
+    "s11",
+    "s12",
+    "s13",
+    "s14",
+    "s15",
 }
 
 # MIPS registers (numeric and ABI names)
 MIPS_REGISTERS = {
-    "$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7",
-    "$8", "$9", "$10", "$11", "$12", "$13", "$14", "$15",
-    "$16", "$17", "$18", "$19", "$20", "$21", "$22", "$23",
-    "$24", "$25", "$26", "$27", "$28", "$29", "$30", "$31",
-    "$zero", "$at", "$v0", "$v1", "$a0", "$a1", "$a2", "$a3",
-    "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7",
-    "$t8", "$t9", "$s0", "$s1", "$s2", "$s3", "$s4", "$s5",
-    "$s6", "$s7", "$k0", "$k1", "$gp", "$sp", "$fp", "$ra",
-    "$hi", "$lo",
+    "$0",
+    "$1",
+    "$2",
+    "$3",
+    "$4",
+    "$5",
+    "$6",
+    "$7",
+    "$8",
+    "$9",
+    "$10",
+    "$11",
+    "$12",
+    "$13",
+    "$14",
+    "$15",
+    "$16",
+    "$17",
+    "$18",
+    "$19",
+    "$20",
+    "$21",
+    "$22",
+    "$23",
+    "$24",
+    "$25",
+    "$26",
+    "$27",
+    "$28",
+    "$29",
+    "$30",
+    "$31",
+    "$zero",
+    "$at",
+    "$v0",
+    "$v1",
+    "$a0",
+    "$a1",
+    "$a2",
+    "$a3",
+    "$t0",
+    "$t1",
+    "$t2",
+    "$t3",
+    "$t4",
+    "$t5",
+    "$t6",
+    "$t7",
+    "$t8",
+    "$t9",
+    "$s0",
+    "$s1",
+    "$s2",
+    "$s3",
+    "$s4",
+    "$s5",
+    "$s6",
+    "$s7",
+    "$k0",
+    "$k1",
+    "$gp",
+    "$sp",
+    "$fp",
+    "$ra",
+    "$hi",
+    "$lo",
     # FP
-    "$f0", "$f1", "$f2", "$f3", "$f4", "$f5", "$f6", "$f7",
-    "$f8", "$f9", "$f10", "$f11", "$f12", "$f13", "$f14", "$f15",
-    "$f16", "$f17", "$f18", "$f19", "$f20", "$f21", "$f22", "$f23",
-    "$f24", "$f25", "$f26", "$f27", "$f28", "$f29", "$f30", "$f31",
+    "$f0",
+    "$f1",
+    "$f2",
+    "$f3",
+    "$f4",
+    "$f5",
+    "$f6",
+    "$f7",
+    "$f8",
+    "$f9",
+    "$f10",
+    "$f11",
+    "$f12",
+    "$f13",
+    "$f14",
+    "$f15",
+    "$f16",
+    "$f17",
+    "$f18",
+    "$f19",
+    "$f20",
+    "$f21",
+    "$f22",
+    "$f23",
+    "$f24",
+    "$f25",
+    "$f26",
+    "$f27",
+    "$f28",
+    "$f29",
+    "$f30",
+    "$f31",
 }
 
 # RISC-V registers (x-names and ABI names)
 RISCV_REGISTERS = {
-    "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
-    "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15",
-    "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23",
-    "x24", "x25", "x26", "x27", "x28", "x29", "x30", "x31",
-    "zero", "ra", "gp", "tp",
-    "t0", "t1", "t2", "t3", "t4", "t5", "t6",
-    "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
-    "s8", "s9", "s10", "s11",
-    "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7",
+    "x0",
+    "x1",
+    "x2",
+    "x3",
+    "x4",
+    "x5",
+    "x6",
+    "x7",
+    "x8",
+    "x9",
+    "x10",
+    "x11",
+    "x12",
+    "x13",
+    "x14",
+    "x15",
+    "x16",
+    "x17",
+    "x18",
+    "x19",
+    "x20",
+    "x21",
+    "x22",
+    "x23",
+    "x24",
+    "x25",
+    "x26",
+    "x27",
+    "x28",
+    "x29",
+    "x30",
+    "x31",
+    "zero",
+    "ra",
+    "gp",
+    "tp",
+    "t0",
+    "t1",
+    "t2",
+    "t3",
+    "t4",
+    "t5",
+    "t6",
+    "s0",
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8",
+    "s9",
+    "s10",
+    "s11",
+    "a0",
+    "a1",
+    "a2",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "a7",
     # FP
-    "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
-    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
-    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
-    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "f31",
-    "ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
-    "ft8", "ft9", "ft10", "ft11",
-    "fs0", "fs1", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
-    "fs8", "fs9", "fs10", "fs11",
-    "fa0", "fa1", "fa2", "fa3", "fa4", "fa5", "fa6", "fa7",
+    "f0",
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "f6",
+    "f7",
+    "f8",
+    "f9",
+    "f10",
+    "f11",
+    "f12",
+    "f13",
+    "f14",
+    "f15",
+    "f16",
+    "f17",
+    "f18",
+    "f19",
+    "f20",
+    "f21",
+    "f22",
+    "f23",
+    "f24",
+    "f25",
+    "f26",
+    "f27",
+    "f28",
+    "f29",
+    "f30",
+    "f31",
+    "ft0",
+    "ft1",
+    "ft2",
+    "ft3",
+    "ft4",
+    "ft5",
+    "ft6",
+    "ft7",
+    "ft8",
+    "ft9",
+    "ft10",
+    "ft11",
+    "fs0",
+    "fs1",
+    "fs2",
+    "fs3",
+    "fs4",
+    "fs5",
+    "fs6",
+    "fs7",
+    "fs8",
+    "fs9",
+    "fs10",
+    "fs11",
+    "fa0",
+    "fa1",
+    "fa2",
+    "fa3",
+    "fa4",
+    "fa5",
+    "fa6",
+    "fa7",
 }
 
 # Combined register set for multi-architecture normalization.
@@ -228,39 +553,114 @@ ALL_REGISTERS = REGISTERS | ARM_REGISTERS | MIPS_REGISTERS | RISCV_REGISTERS
 #: System, privileged, or uncommon instructions that are highly distinctive.
 #: Shingles containing these get boosted weight during MinHash construction.
 RARE_INSTRUCTIONS = {
-    "CPUID", "RDTSC", "RDTSCP", "RDRAND", "RDSEED", "XGETBV",
-    "VMCALL", "VMLAUNCH", "VMRESUME", "VMXOFF",
-    "SYSENTER", "SYSEXIT", "SYSCALL", "SYSRET",
-    "INT", "IRET", "IRETD", "IRETQ",
-    "EMMS", "WBINVD", "INVLPG", "INVD",
-    "SGDT", "LGDT", "SLDT", "LLDT", "LIDT", "SIDT",
-    "STR", "LTR", "LMSW", "CLTS",
-    "MONITOR", "MWAIT",
-    "HLT", "RSM", "UD2",
-    "RDMSR", "WRMSR", "RDPMC",
+    "CPUID",
+    "RDTSC",
+    "RDTSCP",
+    "RDRAND",
+    "RDSEED",
+    "XGETBV",
+    "VMCALL",
+    "VMLAUNCH",
+    "VMRESUME",
+    "VMXOFF",
+    "SYSENTER",
+    "SYSEXIT",
+    "SYSCALL",
+    "SYSRET",
+    "INT",
+    "IRET",
+    "IRETD",
+    "IRETQ",
+    "EMMS",
+    "WBINVD",
+    "INVLPG",
+    "INVD",
+    "SGDT",
+    "LGDT",
+    "SLDT",
+    "LLDT",
+    "LIDT",
+    "SIDT",
+    "STR",
+    "LTR",
+    "LMSW",
+    "CLTS",
+    "MONITOR",
+    "MWAIT",
+    "HLT",
+    "RSM",
+    "UD2",
+    "RDMSR",
+    "WRMSR",
+    "RDPMC",
 }
 
 #: The most common x86 instructions. Shingles composed entirely of these
 #: receive reduced weight (1×) to avoid drowning out distinctive patterns.
 COMMON_INSTRUCTIONS = {
-    "MOV", "PUSH", "POP", "NOP", "LEA",
-    "ADD", "SUB", "XOR", "CMP", "AND", "OR", "NOT", "NEG",
-    "JMP", "CALL", "RET", "RETN",
-    "TEST", "INC", "DEC",
-    "SHL", "SHR", "SAR", "SAL",
-    "REG", "IMM", "MEM_SIZE", "LABEL",  # normalized placeholders
+    "MOV",
+    "PUSH",
+    "POP",
+    "NOP",
+    "LEA",
+    "ADD",
+    "SUB",
+    "XOR",
+    "CMP",
+    "AND",
+    "OR",
+    "NOT",
+    "NEG",
+    "JMP",
+    "CALL",
+    "RET",
+    "RETN",
+    "TEST",
+    "INC",
+    "DEC",
+    "SHL",
+    "SHR",
+    "SAR",
+    "SAL",
+    "REG",
+    "IMM",
+    "MEM_SIZE",
+    "LABEL",  # normalized placeholders
 }
 
 #: Branch / jump mnemonics used by CFG extraction to identify basic-block
 #: boundaries (terminators).
 BRANCH_INSTRUCTIONS = {
-    "JMP", "JZ", "JNZ", "JE", "JNE",
-    "JG", "JGE", "JL", "JLE",
-    "JA", "JAE", "JB", "JBE",
-    "JO", "JNO", "JS", "JNS", "JP", "JNP",
-    "JCXZ", "JECXZ", "JRCXZ",
-    "LOOP", "LOOPZ", "LOOPNZ", "LOOPE", "LOOPNE",
-    "RET", "RETN", "RETF",
+    "JMP",
+    "JZ",
+    "JNZ",
+    "JE",
+    "JNE",
+    "JG",
+    "JGE",
+    "JL",
+    "JLE",
+    "JA",
+    "JAE",
+    "JB",
+    "JBE",
+    "JO",
+    "JNO",
+    "JS",
+    "JNS",
+    "JP",
+    "JNP",
+    "JCXZ",
+    "JECXZ",
+    "JRCXZ",
+    "LOOP",
+    "LOOPZ",
+    "LOOPNZ",
+    "LOOPE",
+    "LOOPNE",
+    "RET",
+    "RETN",
+    "RETF",
     "CALL",  # not a terminator per-se, but starts a new edge
 }
 
@@ -540,7 +940,9 @@ def snippet_name_remove(
     return snippet
 
 
-def snippet_tag_add(session: Session, checksum: str, tag: str, quiet: bool = False) -> Snippet | None:
+def snippet_tag_add(
+    session: Session, checksum: str, tag: str, quiet: bool = False
+) -> Snippet | None:
     """Add a tag to a snippet (idempotent — adding an existing tag is a no-op)."""
     tag = tag.strip()
     if not tag:
@@ -566,7 +968,9 @@ def snippet_tag_add(session: Session, checksum: str, tag: str, quiet: bool = Fal
     return snippet
 
 
-def snippet_tag_remove(session: Session, checksum: str, tag: str, quiet: bool = False) -> Snippet | None:
+def snippet_tag_remove(
+    session: Session, checksum: str, tag: str, quiet: bool = False
+) -> Snippet | None:
     """Remove a tag from a snippet (idempotent — removing a missing tag is a no-op)."""
     tag = tag.strip()
     snippet = Snippet.get_by_checksum(session, checksum)
@@ -630,7 +1034,9 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     return output_tokens
 
 
-def code_create_minhash(code_snippet: str, normalize: bool = True, ngram_size: int = 3) -> MinHash:
+def code_create_minhash(
+    code_snippet: str, normalize: bool = True, ngram_size: int = 3
+) -> MinHash:
     """Return a MinHash object representing the given code snippet.
 
     Uses configurable n-gram shingling to preserve token ordering so that
@@ -662,7 +1068,9 @@ def code_create_minhash_batch(
     """Create MinHash objects for multiple code snippets in batch.
 
     Pre-tokenizes all snippets and builds MinHash objects in a tight loop,
-    amortizing interpreter overhead across the batch.
+    amortizing interpreter overhead across the batch.  Produces exactly the
+    same fingerprints as :func:`code_create_minhash` (including weighted
+    shingling) so that ``reindex`` never changes existing similarity scores.
     """
     results: list[MinHash] = []
     for code_snippet in snippets:
@@ -678,9 +1086,11 @@ def code_create_minhash_batch(
         shingles: set[str] = set()
         for i in range(len(tokens) - ngram_size + 1):
             shingles.add(" ".join(tokens[i : i + ngram_size]))
-        encoded = [s.encode("utf8") for s in shingles]
-        for e in encoded:
-            m.update(e)
+        for shingle in shingles:
+            weight = shingle_weight(shingle)
+            encoded = shingle.encode("utf8")
+            for _ in range(weight):
+                m.update(encoded)
         results.append(m)
     return results
 
@@ -690,7 +1100,155 @@ def code_create_minhash_batch(
 # ---------------------------------------------------------------------------
 
 
-def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> Snippet | None:
+def snippet_prepare(
+    name: str, code: str, ngram_size: int = 3
+) -> tuple[str, str, str, bytes] | None:
+    """Compute the checksum and MinHash fingerprint for a snippet.
+
+    Returns ``(checksum, name, code, minhash_bytes)`` or ``None`` for empty
+    code.  This is a pure function with no database access, so it is safe to
+    run in worker processes when bulk-importing many files.
+    """
+    if not code.strip():
+        return None
+    checksum = string_checksum(code)
+    minhash_bytes = minhash_pack(code_create_minhash(code, ngram_size=ngram_size))
+    return checksum, name, code, minhash_bytes
+
+
+def _checksum_chunks(checksums: list[str], batch_size: int = 500) -> list[list[str]]:
+    """Split checksums into chunks small enough for one SQL ``IN`` clause."""
+    return [checksums[i : i + batch_size] for i in range(0, len(checksums), batch_size)]
+
+
+def _existing_checksums(session: Session, checksums: list[str]) -> set[str]:
+    """Return the subset of *checksums* that already exist in the database."""
+    existing: set[str] = set()
+    for chunk in _checksum_chunks(list(checksums)):
+        rows = session.exec(
+            select(Snippet.checksum).where(  # type: ignore[attr-defined]
+                Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
+            )
+        ).all()
+        existing.update(rows)
+    return existing
+
+
+def _snippets_by_checksums(
+    session: Session, checksums: list[str]
+) -> dict[str, Snippet]:
+    """Fetch snippets by checksum using chunked ``IN`` queries (no N+1)."""
+    result: dict[str, Snippet] = {}
+    for chunk in _checksum_chunks(list(checksums)):
+        for snippet in session.exec(
+            select(Snippet).where(  # type: ignore[attr-defined]
+                Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
+            )
+        ).all():
+            result[snippet.checksum] = snippet
+    return result
+
+
+def _snippet_code_batches(
+    session: Session, batch_size: int = 500
+) -> Iterator[list[Snippet]]:
+    """Yield snippets in fixed-size lists, streaming to bound memory usage.
+
+    Uses keyset pagination so each batch is fully consumed before it is
+    yielded — callers commit mid-loop, which SQLite would reject while a
+    streaming read cursor is still open.
+    """
+    yield from Snippet.iter_batches(session, batch_size)
+
+
+def snippet_add_batch(
+    session: Session,
+    prepared_items: list[tuple[str, str, str, bytes]],
+    batch_size: int = 500,
+) -> dict:
+    """Insert many prepared snippets in one pass.
+
+    ``prepared_items`` is a list of ``(checksum, name, code, minhash_bytes)``
+    tuples as produced by :func:`snippet_prepare`.
+
+    Deduplication is content-addressable: code that already exists in the
+    database is not re-inserted; any new names are merged into the existing
+    snippet as aliases.  Rows are written in batches with a single LSH cache
+    invalidation at the end, making bulk imports orders of magnitude faster
+    than one ``snippet_add`` call per file.
+
+    Returns ``{"added", "aliased", "skipped", "time_elapsed"}``.
+    """
+    start_time = time.time()
+
+    # Group by checksum: within one batch, identical code is deduplicated and
+    # its names are merged.  ``(code, minhash_bytes, names)`` tuples keep the
+    # entry strongly typed for the hot loop below.
+    by_checksum: dict[str, tuple[str, bytes, list[str]]] = {}
+    for checksum, name, code, minhash_bytes in prepared_items:
+        entry = by_checksum.get(checksum)
+        if entry is None:
+            entry = (code, minhash_bytes, [])
+            by_checksum[checksum] = entry
+        if name and name not in entry[2]:
+            entry[2].append(name)
+
+    if not by_checksum:
+        return {
+            "added": 0,
+            "aliased": 0,
+            "skipped": len(prepared_items),
+            "time_elapsed": 0.0,
+        }
+
+    existing = _existing_checksums(session, list(by_checksum))
+
+    aliased = 0
+    new_snippets: list[Snippet] = []
+    for checksum, (code, minhash_bytes, names) in by_checksum.items():
+        if checksum in existing:
+            snippet = session.get(Snippet, checksum)
+            if snippet is not None:
+                name_list = snippet.name_list
+                merged = list(dict.fromkeys(name_list + names))
+                if len(merged) > len(name_list):
+                    snippet.names = json.dumps(merged)
+                    session.add(snippet)
+                    aliased += 1
+            continue
+        new_snippets.append(
+            Snippet(
+                checksum=checksum,
+                names=json.dumps(names),
+                code=code,
+                minhash=minhash_bytes,
+            )
+        )
+
+    # Single transaction: per-group commits would repeatedly trigger WAL
+    # checkpoints that rewrite the whole database file (quadratic at scale).
+    # ``add_all`` in chunks keeps the unit-of-work bounded; one commit persists
+    # everything.
+    for i in range(0, len(new_snippets), batch_size):
+        session.add_all(new_snippets[i : i + batch_size])
+    if new_snippets or aliased:
+        session.commit()
+
+    # Keep the DB-backed LSH index in sync if one is already built.
+    lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
+
+    elapsed = time.time() - start_time
+    return {
+        "added": len(new_snippets),
+        "aliased": aliased,
+        "skipped": len(prepared_items) - len(by_checksum),
+        "time_elapsed": elapsed,
+    }
+
+
+def snippet_add(
+    session: Session, name: str, code: str, ngram_size: int = 3
+) -> Snippet | None:
     """Add a new snippet or alias to the database."""
     if not code.strip():
         return None
@@ -711,7 +1269,7 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
 
     # Snippet with this code does not exist, create a new one
     minhash_obj = code_create_minhash(code, ngram_size=ngram_size)
-    minhash_bytes = pickle.dumps(minhash_obj)
+    minhash_bytes = minhash_pack(minhash_obj)
 
     new_snippet = Snippet(
         checksum=checksum,
@@ -722,7 +1280,8 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     session.add(new_snippet)
     session.commit()
     session.refresh(new_snippet)
-    lsh_cache_invalidate()
+    # Keep the DB-backed LSH index in sync if one is already built.
+    lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
     return new_snippet
 
 
@@ -733,36 +1292,48 @@ def snippet_find_matches(
     threshold: float | None = None,
     normalize: bool = True,
     ngram_size: int = 3,
+    progress: Callable[[int, int], None] | None = None,
 ) -> tuple[int, list[tuple[Snippet, float]]]:
-    """Find and rank matches for a query string."""
+    """Find and rank matches for a query string.
+
+    ``progress`` is forwarded to the lazy index build (see
+    ``lsh_index_build``) when one is triggered.
+    """
     if threshold is None:
         threshold = LSH_THRESHOLD
 
-    lsh = lsh_cache_load(session, threshold)
+    lsh = lsh_cache_load(session, threshold, NUM_PERMUTATIONS)
     if not lsh:
-        lsh = lsh_index_build(session, threshold, NUM_PERMUTATIONS)
+        lsh = lsh_index_build(session, threshold, NUM_PERMUTATIONS, progress=progress)
         if lsh:
-            lsh_cache_save(session, lsh, threshold)
+            lsh_cache_save(session, lsh, threshold, NUM_PERMUTATIONS)
 
     if lsh is None:
         return 0, []  # Error handled in build_lsh_index
 
     query_minhash = code_create_minhash(query_string, normalize, ngram_size=ngram_size)
-    candidate_keys = lsh.query(query_minhash)
+    if isinstance(lsh, ResemblLSH):
+        # DB-backed index queries against the packed fingerprint.
+        candidate_keys = lsh.query(minhash_pack(query_minhash))
+    else:
+        # Legacy pickled datasketch index expects a MinHash object.
+        candidate_keys = lsh.query(query_minhash)
 
     if not candidate_keys:
         return 0, []
 
-    candidate_snippets = [
-        Snippet.get_by_checksum(session, key) for key in candidate_keys
-    ]
+    # Fetch all candidates with chunked IN queries instead of one lookup per key.
+    candidate_map = _snippets_by_checksums(session, list(candidate_keys))
 
-    candidate_map = {s.checksum: s for s in candidate_snippets if s}
+    # Jaccard is computed directly from the packed fingerprints (no MinHash
+    # object construction), which matters when there are thousands of
+    # candidates.
+    query_minhash_bytes = minhash_pack(query_minhash)
 
     # Compute hybrid score (Jaccard + Levenshtein) for each candidate
     scored_matches: list[tuple[Snippet, float, float, float]] = []
-    for checksum, snippet in candidate_map.items():
-        jaccard = query_minhash.jaccard(snippet.get_minhash_obj())
+    for snippet in candidate_map.values():
+        jaccard = minhash_jaccard(query_minhash_bytes, snippet.minhash)
         levenshtein = fuzz.ratio(query_string, snippet.code)
         hybrid = score_hybrid(jaccard, levenshtein)
         scored_matches.append((snippet, hybrid, jaccard, levenshtein))
@@ -789,19 +1360,23 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
     if not quiet:
         logger.info("Snippet with checksum %s deleted.", checksum)
 
-    lsh_cache_invalidate()
+    # Keep the DB-backed LSH index in sync if one is already built.
+    lsh_index_remove(session, checksum)
     return True
 
 
 def snippet_export_yara(session: Session, output_file: str) -> dict:
     """Export snippets as YARA string matching rules."""
     start_time = time.time()
-    snippets = Snippet.get_all(session)
     num_exported = 0
 
     with open(output_file, "w", encoding="utf-8") as f:
-        for snippet in snippets:
-            primary_name = snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
+        for snippet in Snippet.stream_all(session):
+            primary_name = (
+                snippet.name_list[0]
+                if snippet.name_list
+                else f"snippet_{snippet.checksum[:16]}"
+            )
             rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
             if not rule_name[0].isalpha() and rule_name[0] != "_":
                 rule_name = "r_" + rule_name
@@ -810,7 +1385,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
             code_escaped = snippet.code.replace("\\", "\\\\").replace('"', '\\"')
             code_escaped = code_escaped.replace("\r", "\\r").replace("\n", "\\n")
 
-            yara_rule = f'''rule {rule_name} {{
+            yara_rule = f"""rule {rule_name} {{
     meta:
         description = "Resembl exported snippet: {primary_name}"
         checksum = "{snippet.checksum}"
@@ -820,7 +1395,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
         $asm
 }}
 
-'''
+"""
             f.write(yara_rule)
             num_exported += 1
 
@@ -830,33 +1405,122 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     return {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": (time_elapsed / num_exported) if num_exported > 0 else 0,
+        "avg_time_per_snippet": (
+            (time_elapsed / num_exported) if num_exported > 0 else 0
+        ),
     }
 
 
-def db_reindex(session: Session, ngram_size: int = 3) -> dict:
-    """Recalculate the MinHash for every snippet in the database."""
+def _reindex_prepare(args: tuple[list[str], int]) -> list[bytes]:
+    """Worker: recompute packed fingerprints for a batch of codes.
+
+    Pure function (no database access) so it can run in a process pool.
+    """
+    codes, ngram_size = args
+    return [
+        minhash_pack(m) for m in code_create_minhash_batch(codes, ngram_size=ngram_size)
+    ]
+
+
+def db_reindex(
+    session: Session,
+    ngram_size: int = 3,
+    batch_size: int = 500,
+    jobs: int = 1,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict:
+    """Recalculate the MinHash for every snippet in the database.
+
+    With ``jobs > 1`` the CPU-bound tokenization runs in a process pool
+    (bounded in-flight batches), turning a long sequential reindex into a
+    parallel one.
+
+    The fingerprints are invalidated *before* the update: any built index is
+    cleared up front, so a crash mid-reindex can never leave a stale index
+    behind (the next ``find`` simply rebuilds it from whatever fingerprints
+    are stored).  On SQLite the writes are committed periodically so the WAL
+    stays bounded — a single transaction spanning the whole reindex would
+    grow the WAL to the size of the database and force one huge checkpoint
+    at commit.  PostgreSQL segments its own WAL and pays an fsync per
+    commit, so it keeps a single final commit.  If *progress* is given it is
+    called as ``progress(done, total)`` with snippets processed so far.
+    """
+    import multiprocessing as _mp
+    from collections import deque
+    from concurrent.futures import ProcessPoolExecutor
+
     start_time = time.time()
-    snippets = Snippet.get_all(session)
-    num_snippets = len(snippets)
+    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
 
     if num_snippets == 0:
         return {"num_reindexed": 0, "time_elapsed": 0, "avg_time_per_snippet": 0}
 
-    codes = [snippet.code for snippet in snippets]
-    minhashes = code_create_minhash_batch(codes, ngram_size=ngram_size)
-    for snippet, minhash_obj in zip(snippets, minhashes):
-        snippet.minhash = pickle.dumps(minhash_obj)
-        session.add(snippet)
+    reindexed = 0
+    parallel = jobs > 1 and num_snippets > batch_size
+    is_sqlite = session.get_bind().dialect.name == "sqlite"
+    # Commit every N batches on SQLite (WAL stays bounded); never on PG.
+    commit_interval = 10 if is_sqlite else 0
+    batches_since_commit = 0
 
+    def apply_batch(batch: list[Snippet], blobs: list[bytes]) -> None:
+        nonlocal reindexed, batches_since_commit
+        for snippet, blob in zip(batch, blobs):
+            snippet.minhash = blob
+        reindexed += len(batch)
+        if progress is not None:
+            progress(reindexed, num_snippets)
+        # Flush the batch's writes, then drop the objects so the identity
+        # map stays bounded.
+        session.flush()
+        session.expunge_all()
+        batches_since_commit += 1
+        if commit_interval and batches_since_commit >= commit_interval:
+            session.commit()
+            batches_since_commit = 0
+
+    # Fingerprints are about to change — drop any built index now so a crash
+    # mid-reindex cannot leave a stale one behind.
+    lsh_index_clear(session)
+
+    if parallel:
+        ctx = _mp.get_context("spawn")
+        try:
+            with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as executor:
+                in_flight: deque[tuple[list[Snippet], object]] = deque()
+                max_in_flight = jobs * 2
+                for batch in _snippet_code_batches(session, batch_size):
+                    codes = [snippet.code for snippet in batch]
+                    in_flight.append(
+                        (batch, executor.submit(_reindex_prepare, (codes, ngram_size)))
+                    )
+                    if len(in_flight) >= max_in_flight:
+                        pending_batch, future = in_flight.popleft()
+                        apply_batch(pending_batch, future.result())
+                while in_flight:
+                    pending_batch, future = in_flight.popleft()
+                    apply_batch(pending_batch, future.result())
+        except Exception:
+            # Pool unavailable (e.g. spawned from a stdin script) — redo the
+            # work sequentially; correctness must never depend on the pool.
+            # Re-applying identical fingerprints is idempotent, so reset the
+            # counter and process every batch again.
+            logger.warning("Process pool unavailable; reindexing sequentially.")
+            reindexed = 0
+            batches_since_commit = 0
+            for batch in _snippet_code_batches(session, batch_size):
+                codes = [snippet.code for snippet in batch]
+                apply_batch(batch, _reindex_prepare((codes, ngram_size)))
+    else:
+        for batch in _snippet_code_batches(session, batch_size):
+            codes = [snippet.code for snippet in batch]
+            apply_batch(batch, _reindex_prepare((codes, ngram_size)))
     session.commit()
-    lsh_cache_invalidate()
 
     end_time = time.time()
     time_elapsed = end_time - start_time
 
     return {
-        "num_reindexed": num_snippets,
+        "num_reindexed": reindexed,
         "time_elapsed": time_elapsed,
         "avg_time_per_snippet": time_elapsed / num_snippets,
     }
@@ -914,25 +1578,28 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
 
 def db_calculate_average_similarity(session: Session, sample_size: int = 100) -> float:
     """Estimate average Jaccard similarity from a random sample."""
-    all_snippets = Snippet.get_all(session)
-    if len(all_snippets) < 2:
+    count = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    if count < 2:
         return 1.0
 
-    if len(all_snippets) > sample_size:
-        sample_snippets = random.sample(list(all_snippets), sample_size)
+    if count > sample_size:
+        # Random sample directly in SQL — no need to load the whole table.
+        sample_snippets = session.exec(
+            select(Snippet).order_by(func.random()).limit(sample_size)  # type: ignore[attr-defined]
+        ).all()
     else:
-        sample_snippets = list(all_snippets)
+        sample_snippets = list(Snippet.get_all(session))
 
     total_similarity: float = 0.0
     num_comparisons: int = 0
 
-    # Deserialize MinHash objects once to avoid O(n²) pickle.loads calls
-    minhashes = [s.get_minhash_obj() for s in sample_snippets]
+    # Fast packed-bytes Jaccard (no MinHash object construction in the loop).
+    blobs = [s.minhash for s in sample_snippets]
 
     num_snippets = len(sample_snippets)
     for i in range(num_snippets):
         for j in range(i + 1, num_snippets):
-            total_similarity += minhashes[i].jaccard(minhashes[j])
+            total_similarity += minhash_jaccard(blobs[i], blobs[j])
             num_comparisons += 1
 
     return total_similarity / num_comparisons if num_comparisons > 0 else 1.0
@@ -940,8 +1607,8 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
 
 def db_stats(session: Session) -> dict:
     """Return a dictionary of database statistics."""
-    snippets = Snippet.get_all(session)
-    if not snippets:
+    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    if num_snippets == 0:
         return {
             "num_snippets": 0,
             "avg_snippet_size": 0,
@@ -949,15 +1616,20 @@ def db_stats(session: Session) -> dict:
             "avg_jaccard_similarity": 0.0,
         }
 
-    total_size = sum(len(s.code) for s in snippets)
+    # Aggregate the average snippet size in SQL instead of loading every row.
+    avg_size = session.exec(
+        select(func.avg(func.length(Snippet.code)))  # type: ignore[arg-type]
+    ).one()
+    avg_snippet_size = float(avg_size or 0.0)
 
-    all_tokens = set()
-    for s in snippets:
-        all_tokens.update(code_tokenize(s.code))
+    # Vocabulary: stream just the code column (skips the MinHash blobs).
+    all_tokens: set[str] = set()
+    for code in session.exec(select(Snippet.code)).yield_per(2000):
+        all_tokens.update(code_tokenize(code))
 
     return {
-        "num_snippets": len(snippets),
-        "avg_snippet_size": total_size / len(snippets),
+        "num_snippets": num_snippets,
+        "avg_snippet_size": avg_snippet_size,
         "vocabulary_size": len(all_tokens),
         "avg_jaccard_similarity": db_calculate_average_similarity(session),
     }
@@ -975,26 +1647,33 @@ def snippet_search_by_name(session: Session, pattern: str) -> list[Snippet]:
     # The JSON structure means names are embedded in the string,
     # so a standard LIKE '%pattern%' will match anywhere in the names list.
     query_pattern = f"%{pattern}%"
-    return list(session.exec(select(Snippet).where(Snippet.names.like(query_pattern))).all())
+    return list(
+        session.exec(select(Snippet).where(Snippet.names.like(query_pattern))).all()
+    )
 
 
 def snippet_export(session: Session, export_dir: str) -> dict:
     """Export all snippets to a directory."""
     start_time = time.time()
-    snippets = Snippet.get_all(session)
     num_exported = 0
 
     os.makedirs(export_dir, exist_ok=True)
 
     abs_export_dir = os.path.realpath(export_dir)
+    used_paths: set[str] = set()
 
-    for snippet in snippets:
-        # Use the first name as the primary name, sanitized for safety
-        primary_name = snippet.name_list[0]
+    for snippet in Snippet.stream_all(session):
+        # Use the first name as the primary name, sanitized for safety.
+        primary_name = (
+            snippet.name_list[0]
+            if snippet.name_list
+            else f"snippet_{snippet.checksum[:16]}"
+        )
         # Strip path separators to prevent directory traversal
         safe_name = os.path.basename(primary_name.replace("..", "_"))
         if not safe_name:
             safe_name = snippet.checksum[:12]
+
         file_path = os.path.join(abs_export_dir, f"{safe_name}.asm")
 
         # Final guard: ensure the resolved path is within the export directory
@@ -1004,6 +1683,17 @@ def snippet_export(session: Session, export_dir: str) -> dict:
                 primary_name,
             )
             continue
+
+        # Avoid silently overwriting when several snippets share a name.
+        if file_path in used_paths:
+            # 12 hex chars (48 bits) keeps the disambiguator collision-free
+            # even with hundreds of thousands of same-named snippets (the
+            # previous 8 chars collided at ~30 pairs per 500k).
+            file_path = os.path.join(
+                abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm"
+            )
+        used_paths.add(file_path)
+
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(snippet.code)
         num_exported += 1
@@ -1024,19 +1714,22 @@ def db_clean(session: Session) -> dict:
     """Clean the LSH cache and vacuum the database."""
     start_time = time.time()
 
-    # 1. Invalidate (delete) all cache files
-    lsh_cache_invalidate()
+    # 1. Wipe the legacy cache files and the DB-backed index.
+    lsh_index_clear(session)
 
-    # 2. Vacuum the database to reclaim space
-    session.execute(text("VACUUM"))
-    session.commit()
+    # 2. Vacuum the database to reclaim space (SQLite only).
+    vacuum_success = False
+    if session.get_bind().dialect.name == "sqlite":
+        session.execute(text("VACUUM"))
+        session.commit()
+        vacuum_success = True
 
     end_time = time.time()
     time_elapsed = end_time - start_time
 
     return {
         "time_elapsed": time_elapsed,
-        "vacuum_success": True,
+        "vacuum_success": vacuum_success,
     }
 
 
@@ -1078,12 +1771,14 @@ def collection_list(session: Session) -> list[dict]:
     results = []
     for col in collections:
         snippets = Snippet.get_by_collection(session, col.name)
-        results.append({
-            "name": col.name,
-            "description": col.description,
-            "snippet_count": len(snippets),
-            "created_at": col.created_at,
-        })
+        results.append(
+            {
+                "name": col.name,
+                "description": col.description,
+                "snippet_count": len(snippets),
+                "created_at": col.created_at,
+            }
+        )
     return results
 
 
@@ -1168,6 +1863,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     try:
         source_engine = create_db_engine(source_url)
         from sqlmodel import Session as SourceSession
+
         source_session = SourceSession(source_engine)
     except Exception as e:
         logger.error("Failed to open source database: %s", e)
@@ -1176,6 +1872,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     added = 0
     updated = 0
     skipped = 0
+    added_minhashes: list[tuple[str, bytes]] = []
 
     try:
         # Import collections first
@@ -1190,10 +1887,15 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 )
                 session.add(new_col)
 
-        # Import snippets
-        source_snippets = source_session.exec(select(Snippet)).all()
-        for src_snippet in source_snippets:
-            existing = Snippet.get_by_checksum(session, src_snippet.checksum)
+        # Pre-compute the set of checksums already present in this database
+        # so the per-row lookup below stays in-memory (no per-row query).
+        local_checksums = set(session.exec(select(Snippet.checksum)).all())
+
+        # Import snippets (streaming, so memory stays bounded for big sources)
+        for src_snippet in Snippet.stream_all(source_session):
+            existing = None
+            if src_snippet.checksum in local_checksums:
+                existing = session.get(Snippet, src_snippet.checksum)
 
             if existing:
                 changed = False
@@ -1236,9 +1938,13 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 )
                 session.add(new_snippet)
                 added += 1
+                added_minhashes.append(
+                    (src_snippet.checksum, minhash_ensure_packed(src_snippet.minhash))
+                )
 
         session.commit()
-        lsh_cache_invalidate()
+        # Keep the DB-backed LSH index in sync if one is already built.
+        lsh_index_add_batch(session, added_minhashes)
     except Exception as e:
         logger.error("Merge failed: %s", e)
         return {"error": str(e)}
@@ -1253,4 +1959,3 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         "total_source": added + updated + skipped,
         "time_elapsed": end_time - start_time,
     }
-

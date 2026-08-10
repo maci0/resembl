@@ -1,7 +1,10 @@
 import os
+
 from sqlmodel import Session
+
 from resembl.core import snippet_add
 from tests.test_cli import BaseCLITest
+
 
 class TestCLITags(BaseCLITest):
     """Tests for the tag command group."""

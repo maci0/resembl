@@ -50,7 +50,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 - The user can provide the query from a file with `--file`.
 - The output can be formatted as JSON with `--format json`.
 - Results are ranked by a hybrid score combining Jaccard and Levenshtein similarity.
-- The LSH cache is used to speed up searches.
+- A database-backed LSH index speeds up searches (built lazily, kept in sync incrementally).
 - The user can disable normalization with `--no-normalization`.
 
 ---
@@ -174,8 +174,9 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **so that I can** ensure the tool is running efficiently.
 
 **Acceptance Criteria:**
-- `resembl clean` removes all LSH cache files from the current directory.
+- `resembl clean` removes the LSH index (buckets and metadata) and any legacy cache files.
 - `resembl clean` vacuums the database to reclaim unused space.
+- The LSH index is rebuilt automatically on the next `find`.
 
 ---
 

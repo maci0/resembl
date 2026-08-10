@@ -47,6 +47,9 @@ The `compare` command also reports control-flow graph similarity.
 
 **find** *QUERY* [--top-n N] [--threshold T] [--no-normalization]
 :   Find snippets similar to the given query string.
+    Single-line `--query` strings use `;` as a statement separator
+    (e.g., `find "push eax; pop ebx"`); multi-line input and `--file`
+    keep normal NASM semantics where `;` starts a comment.
 
 **compare** *CHECKSUM1* *CHECKSUM2* [--diff]
 :   Compare two snippets side-by-side.  Accepts checksum prefixes.
@@ -66,12 +69,14 @@ The `compare` command also reports control-flow graph similarity.
 
 **reindex**
 :   Recalculate MinHash fingerprints for all snippets.
+    Accepts `--jobs N` to run the CPU-bound recomputation in parallel
+    (default: one worker per CPU core).
 
 **stats**
 :   Show database statistics.
 
 **clean**
-:   Vacuum the database and clear caches.
+:   Wipe the LSH index and any legacy cache files, then vacuum the database.
 
 **merge** *PATH*
 :   Merge snippets from another resembl database file, deduplicating by checksum.
@@ -139,6 +144,8 @@ The `compare` command also reports control-flow graph similarity.
 
 **RESEMBL_CACHE_DIR**
 :   Override the default cache directory (`~/.cache/resembl`).
+    The LSH index itself lives in the database; this variable only applies to
+    legacy pickle cache files written by older versions.
 
 **DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.

@@ -7,6 +7,7 @@ import unittest
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from resembl.config import ResemblConfig
 from resembl.core import (
     collection_add_snippet,
     collection_create,
@@ -22,7 +23,6 @@ from resembl.core import (
     snippet_version_list,
     string_checksum,
 )
-from resembl.config import ResemblConfig
 from resembl.models import Collection, Snippet, SnippetVersion
 
 
@@ -88,7 +88,9 @@ class TestCollections(BaseDBTest):
     def test_add_snippet_to_nonexistent_collection(self):
         """Adding to a nonexistent collection should return None."""
         snippet = snippet_add(self.session, "func", "RET")
-        result = collection_add_snippet(self.session, "missing", snippet.checksum, quiet=True)
+        result = collection_add_snippet(
+            self.session, "missing", snippet.checksum, quiet=True
+        )
         self.assertIsNone(result)
 
     def test_add_nonexistent_snippet_to_collection(self):
@@ -215,10 +217,12 @@ class TestDBMerge(BaseDBTest):
 
     def test_merge_new_snippets(self):
         """Merging a source with unique snippets should add them."""
-        source_path = self._create_source_db([
-            ("func_a", "MOV EAX, 1", [], None),
-            ("func_b", "MOV EBX, 2", [], None),
-        ])
+        source_path = self._create_source_db(
+            [
+                ("func_a", "MOV EAX, 1", [], None),
+                ("func_b", "MOV EBX, 2", [], None),
+            ]
+        )
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["added"], 2)
@@ -230,9 +234,11 @@ class TestDBMerge(BaseDBTest):
     def test_merge_duplicate_snippets_skipped(self):
         """Merging identical snippets should skip them."""
         snippet_add(self.session, "func_a", "MOV EAX, 1")
-        source_path = self._create_source_db([
-            ("func_a", "MOV EAX, 1", [], None),
-        ])
+        source_path = self._create_source_db(
+            [
+                ("func_a", "MOV EAX, 1", [], None),
+            ]
+        )
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["added"], 0)
@@ -243,9 +249,11 @@ class TestDBMerge(BaseDBTest):
     def test_merge_adds_new_names(self):
         """Merging should add new names to existing snippets."""
         snippet_add(self.session, "original_name", "MOV EAX, 1")
-        source_path = self._create_source_db([
-            ("alias_name", "MOV EAX, 1", [], None),
-        ])
+        source_path = self._create_source_db(
+            [
+                ("alias_name", "MOV EAX, 1", [], None),
+            ]
+        )
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["updated"], 1)
@@ -260,9 +268,11 @@ class TestDBMerge(BaseDBTest):
     def test_merge_adds_new_tags_independently(self):
         """Merging should add tags even if names didn't change (bug fix verification)."""
         snippet = snippet_add(self.session, "func", "MOV EAX, 1")
-        source_path = self._create_source_db([
-            ("func", "MOV EAX, 1", ["new_tag"], None),
-        ])
+        source_path = self._create_source_db(
+            [
+                ("func", "MOV EAX, 1", ["new_tag"], None),
+            ]
+        )
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["updated"], 1)

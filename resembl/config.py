@@ -6,18 +6,19 @@ import dataclasses
 import logging
 import os
 import tempfile
+from typing import TypeVar, overload
 
 import tomli
 import tomli_w
 
 DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
+_T = TypeVar("_T")
+
 
 def config_dir_get() -> str:
     """Return the config directory, respecting the RESEMBL_CONFIG_DIR env var."""
-    return os.path.expanduser(
-        os.environ.get("RESEMBL_CONFIG_DIR", DEFAULT_CONFIG_DIR)
-    )
+    return os.path.expanduser(os.environ.get("RESEMBL_CONFIG_DIR", DEFAULT_CONFIG_DIR))
 
 
 def config_path_get() -> str:
@@ -41,6 +42,12 @@ class ResemblConfig:
     format: str = "table"
 
     # ---- dict-compatible helpers ----
+
+    @overload
+    def get(self, key: str, default: _T) -> _T: ...
+
+    @overload
+    def get(self, key: str, default: None = None) -> object: ...
 
     def get(self, key: str, default: object = None) -> object:
         """Return the value for *key* if it exists, else *default*."""

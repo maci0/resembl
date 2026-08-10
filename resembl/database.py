@@ -30,11 +30,13 @@ def create_db_engine(url: str | None = None):
     eng = create_engine(db_url, echo=False)
 
     if db_url.startswith("sqlite"):
+
         @event.listens_for(eng, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     return eng

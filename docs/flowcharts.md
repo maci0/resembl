@@ -25,7 +25,7 @@ graph LR
     subgraph "New Snippet Path"
         D -- No --> F{Generate MinHash from Tokens}
         F --> G[Store Snippet in DB: Checksum, Names, Code, MinHash]
-        G --> H{Invalidate LSH Cache}
+        G --> H[Add Snippet to DB-backed LSH Index]
     end
 
     subgraph "Output"
@@ -50,12 +50,11 @@ graph LR
         B{Normalize Query & Generate MinHash}
     end
 
-    subgraph "LSH Caching"
-        C{Load LSH Cache from Disk}
-        C -- Cache Miss/Stale --> D{Build LSH Index from All Snippet MinHashes in DB}
-        D --> E{Save New LSH Index to Cache on Disk}
-        E --> F[LSH Index Ready]
-        C -- Cache Hit --> F
+    subgraph "LSH Index"
+        C{Load DB-backed LSH Index}
+        C -- Missing / params changed --> D{Build LSH Index from Stored MinHash Fingerprints}
+        D --> F[LSH Index Ready]
+        C -- Ready --> F
     end
 
     subgraph "Candidate Retrieval"
@@ -94,18 +93,20 @@ graph LR
         F --> G["Glob for *.asm and *.txt files recursively"]
     end
 
-    subgraph "Per-File Processing"
-        G --> H[Read File Content]
-        H --> I{Calculate Checksum}
-        I --> J{Snippet Already Exists?}
+    subgraph "Parallel Preparation"
+        G --> H["Process pool (--jobs) lexes + fingerprints each file"]
+        H --> I[Chunked batched write to DB]
+    end
+
+    subgraph "Dedup & Index"
+        I --> J{Checksum Already Exists?}
         J -- Yes --> K[Add Filename as Alias]
-        J -- No --> L[Add New Snippet to DB]
-        L --> M[Increment New Count]
+        J -- No --> L[Insert New Snippet; update LSH index incrementally]
     end
 
     subgraph "Output"
         K --> N[Report Import Statistics]
-        M --> N
+        L --> N
     end
 
     A --> B

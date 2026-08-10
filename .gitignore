@@ -20,6 +20,9 @@ dist/
 # Other
 .DS_Store
 data/
+scale_data/
+scale_benchmark.db*
+benchmark.db*
 
 .gemini
 

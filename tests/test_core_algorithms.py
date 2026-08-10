@@ -242,7 +242,12 @@ class TestCfgSimilarity(unittest.TestCase):
     def test_symmetry(self):
         """cfg_similarity(a, b) should equal cfg_similarity(b, a)."""
         cfg1 = {"num_blocks": 3, "num_edges": 4, "block_sizes": [2, 3, 1], "adj": {}}
-        cfg2 = {"num_blocks": 5, "num_edges": 6, "block_sizes": [1, 2, 3, 4, 5], "adj": {}}
+        cfg2 = {
+            "num_blocks": 5,
+            "num_edges": 6,
+            "block_sizes": [1, 2, 3, 4, 5],
+            "adj": {},
+        }
         self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), cfg_similarity(cfg2, cfg1))
 
     def test_no_edges(self):
@@ -278,6 +283,7 @@ class TestSnippetCompareNewMetrics(unittest.TestCase):
         self.engine = create_db_engine("sqlite:///:memory:")
         SQLModel.metadata.create_all(self.engine)
         from sqlmodel import Session
+
         self.session = Session(self.engine)
 
     def tearDown(self):

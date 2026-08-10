@@ -69,3 +69,27 @@ To use your own database with `resembl`, follow these steps:
 4.  **Create and Pass the Session:** Whenever you need to call an `resembl` core function, create a `Session` from your engine and pass it as the `session` argument.
 
 By following this pattern, you can seamlessly integrate `resembl`'s functionality into any application while maintaining full control over the database.
+
+## Scaling to Millions of Snippets and Beyond
+
+The architecture is designed to keep the **query path constant-time** regardless of database size: a search is a handful of indexed LSH bucket lookups (one per band) plus a chunked candidate fetch, so warm `find` latency stays ~0.6 s from 5k to 500k snippets.  Measured on a shared machine (busy, under load):
+
+| Dataset | Bulk import | Warm `find` | Cold `find` (one-time index build) | `reindex --jobs` |
+|--------:|------------:|------------:|-----------------------------------:|-----------------:|
+| 100,000 | ~25 s | ~0.6 s | ~14 s | ~11 s |
+| 500,000 | ~2 min | ~0.6 s | ~1.8 min | ~53 s |
+
+What the code already supports:
+
+- **PostgreSQL out of the box:** set `DATABASE_URL=postgresql://user:pass@host/db`; the LSH index SQL is dialect-aware (`INSERT OR IGNORE` on SQLite, `ON CONFLICT DO NOTHING` on PostgreSQL) and the build keeps a single final commit there.
+- **Bounded-memory bulk import:** `import --jobs N` prepares files in a process pool and flushes in chunks, expunging the session identity map after each chunk.
+- **Parallel, crash-safe reindex** (`reindex --jobs`), with the old index cleared up front so an interrupted run can never serve stale results.
+- **Incremental index maintenance:** `add` / `import` / `merge` / `rm` update only the affected bucket rows — no full rebuild after single changes.
+
+Guidance for the next order of magnitude (billions of snippets) — not implemented in this repository, but the seams are in place:
+
+- **PostgreSQL with table partitioning:** partition `snippet` (e.g. by `checksum` hash) and `lsh_bucket` (by `band`).  The band column already leads the primary key, so per-band bucket partitions make inserts append-friendly and queries partition-prune to one band.
+- **Distributed index build:** the build is a pure function over `(checksum, minhash)` — shard the keyset ranges across workers/machines and stream sorted band rows to the database (the band-major insertion in `lsh_index_build` is exactly the pattern a partitioned load would use).
+- **Smaller fingerprints:** 128 permutations cost 520 bytes each; a 64-permutation configuration halves storage and band count (14 bands vs 25) at the cost of noisier Jaccard estimates — tune `num_permutations` per dataset.
+- **Streaming/replication:** for a read-heavy service, run the store on PostgreSQL with replication and point the CLI at a read replica; the index is maintained by the writer and replicated with the table.
+- **Memory is the constraint on one box, not throughput:** the same single-machine numbers extend roughly linearly to ~1M snippets; past that, the database file, import time, and reindex time grow with the data, so the distributed/partitioned setup above is the intended path.

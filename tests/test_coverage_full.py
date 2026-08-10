@@ -13,9 +13,9 @@ from datasketch import MinHashLSH
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.cache import (
-    lsh_cache_path_get,
     lsh_cache_invalidate,
     lsh_cache_load,
+    lsh_cache_path_get,
     lsh_cache_save,
     lsh_index_build,
     lsh_index_insert,
@@ -47,7 +47,7 @@ from resembl.core import (
     snippet_version_list,
     string_checksum,
 )
-from resembl.database import db_create, create_db_engine
+from resembl.database import create_db_engine, db_create
 from resembl.models import Collection, Snippet, SnippetVersion
 
 
@@ -121,7 +121,9 @@ class TestBatchMinhashEdgeCases(BaseDBTest):
 
     def test_batch_minhash_tokens_equal_to_ngram(self):
         """Code with tokens == ngram_size should use shingles."""
-        results = code_create_minhash_batch(["MOV EAX, 1"], normalize=True, ngram_size=3)
+        results = code_create_minhash_batch(
+            ["MOV EAX, 1"], normalize=True, ngram_size=3
+        )
         self.assertEqual(len(results), 1)
 
 
@@ -135,7 +137,9 @@ class TestFindMatchesEmpty(BaseDBTest):
 
     def test_find_matches_empty_db(self):
         """Finding matches in an empty DB should return 0 candidates (line 496)."""
-        num, matches = snippet_find_matches(self.session, "MOV EAX, 1", top_n=5, threshold=0.5)
+        num, matches = snippet_find_matches(
+            self.session, "MOV EAX, 1", top_n=5, threshold=0.5
+        )
         self.assertEqual(num, 0)
         self.assertEqual(len(matches), 0)
 
@@ -270,22 +274,23 @@ class TestCollectionErrorPaths(BaseDBTest):
     def test_collection_add_snippet_nonexistent_collection_not_quiet(self):
         """Adding to a nonexistent collection with quiet=False should log (line 835)."""
         snippet = snippet_add(self.session, "func", "NOP")
-        result = collection_add_snippet(self.session, "bad_col", snippet.checksum, quiet=False)
+        result = collection_add_snippet(
+            self.session, "bad_col", snippet.checksum, quiet=False
+        )
         self.assertIsNone(result)
 
     def test_collection_add_snippet_nonexistent_snippet_not_quiet(self):
         """Adding a nonexistent snippet with quiet=False should log (line 841)."""
         collection_create(self.session, "col")
-        result = collection_add_snippet(self.session, "col", "bad_checksum", quiet=False)
+        result = collection_add_snippet(
+            self.session, "col", "bad_checksum", quiet=False
+        )
         self.assertIsNone(result)
 
     def test_collection_remove_snippet_nonexistent_not_quiet(self):
         """Removing a nonexistent snippet with quiet=False should log (line 858)."""
         result = collection_remove_snippet(self.session, "bad_checksum", quiet=False)
         self.assertIsNone(result)
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +304,9 @@ class TestNameOperations(BaseDBTest):
     def test_name_add_duplicate(self):
         """Adding an existing name should return None."""
         snippet = snippet_add(self.session, "original", "NOP")
-        result = snippet_name_add(self.session, snippet.checksum, "original", quiet=True)
+        result = snippet_name_add(
+            self.session, snippet.checksum, "original", quiet=True
+        )
         self.assertIsNone(result)
 
     def test_name_remove_last_name(self):

@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import tomli
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -209,13 +210,32 @@ class TestCLIConfig(BaseCLITest):
             self.assertIn(config_path, result.stdout)
 
     def test_cache_dir_env_override(self):
-        """RESEMBL_CACHE_DIR should control where cache files are stored."""
+        """RESEMBL_CACHE_DIR should control where legacy cache files are stored.
+
+        The LSH index itself lives in the database; the env var applies to the
+        legacy pickle cache files.
+        """
         with tempfile.TemporaryDirectory() as cache_dir:
             self.run_command(
                 "find --query 'MOV EAX, 1'",
                 extra_env={"RESEMBL_CACHE_DIR": cache_dir},
             )
+            # The index is database-backed: no pickle file should be created.
             cache_file = os.path.join(cache_dir, "lsh_0.50.pkl")
+            self.assertFalse(os.path.exists(cache_file))
+
+    def test_cache_dir_env_override_legacy_path(self):
+        """Legacy pickle caches respect RESEMBL_CACHE_DIR."""
+        with tempfile.TemporaryDirectory() as cache_dir:
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": cache_dir}):
+                from sqlmodel import Session as _Session
+
+                with _Session(self.engine) as session:
+                    from resembl.cache import lsh_cache_path_get, lsh_cache_save
+
+                    lsh_cache_save(session, {"legacy": "index"}, 0.5)
+                    cache_file = lsh_cache_path_get(0.5)
+            self.assertTrue(cache_file.startswith(cache_dir))
             self.assertTrue(os.path.exists(cache_file))
 
     def test_config_set_and_list(self):

@@ -31,7 +31,13 @@ Normalize an assembly snippet to a canonical string (strips comments, collapses 
 ## Snippet Operations
 
 ### `snippet_add(session, name: str, code: str, ...) → Snippet`
-Add a snippet to the database. Returns the created `Snippet`.
+Add a snippet or alias. Stores the MinHash fingerprint in a compact packed format and keeps the database-backed LSH index in sync.
+
+### `snippet_prepare(name: str, code: str, ngram_size: int = 3) → tuple | None`
+Pure function computing `(checksum, name, code, minhash_bytes)` for a snippet — safe to run in worker processes for parallel bulk import.
+
+### `snippet_add_batch(session, prepared_items: list[tuple], ...) → dict`
+Insert many prepared snippets in one pass (content-addressable dedup, alias merging, batched writes). Returns `{"added", "aliased", "skipped", "time_elapsed"}`.
 
 ### `snippet_get(session, checksum: str) → Snippet | None`
 Retrieve a snippet by checksum.
@@ -102,4 +108,34 @@ Load from `~/.config/resembl/config.toml` (or `RESEMBL_CONFIG_DIR`).
 ## Database
 
 ### `create_db_engine(url: str | None = None)`
-Create a SQLAlchemy engine. SQLite pragmas applied automatically. Pass a PostgreSQL URL for team use.
+Create a SQLAlchemy engine. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`). Pass a PostgreSQL URL for team use.
+
+### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
+Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard — all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
+
+### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1) → dict`
+Recompute every snippet's MinHash. With `jobs > 1` the CPU-bound tokenization runs in a process pool. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded.
+
+## LSH Index (`resembl.lsh`)
+
+The similarity index is database-backed rather than an in-memory datasketch
+structure — band buckets live in the `lsh_bucket` table with parameters in
+`lsh_meta`.
+
+### `ResemblLSH(session, threshold: float, num_perm: int)`
+A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob.
+
+### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[bytes]`
+Compute the canonical bucket key for each band of a packed fingerprint (big-endian uint32s), matching datasketch's banding math. Malformed blobs raise `ValueError`.
+
+### `lsh_index_build(session, threshold: float, num_perm: int, progress=None) → ResemblLSH | None`
+Build (or replace) the database-backed index in `resembl.cache`. Band-major sorted inserts, periodic commits, a deferred `checksum` index, and a raised page cache keep a 500k-snippet build near-linear (~1.8 min on a busy machine). `progress(done, total)` is invoked as snippets are processed. Rebuilding an index is also the lazy path taken by the first `find` on a fresh database.
+
+### `lsh_index_clear(session)` / `lsh_meta_get(session) → tuple[float, int] | None`
+Drop the bucket table and metadata (the next find rebuilds), and read the `(threshold, num_perm)` the index was built with.
+
+### `minhash_pack(m) → bytes` / `minhash_unpack(data) → MinHash` / `minhash_jaccard(a, b) → float` / `minhash_ensure_packed(data) → bytes`
+Packed uint32 fingerprint serialization (520 bytes at 128 permutations, `RMLH`-prefixed, self-describing) and a fast Jaccard computed directly from packed blobs — legacy pickles load transparently. Malformed packed blobs raise `ValueError` (never low-level `struct` errors), so hostile or corrupted data cannot crash the query path.
+
+### `Snippet.iter_minhash_batches(session, batch_size=1000)`
+Keyset-paginated iterator over `(checksum, minhash)` pairs only — the projected read the index build uses, so building never loads the (much larger) code bodies.

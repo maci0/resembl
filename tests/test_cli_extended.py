@@ -16,7 +16,9 @@ class TestCLICollections(BaseCLITest):
 
     def test_collection_create(self):
         """Creating a collection should succeed."""
-        result = self.run_command("collection create test_col --description 'Test collection'")
+        result = self.run_command(
+            "collection create test_col --description 'Test collection'"
+        )
         self.assertEqual(result.returncode, 0)
         self.assertIn("test_col", result.stdout)
 
@@ -34,6 +36,7 @@ class TestCLICollections(BaseCLITest):
             collection_create(session, "group")
             from resembl.core import collection_add_snippet
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             collection_add_snippet(session, "group", s.checksum)
         result = self.run_command("collection show group")
@@ -52,6 +55,7 @@ class TestCLICollections(BaseCLITest):
         with Session(self.engine) as session:
             collection_create(session, "target_col")
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         result = self.run_command(f"collection add target_col {checksum}")
@@ -63,6 +67,7 @@ class TestCLICollections(BaseCLITest):
             collection_create(session, "my_col")
             from resembl.core import collection_add_snippet
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             collection_add_snippet(session, "my_col", s.checksum)
             checksum = s.checksum
@@ -84,6 +89,7 @@ class TestCLIMerge(BaseCLITest):
     def _create_source_db(self):
         """Create a source DB with a unique snippet."""
         from sqlmodel import SQLModel, create_engine
+
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
         src_engine = create_engine(f"sqlite:///{tmp.name}")
@@ -128,6 +134,7 @@ class TestCLIVersion(BaseCLITest):
         """version should return results (possibly empty)."""
         with Session(self.engine) as session:
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         result = self.run_command(f"version {checksum}")
@@ -181,6 +188,32 @@ class TestCLIFormatFlag(BaseCLITest):
         self.assertIn("matches", data)
         self.assertIsInstance(data["matches"], list)
 
+    def test_find_query_semicolon_separator(self):
+        """Inline --query uses ';' as a statement separator (documented format).
+
+        Without the fix, the pygments lexer treats ';' as a comment and the
+        query would silently truncate to just the first instruction.
+        """
+        with Session(self.engine) as session:
+            snippet_add(session, "multi", "PUSH EBP\nMOV EBP, ESP\nPOP EBP\nRET")
+        result = self.run_command(
+            "--format json find --query 'PUSH EBP; MOV EBP, ESP; POP EBP; RET'"
+        )
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertGreaterEqual(len(data["matches"]), 1)
+        self.assertEqual(data["matches"][0]["names"], ["multi"])
+
+    def test_find_reports_lazy_index_build(self):
+        """Table-mode find announces the one-time LSH index build."""
+        result = self.run_command("find --query 'MOV EAX, 1'")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Building LSH index", result.stdout)
+        # Second find uses the built index — no announcement.
+        result = self.run_command("find --query 'MOV EAX, 1'")
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("Building LSH index", result.stdout)
+
 
 class TestCLITagEdgeCases(BaseCLITest):
     """Edge-case tests for tag commands."""
@@ -189,6 +222,7 @@ class TestCLITagEdgeCases(BaseCLITest):
         """Adding the same tag twice should succeed both times (idempotent)."""
         with Session(self.engine) as session:
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         # First add
@@ -206,6 +240,7 @@ class TestCLIShowCommand(BaseCLITest):
         """show should display snippet details."""
         with Session(self.engine) as session:
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         result = self.run_command(f"show {checksum}")
@@ -216,6 +251,7 @@ class TestCLIShowCommand(BaseCLITest):
         """show should work with checksum prefix."""
         with Session(self.engine) as session:
             from resembl.models import Snippet
+
             s = Snippet.get_by_name(session, "test_snippet")
             prefix = s.checksum[:8]
         result = self.run_command(f"show {prefix}")

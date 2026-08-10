@@ -28,9 +28,15 @@ This approach provides several advantages:
 - **Deduplication:** It is impossible to have two entries with the exact same code.
 - **Stable IDs:** The identifier for a snippet remains the same, even if the database is rebuilt.
 
-### LSH Caching
+### LSH Index
 
-To make searches nearly instantaneous, `resembl` caches the LSH index to a file in `~/.cache/resembl/`. The location can be overridden with the `RESEMBL_CACHE_DIR` environment variable. The cache is automatically invalidated and rebuilt whenever the database is modified.
+To make searches nearly instantaneous, `resembl` maintains a **database-backed LSH index** (the `lsh_bucket` table). Every snippet contributes one row per band bucket it lands in, and a search only touches the buckets the query hits — so lookup time stays flat regardless of database size. The index is:
+
+- **Built lazily** on the first `find` (and rebuilt automatically when the configured `lsh_threshold` or `num_permutations` change).
+- **Kept in sync incrementally** — `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
+- **Streamed** during builds — rows are inserted in batches, bounding memory use on very large databases.
+
+Legacy pickle cache files (from older versions) still load transparently and migrate to the database-backed index on the next write operation. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
 
 ## How It Works
 
@@ -136,9 +142,9 @@ This structural metric is displayed in `compare` output alongside Jaccard, Leven
 
 When you run `resembl find`, the tool processes your query in several stages:
 
-1. **Load metadata** – The SQLite database and the cached LSH index are loaded. If the index is missing or stale it is rebuilt from the stored MinHash fingerprints.
+1. **Load metadata** – The SQLite database and the LSH index are loaded. If the index is missing or its parameters changed, it is rebuilt from the stored MinHash fingerprints (streamed in batches).
 2. **Normalize query** – The query assembly is lexed and normalized unless `--no-normalization` is specified.
-3. **MinHash lookup** – The query's MinHash is hashed into the LSH buckets to retrieve candidate checksums.
+3. **MinHash lookup** – The query's MinHash is hashed into the LSH buckets to retrieve candidate checksums via a handful of indexed lookups.
 4. **Retrieve candidates** – Snippets matching those checksums are loaded from the database.
 5. **Score** – Each candidate is scored by both Jaccard similarity and Levenshtein distance, combined into a hybrid score.
 6. **Display results** – Candidates are sorted by hybrid score and the top results are shown or output as JSON/CSV.
@@ -157,6 +163,7 @@ resembl/
 │   ├── config.py
 │   ├── core.py
 │   ├── database.py
+│   ├── lsh.py
 │   └── models.py
 ├── docs/
 │   ├── adr/
@@ -229,6 +236,13 @@ uv run resembl add my_memcpy "MOV EAX, EBX; ..."
 # Or, after activating the virtual environment, you can call it directly
 resembl find --query "MOV EAX"
 
+# Bulk-import a large directory in parallel (default: one worker per CPU)
+resembl import --force --jobs 8 data/
+
+# Recompute all fingerprints in parallel (default: one worker per CPU)
+resembl reindex --force --jobs 8
+```
+
 Global options:
 ```
 --quiet      Suppress informational output
@@ -252,6 +266,7 @@ uv run resembl import tests/test_data
 
 ```bash
 # search for a snippet
+# (single-line --query strings use ';' as a statement separator)
 uv run resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
 ```
 
@@ -297,6 +312,43 @@ The script will:
 4.  Clean up the generated files and the benchmark database.
 
 This provides a quick way to assess the performance of the core functionality on a non-trivial dataset.
+
+For larger datasets, use `tests/benchmark_scale.py`, which reports the metrics that matter at scale —
+bulk import throughput, cold and warm `find` latency, `reindex` time, database size, and the stored
+MinHash footprint:
+
+```bash
+uv run python tests/benchmark_scale.py --num-files 5000
+```
+
+### Performance at Scale
+
+Measured on a development workstation (shared, under load) with `tests/benchmark_scale.py`:
+
+| Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex --jobs` |
+|--------:|------------:|------------:|----------------------------------:|-----------------:|
+| 5,000   | ~2 s        | ~0.45 s     | ~1.0 s                            | ~2 s             |
+| 20,000  | ~5.6 s      | ~0.45 s     | ~3.0 s                            | ~4 s             |
+| 100,000 | ~25 s       | ~0.6 s      | ~14 s                             | ~11 s            |
+| 500,000 | ~2 min      | ~0.6 s      | ~1.8 min (one-time)               | ~53 s            |
+
+Key properties that keep these numbers flat as the database grows:
+
+- **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup) — queries
+  hit a handful of indexed LSH bucket lookups plus a chunked candidate fetch, independent of size.
+- **Bulk import is linear and parallel** (~4,000 files/s with `--jobs`) with bounded memory.
+- **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
+  incrementally — `add`/`rm` never trigger a full rebuild.
+- **The one-time index build is near-linear**: rows are inserted band-major sorted by bucket so the
+  primary key grows by sequential append (random inserts into a deep b-tree decay ~4× by the tail
+  of a 12.5M-row build), with periodic commits keeping the SQLite WAL bounded and a raised page
+  cache for the build.  A 500k cold build takes ~1.8 min versus ~27 min before this optimization.
+- `reindex --jobs N` recomputes fingerprints in parallel (≈5× faster with 8 workers) and commits
+  periodically on SQLite so the WAL stays bounded.
+
+The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
+jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses
+~2 KB assembly bodies per snippet.
 
 ## Development
 

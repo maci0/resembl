@@ -25,6 +25,8 @@ class TestCache(unittest.TestCase):
     def setUp(self):
         """Set up a mock session for each test."""
         self.session = MagicMock()
+        # LSH metadata lookup (SQLite-backed index) returns "no index built".
+        self.session.exec.return_value.one_or_none.return_value = None
 
     def test_lsh_cache_path_get(self):
         """Test the LSH cache path generation."""

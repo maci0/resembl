@@ -4,7 +4,6 @@ import re
 
 from tests.test_cli import BaseCLITest
 
-
 # Matches any ANSI escape sequence (CSI sequences and OSC sequences).
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[\d;]*[a-zA-Z]|\x1b\][\d;]*\x07")
 
@@ -15,9 +14,7 @@ class TestNoColorOutput(BaseCLITest):
     def _assert_no_ansi(self, text: str, label: str) -> None:
         """Assert that a string contains no ANSI escape sequences."""
         matches = ANSI_ESCAPE_RE.findall(text)
-        self.assertEqual(
-            matches, [], f"ANSI escapes found in {label}: {matches!r}"
-        )
+        self.assertEqual(matches, [], f"ANSI escapes found in {label}: {matches!r}")
 
     def test_no_color_help(self) -> None:
         """--help output with --no-color should be escape-free."""

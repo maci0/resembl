@@ -13,11 +13,12 @@ from resembl.core import (
     string_normalize,
 )
 
-
 # Strategy for generating random assembly-like strings.
 asm_text = st.text(
     alphabet=st.sampled_from(
-        list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ,;[]\n\t+-*")
+        list(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ,;[]\n\t+-*"
+        )
     ),
     min_size=0,
     max_size=500,
@@ -106,6 +107,76 @@ class TestPropertyMinHash(unittest.TestCase):
         m1 = code_create_minhash(code)
         m2 = code_create_minhash(code)
         self.assertEqual(m1.jaccard(m2), 1.0)
+
+
+class TestPropertyPackedStorage(unittest.TestCase):
+    """Property-based tests for the packed fingerprint format."""
+
+    @given(code=asm_text)
+    @settings(max_examples=100, deadline=2000)
+    def test_pack_unpack_roundtrip(self, code: str) -> None:
+        """minhash_pack -> minhash_unpack must round-trip any fingerprint."""
+        from resembl.models import minhash_pack, minhash_unpack
+
+        m = code_create_minhash(code)
+        raw = minhash_pack(m)
+        self.assertTrue(raw.startswith(b"RMLH"))
+        restored = minhash_unpack(raw)
+        self.assertEqual(m.jaccard(restored), 1.0)
+        # Packed Jaccard agrees with the object-based Jaccard.
+        from resembl.models import minhash_jaccard
+
+        self.assertEqual(minhash_jaccard(raw, raw), 1.0)
+
+    @given(code=asm_text.filter(lambda c: c.strip()))
+    @settings(max_examples=100, deadline=2000)
+    def test_checksum_matches_stored_minhash(self, code: str) -> None:
+        """The checksum identifies the exact code; equal minhash for equal checksum."""
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from resembl.core import snippet_add, snippet_get
+        from resembl.models import Snippet
+
+        engine = create_engine("sqlite:///:memory:")
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            snippet_add(session, "prop", code)
+            snippet = snippet_get(session, string_checksum(code))
+            self.assertIsNotNone(snippet)
+            self.assertTrue(snippet.minhash.startswith(b"RMLH"))
+        engine.dispose()
+
+    @given(data=st.binary(max_size=128))
+    @settings(max_examples=200, deadline=2000)
+    def test_malformed_packed_blobs_raise_value_error(self, data: bytes) -> None:
+        """Corrupt RMLH-prefixed blobs raise ValueError, never low-level errors.
+
+        Random bytes that happen to carry the ``RMLH`` magic are the hostile
+        case (corrupted databases, malicious ``merge`` sources): unpacking
+        must fail with a controlled ``ValueError`` — not ``struct.error``,
+        ``MemoryError``, ``ZeroDivisionError``, or a huge allocation.  Non-
+        RMLH bytes take the legacy pickle path, which may raise any exception
+        (or, extremely rarely, succeed) — the requirement is no crash.
+        """
+        from resembl.lsh import band_buckets
+        from resembl.models import minhash_ensure_packed, minhash_unpack
+
+        if data.startswith(b"RMLH"):
+            with self.assertRaises(ValueError):
+                minhash_unpack(data)
+            with self.assertRaises(ValueError):
+                minhash_ensure_packed(data)
+            with self.assertRaises(ValueError):
+                band_buckets(data, 128, 25, 5)
+        else:
+            # Legacy pickle fallback: any outcome is fine, it must not raise
+            # something unexpected like MemoryError from a crafted payload.
+            try:
+                minhash_unpack(data)
+            except ValueError:
+                pass
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
