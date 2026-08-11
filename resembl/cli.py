@@ -25,6 +25,7 @@ import json
 import logging
 import multiprocessing
 import os
+import signal
 import sys
 import time
 from collections.abc import Callable
@@ -337,6 +338,18 @@ def serve(
     _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
     httpd = serve_start(db_url, host=host, port=port)
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
+
+    # Service managers (systemd, Docker stop, kill) send SIGTERM, whose
+    # default disposition kills the process without running the atexit
+    # cleanup — leaving a stale port file behind.  Turn SIGTERM into a
+    # KeyboardInterrupt so the normal shutdown path runs (server close +
+    # port-file removal); the thin client tolerates a stale file, but a
+    # clean lifecycle keeps the cache dir tidy across restarts.
+    def _handle_sigterm(signum: int, frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

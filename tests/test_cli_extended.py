@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -315,6 +316,112 @@ class TestCLIShowCommand(BaseCLITest):
         """show with invalid checksum should fail."""
         result = self.run_command("show ffffffffffffffff")
         self.assertNotEqual(result.returncode, 0)
+
+
+class TestCLIServeLifecycle(BaseCLITest):
+    """End-to-end: a real ``resembl serve`` subprocess answers warm finds.
+
+    Unlike the in-process server tests, these exercise the actual CLI
+    entry points: ``resembl serve`` starts, writes its port file, ``find``
+    and ``find-batch`` route through the thin client, and a SIGTERM (the
+    signal service managers send) shuts the process down cleanly.
+    """
+
+    def _serve_env(self, cache_dir):
+        return {
+            **os.environ,
+            "PYTHONPATH": os.path.join(os.getcwd(), "."),
+            "DATABASE_URL": f"sqlite:///{self.db_name}",
+            "RESEMBL_CACHE_DIR": cache_dir,
+        }
+
+    def _start_serve(self, cache_dir):
+        return subprocess.Popen(
+            ["python", "-m", "resembl.cli", "serve"],
+            env=self._serve_env(cache_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    def _wait_for_port_file(self, port_file, timeout=30):
+        """Block until the serve process writes its port file."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with open(port_file, encoding="utf-8") as f:
+                    port = f.read().strip()
+                if port.isdigit():
+                    return int(port)
+            except OSError:
+                pass
+            time.sleep(0.05)
+        self.fail(f"serve did not write {port_file} within {timeout}s")
+
+    def test_serve_subprocess_answers_find_and_shuts_down(self):
+        import hashlib
+
+        db_url = f"sqlite:///{self.db_name}"
+        with tempfile.TemporaryDirectory() as cache_dir:
+            # Replicate server_port_path() against the temp cache dir.
+            digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+            port_file = os.path.join(cache_dir, f"server_{digest}.port")
+            proc = self._start_serve(cache_dir)
+            try:
+                port = self._wait_for_port_file(port_file)
+                self.assertGreater(port, 0)
+
+                # A find subprocess routes through the running server.
+                result = self.run_command(
+                    "--format json find --query 'MOV EAX, 1'",
+                    extra_env={"RESEMBL_CACHE_DIR": cache_dir},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                payload = json.loads(result.stdout)
+                self.assertGreater(payload["lsh_candidates"], 0)
+                self.assertTrue(
+                    any("test_snippet" in m["names"] for m in payload["matches"])
+                )
+
+                # A repeat find hits the server's version-guarded result cache.
+                result2 = self.run_command(
+                    "--format json find --query 'MOV EAX, 1'",
+                    extra_env={"RESEMBL_CACHE_DIR": cache_dir},
+                )
+                self.assertEqual(result2.returncode, 0, result2.stderr)
+                self.assertEqual(
+                    json.loads(result2.stdout)["lsh_candidates"],
+                    payload["lsh_candidates"],
+                )
+
+                # find-batch also routes through the server, one round trip.
+                queries_file = tempfile.mktemp(suffix=".txt")
+                with open(queries_file, "w", encoding="utf-8") as f:
+                    f.write("MOV EAX, 1\nMOV EAX, 2\n")
+                try:
+                    batch = self.run_command(
+                        f"--format json find-batch --file {queries_file}",
+                        extra_env={"RESEMBL_CACHE_DIR": cache_dir},
+                    )
+                finally:
+                    if os.path.exists(queries_file):
+                        os.remove(queries_file)
+                self.assertEqual(batch.returncode, 0, batch.stderr)
+                batch_payload = json.loads(batch.stdout)
+                self.assertEqual(len(batch_payload), 2)
+            finally:
+                # SIGTERM — the signal a service manager sends — must shut the
+                # process down cleanly and remove the port file.
+                proc.terminate()
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    self.fail("serve did not exit after SIGTERM")
+            self.assertFalse(os.path.exists(port_file), "stale port file left behind")
 
 
 if __name__ == "__main__":
