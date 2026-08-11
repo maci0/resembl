@@ -314,6 +314,7 @@ class TestVersioning(BaseDBTest):
         """Manually inserted versions should be retrievable."""
         snippet = snippet_add(self.session, "func", "RET")
         v = SnippetVersion(
+            id=1,
             snippet_checksum=snippet.checksum,
             code="old code",
             minhash=snippet.minhash,
@@ -413,12 +414,14 @@ class TestModelMethods(BaseDBTest):
         """SnippetVersion.get_by_checksum should return versions newest first."""
         snippet = snippet_add(self.session, "func", "NOP")
         v1 = SnippetVersion(
+            id=1,
             snippet_checksum=snippet.checksum,
             code="v1",
             minhash=snippet.minhash,
             created_at="2024-01-01T00:00:00",
         )
         v2 = SnippetVersion(
+            id=2,
             snippet_checksum=snippet.checksum,
             code="v2",
             minhash=snippet.minhash,

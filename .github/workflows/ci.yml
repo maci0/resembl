@@ -19,9 +19,25 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: resembl
+          MYSQL_USER: resembl
+          MYSQL_PASSWORD: resembl
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
-      # Enables tests/test_pg_integration.py (skipped otherwise).
+      # Enables tests/test_pg_integration.py and test_mysql_integration.py
+      # (skipped otherwise).
       RESEMBL_TEST_PG_URL: postgresql+pg8000://postgres:postgres@localhost:5432/postgres
+      RESEMBL_TEST_MYSQL_URL: mysql+pymysql://resembl:resembl@localhost:3306/resembl
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python

@@ -33,6 +33,9 @@ dev = [
     "slipcover>=1.0.17",
     "hypothesis>=6.0.0",
     "pg8000>=1.31.0",
+    "duckdb>=1.0.0",
+    "duckdb-engine>=0.13.0",
+    "pymysql>=1.1.0",
     "pytest-benchmark>=4.0.0",
 ]
 

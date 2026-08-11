@@ -10,7 +10,7 @@ from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Integer, Text
 from sqlmodel import Field, Session, SQLModel, select
 
 if TYPE_CHECKING:
@@ -174,9 +174,19 @@ class Collection(SQLModel, table=True):  # type: ignore
 
 
 class SnippetVersion(SQLModel, table=True):  # type: ignore
-    """A historical version of a snippet's code."""
+    """A historical version of a snippet's code.
 
-    id: int | None = Field(default=None, primary_key=True)
+    The primary key is a plain integer set by the caller.  DuckDB (as of
+    1.5.x) does not implement any auto-increment form (SERIAL / IDENTITY
+    both raise "Constraint not implemented"), so a portable schema cannot
+    rely on database-generated ids.  This model has no production writer
+    yet; the versioning feature should assign ids explicitly when it lands.
+    """
+
+    id: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, primary_key=True, autoincrement=False),
+    )
     snippet_checksum: str = Field(index=True, max_length=64)
     code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
