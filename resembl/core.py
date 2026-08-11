@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from pygments.lexers.asm import NasmLexer
 from pygments.token import Comment, Name, Number, Punctuation, Text
+from sqlalchemy.exc import OperationalError
 
 if TYPE_CHECKING:
     from datasketch import MinHash
@@ -66,6 +67,13 @@ NUM_PERMUTATIONS = 128
 
 #: Default LSH similarity threshold for candidate filtering.
 LSH_THRESHOLD = 0.5
+
+#: Bounded retries for the index clear inside ``db_reindex`` (see there):
+#: concurrent cold finds of the same database contend on SQLite's exclusive
+#: schema lock, and the loser should wait rather than crash.
+_REINDEX_CLEAR_RETRIES = 3
+#: Linear backoff between clear retries, in seconds.
+_REINDEX_CLEAR_RETRY_BACKOFF = 3
 
 # Reuse a single Pygments lexer instance across all calls.
 lexer = NasmLexer()
@@ -1678,8 +1686,28 @@ def db_reindex(
             batches_since_commit = 0
 
     # Fingerprints are about to change — drop any built index now so a crash
-    # mid-reindex cannot leave a stale one behind.
-    lsh_index_clear(session)
+    # mid-reindex cannot leave a stale one behind.  The clear takes an
+    # exclusive lock; when another process is concurrently building the index
+    # (two CLI processes cold-finding the same database), retry briefly
+    # instead of surfacing a raw "database is locked".
+    for attempt in range(_REINDEX_CLEAR_RETRIES):
+        try:
+            lsh_index_clear(session)
+            break
+        except OperationalError:
+            session.rollback()
+            if attempt + 1 < _REINDEX_CLEAR_RETRIES:
+                time.sleep(_REINDEX_CLEAR_RETRY_BACKOFF * (attempt + 1))
+    else:
+        logger.error(
+            "Could not clear the index (another process may be writing to "
+            "this database); retry once it is idle."
+        )
+        return {
+            "num_reindexed": 0,
+            "time_elapsed": 0,
+            "avg_time_per_snippet": 0,
+        }
 
     if parallel:
         ctx = _mp.get_context("spawn")

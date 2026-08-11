@@ -383,6 +383,13 @@ def lsh_index_clear(session: Session) -> None:
     O(1).  An empty table is recreated immediately so subsequent inserts
     (e.g. during a build) keep working.
     """
+    # CREATE/DROP TABLE need an exclusive lock, and SQLite fails *immediately*
+    # (busy_timeout cannot help) when the session still holds a shared read
+    # snapshot from an earlier statement — the usual cause of "database is
+    # locked" when two processes cold-build the same database concurrently.
+    # Ending the transaction first lets the exclusive lock wait via the busy
+    # timeout, so the loser blocks on the winner instead of crashing.
+    session.commit()
     table_ensure(session)
     session.execute(text("DROP TABLE IF EXISTS lsh_bucket"))
     session.commit()

@@ -36,7 +36,10 @@ def create_db_engine(url: str | None = None):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
+            # 30s busy wait: concurrent writers (two CLI processes, or an
+            # import while a find builds the index) serialize instead of
+            # failing immediately with "database is locked".
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
 
     return eng

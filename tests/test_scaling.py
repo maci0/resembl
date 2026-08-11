@@ -39,7 +39,7 @@ from resembl.core import (
     snippet_get,
     snippet_prepare,
 )
-from resembl.lsh import lsh_meta_get
+from resembl.lsh import lsh_index_clear, lsh_meta_get
 from resembl.models import Snippet, minhash_jaccard, minhash_pack, minhash_unpack
 
 ENGINE = create_engine("sqlite:///:memory:")
@@ -662,6 +662,76 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(calls[-1], (50, 50))
         self.assertTrue(all(done <= total for done, total in calls))
         self.assertTrue(all(a <= b for (a, _), (b, _) in zip(calls, calls[1:])))
+
+    def test_build_retries_on_locked_database(self):
+        """A concurrent-writer lock mid-build is retried, not crashed on.
+
+        Two CLI processes cold-finding the same database race on SQLite's
+        single-writer lock; the loser must retry (identical databases build
+        identical indexes) instead of surfacing a raw ``database is locked``
+        traceback.
+        """
+        import sqlite3
+        from unittest.mock import patch
+
+        import sqlalchemy.exc
+
+        from resembl import cache
+
+        self._add(20, "lock")
+        raised = {"n": 0}
+        real_insert = cache._insert_rows
+
+        def flaky_insert(session, sql, rows):
+            if raised["n"] == 0:  # fail only the very first insert call
+                raised["n"] += 1
+                raise sqlalchemy.exc.OperationalError(
+                    "stmt", {}, sqlite3.OperationalError("database is locked")
+                )
+            real_insert(session, sql, rows)
+
+        with (
+            patch("resembl.cache._insert_rows", side_effect=flaky_insert),
+            patch("resembl.cache.time.sleep"),
+            patch("resembl.cache._BUILD_RETRIES", 3),
+            patch("resembl.cache._BUILD_RETRY_BACKOFF", 0),
+        ):
+            lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+
+        self.assertIsNotNone(lsh)
+        self.assertEqual(raised["n"], 1)  # one lock failure, recovered
+        rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
+        self.assertEqual(rows, 20 * 25)
+
+    def test_reindex_clear_retries_on_locked(self):
+        """The migration-time index clear retries on a concurrent-writer lock."""
+        import sqlite3
+        from unittest.mock import patch
+
+        import sqlalchemy.exc
+
+        self._add(20, "reidx")
+        raised = {"n": 0}
+        real_clear = lsh_index_clear
+
+        def flaky_clear(session):
+            if raised["n"] == 0:  # fail only the very first clear call
+                raised["n"] += 1
+                raise sqlalchemy.exc.OperationalError(
+                    "stmt", {}, sqlite3.OperationalError("database is locked")
+                )
+            real_clear(session)
+
+        with (
+            patch("resembl.core.lsh_index_clear", side_effect=flaky_clear),
+            patch("resembl.core.time.sleep"),
+            patch("resembl.core._REINDEX_CLEAR_RETRIES", 3),
+            patch("resembl.core._REINDEX_CLEAR_RETRY_BACKOFF", 0),
+        ):
+            result = db_reindex(self.session, jobs=1)
+
+        self.assertEqual(raised["n"], 1)  # one lock failure, recovered
+        self.assertEqual(result["num_reindexed"], 20)
 
 
 class TestFingerprintVersion(BaseScalingTest):

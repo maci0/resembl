@@ -13,9 +13,11 @@ after an upgrade migrates to the database-backed index.
 import logging
 import os
 import pickle
+import time
 import zlib
 from collections.abc import Callable
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
 from .database import db_checksum_get
@@ -50,6 +52,15 @@ _BAND_CHUNK = 100_000
 #: Number of snippets fetched per keyset query during an index build.  Kept
 #: modest so the buffered row dicts stay bounded regardless of band count.
 _BATCH_SIZE = 2_000
+
+#: Bounded retries for a concurrent index build on SQLite (see
+#: ``lsh_index_build``): when two CLI processes cold-find the same database,
+#: SQLite's single-writer lock makes the loser fail partway through a
+#: multi-minute build.  Identical databases build identical indexes, so the
+#: loser may retry after the winner finishes.
+_BUILD_RETRIES = 3
+#: Linear backoff between build retries, in seconds.
+_BUILD_RETRY_BACKOFF = 3
 
 
 def cache_dir_get() -> str:
@@ -99,6 +110,13 @@ def lsh_index_build(
     the number of snippets processed so far and the total, roughly once per
     batch — let long-running CLI builds report status instead of appearing
     hung.
+
+    A concurrent build of the same database (two CLI processes cold-finding
+    together) makes one of them fail on SQLite's single-writer lock partway
+    through the build.  Since identical databases build identical indexes,
+    the whole build is retried a bounded number of times with a brief
+    backoff — the loser waits for the winner instead of crashing with a raw
+    ``database is locked`` traceback.
     """
     try:
         lsh = ResemblLSH(session, threshold, num_perm)
@@ -110,6 +128,35 @@ def lsh_index_build(
         )
         logger.error("  -> Original error: %s", e)
         return None
+
+    for attempt in range(_BUILD_RETRIES):
+        try:
+            _build_once(lsh, threshold, num_perm, progress)
+            return lsh
+        except OperationalError:
+            session.rollback()  # abort the failed transaction before retrying
+            if attempt + 1 < _BUILD_RETRIES:
+                logger.warning(
+                    "Index build hit a database lock (another process may be "
+                    "writing); retrying in %ds…",
+                    _BUILD_RETRY_BACKOFF * (attempt + 1),
+                )
+                time.sleep(_BUILD_RETRY_BACKOFF * (attempt + 1))
+    logger.error(
+        "Index build failed repeatedly (another process may be writing to "
+        "this database); retry once it is idle."
+    )
+    return None
+
+
+def _build_once(
+    lsh: ResemblLSH,
+    threshold: float,
+    num_perm: int,
+    progress: Callable[[int, int], None] | None = None,
+) -> None:
+    """Run one full index build inside ``lsh_index_build``'s retry loop."""
+    session = lsh.session
 
     lsh_index_clear(session)
 
@@ -172,7 +219,6 @@ def lsh_index_build(
 
     lsh_meta_set(session, threshold, num_perm)
     fingerprint_version_set(session, FINGERPRINT_VERSION)
-    return lsh
 
 
 def lsh_index_insert(lsh: ResemblLSH, snippet: Snippet) -> None:

@@ -55,6 +55,7 @@ class TestDialectDispatch(unittest.TestCase):
         from resembl import cache, core
 
         build_src = inspect.getsource(cache.lsh_index_build)
+        build_src += inspect.getsource(cache._build_once)
         self.assertIn('dialect.name == "sqlite"', build_src)
         reindex_src = inspect.getsource(core.db_reindex)
         self.assertIn('dialect.name == "sqlite"', reindex_src)
