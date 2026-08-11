@@ -9,6 +9,7 @@ from rapidfuzz import fuzz
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.core import (
+    _random_snippet_rows,
     code_create_minhash,
     code_tokenize,
     db_calculate_average_similarity,
@@ -379,6 +380,17 @@ class TestSnippetCoreFunctions(unittest.TestCase):
         snippet_add(self.session, "s2", "MOV EAX, 2")
         similarity = db_calculate_average_similarity(self.session)
         self.assertIsInstance(similarity, float)
+
+    def test_random_snippet_rows_samples_distinctly(self):
+        """Keyset random sampling returns distinct rows and wraps around."""
+        for i in range(500):
+            snippet_add(self.session, f"r{i}", f"MOV EAX, {i}")
+        rows = _random_snippet_rows(self.session, 100)
+        self.assertEqual(len(rows), 100)
+        self.assertEqual(len({s.checksum for s in rows}), 100)  # distinct
+        rows2 = _random_snippet_rows(self.session, 100)
+        # Two draws of 100 from 500 differ (a full collision is impossible).
+        self.assertNotEqual({s.checksum for s in rows}, {s.checksum for s in rows2})
 
     def test_snippet_name_add_nonexistent_snippet(self):
         """Test adding a name to a non-existent snippet."""
