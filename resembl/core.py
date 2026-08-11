@@ -1490,6 +1490,7 @@ def snippet_find_matches(
     normalize: bool = True,
     ngram_size: int = 3,
     num_permutations: int = NUM_PERMUTATIONS,
+    jaccard_weight: float = 0.4,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string.
@@ -1600,7 +1601,11 @@ def snippet_find_matches(
     for start in range(0, len(order), 64):
         batch = order[start : start + 64]
         # Best possible hybrid in this batch cannot beat the current top-n.
-        if len(scored) >= top_n and 40 * jaccards[batch[0]] + 60 < scored[0][0]:
+        if (
+            len(scored) >= top_n
+            and 100 * jaccard_weight * jaccards[batch[0]] + 100 * (1 - jaccard_weight)
+            < scored[0][0]
+        ):
             break
         full_rows = _snippets_by_checksums(session, [keys[i] for i in batch])
         for i in batch:
@@ -1608,10 +1613,17 @@ def snippet_find_matches(
             if snippet is None:
                 continue  # deleted concurrently between the two fetches
             jaccard = jaccards[i]
-            if len(scored) >= top_n and 40 * jaccard + 60 < scored[0][0]:
+            # Upper bound on hybrid = 100*w*jaccard + 100*(1-w); candidates
+            # below the current n-th best are provably out and skip the
+            # fuzz.ratio call.
+            if (
+                len(scored) >= top_n
+                and 100 * jaccard_weight * jaccard + 100 * (1 - jaccard_weight)
+                < scored[0][0]
+            ):
                 continue
             levenshtein = fuzz.ratio(query_string, snippet.code)
-            hybrid = score_hybrid(jaccard, levenshtein)
+            hybrid = score_hybrid(jaccard, levenshtein, jaccard_weight)
             heapq.heappush(scored, (hybrid, i, snippet))
             if len(scored) > top_n:
                 heapq.heappop(scored)

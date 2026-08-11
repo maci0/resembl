@@ -95,6 +95,7 @@ def _main(argv: list[str] | None = None) -> int:
     )
     effective_ngram = int(cfg.get("ngram_size", 3))
     effective_perm = int(cfg.get("num_permutations", 128))
+    effective_jw = float(cfg.get("jaccard_weight", 0.4))
 
     body = json.dumps(
         {
@@ -104,6 +105,7 @@ def _main(argv: list[str] | None = None) -> int:
             "normalize": not args.no_normalization,
             "ngram_size": effective_ngram,
             "num_permutations": effective_perm,
+            "jaccard_weight": effective_jw,
         }
     ).encode("utf-8")
     request = urllib.request.Request(

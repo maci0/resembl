@@ -49,6 +49,7 @@ _RESULT_CACHE_LOCK = threading.Lock()
 _SERVER_THRESHOLD = 0.5
 _SERVER_NUM_PERM = 128
 _SERVER_NGRAM = 3
+_SERVER_JACCARD_WEIGHT = 0.4
 
 
 def _db_version(session: Session) -> int | None:
@@ -69,6 +70,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
         bool(body.get("normalize", True)),
         int(body.get("ngram_size", _SERVER_NGRAM)),
         int(body.get("num_permutations", _SERVER_NUM_PERM)),
+        float(body.get("jaccard_weight", _SERVER_JACCARD_WEIGHT)),
     )
     version = _db_version(session)
     if version is not None:
@@ -78,7 +80,12 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
                 _RESULT_CACHE.move_to_end(key)
                 return entry[1]
     num_candidates, matches = snippet_find_matches(
-        session, query, *key[1:4], ngram_size=key[4], num_permutations=key[5]
+        session,
+        query,
+        *key[1:4],
+        ngram_size=key[4],
+        num_permutations=key[5],
+        jaccard_weight=key[6],
     )
     payload = {
         "lsh_candidates": num_candidates,
@@ -220,13 +227,14 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         # Honor the CLI config: the server answers with the same threshold /
         # permutation count as in-process find, so clients using the same
         # config get warm cache hits instead of per-request rebuilds.
-        global _SERVER_THRESHOLD, _SERVER_NUM_PERM, _SERVER_NGRAM
+        global _SERVER_THRESHOLD, _SERVER_NUM_PERM, _SERVER_NGRAM, _SERVER_JACCARD_WEIGHT
         from .config import load_config
 
         cfg = load_config()
         _SERVER_THRESHOLD = float(cfg.get("lsh_threshold", LSH_THRESHOLD))
         _SERVER_NUM_PERM = int(cfg.get("num_permutations", NUM_PERMUTATIONS))
         _SERVER_NGRAM = int(cfg.get("ngram_size", 3))
+        _SERVER_JACCARD_WEIGHT = float(cfg.get("jaccard_weight", 0.4))
 
         # One-time migration + index build, before any request is served.
         # The migration worker count scales with the database (spawning a

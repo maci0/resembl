@@ -760,6 +760,31 @@ class TestIndexBuild(BaseScalingTest):
         )
         self.assertEqual(n5b, n5)
 
+    def test_jaccard_weight_honored(self):
+        """The config jaccard_weight reaches scoring (it was inert)."""
+        from resembl.core import snippet_add
+
+        snippet_add(self.session, "a", "MOV EAX, 1\nRET")
+        b = snippet_add(self.session, "b", "MOV EBX, 2\nRET")
+        query = "MOV EAX, 1\nRET"
+
+        _n0, m0 = snippet_find_matches(self.session, query, top_n=2, jaccard_weight=0.0)
+        _n1, m1 = snippet_find_matches(self.session, query, top_n=2, jaccard_weight=1.0)
+
+        def score_of(matches, checksum):
+            for s, sc in matches:
+                if s.checksum == checksum:
+                    return sc
+            return None
+
+        # "b" shares the query's token stream (jaccard 1.0) but differs in
+        # text: at w=0 its score is its Levenshtein (<100); at w=1 it is 100.
+        b0 = score_of(m0, b.checksum)
+        b1 = score_of(m1, b.checksum)
+        self.assertIsNotNone(b0)
+        self.assertIsNotNone(b1)
+        self.assertLess(b0, b1)
+
     def test_build_reports_progress(self):
         """The build invokes the progress callback with (done, total)."""
         self._add(50, "p")

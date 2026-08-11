@@ -1076,6 +1076,7 @@ def find(
         not no_normalization,
         ngram_size=ngram_size,
         num_permutations=cast(int, state.config.get("num_permutations", 128)),
+        jaccard_weight=cast(float, state.config.get("jaccard_weight", 0.4)),
         progress=build_progress,
     )
 
@@ -1155,6 +1156,7 @@ def find_batch(
                 effective_threshold,
                 ngram_size=ngram_size,
                 num_permutations=cast(int, state.config.get("num_permutations", 128)),
+                jaccard_weight=cast(float, state.config.get("jaccard_weight", 0.4)),
             )
             results.append(
                 {
