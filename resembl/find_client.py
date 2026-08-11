@@ -31,6 +31,25 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
     return os.path.join(cache_dir, f"server_{digest}.port")
 
 
+def _load_config() -> dict:
+    """Read the CLI config.toml (lsh_threshold / ngram_size), if present.
+
+    The thin client must produce the same results as `resembl find`, which
+    honors these settings — ignoring them would silently change matches.
+    """
+    config_dir = os.environ.get("RESEMBL_CONFIG_DIR") or os.path.expanduser(
+        "~/.config/resembl"
+    )
+    path = os.path.join(config_dir, "config.toml")
+    try:
+        import tomllib
+
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, ValueError, ImportError):
+        return {}
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="resembl-find", description="Query a running resembl server."
@@ -70,13 +89,19 @@ def _main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    cfg = _load_config()
+    effective_threshold = (
+        args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
+    )
+    effective_ngram = int(cfg.get("ngram_size", 3))
+
     body = json.dumps(
         {
             "query": query,
             "top_n": args.top_n,
-            "threshold": args.threshold,
+            "threshold": effective_threshold,
             "normalize": not args.no_normalization,
-            "ngram_size": 3,
+            "ngram_size": effective_ngram,
         }
     ).encode("utf-8")
     request = urllib.request.Request(

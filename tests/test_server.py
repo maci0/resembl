@@ -97,6 +97,53 @@ class TestServerMode(unittest.TestCase):
         rc = _main(["--query", "push ebx; mov eax, 5; pop ebx; ret", "--json"])
         self.assertEqual(rc, 0)
 
+    def test_load_config_parses_toml(self):
+        """find_client reads lsh_threshold/ngram_size from config.toml."""
+        import tempfile
+
+        from resembl.find_client import _load_config
+
+        cfg_dir = tempfile.mkdtemp()
+        with open(os.path.join(cfg_dir, "config.toml"), "w", encoding="utf-8") as f:
+            f.write("lsh_threshold = 0.7\nngram_size = 2\n")
+        with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": cfg_dir}):
+            cfg = _load_config()
+        self.assertEqual(cfg["lsh_threshold"], 0.7)
+        self.assertEqual(cfg["ngram_size"], 2)
+
+    def test_thin_client_sends_config_values(self):
+        """The thin client's request honors the CLI config (same results)."""
+        from unittest.mock import patch as _patch
+
+        from resembl.find_client import _main
+
+        captured: dict = {}
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"lsh_candidates": 0, "matches": []}'
+
+        def fake_urlopen(request, timeout=5):
+            captured["body"] = json.loads(request.data)
+            return _FakeResponse()
+
+        self._start_server()  # writes the port file
+        with _patch(
+            "resembl.find_client._load_config",
+            return_value={"lsh_threshold": 0.7, "ngram_size": 2},
+        ):
+            with _patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                rc = _main(["--query", "mov", "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["body"]["threshold"], 0.7)
+        self.assertEqual(captured["body"]["ngram_size"], 2)
+
     def test_find_batch_endpoint(self):
         """POST /find-batch returns per-query results matching single finds."""
         port = self._start_server()
