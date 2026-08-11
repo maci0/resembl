@@ -94,7 +94,10 @@ The `compare` command also reports control-flow graph similarity.
     Ctrl+C.  For repeated queries, the thin client
     `resembl-find --query "…"` (or `python -m resembl.find_client`) is the
     fastest path.  Requests run concurrently (each gets its own session);
-    the fingerprint migration and index build happen once at startup.
+    the fingerprint migration and index build happen once at startup, and a
+    restart skips rebuilding an index that is already current.  Starting a
+    second server for the same database is refused (as is an occupied
+    `--port`), with a clean error rather than a traceback.
 
 **reindex**
 :   Recalculate MinHash fingerprints for all snippets.
