@@ -1824,21 +1824,22 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 def db_verify(session: Session) -> dict:
     """Report the database's health: index, fingerprints, and pending work.
 
-    Returns a dict with counts plus an ``issues`` list.  The tool self-heals
-    (a missing index is rebuilt and a stale fingerprint version is reindexed
-    on the next ``find``), so an issue here means "work is pending", not
-    "broken" — except a bucket/snippet mismatch, which indicates a stale
-    index that ``reindex --force`` should resolve.
+    Returns a dict with counts, ``warnings`` (self-healing states: a missing
+    index or stale fingerprints, both repaired by the next ``find``) and
+    ``issues`` (a bucket/snippet mismatch — a genuinely stale index that
+    ``reindex --force`` should resolve).  Callers typically exit non-zero
+    only when ``issues`` is non-empty.
     """
     from .lsh import _banding_params, fingerprint_version_get, lsh_meta_get
     from .models import FINGERPRINT_VERSION
 
     num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    warnings: list[str] = []
     issues: list[str] = []
 
     stored_version = fingerprint_version_get(session)
     if stored_version != FINGERPRINT_VERSION:
-        issues.append(
+        warnings.append(
             "fingerprints are from an older format — the next `find` reindexes once"
         )
 
@@ -1846,7 +1847,7 @@ def db_verify(session: Session) -> dict:
     num_buckets = 0
     expected_buckets: int | None = None
     if meta is None:
-        issues.append("no LSH index — the next `find` builds it")
+        warnings.append("no LSH index — the next `find` builds it")
     else:
         threshold, num_perm = meta
         b, _r = _banding_params(threshold, num_perm)
@@ -1863,6 +1864,7 @@ def db_verify(session: Session) -> dict:
         "num_buckets": num_buckets,
         "expected_buckets": expected_buckets,
         "fingerprint_version": stored_version,
+        "warnings": warnings,
         "issues": issues,
     }
 

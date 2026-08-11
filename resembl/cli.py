@@ -772,10 +772,10 @@ def verify() -> None:
     """Verify database health (index, fingerprints, pending work).
 
     Reports the snippet/bucket counts, the fingerprint format version, and
-    any pending work (a missing index or stale fingerprints are healed
-    automatically by the next ``find``; a bucket/snippet mismatch means the
-    index is stale and ``reindex --force`` should run).  Exits 1 when
-    issues are found.
+    any pending work: a missing index or stale fingerprints are *warnings*
+    (healed automatically by the next ``find``); a bucket/snippet mismatch
+    is an *issue* (the index is stale — ``reindex --force`` should run).
+    Exits 1 only when issues are found.
     """
     result = db_verify(state.session)
     if state.format in ("json", "csv"):
@@ -797,11 +797,14 @@ def verify() -> None:
         )
         table.add_row("Fingerprint version", str(result["fingerprint_version"]))
         _echo(table)
+        for warning in result["warnings"]:
+            _echo(f"[yellow]• {warning}[/yellow]")
         if result["issues"]:
             for issue in result["issues"]:
-                _echo(f"[yellow]• {issue}[/yellow]")
+                _echo(f"[red]• {issue}[/red]")
             raise typer.Exit(code=1)
-        _echo("[green]All checks passed.[/green]")
+        if not result["warnings"]:
+            _echo("[green]All checks passed.[/green]")
 
 
 @app.command()

@@ -675,19 +675,29 @@ class TestFingerprintVersion(BaseScalingTest):
         self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
 
     def test_verify_reports_health(self):
-        """db_verify flags pending work, then is clean once built."""
+        """db_verify flags pending work as warnings, staleness as an issue."""
         from resembl.core import db_verify
 
         self._add(10)
         report = db_verify(self.session)
-        self.assertGreater(len(report["issues"]), 0)  # no index yet
+        # Fresh DB: self-healing states are warnings, not issues.
+        self.assertGreater(len(report["warnings"]), 0)
+        self.assertEqual(report["issues"], [])
         snippet_find_matches(
             self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
         )
         report = db_verify(self.session)
         self.assertEqual(report["issues"], [])
+        self.assertEqual(report["warnings"], [])
         self.assertEqual(report["num_buckets"], report["expected_buckets"])
         self.assertEqual(report["num_snippets"], 10)
+        # A partially emptied index (meta intact) is a real issue.
+        from sqlmodel import text
+
+        self.session.execute(text("DELETE FROM lsh_bucket WHERE band = 0"))
+        self.session.commit()
+        report = db_verify(self.session)
+        self.assertGreater(len(report["issues"]), 0)
 
     def test_merge_clears_stamp(self):
         """Merge copies source blobs verbatim — the stamp must be cleared."""
