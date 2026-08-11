@@ -90,6 +90,12 @@ def main() -> None:
     )
     parser.add_argument("--jobs", type=int, default=None)
     parser.add_argument("--keep", action="store_true")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for reproducible data + query selection.",
+    )
     args = parser.parse_args()
 
     num_files = args.num_files
@@ -103,7 +109,7 @@ def main() -> None:
         shutil.rmtree(args.data_dir)
 
     print(f"Generating {num_files} assembly files...")
-    generate_files(data_dir=args.data_dir, num_files=num_files)
+    generate_files(data_dir=args.data_dir, num_files=num_files, seed=args.seed)
 
     import_args = ["--quiet", "import", "--force"]
     if args.jobs:
@@ -119,6 +125,8 @@ def main() -> None:
     else:
         print("DB size / MinHash footprint: n/a (non-SQLite backend)")
 
+    if args.seed is not None:
+        random.seed(args.seed)
     query_file = os.path.join(
         args.data_dir, random.choice([f for f in os.listdir(args.data_dir)])
     )

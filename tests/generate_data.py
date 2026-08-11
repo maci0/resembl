@@ -107,12 +107,16 @@ def generate_control_flow_block(label_id: str, function_names: list[str]) -> lis
 # --- Main Generation Logic ---
 
 
-def _generate_one(args: tuple[str, int, int, str]) -> None:
+def _generate_one(args: tuple[str, int, int, str, int | None]) -> None:
     """Worker: generate and write a single function file.
 
-    Pure function (no shared state) so it can run in a process pool.
+    Pure function (no shared state) so it can run in a process pool.  With a
+    fixed seed, the global RNG is re-seeded per file (``seed + index``), so
+    the output is deterministic regardless of pool scheduling.
     """
-    name, i, num_files, data_dir = args
+    name, i, num_files, data_dir, seed = args
+    if seed is not None:
+        random.seed(seed + i)
     function_names_sample = [
         f"generated_func_{random.randrange(num_files):04d}" for _ in range(20)
     ]
@@ -166,12 +170,16 @@ def generate_files(
     data_dir: str = DEFAULT_DATA_DIR,
     num_files: int = DEFAULT_NUM_FILES,
     jobs: int | None = None,
+    seed: int | None = None,
 ):
     """Generate random assembly files in data_dir.
 
     Generation is embarrassingly parallel (each file is independent), so a
     process pool is used by default.  Pass ``jobs=1`` to force a single
-    process (e.g. inside a fork-sensitive environment).
+    process (e.g. inside a fork-sensitive environment).  A fixed *seed*
+    makes the output deterministic (reproducible benchmarks): each file
+    derives its randomness from ``seed + index``, so the pool order never
+    matters.
     """
     import multiprocessing as _mp
     from concurrent.futures import ProcessPoolExecutor
@@ -192,7 +200,9 @@ def generate_files(
         jobs = max(1, os.cpu_count() or 1) if num_files > 50_000 else 1
     jobs = min(jobs, max(1, num_files))
 
-    args = [(name, i, num_files, data_dir) for i, name in enumerate(function_names)]
+    args = [
+        (name, i, num_files, data_dir, seed) for i, name in enumerate(function_names)
+    ]
 
     if jobs == 1:
         for a in args:
