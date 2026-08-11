@@ -88,6 +88,7 @@ def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
     """
     return max(1, min(cpu_count, num_items // 100 + 1))
 
+
 # Reuse a single Pygments lexer instance across all calls.
 lexer = NasmLexer()
 
