@@ -437,6 +437,37 @@ class TestCLIServeLifecycle(BaseCLITest):
                     self.fail("serve did not exit after SIGTERM")
             self.assertFalse(os.path.exists(port_file), "stale port file left behind")
 
+    def test_second_serve_refuses_to_double_start(self):
+        """Starting serve twice for the same DB fails cleanly instead of orphaning."""
+        import hashlib
+
+        db_url = f"sqlite:///{self.db_name}"
+        with tempfile.TemporaryDirectory() as cache_dir:
+            digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+            port_file = os.path.join(cache_dir, f"server_{digest}.port")
+            first = self._start_serve(cache_dir)
+            try:
+                self._wait_for_port_file(port_file)
+                # Second serve must refuse (already running) with a clean error.
+                second = subprocess.run(
+                    ["python", "-m", "resembl.cli", "serve"],
+                    env=self._serve_env(cache_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(second.returncode, 0)
+                self.assertIn("already running", second.stderr)
+            finally:
+                first.terminate()
+                try:
+                    first.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    first.kill()
+                    first.wait(timeout=5)
+                    self.fail("first serve did not exit after SIGTERM")
+            self.assertFalse(os.path.exists(port_file))
+
 
 if __name__ == "__main__":
     unittest.main()

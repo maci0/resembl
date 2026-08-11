@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import socket
 import threading
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -179,6 +180,28 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     """
     from .database import create_db_engine
 
+    # Refuse to double-serve: if a port file exists for this database and a
+    # server is actually listening on it, another ``serve`` is already
+    # running.  Starting a second one would silently orphan the first — both
+    # bind different auto-ports, and find clients use the port file, which
+    # the last starter overwrites.  (A stale port file whose port is dead is
+    # ignored and replaced.)
+    port_file = server_port_path(db_url)
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            existing_port = int(f.read().strip())
+    except (OSError, ValueError):
+        existing_port = None  # no port file, or malformed
+    if existing_port is not None:
+        try:
+            with socket.create_connection(("127.0.0.1", existing_port), timeout=1):
+                raise ValueError(
+                    "another serve process is already running for this "
+                    f"database (port {existing_port})"
+                )
+        except OSError:
+            pass  # stale port file — nothing listening; we'll replace it
+
     # Larger than the default pool: requests run one thread per connection,
     # and the default (5 + 10 overflow) was exhausted under concurrent load,
     # timing requests out after 30s.  SQLite in WAL mode handles many
@@ -203,7 +226,6 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
 
     _FindHandler.engine = engine
     httpd = ThreadingHTTPServer((host, port), _FindHandler)
-    port_file = server_port_path(db_url)
     os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(str(httpd.server_address[1]))

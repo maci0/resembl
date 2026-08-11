@@ -337,7 +337,11 @@ def serve(
             "unauthenticated find service.[/yellow]"
         )
     _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
-    httpd = serve_start(db_url, host=host, port=port)
+    try:
+        httpd = serve_start(db_url, host=host, port=port)
+    except ValueError as e:
+        err_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
 
     # Service managers (systemd, Docker stop, kill) send SIGTERM, whose
