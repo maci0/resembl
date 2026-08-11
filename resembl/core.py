@@ -1666,6 +1666,16 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
     }
 
 
+def _random_expr(session: Session):
+    """Return a dialect-portable random expression for ``ORDER BY`` sampling.
+
+    PostgreSQL/SQLite/DuckDB use ``random()``; MySQL/MariaDB use ``rand()``.
+    """
+    if session.get_bind().dialect.name == "mysql":
+        return func.rand()  # type: ignore[attr-defined]
+    return func.random()  # type: ignore[attr-defined]
+
+
 def db_calculate_average_similarity(session: Session, sample_size: int = 100) -> float:
     """Estimate average Jaccard similarity from a random sample."""
     count = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
@@ -1675,7 +1685,7 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     if count > sample_size:
         # Random sample directly in SQL — no need to load the whole table.
         sample_snippets = session.exec(
-            select(Snippet).order_by(func.random()).limit(sample_size)  # type: ignore[attr-defined]
+            select(Snippet).order_by(_random_expr(session)).limit(sample_size)
         ).all()
     else:
         sample_snippets = list(Snippet.get_all(session))
@@ -1716,7 +1726,7 @@ def db_stats(session: Session) -> dict:
     # constant-time at scale (tokenizing every code took ~1 min at 500k).
     # For small databases the sample is the whole corpus (exact).
     sample_codes = session.exec(
-        select(Snippet.code).order_by(func.random()).limit(2000)  # type: ignore[attr-defined]
+        select(Snippet.code).order_by(_random_expr(session)).limit(2000)
     ).all()
     all_tokens: set[str] = set()
     for code in sample_codes:

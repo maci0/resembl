@@ -215,6 +215,12 @@ default values. Set `RESEMBL_CONFIG_DIR` to override this location.
 | `jaccard_weight`  | `0.4`   | Weight of Jaccard similarity in the hybrid score (0.0–1.0). |
 | `format`          | `table` | Default output format (`table`, `json`, or `csv`). |
 
+The database backend is selected with the `DATABASE_URL` environment
+variable: SQLite (default, `sqlite:///assembly.db`), PostgreSQL
+(`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+mysqlconnector://…`), or
+DuckDB (`duckdb:///file.db` via `duckdb-engine`).  See
+[Using a Custom Database](docs/custom_database.md) for details.
+
 **Example `config.toml`:**
 ```toml
 lsh_threshold = 0.8

@@ -59,11 +59,76 @@ _INSERT_PG = (
     "VALUES (:band, :bucket, :checksum) ON CONFLICT DO NOTHING"
 )
 
+_INSERT_MYSQL = (
+    "INSERT IGNORE INTO lsh_bucket (band, bucket, checksum) "
+    "VALUES (:band, :bucket, :checksum)"
+)
+
+#: Upsert variants for the single-row ``lsh_meta`` / ``app_meta`` upserts.
+_META_UPSERT_SQLITE_PG = (
+    "INSERT INTO lsh_meta (id, threshold, num_perm) VALUES (1, :t, :n) "
+    "ON CONFLICT(id) DO UPDATE SET threshold = :t, num_perm = :n"
+)
+_META_UPSERT_MYSQL = (
+    "INSERT INTO lsh_meta (id, threshold, num_perm) VALUES (1, :t, :n) "
+    "ON DUPLICATE KEY UPDATE threshold = :t, num_perm = :n"
+)
+_META_UPSERT_DUCKDB = (
+    "INSERT INTO lsh_meta (id, threshold, num_perm) VALUES (1, :t, :n) "
+    "ON CONFLICT (id) DO UPDATE SET threshold = :t, num_perm = :n"
+)
+
+_VERSION_UPSERT_SQLITE_PG = (
+    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "ON CONFLICT(key) DO UPDATE SET value = :v"
+)
+_VERSION_UPSERT_MYSQL = (
+    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "ON DUPLICATE KEY UPDATE value = :v"
+)
+_VERSION_UPSERT_DUCKDB = (
+    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "ON CONFLICT (key) DO UPDATE SET value = :v"
+)
+
+
+def dialect_name(session: Session) -> str:
+    """Return the SQLAlchemy dialect name of the session's connection."""
+    return session.get_bind().dialect.name
+
 
 def _insert_sql(session: Session) -> str:
-    """Return the dialect-appropriate upsert-ignore statement."""
-    dialect = session.get_bind().dialect.name
-    return _INSERT_PG if dialect == "postgresql" else _INSERT_SQLITE
+    """Return the dialect-appropriate upsert-ignore statement.
+
+    SQLite: ``INSERT OR IGNORE``; MySQL/MariaDB: ``INSERT IGNORE``;
+    PostgreSQL/DuckDB: ``ON CONFLICT DO NOTHING``.
+    """
+    dialect = dialect_name(session)
+    if dialect == "mysql":
+        return _INSERT_MYSQL
+    if dialect in ("postgresql", "duckdb"):
+        return _INSERT_PG
+    return _INSERT_SQLITE
+
+
+def _meta_upsert_sql(session: Session) -> str:
+    """Return the dialect-appropriate single-row upsert for ``lsh_meta``."""
+    dialect = dialect_name(session)
+    if dialect == "mysql":
+        return _META_UPSERT_MYSQL
+    if dialect == "duckdb":
+        return _META_UPSERT_DUCKDB
+    return _META_UPSERT_SQLITE_PG
+
+
+def _version_upsert_sql(session: Session) -> str:
+    """Return the dialect-appropriate upsert for the ``app_meta`` key."""
+    dialect = dialect_name(session)
+    if dialect == "mysql":
+        return _VERSION_UPSERT_MYSQL
+    if dialect == "duckdb":
+        return _VERSION_UPSERT_DUCKDB
+    return _VERSION_UPSERT_SQLITE_PG
 
 
 def table_ensure(session: Session) -> None:
@@ -84,13 +149,7 @@ def lsh_meta_get(session: Session) -> tuple[float, int] | None:
 
 def lsh_meta_set(session: Session, threshold: float, num_perm: int) -> None:
     """Record that ``lsh_bucket`` holds a complete index (id = 1)."""
-    session.execute(
-        text(
-            "INSERT INTO lsh_meta (id, threshold, num_perm) VALUES (1, :t, :n) "
-            "ON CONFLICT(id) DO UPDATE SET threshold = :t, num_perm = :n"
-        ),
-        {"t": threshold, "n": num_perm},
-    )
+    session.execute(text(_meta_upsert_sql(session)), {"t": threshold, "n": num_perm})
     session.commit()
 
 
@@ -111,10 +170,7 @@ def fingerprint_version_get(session: Session) -> int | None:
 def fingerprint_version_set(session: Session, version: int) -> None:
     """Stamp the fingerprint-format version (current algorithm)."""
     session.execute(
-        text(
-            "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
-            "ON CONFLICT(key) DO UPDATE SET value = :v"
-        ),
+        text(_version_upsert_sql(session)),
         {"v": str(version)},
     )
     session.commit()
@@ -126,7 +182,7 @@ def fingerprint_version_clear(session: Session) -> None:
     session.commit()
 
 
-def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[bytes]:
+def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:
     """Compute the bucket key for each band of a packed fingerprint.
 
     ``packed`` is a ``minhash_pack`` blob (magic + num_perm + uint32 values).
@@ -137,6 +193,10 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[bytes]:
     plain bytes slicing (C-level) rather than per-band ``struct`` packing —
     ~3.6x faster, which matters because the index build calls this once per
     band per snippet (12.5M+ times at 500k snippets).
+
+    Keys are returned as fixed-width lowercase hex strings (20 bytes ->
+    40 chars).  Every supported database can index a string column, whereas
+    a raw ``BLOB`` column cannot be part of a primary key on MySQL/MariaDB.
 
     Malformed blobs (bad header, wrong permutation count) raise
     ``ValueError`` rather than low-level ``struct`` errors.
@@ -150,7 +210,7 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[bytes]:
         )
     step = 4 * r
     base = 8
-    return [packed[base + i * step : base + (i + 1) * step] for i in range(b)]
+    return [packed[base + i * step : base + (i + 1) * step].hex() for i in range(b)]
 
 
 class ResemblLSH:
@@ -188,7 +248,7 @@ class ResemblLSH:
             return minhash_pack(value)
         return value  # type: ignore[return-value]
 
-    def _buckets(self, packed: bytes) -> list[bytes]:
+    def _buckets(self, packed: bytes) -> list[str]:
         return band_buckets(packed, self.num_perm, self.b, self.r)
 
     # -- mutation ----------------------------------------------------------

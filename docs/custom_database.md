@@ -4,6 +4,23 @@ The `resembl` library is designed to be flexible, allowing you to integrate it w
 
 This guide will walk you through the process of using `resembl` with a custom database managed by your application.
 
+## Supported Databases
+
+Set `DATABASE_URL` (or pass a URL to `create_db_engine`) to point the CLI
+at a different backend.  The dialect-specific SQL (bucket upserts, single-row
+metadata upserts, random sampling) is selected automatically:
+
+| Database    | `DATABASE_URL` example                                      | Notes |
+|-------------|-------------------------------------------------------------|-------|
+| SQLite      | `sqlite:///assembly.db` (default)                           | WAL mode, band-major builds — the reference backend. |
+| PostgreSQL  | `postgresql+pg8000://user:pass@host:5432/db`                | `ON CONFLICT DO NOTHING`; integration-tested in CI.  Any PG driver works (`psycopg2`, `pg8000`, …). |
+| MySQL/MariaDB | `mysql+mysqlconnector://user:pass@host:3306/db`            | `INSERT IGNORE` / `ON DUPLICATE KEY UPDATE`.  Bucket keys are stored as indexable hex strings (a raw `BLOB` cannot be a primary key on MySQL). |
+| DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas. |
+
+The schema is portable: string primary keys carry explicit lengths and long
+text columns use `TEXT`, so `SQLModel.metadata.create_all` emits valid DDL on
+all of the above (pinned by `tests/test_pg_dialect.py`).
+
 ## The Key Principle: SQLModel Metadata
 
 The magic behind this flexibility lies in how `SQLModel` manages database schemas. When you import a model class that inherits from `SQLModel` (like `resembl.models.Snippet`), it registers its schema with a central `SQLModel.metadata` object.

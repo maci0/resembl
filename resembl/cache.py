@@ -126,7 +126,7 @@ def lsh_index_build(
     # the (band, bucket, checksum) primary key grows by sequential append
     # instead of random probe — random inserts into a deep b-tree decay badly
     # (measured ~4x slower by the tail of a 12.5M-row build).
-    band_rows: list[list[tuple[bytes, str]]] = [[] for _ in range(lsh.b)]
+    band_rows: list[list[tuple[str, str]]] = [[] for _ in range(lsh.b)]
 
     def flush_band(band: int) -> None:
         pairs = sorted(band_rows[band])

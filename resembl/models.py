@@ -10,6 +10,7 @@ from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, Session, SQLModel, select
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ def minhash_ensure_packed(data: bytes) -> bytes:
 class Collection(SQLModel, table=True):  # type: ignore
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 
-    name: str = Field(primary_key=True)
+    name: str = Field(primary_key=True, max_length=128)
     description: str = ""
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -176,8 +177,8 @@ class SnippetVersion(SQLModel, table=True):  # type: ignore
     """A historical version of a snippet's code."""
 
     id: int | None = Field(default=None, primary_key=True)
-    snippet_checksum: str = Field(index=True)
-    code: str
+    snippet_checksum: str = Field(index=True, max_length=64)
+    code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -198,12 +199,12 @@ class SnippetVersion(SQLModel, table=True):  # type: ignore
 class Snippet(SQLModel, table=True):  # type: ignore
     """Model representing a stored assembly snippet."""
 
-    checksum: str = Field(primary_key=True)
-    names: str  # JSON-encoded list of strings
-    code: str
+    checksum: str = Field(primary_key=True, max_length=64)
+    names: str = Field(sa_column=Column(Text, nullable=False))  # JSON-encoded list
+    code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
-    tags: str = Field(default="[]")
-    collection: str | None = Field(default=None, index=True)
+    tags: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    collection: str | None = Field(default=None, index=True, max_length=128)
 
     @property
     def name_list(self) -> list[str]:
@@ -315,13 +316,17 @@ class LSHBucket(SQLModel, table=True):  # type: ignore
     the buckets the query lands in, so lookups stay fast regardless of how
     many snippets are indexed, and no full in-memory index needs to be
     pickled to disk.
+
+    ``bucket`` is a fixed-width lowercase hex encoding of the band (20 bytes
+    -> 40 chars), which every supported database can index — a raw ``BLOB``
+    column cannot be part of a primary key on MySQL/MariaDB.
     """
 
     __tablename__ = "lsh_bucket"  # noqa: N815
 
     band: int = Field(primary_key=True)
-    bucket: bytes = Field(primary_key=True)
-    checksum: str = Field(primary_key=True, index=True)
+    bucket: str = Field(primary_key=True, max_length=40)
+    checksum: str = Field(primary_key=True, max_length=64, index=True)
 
 
 class LSHMeta(SQLModel, table=True):  # type: ignore
@@ -340,11 +345,12 @@ class LSHMeta(SQLModel, table=True):  # type: ignore
 
 
 #: Version of the fingerprint algorithm.  Bumped whenever stored MinHash
-#: blobs would differ from a re-computation (e.g. the weighted-shingling
-#: fix).  The value is stamped into ``app_meta`` by index builds/reindexes;
-#: a mismatch makes ``find`` reindex the database once instead of silently
-#: matching old fingerprints against new query fingerprints.
-FINGERPRINT_VERSION = 2
+#: blobs or bucket keys would differ from a re-computation (e.g. the
+#: weighted-shingling fix, or the switch to hex-encoded bucket keys).  The
+#: value is stamped into ``app_meta`` by index builds/reindexes; a mismatch
+#: makes ``find`` reindex the database once instead of silently matching old
+#: fingerprints against new query fingerprints.
+FINGERPRINT_VERSION = 3
 
 
 class AppMeta(SQLModel, table=True):  # type: ignore
@@ -352,5 +358,5 @@ class AppMeta(SQLModel, table=True):  # type: ignore
 
     __tablename__ = "app_meta"  # noqa: N815
 
-    key: str = Field(primary_key=True)
-    value: str
+    key: str = Field(primary_key=True, max_length=64)
+    value: str = Field(sa_column=Column(Text, nullable=False))
