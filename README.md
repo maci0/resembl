@@ -355,7 +355,9 @@ Key properties that keep these numbers flat as the database grows:
   bounded memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the
   snippet is lexed once (the checksum string and the MinHash tokens are derived from the same token
   stream), the MinHash permutations are cloned from a cached template instead of regenerated
-  (~260 µs saved), and the write path is a raw ``executemany`` bulk insert.
+  (~260 µs saved), and the write path is a parameterized ``executemany`` bulk insert (multi-row
+  `VALUES` statements on DuckDB — see below).  The default worker count is adaptive (one worker per
+  ~100 files, capped at the CPU count), so small directories never pay the per-worker spawn cost.
 - **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
   incrementally — `add`/`rm` never trigger a full rebuild.  *Note:* the weighted-shingling fix
   (rare-instruction shingles now really boost the signature) changed the fingerprint format; the
@@ -371,7 +373,10 @@ Key properties that keep these numbers flat as the database grows:
   that never touch fingerprints (`list`, `stats`, `export`, …) skip ~200 ms of startup.
 - **Instant warm finds with `serve`**: start `resembl serve` once and `find` (or the stdlib-only
   `resembl-find` client) answers in ~40 ms instead of ~450 ms — the interpreter and libraries stay
-  warm in the server process.  The port file lives in the cache directory and is cleaned up on exit.
+  warm in the server process (measured 74 ms end to end at 5k snippets on a loaded machine).  The
+  port file lives in the cache directory and is cleaned up on exit; a second `serve` for the same
+  database is refused, restarts skip rebuilding a current index, and a slow-but-alive server's port
+  file survives client timeouts.
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses
