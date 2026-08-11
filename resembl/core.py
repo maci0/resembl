@@ -1206,6 +1206,28 @@ def _snippets_by_checksums(
     return result
 
 
+def _snippet_minhashes_by_checksums(
+    session: Session, checksums: list[str]
+) -> dict[str, bytes]:
+    """Fetch only ``(checksum, minhash)`` pairs for many checksums.
+
+    The ``code`` column dominates the table, so reading it for every LSH
+    candidate would pull megabytes of text through the ORM per query even
+    though most candidates are pruned before they are ever Levenshtein-
+    scored.  The find hot path reads just the fingerprints here, vectorizes
+    the Jaccard pass, and only then fetches full rows for the survivors.
+    """
+    result: dict[str, bytes] = {}
+    for chunk in _checksum_chunks(list(checksums)):
+        for row in session.exec(
+            select(Snippet.checksum, Snippet.minhash).where(  # type: ignore[attr-defined]
+                Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
+            )
+        ).all():
+            result[row[0]] = row[1]
+    return result
+
+
 def _snippet_code_batches(
     session: Session, batch_size: int = 500
 ) -> Iterator[list[Snippet]]:
@@ -1413,39 +1435,52 @@ def snippet_find_matches(
     if top_n <= 0:
         return len(candidate_keys), []
 
-    # Fetch all candidates with chunked IN queries instead of one lookup per key.
-    candidate_map = _snippets_by_checksums(session, list(candidate_keys))
-    candidates = list(candidate_map.values())
+    # Fetch only the fingerprint columns for every candidate first — the
+    # ``code`` column dominates the table, and most candidates are pruned
+    # before they are ever Levenshtein-scored, so loading full rows for all
+    # of them would move megabytes of text through the ORM per query.
+    keys = list(candidate_keys)
+    minhashes = _snippet_minhashes_by_checksums(session, keys)
 
     # Jaccard is computed directly from the packed fingerprints (no MinHash
     # object construction), vectorized across all candidates in one numpy
-    # pass over the (N, 128) uint32 array — SIMD under the hood — instead of
-    # a per-blob struct-unpack + Python equality loop per candidate.  This
-    # is what keeps find fast when a query lands in a crowded band (thousands
+    # pass over the (N, 128) uint32 array — SIMD under the hood.  This is
+    # what keeps find fast when a query lands in a crowded band (thousands
     # of candidates at scale).
     query_minhash_bytes = minhash_pack(query_minhash)
-    jaccards = minhash_jaccard_batch(
-        query_minhash_bytes, [snippet.minhash for snippet in candidates]
-    )
+    jaccards = minhash_jaccard_batch(query_minhash_bytes, [minhashes[k] for k in keys])
 
     # Hybrid score (Jaccard + Levenshtein) with an early exit: since
     # ``hybrid = 40 * jaccard + 0.6 * levenshtein`` and levenshtein <= 100,
     # a candidate whose upper bound ``40 * jaccard + 60`` is strictly below
     # the current n-th best hybrid can never enter the top-n — it skips the
-    # ``fuzz.ratio`` call entirely (rapidfuzz is fast, but it is per-candidate
-    # Python work that dwarfs the vectorized jaccard pass when candidates run
-    # into the thousands).  The heap keeps the top-n by (hybrid, insertion
-    # index), and the final sort replicates the previous full stable sort, so
-    # the returned matches are bit-for-bit identical to scoring everything.
+    # ``fuzz.ratio`` call and the full-row fetch entirely.  Candidates are
+    # processed in descending jaccard order so the bound only shrinks: once
+    # one candidate is pruned, the rest of the list is provably pruned too,
+    # and no further rows are fetched at all.  Full rows are loaded in small
+    # chunks, and the heap keeps the top-n by (hybrid, insertion index) with
+    # a final sort that replicates a stable sort, so the returned matches
+    # are identical to scoring and fetching everything.
+    order = sorted(range(len(keys)), key=lambda i: jaccards[i], reverse=True)
     scored: list[tuple[float, int, Snippet]] = []
-    for idx, (snippet, jaccard) in enumerate(zip(candidates, jaccards)):
-        if scored and len(scored) >= top_n and 40 * jaccard + 60 < scored[0][0]:
-            continue
-        levenshtein = fuzz.ratio(query_string, snippet.code)
-        hybrid = score_hybrid(jaccard, levenshtein)
-        heapq.heappush(scored, (hybrid, idx, snippet))
-        if len(scored) > top_n:
-            heapq.heappop(scored)
+    for start in range(0, len(order), 64):
+        batch = order[start : start + 64]
+        # Best possible hybrid in this batch cannot beat the current top-n.
+        if len(scored) >= top_n and 40 * jaccards[batch[0]] + 60 < scored[0][0]:
+            break
+        full_rows = _snippets_by_checksums(session, [keys[i] for i in batch])
+        for i in batch:
+            snippet = full_rows.get(keys[i])
+            if snippet is None:
+                continue  # deleted concurrently between the two fetches
+            jaccard = jaccards[i]
+            if len(scored) >= top_n and 40 * jaccard + 60 < scored[0][0]:
+                continue
+            levenshtein = fuzz.ratio(query_string, snippet.code)
+            hybrid = score_hybrid(jaccard, levenshtein)
+            heapq.heappush(scored, (hybrid, i, snippet))
+            if len(scored) > top_n:
+                heapq.heappop(scored)
     scored.sort(key=lambda t: (-t[0], t[1]))
     top_matches = [(snippet, hybrid) for hybrid, _idx, snippet in scored[:top_n]]
 
