@@ -53,6 +53,7 @@ from .models import (
     minhash_ensure_packed,
     minhash_jaccard,
     minhash_jaccard_batch,
+    minhash_num_perm,
     minhash_pack,
 )
 
@@ -1093,17 +1094,24 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
 
 
 def code_create_minhash(
-    code_snippet: str, normalize: bool = True, ngram_size: int = 3
+    code_snippet: str,
+    normalize: bool = True,
+    ngram_size: int = 3,
+    num_perm: int = NUM_PERMUTATIONS,
 ) -> MinHash:
     """Return a MinHash object representing the given code snippet.
 
     Uses configurable n-gram shingling to preserve token ordering so that
     structurally different snippets produce distinct fingerprints.
     """
-    return _minhash_from_tokens(code_tokenize(code_snippet, normalize), ngram_size)
+    return _minhash_from_tokens(
+        code_tokenize(code_snippet, normalize), ngram_size, num_perm
+    )
 
 
-def _minhash_from_tokens(tokens: list[str], ngram_size: int = 3) -> MinHash:
+def _minhash_from_tokens(
+    tokens: list[str], ngram_size: int = 3, num_perm: int = NUM_PERMUTATIONS
+) -> MinHash:
     """Build a MinHash from an already-tokenized snippet.
 
     Shares the shingling/weighting logic with :func:`code_create_minhash`
@@ -1114,7 +1122,7 @@ def _minhash_from_tokens(tokens: list[str], ngram_size: int = 3) -> MinHash:
     """
     from .models import minhash_new
 
-    m = minhash_new(NUM_PERMUTATIONS)
+    m = minhash_new(num_perm)
     if not tokens:
         return m
     if len(tokens) < ngram_size:
@@ -1141,7 +1149,10 @@ def _minhash_from_tokens(tokens: list[str], ngram_size: int = 3) -> MinHash:
 
 
 def code_create_minhash_batch(
-    snippets: list[str], normalize: bool = True, ngram_size: int = 3
+    snippets: list[str],
+    normalize: bool = True,
+    ngram_size: int = 3,
+    num_perm: int = NUM_PERMUTATIONS,
 ) -> list[MinHash]:
     """Create MinHash objects for multiple code snippets in batch.
 
@@ -1153,7 +1164,7 @@ def code_create_minhash_batch(
     results: list[MinHash] = []
     for code_snippet in snippets:
         tokens = code_tokenize(code_snippet, normalize)
-        results.append(_minhash_from_tokens(tokens, ngram_size))
+        results.append(_minhash_from_tokens(tokens, ngram_size, num_perm))
     return results
 
 
@@ -1471,6 +1482,7 @@ def snippet_find_matches(
     threshold: float | None = None,
     normalize: bool = True,
     ngram_size: int = 3,
+    num_permutations: int = NUM_PERMUTATIONS,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string.
@@ -1482,28 +1494,42 @@ def snippet_find_matches(
         threshold = LSH_THRESHOLD
 
     # Fingerprint-format migration: if the stored blobs were written by an
-    # older algorithm (stamp missing or outdated), recompute them once so
-    # queries never silently match old fingerprints against new ones.
+    # older algorithm (stamp missing or outdated), or with a different
+    # permutation count than requested (the config's num_permutations),
+    # recompute them once so queries never silently mix fingerprint formats.
     # Reindexing current-format blobs is idempotent (identical fingerprints).
-    if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+    needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
+    if not needs_reindex and num_permutations != NUM_PERMUTATIONS:
+        # A non-default permutation count must match the stored blobs; the
+        # version stamp does not cover perm-count changes, so probe one blob.
+        blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
+        if blob is not None:
+            try:
+                needs_reindex = minhash_num_perm(blob) != num_permutations
+            except ValueError:
+                needs_reindex = True  # corrupt blob — a reindex heals it
+    if needs_reindex:
         num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
         db_reindex(
             session,
             ngram_size=ngram_size,
             jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+            num_perm=num_permutations,
             progress=progress,
         )
 
-    lsh = lsh_cache_load(session, threshold, NUM_PERMUTATIONS)
+    lsh = lsh_cache_load(session, threshold, num_permutations)
     if not lsh:
-        lsh = lsh_index_build(session, threshold, NUM_PERMUTATIONS, progress=progress)
+        lsh = lsh_index_build(session, threshold, num_permutations, progress=progress)
         if lsh:
-            lsh_cache_save(session, lsh, threshold, NUM_PERMUTATIONS)
+            lsh_cache_save(session, lsh, threshold, num_permutations)
 
     if lsh is None:
         return 0, []  # Error handled in build_lsh_index
 
-    query_minhash = code_create_minhash(query_string, normalize, ngram_size=ngram_size)
+    query_minhash = code_create_minhash(
+        query_string, normalize, ngram_size=ngram_size, num_perm=num_permutations
+    )
     if isinstance(lsh, ResemblLSH):
         # DB-backed index queries against the packed fingerprint.
         candidate_keys = lsh.query(minhash_pack(query_minhash))
@@ -1647,14 +1673,17 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     }
 
 
-def _reindex_prepare(args: tuple[list[str], int]) -> list[bytes]:
+def _reindex_prepare(args: tuple[list[str], int, int]) -> list[bytes]:
     """Worker: recompute packed fingerprints for a batch of codes.
 
     Pure function (no database access) so it can run in a process pool.
     """
-    codes, ngram_size = args
+    codes, ngram_size, num_perm = args
     return [
-        minhash_pack(m) for m in code_create_minhash_batch(codes, ngram_size=ngram_size)
+        minhash_pack(m)
+        for m in code_create_minhash_batch(
+            codes, ngram_size=ngram_size, num_perm=num_perm
+        )
     ]
 
 
@@ -1663,6 +1692,7 @@ def db_reindex(
     ngram_size: int = 3,
     batch_size: int = 500,
     jobs: int = 1,
+    num_perm: int = NUM_PERMUTATIONS,
     progress: Callable[[int, int], None] | None = None,
 ) -> dict:
     """Recalculate the MinHash for every snippet in the database.
@@ -1748,7 +1778,12 @@ def db_reindex(
                 for batch in _snippet_code_batches(session, batch_size):
                     codes = [snippet.code for snippet in batch]
                     in_flight.append(
-                        (batch, executor.submit(_reindex_prepare, (codes, ngram_size)))
+                        (
+                            batch,
+                            executor.submit(
+                                _reindex_prepare, (codes, ngram_size, num_perm)
+                            ),
+                        )
                     )
                     if len(in_flight) >= max_in_flight:
                         pending_batch, future = in_flight.popleft()
@@ -1766,11 +1801,11 @@ def db_reindex(
             batches_since_commit = 0
             for batch in _snippet_code_batches(session, batch_size):
                 codes = [snippet.code for snippet in batch]
-                apply_batch(batch, _reindex_prepare((codes, ngram_size)))
+                apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     else:
         for batch in _snippet_code_batches(session, batch_size):
             codes = [snippet.code for snippet in batch]
-            apply_batch(batch, _reindex_prepare((codes, ngram_size)))
+            apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     session.commit()
     # Fingerprints are now current — stamp the format version so `find`
     # does not reindex again.

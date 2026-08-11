@@ -94,6 +94,7 @@ def _main(argv: list[str] | None = None) -> int:
         args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
     )
     effective_ngram = int(cfg.get("ngram_size", 3))
+    effective_perm = int(cfg.get("num_permutations", 128))
 
     body = json.dumps(
         {
@@ -102,6 +103,7 @@ def _main(argv: list[str] | None = None) -> int:
             "threshold": effective_threshold,
             "normalize": not args.no_normalization,
             "ngram_size": effective_ngram,
+            "num_permutations": effective_perm,
         }
     ).encode("utf-8")
     request = urllib.request.Request(

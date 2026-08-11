@@ -44,6 +44,11 @@ _RESULT_CACHE_MAX = 128
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
 
+#: Threshold / permutation count the server pre-warms with (set from the CLI
+#: config at startup, so served results match in-process find).
+_SERVER_THRESHOLD = 0.5
+_SERVER_NUM_PERM = 128
+
 
 def _db_version(session: Session) -> int | None:
     """Return a DB-change counter for cache invalidation (SQLite only)."""
@@ -62,6 +67,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
         body.get("threshold"),
         bool(body.get("normalize", True)),
         int(body.get("ngram_size", 3)),
+        int(body.get("num_permutations", _SERVER_NUM_PERM)),
     )
     version = _db_version(session)
     if version is not None:
@@ -70,7 +76,9 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
             if entry is not None and entry[0] == version:
                 _RESULT_CACHE.move_to_end(key)
                 return entry[1]
-    num_candidates, matches = snippet_find_matches(session, query, *key[1:])
+    num_candidates, matches = snippet_find_matches(
+        session, query, *key[1:5], num_permutations=key[5]
+    )
     payload = {
         "lsh_candidates": num_candidates,
         "matches": [
@@ -208,10 +216,32 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # concurrent readers fine.
     engine = create_db_engine(db_url, pool_size=32, max_overflow=64)
     with Session(engine) as session:
+        # Honor the CLI config: the server answers with the same threshold /
+        # permutation count as in-process find, so clients using the same
+        # config get warm cache hits instead of per-request rebuilds.
+        global _SERVER_THRESHOLD, _SERVER_NUM_PERM
+        from .config import load_config
+
+        cfg = load_config()
+        _SERVER_THRESHOLD = float(cfg.get("lsh_threshold", LSH_THRESHOLD))
+        _SERVER_NUM_PERM = int(cfg.get("num_permutations", NUM_PERMUTATIONS))
+
         # One-time migration + index build, before any request is served.
         # The migration worker count scales with the database (spawning a
         # worker per CPU for a small database costs more than the work).
-        if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+        needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
+        if not needs_reindex and _SERVER_NUM_PERM != NUM_PERMUTATIONS:
+            from sqlmodel import func, select
+
+            from .models import Snippet, minhash_num_perm
+
+            blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
+            if blob is not None:
+                try:
+                    needs_reindex = minhash_num_perm(blob) != _SERVER_NUM_PERM
+                except ValueError:
+                    needs_reindex = True  # corrupt blob — reindex heals it
+        if needs_reindex:
             from sqlmodel import func, select
 
             from .core import adaptive_worker_count
@@ -221,6 +251,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
             db_reindex(
                 session,
                 jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+                num_perm=_SERVER_NUM_PERM,
             )
         # Build the index only if it is missing or was built with different
         # parameters — rebuilding an already-current index on every restart
@@ -231,10 +262,10 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         meta = lsh_meta_get(session)
         if (
             meta is None
-            or abs(meta[0] - LSH_THRESHOLD) > 1e-9
-            or meta[1] != NUM_PERMUTATIONS
+            or abs(meta[0] - _SERVER_THRESHOLD) > 1e-9
+            or meta[1] != _SERVER_NUM_PERM
         ):
-            lsh_index_build(session, LSH_THRESHOLD, NUM_PERMUTATIONS)
+            lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
 
     _FindHandler.engine = engine
     httpd = ThreadingHTTPServer((host, port), _FindHandler)

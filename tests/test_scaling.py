@@ -696,6 +696,33 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(stats["num_snippets"], 30)
         self.assertIsInstance(stats["avg_jaccard_similarity"], float)
 
+    def test_custom_num_permutations_honored(self):
+        """A non-default perm count builds at that count, with no rebuild loop.
+
+        The config's num_permutations used to be inert (the build always used
+        the 128 constant) while the CLI's meta check compared against the
+        config — so a non-default setting rebuilt the index on every find.
+        """
+        self._add(20, "perm")
+        n, m = snippet_find_matches(
+            self.session,
+            "MOV EAX, 5; ADD EBX, 5; RET",
+            top_n=3,
+            num_permutations=64,
+        )
+        self.assertGreaterEqual(n, 0)
+        self.assertEqual(lsh_meta_get(self.session)[1], 64)
+        # Stored blobs were reindexed at 64 (the migration reindexes on a
+        # perm-count change), so the second find does not rebuild.
+        n2, m2 = snippet_find_matches(
+            self.session,
+            "MOV EAX, 5; ADD EBX, 5; RET",
+            top_n=3,
+            num_permutations=64,
+        )
+        self.assertEqual(lsh_meta_get(self.session)[1], 64)
+        self.assertEqual(n2, n)
+
     def test_build_reports_progress(self):
         """The build invokes the progress callback with (done, total)."""
         self._add(50, "p")

@@ -1075,6 +1075,7 @@ def find(
         effective_threshold,
         not no_normalization,
         ngram_size=ngram_size,
+        num_permutations=cast(int, state.config.get("num_permutations", 128)),
         progress=build_progress,
     )
 
@@ -1153,6 +1154,7 @@ def find_batch(
                 effective_top_n,
                 effective_threshold,
                 ngram_size=ngram_size,
+                num_permutations=cast(int, state.config.get("num_permutations", 128)),
             )
             results.append(
                 {
