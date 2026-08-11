@@ -73,7 +73,10 @@ The `compare` command also reports control-flow graph similarity.
 
 **import** *PATH* [--jobs N]
 :   Import `.asm` / `.txt` files from a directory (subdirectories are
-    included automatically).
+    included automatically).  The default worker count is adaptive — one
+    worker per ~100 files, capped at the CPU count — so small directories
+    stay single-process (spawning each worker costs ~450 ms of interpreter
+    startup) while large ones parallelize fully.
 
 **export** *DIRECTORY* [--format json|asm]
 :   Export all snippets to a directory.

@@ -318,6 +318,20 @@ class TestCLIShowCommand(BaseCLITest):
         self.assertNotEqual(result.returncode, 0)
 
 
+class TestImportJobs(BaseCLITest):
+    """The adaptive default worker count for imports."""
+
+    def test_default_jobs_scales_with_directory(self):
+        from resembl.cli import _default_import_jobs as d
+
+        self.assertEqual(d(0, 32), 1)
+        self.assertEqual(d(50, 32), 1)  # small dirs: no pool spawn at all
+        self.assertEqual(d(300, 32), 4)
+        self.assertEqual(d(1000, 32), 11)
+        self.assertEqual(d(10000, 32), 32)  # large dirs: capped at CPU count
+        self.assertEqual(d(10_000, 4), 4)
+
+
 class TestCLIServeLifecycle(BaseCLITest):
     """End-to-end: a real ``resembl serve`` subprocess answers warm finds.
 

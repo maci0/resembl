@@ -519,6 +519,19 @@ def export_yara_cmd(
     _echo(table)
 
 
+def _default_import_jobs(num_files: int, cpu_count: int) -> int:
+    """Choose the default worker count for an import.
+
+    One worker per CPU is wasteful for small directories: spawning each
+    ``spawn`` worker costs the full interpreter + library import (~450 ms
+    and ~50 MB), so a 300-file import measured 1.85 s with 32 workers vs
+    0.84 s with 4.  The default scales with the directory (one worker per
+    ~100 files) and is capped at the CPU count, so small imports stay
+    light and large ones still parallelize fully.
+    """
+    return max(1, min(cpu_count, num_files // 100 + 1))
+
+
 def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] | None:
     """Worker: read a file and compute its checksum + MinHash fingerprint.
 
@@ -562,7 +575,7 @@ def import_cmd(
     file_paths += glob.glob(os.path.join(directory, "**", "*.txt"), recursive=True)
 
     if jobs is None:
-        jobs = max(1, os.cpu_count() or 1)
+        jobs = _default_import_jobs(len(file_paths), os.cpu_count() or 1)
     jobs = min(jobs, max(1, len(file_paths)))
 
     # Prepared results are flushed to the database in chunks, so importing a

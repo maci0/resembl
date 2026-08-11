@@ -242,7 +242,9 @@ uv run resembl add my_memcpy "MOV EAX, EBX; ..."
 # Or, after activating the virtual environment, you can call it directly
 resembl find --query "MOV EAX"
 
-# Bulk-import a large directory in parallel (default: one worker per CPU)
+# Bulk-import a large directory in parallel (default: adaptive — one worker
+# per ~100 files, capped at the CPU count; small directories stay single-
+# process so they never pay the ~450 ms per-worker spawn cost)
 resembl import --force --jobs 8 data/
 
 # Recompute all fingerprints in parallel (default: one worker per CPU)
