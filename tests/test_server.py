@@ -189,6 +189,42 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("lsh_candidates", payload["results"][0])
         self.assertIn("error", payload["results"][1])
 
+    def test_result_cache_invalidates_on_db_change(self):
+        """Cached finds are served until the database changes (data_version)."""
+        from unittest.mock import patch as _patch
+
+        from resembl.server import _RESULT_CACHE, _db_version
+
+        _RESULT_CACHE.clear()
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+
+        def find_once() -> dict:
+            body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return json.loads(response.read())
+
+        first = find_once()
+        self.assertGreater(first["lsh_candidates"], 0)
+        cached = find_once()
+        self.assertEqual(cached["lsh_candidates"], first["lsh_candidates"])
+        self.assertEqual(len(_RESULT_CACHE), 1)
+
+        # A DB change (add a snippet) must invalidate the cache entry.  A
+        # different immediate yields a new checksum with the same minhash, so
+        # the query's candidate count necessarily grows.
+        from resembl.core import snippet_add
+
+        snippet_add(self._session, "new_one", "push ebx\nmov eax, 250\npop ebx\nret")
+        after = find_once()
+        self.assertGreater(after["lsh_candidates"], first["lsh_candidates"])
+        self.assertNotEqual(after["lsh_candidates"], first["lsh_candidates"])
+
     def test_concurrent_requests_all_succeed(self):
         """The server answers concurrent finds correctly (per-request sessions)."""
         import concurrent.futures
