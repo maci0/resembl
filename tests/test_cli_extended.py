@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from sqlmodel import Session
 
@@ -467,6 +468,68 @@ class TestCLIServeLifecycle(BaseCLITest):
                     first.wait(timeout=5)
                     self.fail("first serve did not exit after SIGTERM")
             self.assertFalse(os.path.exists(port_file))
+
+
+class TestServerFallback(unittest.TestCase):
+    """The thin-client fallback must not orphan a slow-but-live server."""
+
+    def setUp(self):
+        import hashlib
+
+        from sqlmodel import Session, SQLModel, create_engine
+
+        import resembl.cli as cli
+
+        self._cache = tempfile.TemporaryDirectory()
+        self.addCleanup(self._cache.cleanup)
+        self._db = tempfile.mktemp(suffix=".db")
+        self.addCleanup(lambda: os.path.exists(self._db) and os.remove(self._db))
+        engine = create_engine(f"sqlite:///{self._db}")
+        SQLModel.metadata.create_all(engine)
+        self.addCleanup(engine.dispose)
+        self._session = Session(engine)
+        self.addCleanup(self._session.close)
+        cli.state.session = self._session
+
+        digest = hashlib.sha1(str(engine.url).encode("utf-8")).hexdigest()[:12]
+        self.port_file = os.path.join(self._cache.name, f"server_{digest}.port")
+        with open(self.port_file, "w", encoding="utf-8") as f:
+            f.write("12345")
+        self._env = patch.dict(os.environ, {"RESEMBL_CACHE_DIR": self._cache.name})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+
+    def test_timeout_keeps_port_file(self):
+        """A slow-but-live server keeps its port file (no orphaning)."""
+        import urllib.error
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError(TimeoutError("server busy")),
+        ):
+            result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
+        self.assertIsNone(result)
+        self.assertTrue(
+            os.path.exists(self.port_file), "port file must survive a timeout"
+        )
+
+    def test_connection_refused_removes_stale_port_file(self):
+        """A dead server's stale port file is cleaned up."""
+        import urllib.error
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
+        ):
+            result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
+        self.assertIsNone(result)
+        self.assertFalse(os.path.exists(self.port_file), "stale file should be removed")
 
 
 if __name__ == "__main__":

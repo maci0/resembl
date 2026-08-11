@@ -222,8 +222,16 @@ def _find_via_server(
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             payload = _json.loads(response.read())
-    except (urllib.error.URLError, OSError, ValueError):
-        # Server gone (stale port file) — clean it up and fall back.
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        # Only a dead server (connection refused) means the port file is
+        # stale and should be removed.  A timeout means the server is alive
+        # but slow (e.g. busy serving a large find-batch) — deleting its
+        # port file would orphan a healthy server, so keep it and fall back
+        # in-process for this call only.
+        if isinstance(exc, urllib.error.URLError) and isinstance(
+            exc.reason, TimeoutError
+        ):
+            return None
         try:
             os.remove(port_file)
         except OSError:
@@ -277,7 +285,13 @@ def _find_batch_via_server(
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             payload = _json.loads(response.read())
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        # See ``_find_via_server``: a timeout is a slow-but-live server, so
+        # the port file is kept; only a dead server's stale file is removed.
+        if isinstance(exc, urllib.error.URLError) and isinstance(
+            exc.reason, TimeoutError
+        ):
+            return None
         try:
             os.remove(port_file)
         except OSError:
