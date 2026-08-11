@@ -318,6 +318,24 @@ class TestCLIShowCommand(BaseCLITest):
         result = self.run_command("show ffffffffffffffff")
         self.assertNotEqual(result.returncode, 0)
 
+    def test_compare_corrupt_blob_clean_error(self):
+        """compare on a corrupt fingerprint errors cleanly, not with a traceback."""
+        from sqlmodel import Session, text
+
+        with Session(self.engine) as session:
+            row = session.exec(text("SELECT checksum FROM snippet LIMIT 1")).one()
+            checksum = row[0]
+            session.execute(
+                text("UPDATE snippet SET minhash = :m WHERE checksum = :c"),
+                {"m": b"corrupt-blob", "c": checksum},
+            )
+            session.commit()
+
+        result = self.run_command(f"compare {checksum} {checksum}")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Error", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
 
 class TestImportJobs(BaseCLITest):
     """The adaptive default worker count for imports."""

@@ -1212,7 +1212,12 @@ def compare(
     if not resolved1 or not resolved2:
         raise typer.Exit(code=1)
 
-    comparison = snippet_compare(state.session, resolved1, resolved2)
+    try:
+        comparison = snippet_compare(state.session, resolved1, resolved2)
+    except ValueError as e:
+        # e.g. a corrupt fingerprint (disk rot) — report cleanly, no traceback.
+        err_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
     if not comparison:
         err_console.print("[red]Error:[/red] One or both snippets could not be found.")
         raise typer.Exit(code=1)
