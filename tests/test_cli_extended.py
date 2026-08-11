@@ -197,6 +197,17 @@ class TestCLISearch(BaseCLITest):
         self.assertIn("memcpy_impl", result.stdout)
         self.assertNotIn("strcmp_impl", result.stdout)
 
+    def test_search_limit(self):
+        """--limit bounds the results (and reports N+ when truncated)."""
+        with Session(self.engine) as session:
+            for i in range(5):
+                snippet_add(session, f"mem_{i}", f"REP MOVSB {i}")
+        result = self.run_command("search mem --limit 2")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Found 2+ snippets", result.stdout)
+        result = self.run_command("search mem --limit 10")
+        self.assertIn("Found 5 snippets", result.stdout)
+
 
 class TestCLIFormatFlag(BaseCLITest):
     """Integration tests for --format json/csv."""

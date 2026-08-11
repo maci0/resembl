@@ -1751,14 +1751,22 @@ def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet
     return list(Snippet.get_all(session))
 
 
-def snippet_search_by_name(session: Session, pattern: str) -> list[Snippet]:
-    """Search for snippets where any name matches the pattern (case-insensitive)."""
-    # The JSON structure means names are embedded in the string,
-    # so a standard LIKE '%pattern%' will match anywhere in the names list.
+def snippet_search_by_name(
+    session: Session, pattern: str, limit: int = 50
+) -> list[Snippet]:
+    """Search for snippets where any name matches the pattern (case-insensitive).
+
+    The JSON structure means names are embedded in the string, so a standard
+    LIKE '%pattern%' matches anywhere in the names list.  *limit* bounds the
+    result (and the fetch) so a broad pattern on a large database returns a
+    useful page instead of everything.
+    """
     query_pattern = f"%{pattern}%"
     return list(
         session.exec(
-            select(Snippet).where(Snippet.names.like(query_pattern))  # type: ignore[attr-defined]
+            select(Snippet)
+            .where(Snippet.names.like(query_pattern))  # type: ignore[attr-defined]
+            .limit(limit)
         ).all()
     )
 

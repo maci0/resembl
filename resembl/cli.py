@@ -1073,14 +1073,18 @@ def find_batch(
 @app.command()
 def search(
     pattern: str = typer.Argument(help="The name pattern to search for."),
+    limit: int = typer.Option(
+        50, "--limit", help="Maximum number of results to return (default: 50)."
+    ),
 ) -> None:
     """Search for snippets by matching their names."""
-    snippets = snippet_search_by_name(state.session, pattern)
+    snippets = snippet_search_by_name(state.session, pattern, limit=limit)
 
     if state.format in ("json", "csv"):
         _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
-        _echo(f"[dim]Found {len(snippets)} snippets matching '{pattern}'.[/dim]")
+        found = f"{len(snippets)}+" if len(snippets) >= limit else str(len(snippets))
+        _echo(f"[dim]Found {found} snippets matching '{pattern}'.[/dim]")
         if snippets:
             table = Table(title="Search Results", title_style="bold cyan")
             table.add_column("#", style="dim", justify="right")
