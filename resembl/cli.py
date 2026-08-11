@@ -28,7 +28,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from typing import Any, cast
 
 import typer
@@ -581,34 +581,57 @@ def import_cmd(
     if file_paths and jobs > 0:
         ctx = multiprocessing.get_context("spawn")
         try:
+            from collections import deque
+
             with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as executor:
-                futures = [
-                    executor.submit(_import_prepare_file, (fp, ngram_size))
-                    for fp in file_paths
-                ]
+                # Bound in-flight futures: submitting every file at once
+                # keeps O(n) futures + results in memory (hundreds of MB for
+                # a million files).  A small window keeps memory flat while
+                # the workers stay saturated.
+                file_iter = iter(file_paths)
+                window = max(jobs * 4, 16)
+                in_flight: deque = deque()
+
+                def _submit_next() -> bool:
+                    fp = next(file_iter, None)
+                    if fp is None:
+                        return False
+                    in_flight.append(
+                        executor.submit(_import_prepare_file, (fp, ngram_size))
+                    )
+                    return True
+
+                for _ in range(min(window, len(file_paths))):
+                    _submit_next()
+
+                def _completed_futures():
+                    while in_flight:
+                        done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                        for future in done:
+                            in_flight.remove(future)
+                            yield future
+                            _submit_next()
+
+                def _handle(result) -> None:
+                    nonlocal rejects
+                    if result is None:
+                        rejects += 1
+                    else:
+                        prepared.append(result)
+                        if len(prepared) >= import_chunk_size:
+                            flush_prepared()
+
                 if state.quiet or state.format in ("json", "csv"):
-                    for future in as_completed(futures):
-                        result = future.result()
-                        if result is None:
-                            rejects += 1
-                        else:
-                            prepared.append(result)
-                            if len(prepared) >= import_chunk_size:
-                                flush_prepared()
+                    for future in _completed_futures():
+                        _handle(future.result())
                 else:
                     for future in track(
-                        as_completed(futures),
-                        total=len(futures),
+                        _completed_futures(),
+                        total=len(file_paths),
                         description="Preparing snippets...",
                         console=err_console,
                     ):
-                        result = future.result()
-                        if result is None:
-                            rejects += 1
-                        else:
-                            prepared.append(result)
-                            if len(prepared) >= import_chunk_size:
-                                flush_prepared()
+                        _handle(future.result())
         except Exception:
             logger.warning(
                 "Process pool unavailable; falling back to in-process import."
