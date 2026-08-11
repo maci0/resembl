@@ -377,6 +377,25 @@ jobs competing for I/O); expect proportionally faster runs on an idle one.  The 
 (they were ~5.6 s / ~4 s before); larger datasets scale the same way but were not re-measured after
 the optimization.
 
+### Scaling: the pieces that keep it fast
+
+- **Backends** — `DATABASE_URL` selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
+  the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
+  [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
+  in CI on every push; DuckDB runs locally in the suite.
+- **Warm server** — `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
+  route through it when running (with automatic in-process fallback), answering concurrent requests
+  in milliseconds.
+- **Batch workflows** — `find-batch` processes a file of queries in one process (or one round trip
+  through the server), amortizing startup across the batch.
+- **Bounded memory** — import prepares files with a bounded in-flight window (flat memory at a
+  million files), flushes in chunks with `executemany`, and expunges the session identity map; the
+  index build streams with band-major sorted inserts.
+- **Self-healing** — a missing index or an older fingerprint format is repaired automatically by the
+  next `find` (a format version is stamped in the database); `verify` reports health and flags a
+  genuinely stale index.
+- **Cross-backend merge** — `merge` accepts any backend URL as its source.
+
 ## Development
 
 For detailed guidelines on contributing to this project, please see our [Contributor Guide](./CONTRIBUTING.md).
