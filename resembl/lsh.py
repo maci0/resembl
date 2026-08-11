@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from datasketch import MinHash
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=64)
 def _banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     """Return the ``(b, r)`` banding for a ``(threshold, num_perm)`` pair.
 
@@ -40,6 +40,8 @@ def _banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     result turns a ~13 ms per-query cost into a dict lookup.  The scipy
     dependency is imported lazily so commands that never touch the index
     (list, stats, export, ...) skip the ~200 ms datasketch/scipy startup.
+    The 64-entry cache keeps varied-threshold workflows (a script cycling
+    many thresholds) from thrashing and re-paying the integral on evictions.
     """
     from datasketch.lsh import _optimal_param  # type: ignore[attr-defined]
 
