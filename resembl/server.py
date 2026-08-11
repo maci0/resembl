@@ -100,9 +100,9 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"bad request: {exc}"})
             return
         results: list[dict] = []
-        try:
-            with Session(self.engine) as session:
-                for query in queries:
+        with Session(self.engine) as session:
+            for query in queries:
+                try:
                     num_candidates, matches = snippet_find_matches(
                         session,
                         query,
@@ -111,23 +111,23 @@ class _FindHandler(BaseHTTPRequestHandler):
                         normalize=bool(body.get("normalize", True)),
                         ngram_size=int(body.get("ngram_size", 3)),
                     )
-                    results.append(
-                        {
-                            "query": query,
-                            "lsh_candidates": num_candidates,
-                            "matches": [
-                                {
-                                    "checksum": s.checksum,
-                                    "names": s.name_list,
-                                    "score": score,
-                                }
-                                for s, score in matches
-                            ],
-                        }
-                    )
-        except Exception as exc:  # pragma: no cover - defensive
-            self._respond(500, {"error": str(exc)})
-            return
+                except Exception as exc:  # isolate per-query failures
+                    results.append({"query": query, "error": str(exc)})
+                    continue
+                results.append(
+                    {
+                        "query": query,
+                        "lsh_candidates": num_candidates,
+                        "matches": [
+                            {
+                                "checksum": s.checksum,
+                                "names": s.name_list,
+                                "score": score,
+                            }
+                            for s, score in matches
+                        ],
+                    }
+                )
         self._respond(200, {"results": results})
 
     def _respond(self, status: int, payload: dict[str, Any]) -> None:

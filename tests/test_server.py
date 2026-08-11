@@ -172,6 +172,23 @@ class TestServerMode(unittest.TestCase):
                 single = json.loads(response.read())
             self.assertEqual(result["lsh_candidates"], single["lsh_candidates"])
 
+    def test_find_batch_isolates_bad_queries(self):
+        """A malformed query fails itself, not the whole batch."""
+        port = self._start_server()
+        body = json.dumps(
+            {"queries": ["push ebx\nmov eax, 5\npop ebx\nret", 12345]}
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find-batch",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read())
+        self.assertEqual(len(payload["results"]), 2)
+        self.assertIn("lsh_candidates", payload["results"][0])
+        self.assertIn("error", payload["results"][1])
+
     def test_concurrent_requests_all_succeed(self):
         """The server answers concurrent finds correctly (per-request sessions)."""
         import concurrent.futures
