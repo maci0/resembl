@@ -2289,6 +2289,20 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # the per-overlap ``session.get`` (the N+1 fixed earlier).
         merge_chunk: list[Snippet] = []
 
+        #: New rows are flushed to the database in chunks so a mostly-new
+        #: merge stays flat in memory regardless of source size.
+        _MERGE_FLUSH_SIZE = 5000
+
+        def flush_new_rows() -> None:
+            """Bulk-insert buffered new rows and sync the index, then clear."""
+            if not new_rows:
+                return
+            _insert_snippet_rows(session, new_rows)
+            session.commit()
+            lsh_index_add_batch(session, added_minhashes)
+            new_rows.clear()
+            added_minhashes.clear()
+
         def record_new(src_snippet: Snippet) -> None:
             nonlocal added
             new_rows.append(
@@ -2305,6 +2319,8 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             added_minhashes.append(
                 (src_snippet.checksum, minhash_ensure_packed(src_snippet.minhash))
             )
+            if len(new_rows) >= _MERGE_FLUSH_SIZE:
+                flush_new_rows()
 
         def flush_merge_chunk() -> None:
             nonlocal updated, skipped
@@ -2357,12 +2373,12 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 flush_merge_chunk()
         flush_merge_chunk()
 
-        # Bulk-insert the new rows instead of per-object ORM adds — the same
-        # ~30x write-path win as snippet_add_batch (multi-VALUES on DuckDB).
-        _insert_snippet_rows(session, new_rows)
+        # Persist any remaining new rows.  ``record_new`` flushes in chunks
+        # (see below) so a mostly-new merge never accumulates the whole new
+        # content in memory — same bounded-memory design as import.
+        flush_new_rows()
+        # Persist the session.add'ed merge updates (aliases, tags, collections).
         session.commit()
-        # Keep the DB-backed LSH index in sync if one is already built.
-        lsh_index_add_batch(session, added_minhashes)
         # The source blobs were copied verbatim and may be from an older
         # fingerprint format — drop the version stamp so the next `find`
         # reindexes once and normalizes everything.
