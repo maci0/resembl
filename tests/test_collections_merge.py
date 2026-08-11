@@ -323,6 +323,30 @@ class TestDBMerge(BaseDBTest):
         # 120 overlaps resolved via ~1 chunked IN fetch, not 120 SELECTs.
         self.assertLessEqual(counts["select"], 6)
 
+    def test_merge_skips_corrupt_source_blob(self):
+        """One corrupt source blob skips that row, not the whole merge."""
+        source_path = self._create_source_db(
+            [
+                ("a", "MOV EAX, 1", [], None),
+                ("b", "MOV EBX, 2", [], None),
+                ("c", "MOV ECX, 3", [], None),
+            ]
+        )
+        try:
+            src_engine = create_engine(f"sqlite:///{source_path}")
+            with Session(src_engine) as ss:
+                row = ss.exec(select(Snippet)).first()
+                row.minhash = b"corrupt-blob"
+                ss.add(row)
+                ss.commit()
+            src_engine.dispose()
+
+            result = db_merge(self.session, source_path)
+            self.assertEqual(result["added"], 2)
+            self.assertEqual(result["skipped"], 1)  # the corrupt row
+        finally:
+            os.unlink(source_path)
+
     def test_merge_imports_collections(self):
         """Merging should create collections from the source if missing."""
         source_path = self._create_source_db(

@@ -1885,10 +1885,19 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     total_similarity: float = 0.0
     num_comparisons: int = 0
 
-    # Fast packed-bytes Jaccard (no MinHash object construction in the loop).
-    blobs = [s.minhash for s in sample_snippets]
+    # Normalize and validate each sampled fingerprint, skipping corrupt ones
+    # (disk rot) — one bad blob must not crash `stats` on a large database.
+    blobs: list[bytes] = []
+    for s in sample_snippets:
+        try:
+            blobs.append(minhash_ensure_packed(s.minhash))
+        except ValueError:
+            logger.warning(
+                "Skipping snippet %s in the similarity sample: corrupt fingerprint.",
+                s.checksum,
+            )
 
-    num_snippets = len(sample_snippets)
+    num_snippets = len(blobs)
     for i in range(num_snippets):
         for j in range(i + 1, num_snippets):
             total_similarity += minhash_jaccard(blobs[i], blobs[j])
@@ -2332,7 +2341,19 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             added_minhashes.clear()
 
         def record_new(src_snippet: Snippet) -> None:
-            nonlocal added
+            nonlocal added, skipped
+            try:
+                packed = minhash_ensure_packed(src_snippet.minhash)
+            except ValueError:
+                # One corrupt source blob must not fail the whole merge —
+                # skip the row (a reindex on the target heals nothing here,
+                # but the source row is simply not importable).
+                logger.warning(
+                    "Skipping source snippet %s: corrupt fingerprint.",
+                    src_snippet.checksum,
+                )
+                skipped += 1
+                return
             new_rows.append(
                 {
                     "checksum": src_snippet.checksum,
@@ -2344,9 +2365,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 }
             )
             added += 1
-            added_minhashes.append(
-                (src_snippet.checksum, minhash_ensure_packed(src_snippet.minhash))
-            )
+            added_minhashes.append((src_snippet.checksum, packed))
             if len(new_rows) >= _MERGE_FLUSH_SIZE:
                 flush_new_rows()
 

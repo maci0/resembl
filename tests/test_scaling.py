@@ -679,6 +679,23 @@ class TestIndexBuild(BaseScalingTest):
         rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
         self.assertEqual(rows, 20 * 25)
 
+    def test_stats_survives_corrupt_fingerprint(self):
+        """A corrupt blob in the similarity sample must not crash `stats`."""
+        from resembl.core import db_calculate_average_similarity, db_stats
+        from resembl.models import Snippet as SnippetModel
+
+        self._add(30, "st")
+        corrupt = self.session.exec(select(SnippetModel)).first()
+        corrupt.minhash = b"corrupt-blob"
+        self.session.add(corrupt)
+        self.session.commit()
+
+        similarity = db_calculate_average_similarity(self.session)
+        self.assertIsInstance(similarity, float)
+        stats = db_stats(self.session)
+        self.assertEqual(stats["num_snippets"], 30)
+        self.assertIsInstance(stats["avg_jaccard_similarity"], float)
+
     def test_build_reports_progress(self):
         """The build invokes the progress callback with (done, total)."""
         self._add(50, "p")
