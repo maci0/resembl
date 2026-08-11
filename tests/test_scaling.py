@@ -648,6 +648,37 @@ class TestIndexBuild(BaseScalingTest):
         rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
         self.assertEqual(rows, 30 * 25)
 
+    def test_build_skips_corrupt_fingerprint(self):
+        """A corrupt blob must not brick the build or the query path."""
+        from resembl.models import Snippet as SnippetModel
+
+        self._add(20, "good")
+        # Corrupt one snippet's stored fingerprint (e.g. disk rot).
+        corrupt = self.session.exec(select(SnippetModel)).first()
+        corrupt.minhash = b"corrupt-blob"
+        self.session.add(corrupt)
+        self.session.commit()
+
+        # The build skips it; the other 19 index fine and find still works.
+        lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        self.assertIsNotNone(lsh)
+        rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
+        self.assertEqual(rows, 19 * 25)
+        num_candidates, matches = snippet_find_matches(
+            self.session, "MOV EAX, 5; ADD EBX, 5; RET", top_n=3
+        )
+        self.assertGreaterEqual(num_candidates, 0)
+        self.assertIsInstance(matches, list)
+
+        # A reindex heals it (fingerprints are recomputed from the code).
+        db_reindex(self.session, jobs=1)
+        healed = self.session.get(SnippetModel, corrupt.checksum)
+        self.assertTrue(healed.minhash.startswith(b"RMLH"))
+        # The rebuilt index covers all 20 again.
+        lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
+        self.assertEqual(rows, 20 * 25)
+
     def test_build_reports_progress(self):
         """The build invokes the progress callback with (done, total)."""
         self._add(50, "p")

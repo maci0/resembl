@@ -193,9 +193,19 @@ def _build_once(
 
     total_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
     processed = 0
+    skipped_corrupt = 0
     for batch in Snippet.iter_minhash_batches(session, _BATCH_SIZE):
         for checksum, minhash in batch:
-            packed = minhash_ensure_packed(minhash)
+            try:
+                packed = minhash_ensure_packed(minhash)
+            except ValueError:
+                # A corrupt fingerprint (disk rot, a bad merge source) must
+                # not brick the whole build — every find would crash.  Skip
+                # the snippet; a reindex recomputes its fingerprint from the
+                # code and heals it.
+                skipped_corrupt += 1
+                logger.warning("Skipping snippet %s: corrupt fingerprint.", checksum)
+                continue
             for band, bucket in enumerate(band_buckets(packed, num_perm, lsh.b, lsh.r)):
                 band_rows[band].append((bucket, checksum))
         processed += len(batch)
@@ -207,6 +217,12 @@ def _build_once(
     for band in range(lsh.b):
         if band_rows[band]:
             flush_band(band)
+    if skipped_corrupt:
+        logger.warning(
+            "Index build skipped %d snippet(s) with corrupt fingerprints; "
+            "`resembl reindex --force` recomputes them from their code.",
+            skipped_corrupt,
+        )
 
     if is_sqlite:
         session.execute(

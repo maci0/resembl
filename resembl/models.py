@@ -102,7 +102,14 @@ def minhash_unpack(data: bytes) -> MinHash:
         num_perm = minhash_num_perm(data)
         values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
         return MinHash(num_perm=num_perm, hashvalues=list(values))
-    return pickle.loads(data)
+    try:
+        return pickle.loads(data)
+    except Exception as e:
+        # Corrupt legacy blobs (truncated pickles, disk rot) surface as
+        # UnpicklingError/EOFError/AttributeError/... — normalize them to
+        # ValueError so every caller's documented "malformed blob raises
+        # ValueError" contract holds and no low-level exception escapes.
+        raise ValueError(f"Corrupt legacy fingerprint: {e}") from e
 
 
 def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:

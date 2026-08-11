@@ -1529,7 +1529,22 @@ def snippet_find_matches(
     # what keeps find fast when a query lands in a crowded band (thousands
     # of candidates at scale).
     query_minhash_bytes = minhash_pack(query_minhash)
-    jaccards = minhash_jaccard_batch(query_minhash_bytes, [minhashes[k] for k in keys])
+    # Normalize each candidate's blob (legacy pickles -> packed) and skip
+    # corrupt ones: a single rotten fingerprint must not crash the query —
+    # it is excluded from scoring (a reindex heals it from its code).
+    normalized: list[bytes] = []
+    valid_keys: list[str] = []
+    for k in keys:
+        try:
+            normalized.append(minhash_ensure_packed(minhashes[k]))
+        except ValueError:
+            logger.warning("Skipping candidate %s: corrupt fingerprint.", k)
+            continue
+        valid_keys.append(k)
+    keys = valid_keys
+    if not keys:
+        return 0, []
+    jaccards = minhash_jaccard_batch(query_minhash_bytes, normalized)
 
     # Hybrid score (Jaccard + Levenshtein) with an early exit: since
     # ``hybrid = 40 * jaccard + 0.6 * levenshtein`` and levenshtein <= 100,
