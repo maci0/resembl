@@ -41,15 +41,31 @@ class _FindHandler(BaseHTTPRequestHandler):
 
     engine: Any = None  # set by serve()
 
-    def do_POST(self) -> None:  # noqa: N802 (http.server API)
-        if self.path != "/find":
-            self.send_error(404, "Not Found")
-            return
-        length = int(self.headers.get("Content-Length", 0))
+    def _read_body(self) -> dict | None:
+        """Read and parse the JSON request body; None if malformed."""
         try:
-            body = json.loads(self.rfile.read(length) or b"{}")
+            length = int(self.headers.get("Content-Length", 0))
+            return json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, KeyError):
+            return None
+
+    def do_POST(self) -> None:  # noqa: N802 (http.server API)
+        body = self._read_body()
+        if body is None:
+            self._respond(400, {"error": "bad request body"})
+            return
+        if self.path == "/find":
+            self._handle_find(body)
+            return
+        if self.path == "/find-batch":
+            self._handle_find_batch(body)
+            return
+        self.send_error(404, "Not Found")
+
+    def _handle_find(self, body: dict) -> None:
+        try:
             query = body["query"]
-        except (ValueError, KeyError) as exc:
+        except KeyError as exc:
             self._respond(400, {"error": f"bad request: {exc}"})
             return
         try:
@@ -75,6 +91,44 @@ class _FindHandler(BaseHTTPRequestHandler):
                 ],
             },
         )
+
+    def _handle_find_batch(self, body: dict) -> None:
+        """Process many queries in one request (results keyed by query)."""
+        try:
+            queries = body["queries"]
+        except KeyError as exc:
+            self._respond(400, {"error": f"bad request: {exc}"})
+            return
+        results: list[dict] = []
+        try:
+            with Session(self.engine) as session:
+                for query in queries:
+                    num_candidates, matches = snippet_find_matches(
+                        session,
+                        query,
+                        top_n=int(body.get("top_n", 5)),
+                        threshold=body.get("threshold"),
+                        normalize=bool(body.get("normalize", True)),
+                        ngram_size=int(body.get("ngram_size", 3)),
+                    )
+                    results.append(
+                        {
+                            "query": query,
+                            "lsh_candidates": num_candidates,
+                            "matches": [
+                                {
+                                    "checksum": s.checksum,
+                                    "names": s.name_list,
+                                    "score": score,
+                                }
+                                for s, score in matches
+                            ],
+                        }
+                    )
+        except Exception as exc:  # pragma: no cover - defensive
+            self._respond(500, {"error": str(exc)})
+            return
+        self._respond(200, {"results": results})
 
     def _respond(self, status: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload).encode("utf-8")

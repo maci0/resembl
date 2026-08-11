@@ -97,6 +97,34 @@ class TestServerMode(unittest.TestCase):
         rc = _main(["--query", "push ebx; mov eax, 5; pop ebx; ret", "--json"])
         self.assertEqual(rc, 0)
 
+    def test_find_batch_endpoint(self):
+        """POST /find-batch returns per-query results matching single finds."""
+        port = self._start_server()
+        q1 = "push ebx\nmov eax, 5\npop ebx\nret"
+        q2 = "push ebx\nmov eax, 99\npop ebx\nret"
+        body = json.dumps({"queries": [q1, q2], "top_n": 5}).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find-batch",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read())
+
+        self.assertEqual(len(payload["results"]), 2)
+        for query, result in zip((q1, q2), payload["results"]):
+            self.assertEqual(result["query"], query)
+            # Matches the single /find result for the same query.
+            single_body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
+            single_request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find",
+                data=single_body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(single_request, timeout=10) as response:
+                single = json.loads(response.read())
+            self.assertEqual(result["lsh_candidates"], single["lsh_candidates"])
+
     def test_concurrent_requests_all_succeed(self):
         """The server answers concurrent finds correctly (per-request sessions)."""
         import concurrent.futures

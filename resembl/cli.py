@@ -231,6 +231,60 @@ def _find_via_server(
     return payload
 
 
+def _find_batch_via_server(
+    queries: list[str],
+    top_n: int,
+    threshold: float | None,
+    normalize: bool,
+    ngram_size: int,
+) -> list[dict] | None:
+    """Query a running ``serve`` process with a batch (one round trip).
+
+    Returns the per-query payload list on success, or ``None`` if no server
+    is running (the caller falls back to in-process).
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    from .server import server_port_path
+
+    db_url = str(cast(Engine, state.session.get_bind()).url)
+    port_file = server_port_path(db_url)
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            port = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+    body = _json.dumps(
+        {
+            "queries": queries,
+            "top_n": top_n,
+            "threshold": threshold,
+            "normalize": normalize,
+            "ngram_size": ngram_size,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/find-batch",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = _json.loads(response.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        try:
+            os.remove(port_file)
+        except OSError:
+            pass
+        return None
+    if "error" in payload:
+        return None
+    return payload["results"]
+
+
 def _render_find_payload(payload: dict) -> None:
     """Render a ``{lsh_candidates, matches}`` payload in the current format."""
     if state.format in ("json", "csv"):
@@ -897,31 +951,46 @@ def find_batch(
         raise typer.Exit(code=1)
 
     results: list[dict] = []
+    converted = []
     for raw_query in queries:
         # Same convenience as `find --query`: single-line ';' separates
         # statements (in a multi-line batch entry ';' stays a comment).
-        query_string = (
+        converted.append(
             raw_query.replace(";", "\n")
             if ";" in raw_query and "\n" not in raw_query
             else raw_query
         )
-        num_candidates, matches = snippet_find_matches(
-            state.session,
-            query_string,
-            effective_top_n,
-            effective_threshold,
-            ngram_size=ngram_size,
-        )
-        results.append(
-            {
-                "query": query_string,
-                "lsh_candidates": num_candidates,
-                "matches": [
-                    {"checksum": s.checksum, "names": s.name_list, "score": score}
-                    for s, score in matches
-                ],
-            }
-        )
+
+    # Fast path: a running `serve` process answers the whole batch in one
+    # round trip with a warm index (fall back to in-process otherwise).
+    server_results = _find_batch_via_server(
+        converted,
+        effective_top_n,
+        effective_threshold,
+        True,
+        ngram_size,
+    )
+    if server_results is not None:
+        results = server_results
+    else:
+        for query_string in converted:
+            num_candidates, matches = snippet_find_matches(
+                state.session,
+                query_string,
+                effective_top_n,
+                effective_threshold,
+                ngram_size=ngram_size,
+            )
+            results.append(
+                {
+                    "query": query_string,
+                    "lsh_candidates": num_candidates,
+                    "matches": [
+                        {"checksum": s.checksum, "names": s.name_list, "score": score}
+                        for s, score in matches
+                    ],
+                }
+            )
 
     if state.format in ("json", "csv"):
         _echo_format(results)
