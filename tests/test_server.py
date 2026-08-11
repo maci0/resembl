@@ -111,6 +111,22 @@ class TestServerMode(unittest.TestCase):
             [round(score, 6) for _, score in matches],
         )
 
+    def test_server_rejects_unbuildable_threshold(self):
+        """The server answers an unbuildable threshold with an error payload."""
+        port = self._start_server()
+        body = json.dumps(
+            {"query": "push ebx\nmov eax, 5\npop ebx\nret", "threshold": 0.985}
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read())
+        self.assertIn("error", payload)
+        self.assertIn("too high", payload["error"])
+
     def test_port_file_written(self):
         """serve writes a discoverable port file in the cache dir."""
         from resembl.server import server_port_path

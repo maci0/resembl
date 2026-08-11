@@ -79,6 +79,22 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
             if entry is not None and entry[0] == version:
                 _RESULT_CACHE.move_to_end(key)
                 return entry[1]
+    # Reject unbuildable thresholds up front: the banding needs b >= 2
+    # bands, and an unbuildable one would make the find return zero matches
+    # silently.  (The thin client cannot run the scipy banding check without
+    # losing its ~50 ms startup, so the server is the right place.)
+    from .lsh import _banding_params
+
+    threshold = key[2] if key[2] is not None else LSH_THRESHOLD
+    try:
+        bands, _ = _banding_params(threshold, key[5])
+    except ValueError:
+        bands = 1
+    if bands < 2:
+        return {
+            "error": f"threshold {threshold} is too high for {key[5]} "
+            "permutations (fewer than 2 bands)"
+        }
     num_candidates, matches = snippet_find_matches(
         session,
         query,
