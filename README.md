@@ -386,9 +386,12 @@ the optimization.
 - **DuckDB fast bulk inserts** — DuckDB's Python `executemany` path is pathologically slow
   (~7k rows/s measured), so the index build and the snippet import swap in multi-row `VALUES`
   statements there (values are rendered through a quote-doubling / `FROM_HEX` literal builder — the
-  injection boundary for user text).  At 15k snippets this cut the DuckDB cold find from ~65 s to
-  ~9 s and import from ~9.6 s to ~4.7 s (3.2k files/s), bringing the embedded backend within ~2× of
-  SQLite on both.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
+  injection boundary for user text).  Measured on this machine at 100k snippets: import 30 s
+  (3.3k files/s, within ~20% of SQLite), reindex 11 s (on par), warm find ~1.2 s (interpreter-bound;
+  ms when `serve`d).  The one-time LSH index build remains ~4× slower than SQLite at 100k
+  (~64 s vs ~14 s — DuckDB's row-insert model is slower at 2.5M point inserts than its bulk
+  paths), so cold-start latency favors SQLite; steady-state query and import throughput favor
+  DuckDB's columnar engine.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
 - **Warm server** — `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
   route through it when running (with automatic in-process fallback), answering concurrent requests
   in milliseconds.
