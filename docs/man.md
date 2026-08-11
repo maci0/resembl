@@ -50,6 +50,16 @@ The `compare` command also reports control-flow graph similarity.
     Single-line `--query` strings use `;` as a statement separator
     (e.g., `find "push eax; pop ebx"`); multi-line input and `--file`
     keep normal NASM semantics where `;` starts a comment.
+    If a `serve` process is running for this database, the query is
+    answered by it (a few milliseconds); otherwise the in-process path
+    runs, building the LSH index lazily on the first search.
+
+**find-batch** *--file QUERIES* [--top-n N] [--threshold T]
+:   Find matches for many queries in one process — each line of *file* is
+    one query (`#` starts a comment), and the interpreter startup and LSH
+    index load are amortized across the whole batch.  Roughly N times
+    faster than N separate `find` calls.  JSON/CSV output is a list of
+    per-query payloads.
 
 **compare** *CHECKSUM1* *CHECKSUM2* [--diff]
 :   Compare two snippets side-by-side.  Accepts checksum prefixes.
@@ -74,7 +84,8 @@ The `compare` command also reports control-flow graph similarity.
     is written to the cache directory and removed on exit.  Stop with
     Ctrl+C.  For repeated queries, the thin client
     `resembl-find --query "…"` (or `python -m resembl.find_client`) is the
-    fastest path.
+    fastest path.  Requests run concurrently (each gets its own session);
+    the fingerprint migration and index build happen once at startup.
 
 **reindex**
 :   Recalculate MinHash fingerprints for all snippets.

@@ -281,6 +281,11 @@ uv run resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH];
 uv run resembl find --file tests/test_data/1000A0A0.asm
 ```
 
+```bash
+# check many queries in one process (amortizes startup + index load)
+uv run resembl find-batch --file queries.txt --top-n 5
+```
+
 ### 5. Running Tests
 
 To ensure everything is working correctly, you can run the test suite:
