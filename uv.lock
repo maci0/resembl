@@ -1063,6 +1063,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "datasketch" },
+    { name = "numpy" },
     { name = "pygments" },
     { name = "rapidfuzz" },
     { name = "rich" },
@@ -1098,6 +1099,7 @@ requires-dist = [
     { name = "duckdb-engine", marker = "extra == 'dev'", specifier = ">=0.13.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.16.1" },
+    { name = "numpy", specifier = ">=1.24.0" },
     { name = "pg8000", marker = "extra == 'dev'", specifier = ">=1.31.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.2.0" },
     { name = "pygments", specifier = ">=2.19.2" },

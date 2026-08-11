@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 
+from rapidfuzz import fuzz
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.core import (
@@ -13,6 +14,7 @@ from resembl.core import (
     db_clean,
     db_reindex,
     db_stats,
+    score_hybrid,
     snippet_add,
     snippet_compare,
     snippet_delete,
@@ -24,7 +26,12 @@ from resembl.core import (
     snippet_name_remove,
     string_checksum,
 )
-from resembl.models import Snippet
+from resembl.models import (
+    Snippet,
+    minhash_jaccard,
+    minhash_jaccard_batch,
+    minhash_pack,
+)
 
 # Use an in-memory SQLite database for testing
 DATABASE_URL = "sqlite:///:memory:"
@@ -163,6 +170,83 @@ class TestResembl(unittest.TestCase):
         """Test finding matches with no candidates."""
         _num, matches = snippet_find_matches(self.session, "MOV EAX, 1")
         self.assertEqual(len(matches), 0)
+
+    def test_minhash_jaccard_batch_matches_per_blob(self):
+        """Batch jaccard is bit-identical to repeated per-blob scoring."""
+        m1 = code_create_minhash("MOV EAX, 1\nPUSH EBX")
+        m2 = code_create_minhash("MOV EAX, 1\nPUSH ECX")
+        m3 = code_create_minhash("XOR EAX, EAX ; RET")
+        query = minhash_pack(m1)
+        blobs = [minhash_pack(m1), minhash_pack(m2), minhash_pack(m3)]
+        batch = minhash_jaccard_batch(query, blobs)
+        per_blob = [minhash_jaccard(query, b) for b in blobs]
+        self.assertEqual(batch, per_blob)
+        self.assertEqual(batch[0], 1.0)  # byte-identical blob is an exact match
+        self.assertEqual(minhash_jaccard_batch(query, []), [])
+
+    def test_minhash_jaccard_batch_legacy_pickle_fallback(self):
+        """Batch jaccard falls back to per-blob scoring for legacy pickles."""
+        import pickle
+
+        from datasketch import MinHash
+
+        query = minhash_pack(code_create_minhash("MOV EAX, 1"))
+        legacy = pickle.dumps(code_create_minhash("MOV EBX, 2"))
+        packed = minhash_pack(code_create_minhash("MOV EAX, 1"))
+        batch = minhash_jaccard_batch(query, [packed, legacy])
+        per_blob = [minhash_jaccard(query, b) for b in [packed, legacy]]
+        self.assertEqual(batch, per_blob)
+        self.assertEqual(batch[0], 1.0)
+
+    def test_minhash_jaccard_batch_permutation_mismatch(self):
+        """Batch jaccard rejects candidates with a different permutation count."""
+        from datasketch import MinHash
+
+        small = MinHash(num_perm=64)
+        small.update(b"x")
+        query = minhash_pack(code_create_minhash("MOV EAX, 1"))
+        with self.assertRaises(ValueError):
+            minhash_jaccard_batch(query, [minhash_pack(small)])
+
+    def test_find_crowded_candidates_matches_bruteforce(self):
+        """find ranks a crowded candidate set identically to brute-force scoring.
+
+        Sixty snippets share the query's exact token stream (so every one of
+        them is an LSH candidate with jaccard 1.0) and fifty more share only
+        the first shingle — admitted as candidates at threshold 0.0 (b=128,
+        r=1: any single shared hash value counts).  The mixed jaccards make
+        the early-exit path skip the Levenshtein computation for the low
+        scorers; the returned top-n must still equal scoring every candidate.
+        """
+        for i in range(60):
+            snippet_add(
+                self.session,
+                f"crowd_{i}",
+                f"mov eax, {i}\npush ebx\ncall 0x{i:x}\nadd eax, ebx\nret",
+            )
+        for i in range(50):
+            snippet_add(self.session, f"far_{i}", f"mov eax, {i}\nret")
+
+        query = "mov eax, 999\npush ebx\ncall 0x3e7\nadd eax, ebx\nret"
+        num, matches = snippet_find_matches(self.session, query, top_n=5, threshold=0.0)
+        # The far snippets must actually be candidates, otherwise the test
+        # would not exercise the crowded path.
+        self.assertGreater(num, 60)
+
+        query_packed = minhash_pack(code_create_minhash(query))
+        scored = []
+        for s in self.session.exec(select(Snippet)).all():
+            jaccard = minhash_jaccard(query_packed, s.minhash)
+            levenshtein = fuzz.ratio(query, s.code)
+            scored.append((score_hybrid(jaccard, levenshtein), s.checksum))
+        scored.sort(key=lambda t: -t[0])
+
+        got = [m[0].checksum for m in matches]
+        expected = [c for _, c in scored[:5]]
+        self.assertEqual(sorted(got), sorted(expected))
+        self.assertEqual(
+            sorted(m[1] for m in matches), sorted(h for h, _ in scored[:5])
+        )
 
 
 class TestDBCoreFunctions(unittest.TestCase):

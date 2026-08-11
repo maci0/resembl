@@ -42,8 +42,11 @@ The `compare` command also reports control-flow graph similarity.
 **list**
 :   List all stored snippets.
 
-**search** *PATTERN*
-:   Search for snippets by matching their names.
+**search** *PATTERN* [--limit N]
+:   Search for snippets by matching their names.  A broad pattern over a
+    large database could otherwise return hundreds of thousands of rows,
+    so results are bounded (default 50; ``N``+ is printed when the limit
+    truncates the output).
 
 **find** *QUERY* [--top-n N] [--threshold T] [--no-normalization]
 :   Find snippets similar to the given query string.

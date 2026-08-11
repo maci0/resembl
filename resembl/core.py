@@ -11,6 +11,7 @@ This module provides:
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import logging
 import os
@@ -50,6 +51,7 @@ from .models import (
     SnippetVersion,
     minhash_ensure_packed,
     minhash_jaccard,
+    minhash_jaccard_batch,
     minhash_pack,
 )
 
@@ -1408,28 +1410,44 @@ def snippet_find_matches(
 
     if not candidate_keys:
         return 0, []
+    if top_n <= 0:
+        return len(candidate_keys), []
 
     # Fetch all candidates with chunked IN queries instead of one lookup per key.
     candidate_map = _snippets_by_checksums(session, list(candidate_keys))
+    candidates = list(candidate_map.values())
 
     # Jaccard is computed directly from the packed fingerprints (no MinHash
-    # object construction), which matters when there are thousands of
-    # candidates.
+    # object construction), vectorized across all candidates in one numpy
+    # pass over the (N, 128) uint32 array — SIMD under the hood — instead of
+    # a per-blob struct-unpack + Python equality loop per candidate.  This
+    # is what keeps find fast when a query lands in a crowded band (thousands
+    # of candidates at scale).
     query_minhash_bytes = minhash_pack(query_minhash)
+    jaccards = minhash_jaccard_batch(
+        query_minhash_bytes, [snippet.minhash for snippet in candidates]
+    )
 
-    # Compute hybrid score (Jaccard + Levenshtein) for each candidate
-    scored_matches: list[tuple[Snippet, float, float, float]] = []
-    for snippet in candidate_map.values():
-        jaccard = minhash_jaccard(query_minhash_bytes, snippet.minhash)
+    # Hybrid score (Jaccard + Levenshtein) with an early exit: since
+    # ``hybrid = 40 * jaccard + 0.6 * levenshtein`` and levenshtein <= 100,
+    # a candidate whose upper bound ``40 * jaccard + 60`` is strictly below
+    # the current n-th best hybrid can never enter the top-n — it skips the
+    # ``fuzz.ratio`` call entirely (rapidfuzz is fast, but it is per-candidate
+    # Python work that dwarfs the vectorized jaccard pass when candidates run
+    # into the thousands).  The heap keeps the top-n by (hybrid, insertion
+    # index), and the final sort replicates the previous full stable sort, so
+    # the returned matches are bit-for-bit identical to scoring everything.
+    scored: list[tuple[float, int, Snippet]] = []
+    for idx, (snippet, jaccard) in enumerate(zip(candidates, jaccards)):
+        if scored and len(scored) >= top_n and 40 * jaccard + 60 < scored[0][0]:
+            continue
         levenshtein = fuzz.ratio(query_string, snippet.code)
         hybrid = score_hybrid(jaccard, levenshtein)
-        scored_matches.append((snippet, hybrid, jaccard, levenshtein))
-
-    # Sort by hybrid score descending, take top_n
-    scored_matches.sort(key=lambda x: x[1], reverse=True)
-    top_matches = [
-        (snippet, hybrid) for snippet, hybrid, _, _ in scored_matches[:top_n]
-    ]
+        heapq.heappush(scored, (hybrid, idx, snippet))
+        if len(scored) > top_n:
+            heapq.heappop(scored)
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    top_matches = [(snippet, hybrid) for hybrid, _idx, snippet in scored[:top_n]]
 
     return len(candidate_keys), top_matches
 

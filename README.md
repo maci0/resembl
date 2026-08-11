@@ -93,8 +93,8 @@ This technique is effective because it balances the trade-off between false posi
 
 The LSH step gives us a small list of candidates, but it's not perfectly accurate. The second step is to precisely rank these candidates using a **hybrid scoring** system.
 
-- **Jaccard Similarity:** Each candidate's MinHash is compared to the query's MinHash to estimate structural (set-level) similarity.
-- **Levenshtein Similarity:** We use the `rapidfuzz` library to calculate the edit-distance-based similarity score between the original query and the full code of each candidate snippet.
+- **Jaccard Similarity:** Each candidate's MinHash is compared to the query's MinHash to estimate structural (set-level) similarity. When a query lands in a crowded band, the Jaccard pass is vectorized: all candidate fingerprints are loaded into one numpy array and compared in a single C-level (SIMD) pass, instead of a per-candidate Python loop.
+- **Levenshtein Similarity:** We use the `rapidfuzz` library to calculate the edit-distance-based similarity score between the original query and the full code of each candidate snippet. Because the hybrid score caps at `jaccard × 100 × w + 100 × (1 − w)`, candidates that provably cannot beat the current top-N skip the Levenshtein call entirely.
 - **Hybrid Score:** The two scores are combined into a single 0–100 composite score: `hybrid = (jaccard × 100 × w) + (levenshtein × (1 − w))`, where `w` is the `jaccard_weight` config setting (default 0.4).
 - **Ranking:** Candidates are sorted by hybrid score. The top results are presented to the user.
 
