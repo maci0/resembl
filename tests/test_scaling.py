@@ -813,6 +813,24 @@ class TestFingerprintVersion(BaseScalingTest):
         report = db_verify(self.session)
         self.assertGreater(len(report["issues"]), 0)
 
+    def test_verify_survives_missing_bucket_table(self):
+        """verify warns (not crashes) when lsh_bucket is missing but meta exists."""
+        from resembl.core import db_verify
+
+        self._add(10)
+        snippet_find_matches(
+            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+        )
+        # Simulate the crash-window state: meta row present, table dropped.
+        from sqlmodel import text
+
+        self.session.execute(text("DROP TABLE lsh_bucket"))
+        self.session.commit()
+        report = db_verify(self.session)
+        self.assertEqual(report["num_buckets"], 0)
+        self.assertGreater(len(report["warnings"]), 0)
+        self.assertIn("missing", " ".join(report["warnings"]).lower())
+
     def test_merge_clears_stamp(self):
         """Merge copies source blobs verbatim — the stamp must be cleared."""
         import os

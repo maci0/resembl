@@ -2062,7 +2062,20 @@ def db_verify(session: Session) -> dict:
         threshold, num_perm = meta
         b, _r = _banding_params(threshold, num_perm)
         expected_buckets = num_snippets * b
-        num_buckets = session.exec(select(func.count(LSHBucket.checksum))).one()  # type: ignore[arg-type]
+        try:
+            num_buckets = session.exec(
+                select(  # type: ignore[arg-type]
+                    func.count(LSHBucket.checksum)  # type: ignore[arg-type]
+                )
+            ).one()
+        except OperationalError:
+            # lsh_bucket missing while its meta row says an index exists —
+            # e.g. a crash inside the drop/recreate window, or a manual drop.
+            # The next `find` rebuilds, so this is a warning, not an issue.
+            warnings.append(
+                "lsh_bucket table is missing — the next `find` rebuilds the index"
+            )
+            num_buckets = 0
         if num_snippets > 0 and num_buckets != expected_buckets:
             issues.append(
                 f"index may be stale ({num_buckets} bucket rows, expected "
