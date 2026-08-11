@@ -222,7 +222,19 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
                 session,
                 jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
             )
-        lsh_index_build(session, LSH_THRESHOLD, NUM_PERMUTATIONS)
+        # Build the index only if it is missing or was built with different
+        # parameters — rebuilding an already-current index on every restart
+        # would make serve startup pay the full build (~2 min at 500k) each
+        # time, which bites under process managers that restart often.
+        from .lsh import lsh_meta_get
+
+        meta = lsh_meta_get(session)
+        if (
+            meta is None
+            or abs(meta[0] - LSH_THRESHOLD) > 1e-9
+            or meta[1] != NUM_PERMUTATIONS
+        ):
+            lsh_index_build(session, LSH_THRESHOLD, NUM_PERMUTATIONS)
 
     _FindHandler.engine = engine
     httpd = ThreadingHTTPServer((host, port), _FindHandler)

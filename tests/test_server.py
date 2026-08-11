@@ -55,6 +55,38 @@ class TestServerMode(unittest.TestCase):
         self.addCleanup(httpd.server_close)
         return httpd.server_address[1]
 
+    def test_startup_skips_current_index_rebuild(self):
+        """serve does not rebuild an already-current index on restart.
+
+        Restarting serve used to pay the full index build every time (~2 min
+        at 500k) even when the index was current — a real cost under process
+        managers that restart often.
+        """
+        from unittest.mock import patch
+
+        from resembl import server as server_mod
+        from resembl.cache import lsh_index_build
+        from resembl.lsh import lsh_meta_get
+
+        lsh_index_build(self._session, 0.5, 128)
+        self.assertIsNotNone(lsh_meta_get(self._session))
+
+        with patch.object(server_mod, "lsh_index_build") as mock_build:
+            httpd = server_mod.serve(f"sqlite:///{self._db}", port=0)
+            httpd.server_close()
+        mock_build.assert_not_called()
+
+    def test_startup_builds_missing_index(self):
+        """serve builds the index when none exists yet."""
+        from unittest.mock import patch
+
+        from resembl import server as server_mod
+
+        with patch.object(server_mod, "lsh_index_build") as mock_build:
+            httpd = server_mod.serve(f"sqlite:///{self._db}", port=0)
+            httpd.server_close()
+        mock_build.assert_called_once()
+
     def test_server_query_matches_in_process(self):
         """POST /find returns the same top matches as the in-process path."""
         port = self._start_server()

@@ -139,6 +139,60 @@ def main() -> None:
     t_warm = run_command(["--quiet", "find", "--file", query_file], env)
     print(f"Warm find took: {t_warm:.3f}s")
 
+    # Warm find through a `serve` process, measured with the stdlib-only thin
+    # client — the headline "instant warm finds" number end to end.
+    with open(query_file, encoding="utf-8", errors="replace") as f:
+        query_text = f.read()
+    serve_env = {
+        **os.environ,
+        **env,
+        "PYTHONPATH": os.path.join(os.getcwd(), "."),
+    }
+    serve_proc = subprocess.Popen(
+        ["python", "-m", "resembl.cli", "--quiet", "serve"],
+        env=serve_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        from resembl.server import server_port_path
+
+        port_file = server_port_path(db_url)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            try:
+                with open(port_file, encoding="utf-8") as f:
+                    int(f.read().strip())
+                break
+            except (OSError, ValueError):
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("serve did not write its port file in time")
+        n_runs = 5
+        t0 = time.monotonic()
+        for _ in range(n_runs):
+            subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "resembl.find_client",
+                    "--query",
+                    query_text,
+                ],
+                capture_output=True,
+                env=serve_env,
+                check=False,
+            )
+        avg_ms = (time.monotonic() - t0) / n_runs * 1000
+        print(f"Thin-client warm find via serve: {avg_ms:.1f} ms avg ({n_runs} runs)")
+    finally:
+        serve_proc.terminate()
+        try:
+            serve_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            serve_proc.kill()
+            serve_proc.wait(timeout=5)
+
     print("\n--- Reindex ---")
     t_reindex = run_command(["--quiet", "reindex", "--force"], env)
     print(f"Reindex took: {t_reindex:.3f}s")
