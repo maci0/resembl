@@ -46,12 +46,17 @@ graph LR
         A[resembl find --query 'code']
     end
 
+    subgraph "Warm Server"
+        A -->|serve running for this DB| S{POST /find to warm server}
+        S --> J[Display Top N Matches to User]
+    end
+
     subgraph "Query Processing"
-        B{Normalize Query & Generate MinHash}
+        A -->|no server / fallback| B{Normalize Query & Generate MinHash}
     end
 
     subgraph "LSH Index"
-        C{Load DB-backed LSH Index}
+        B --> C{Load DB-backed LSH Index}
         C -- Missing / params changed --> D{Build LSH Index from Stored MinHash Fingerprints}
         D --> F[LSH Index Ready]
         C -- Ready --> F
@@ -64,11 +69,15 @@ graph LR
 
     subgraph "Ranking & Output"
         H --> I{Rank Candidates by Hybrid Score}
-        I --> J[Display Top N Matches to User]
+        I --> J
     end
-
-    A --> B --> C
 ```
+
+The index lives in ordinary database tables (`lsh_bucket`) on any supported
+backend (SQLite, PostgreSQL, MySQL/MariaDB, DuckDB), so lookups stay flat
+regardless of database size.  Candidate scoring is vectorized (one SIMD
+numpy pass over all candidate fingerprints) with an early exit that skips
+the Levenshtein call for candidates that cannot beat the current top-N.
 
 ## Import Snippets Flow
 
@@ -111,6 +120,12 @@ graph LR
 
     A --> B
 ```
+
+The worker count defaults to one per ~100 files (capped at the CPU count),
+so small directories never pay the per-worker interpreter spawn cost.  The
+chunked writes use parameterized `executemany` on SQLite/PostgreSQL/MySQL
+and multi-row `VALUES` statements on DuckDB (whose executemany is ~10x
+slower).
 
 ## Export Snippets Flow
 
