@@ -64,6 +64,11 @@ _INSERT_MYSQL = (
     "VALUES (:band, :bucket, :checksum)"
 )
 
+_INSERT_PLAIN = (
+    "INSERT INTO lsh_bucket (band, bucket, checksum) "
+    "VALUES (:band, :bucket, :checksum)"
+)
+
 #: Upsert variants for the single-row ``lsh_meta`` / ``app_meta`` upserts.
 _META_UPSERT_SQLITE_PG = (
     "INSERT INTO lsh_meta (id, threshold, num_perm) VALUES (1, :t, :n) "
@@ -109,6 +114,20 @@ def _insert_sql(session: Session) -> str:
     if dialect in ("postgresql", "duckdb"):
         return _INSERT_PG
     return _INSERT_SQLITE
+
+
+def _build_insert_sql(session: Session) -> str:
+    """Return the insert used by one-time index builds.
+
+    Build rows are unique by construction (one row per band per snippet,
+    checksums are primary keys), so a plain ``INSERT`` is correct — and
+    DuckDB's ``ON CONFLICT`` handling is ~7x slower than a plain insert,
+    which dominates the one-time build there.  The incremental sync path
+    keeps the conflict-ignore variants (idempotency matters there).
+    """
+    if dialect_name(session) == "duckdb":
+        return _INSERT_PLAIN
+    return _insert_sql(session)
 
 
 def _meta_upsert_sql(session: Session) -> str:

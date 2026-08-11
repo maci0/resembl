@@ -2,6 +2,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -94,6 +96,114 @@ class TestServerMode(unittest.TestCase):
         self._start_server()
         rc = _main(["--query", "push ebx; mov eax, 5; pop ebx; ret", "--json"])
         self.assertEqual(rc, 0)
+
+
+class TestCLIServerEndToEnd(unittest.TestCase):
+    """The real CLI `serve` + `find` wiring, via subprocesses."""
+
+    def setUp(self):
+        import tempfile
+
+        self._db = tempfile.mktemp(suffix=".db")
+        self._cache_dir = tempfile.mkdtemp()
+        # Keep the test process and its subprocesses on the same cache dir.
+        self._env_patch = patch.dict(
+            os.environ,
+            {
+                "RESEMBL_CACHE_DIR": self._cache_dir,
+                "DATABASE_URL": f"sqlite:///{self._db}",
+            },
+        )
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+        # Build a small database through the CLI itself.
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.path.abspath("."),
+            "DATABASE_URL": f"sqlite:///{self._db}",
+            "RESEMBL_CACHE_DIR": self._cache_dir,
+        }
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "resembl.cli",
+                "--quiet",
+                "import",
+                "--force",
+                "--jobs",
+                "2",
+                "tests/test_data",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self._env = env
+
+    def tearDown(self):
+        for path in (self._db, self._db + "-wal", self._db + "-shm"):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_find_uses_running_server(self):
+        """`find` answers via a running `serve` process (subprocess wiring)."""
+        import time
+
+        server = subprocess.Popen(
+            [sys.executable, "-m", "resembl.cli", "serve", "--port", "0"],
+            env=self._env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.addCleanup(server.terminate)
+        try:
+            # Wait for the port file.
+            from resembl.server import server_port_path
+
+            port_file = server_port_path(f"sqlite:///{self._db}")
+            deadline = time.time() + 20
+            while not os.path.exists(port_file) and time.time() < deadline:
+                time.sleep(0.1)
+            if server.poll() is not None:
+                self.fail(f"serve exited early: {server.stderr.read()}")
+            if not os.path.exists(port_file):
+                entries = (
+                    os.listdir(self._cache_dir)
+                    if os.path.isdir(self._cache_dir)
+                    else "no cache dir"
+                )
+                self.fail(
+                    f"serve did not start; cache dir: {entries}; port_file: {port_file}"
+                )
+
+            query_file = os.path.join(
+                "tests", "test_data", sorted(os.listdir("tests/test_data"))[0]
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "resembl.find_client",
+                    "--file",
+                    query_file,
+                    "--json",
+                ],
+                capture_output=True,
+                text=True,
+                env=self._env,
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertIn("matches", payload)
+            self.assertGreater(payload["lsh_candidates"], 0)
+        finally:
+            server.terminate()
+            server.wait(timeout=10)
 
 
 class TestLazyPackageInit(unittest.TestCase):

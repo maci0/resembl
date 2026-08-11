@@ -21,7 +21,7 @@ from sqlmodel import Session, func, select, text
 from .database import db_checksum_get
 from .lsh import (
     ResemblLSH,
-    _insert_sql,
+    _build_insert_sql,
     band_buckets,
     fingerprint_version_set,
     lsh_index_clear,
@@ -121,7 +121,9 @@ def lsh_index_build(
         session.execute(text("PRAGMA cache_size=-262144"))
         session.commit()
 
-    insert_sql = text(_insert_sql(session))
+    # The build's rows are unique by construction; DuckDB's ON CONFLICT
+    # handling is ~7x slower than a plain insert and dominates the build.
+    insert_sql = text(_build_insert_sql(session))
     # Rows are buffered per band and inserted band-major, sorted by bucket, so
     # the (band, bucket, checksum) primary key grows by sequential append
     # instead of random probe — random inserts into a deep b-tree decay badly

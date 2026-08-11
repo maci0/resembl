@@ -80,6 +80,9 @@ The `compare` command also reports control-flow graph similarity.
 :   Recalculate MinHash fingerprints for all snippets.
     Accepts `--jobs N` to run the CPU-bound recomputation in parallel
     (default: one worker per CPU core).
+    After a fingerprint-format change, the first `find` reindexes
+    automatically once (a format version is stamped in the database);
+    `reindex --force` is only needed to force it early.
 
 **stats**
 :   Show database statistics.

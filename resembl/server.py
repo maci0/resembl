@@ -97,6 +97,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> HTTPServer:
     _FindHandler.session = Session(engine)
     httpd = HTTPServer((host, port), _FindHandler)
     port_file = server_port_path(db_url)
+    os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(str(httpd.server_address[1]))
 

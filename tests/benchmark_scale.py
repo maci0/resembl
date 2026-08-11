@@ -17,7 +17,9 @@ Usage::
 Optional flags:
 
     --data-dir DIR   Directory for generated files (default: ``scale_data``)
-    --db PATH        Database file (default: ``scale_benchmark.db``)
+    --db PATH        SQLite database file (default: ``scale_benchmark.db``)
+    --db-url URL     Full DATABASE_URL override (DuckDB, PostgreSQL, ...);
+                     SQLite-only metrics are skipped for non-SQLite backends
     --jobs N         Worker processes for import (default: CPU count)
     --keep           Do not clean up generated files / database afterwards
 """
@@ -79,15 +81,23 @@ def main() -> None:
     parser.add_argument("--num-files", type=int, default=DEFAULT_NUM_FILES)
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
     parser.add_argument("--db", default=DEFAULT_DB)
+    parser.add_argument(
+        "--db-url",
+        default=None,
+        help="Full DATABASE_URL (e.g. duckdb:///file.db or "
+        "postgresql+pg8000://user:pass@host/db).  Overrides --db; "
+        "SQLite-only metrics (DB size, MinHash footprint) are skipped.",
+    )
     parser.add_argument("--jobs", type=int, default=None)
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
     num_files = args.num_files
-    db_url = f"sqlite:///{args.db}"
+    is_sqlite = args.db_url is None
+    db_url = args.db_url or f"sqlite:///{args.db}"
     env = {"DATABASE_URL": db_url}
 
-    if os.path.exists(args.db):
+    if is_sqlite and os.path.exists(args.db):
         os.remove(args.db)
     if os.path.exists(args.data_dir):
         shutil.rmtree(args.data_dir)
@@ -103,8 +113,11 @@ def main() -> None:
     print(f"\n--- Import: {num_files} files ---")
     t = run_command(import_args, env)
     print(f"Import took: {t:.3f}s  ({num_files / t:,.0f} files/s)")
-    print(f"DB size: {db_size_mb(args.db):.2f} MB")
-    print(f"Avg MinHash bytes/snippet: {minhash_bytes_per_snippet(args.db):.1f}")
+    if is_sqlite:
+        print(f"DB size: {db_size_mb(args.db):.2f} MB")
+        print(f"Avg MinHash bytes/snippet: {minhash_bytes_per_snippet(args.db):.1f}")
+    else:
+        print("DB size / MinHash footprint: n/a (non-SQLite backend)")
 
     query_file = os.path.join(
         args.data_dir, random.choice([f for f in os.listdir(args.data_dir)])
@@ -124,7 +137,7 @@ def main() -> None:
 
     if not args.keep:
         print("\nCleaning up...")
-        if os.path.exists(args.db):
+        if is_sqlite and os.path.exists(args.db):
             os.remove(args.db)
         if os.path.exists(args.data_dir):
             shutil.rmtree(args.data_dir)
