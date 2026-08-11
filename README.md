@@ -342,7 +342,7 @@ Measured on a development workstation (shared, under load) with `tests/benchmark
 |--------:|------------:|------------:|----------------------------------:|-----------------:|
 | 5,000   | ~2 s        | ~0.45 s     | ~1.0 s                            | ~2 s             |
 | 20,000  | ~3.6 s      | ~0.45 s     | ~3.0 s                            | ~2.9 s           |
-| 100,000 | ~25 s       | ~0.6 s      | ~14 s                             | ~11 s            |
+| 100,000 | ~19 s       | ~0.47 s     | ~21 s (one-time)                  | ~6 s             |
 | 500,000 | ~2 min      | ~0.6 s      | ~1.8 min (one-time)               | ~53 s            |
 
 Key properties that keep these numbers flat as the database grows:
