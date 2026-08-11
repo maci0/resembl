@@ -136,11 +136,12 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
         values = ",".join(
             f"({row['band']}, '{row['bucket']}', '{row['checksum']}')" for row in chunk
         )
-        session.execute(
-            text(
-                "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
-                f"{values}{conflict}"
-            )
+        # exec_driver_sql, not text(): the statement has no bind parameters,
+        # and text()'s marker scan would misread literal ``$n`` / ``:name``
+        # sequences inside values as bind placeholders.
+        session.connection().exec_driver_sql(
+            "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
+            f"{values}{conflict}"
         )
 
 

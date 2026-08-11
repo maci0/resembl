@@ -6,6 +6,7 @@ dependencies), exercising the full import -> build -> find -> reindex cycle
 against a real DuckDB engine.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -150,6 +151,76 @@ class TestDuckDBIntegration(unittest.TestCase):
         self.assertIn(tricky_name, stored.name_list)
         # Binary payload survived verbatim (blob via FROM_HEX).
         self.assertEqual(stored.minhash, items[0][3])
+
+    def test_literal_builder_roundtrips_arbitrary_text(self):
+        """Randomized round-trip through the DuckDB SQL literal builder.
+
+        The multi-VALUES fast path interpolates user text into SQL, so the
+        escaping must survive arbitrary strings: quotes, backslashes,
+        unicode, and control characters must all round-trip exactly, and
+        never break out of the literal.
+        """
+        from hypothesis import given, settings
+        from hypothesis import strategies as st
+        from sqlmodel import text as sqltext
+
+        from resembl.core import _insert_snippet_rows
+
+        arbitrary = st.text(
+            alphabet=st.characters(
+                blacklist_categories=("Cs",),  # no surrogates
+                blacklist_characters="\x00",  # NUL cannot appear in filenames
+            ),
+            max_size=200,
+        )
+        checksum = st.text(alphabet="0123456789abcdef", min_size=64, max_size=64)
+
+        @given(
+            code=arbitrary,
+            name=arbitrary,
+            checksum=checksum,
+            blob=st.binary(max_size=64),
+            col=st.none() | arbitrary,
+        )
+        @settings(max_examples=60)
+        def _roundtrip(code, name, checksum, blob, col):
+            # Hypothesis shrinks toward degenerate values (e.g. an all-zeros
+            # checksum), which can repeat across examples — clear any prior
+            # row with this checksum so each example is self-contained.
+            self.session.execute(
+                sqltext("DELETE FROM snippet WHERE checksum = :c"), {"c": checksum}
+            )
+            # Go through the real production fast path — this is the exact
+            # statement builder that import/merge use, so escaping bugs (and
+            # text() bind-marker misreads of literal ``$1`` / ``:0``) surface
+            # here rather than in a hand-rolled replica.
+            _insert_snippet_rows(
+                self.session,
+                [
+                    {
+                        "checksum": checksum,
+                        "names": json.dumps([name]),
+                        "code": code,
+                        "minhash": blob,
+                        "tags": "[]",
+                        "collection": col,
+                    }
+                ],
+            )
+            self.session.commit()
+            row = self.session.exec(
+                sqltext(
+                    "SELECT names, code, minhash, collection FROM snippet "
+                    "WHERE checksum = :c"
+                ),
+                params={"c": checksum},
+            ).one()
+            self.assertEqual(row[0], json.dumps([name]))
+            self.assertEqual(row[1], code)
+            self.assertEqual(bytes(row[2]), blob)
+            self.assertEqual(row[3], col)
+
+        _roundtrip()
 
 
 if __name__ == "__main__":

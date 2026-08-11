@@ -1289,11 +1289,13 @@ def _insert_snippet_rows(
             + ")"
             for row in chunk
         )
-        session.execute(
-            text(
-                "INSERT INTO snippet (checksum, names, code, minhash, tags, "
-                f"collection) VALUES {values}"
-            )
+        # exec_driver_sql, not text(): the generated statement has no bind
+        # parameters, and text()'s marker scan cannot tell a literal ``$1``
+        # or ``:0`` inside user content from a real bind placeholder — a
+        # snippet containing either would otherwise raise StatementError.
+        session.connection().exec_driver_sql(
+            "INSERT INTO snippet (checksum, names, code, minhash, tags, "
+            f"collection) VALUES {values}"
         )
 
 
