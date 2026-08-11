@@ -66,8 +66,9 @@ The `compare` command also reports control-flow graph similarity.
 
 ### Bulk Operations
 
-**import** *PATH* [--recursive] [--jobs N]
-:   Import `.asm` files from a directory.
+**import** *PATH* [--jobs N]
+:   Import `.asm` / `.txt` files from a directory (subdirectories are
+    included automatically).
 
 **export** *DIRECTORY* [--format json|asm]
 :   Export all snippets to a directory.
@@ -207,7 +208,7 @@ resembl add "memcpy" "mov ecx, [esp+8] ; rep movsb"
 resembl find "mov ecx, [esp+8]" --top-n 10
 
 # Import a directory of .asm files
-resembl import ./samples --recursive --jobs 4
+resembl import ./samples --jobs 4
 
 # Generate a YARA rule
 resembl yara abc123 --rule-name suspicious_memcpy

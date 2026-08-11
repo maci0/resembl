@@ -329,6 +329,11 @@ def serve(
     from .server import serve as serve_start
 
     db_url = str(cast(Engine, state.session.get_bind()).url)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        _echo(
+            "[yellow]Warning: binding a non-loopback interface exposes an "
+            "unauthenticated find service.[/yellow]"
+        )
     _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
     httpd = serve_start(db_url, host=host, port=port)
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
