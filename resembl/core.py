@@ -2146,7 +2146,8 @@ def collection_list(session: Session) -> list[dict]:
     counts = dict(
         session.exec(
             select(  # type: ignore[arg-type]
-                Snippet.collection, func.count(Snippet.checksum)
+                Snippet.collection,
+                func.count(Snippet.checksum),  # type: ignore[arg-type]
             )
             .where(Snippet.collection.is_not(None))  # type: ignore[union-attr]
             .group_by(Snippet.collection)  # type: ignore[union-attr]
