@@ -97,6 +97,30 @@ class TestServerMode(unittest.TestCase):
         rc = _main(["--query", "push ebx; mov eax, 5; pop ebx; ret", "--json"])
         self.assertEqual(rc, 0)
 
+    def test_concurrent_requests_all_succeed(self):
+        """The server answers concurrent finds correctly (per-request sessions)."""
+        import concurrent.futures
+
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+
+        def do_find(i: int) -> dict:
+            body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(do_find, range(16)))
+        self.assertEqual(len(results), 16)
+        for payload in results:
+            self.assertIn("matches", payload)
+            self.assertEqual(len(payload["matches"]), 5)
+
 
 class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""

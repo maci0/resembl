@@ -2,13 +2,16 @@
 
 Every CLI invocation pays ~450 ms of interpreter/library startup; a search
 itself is ~1.4 ms.  ``resembl serve`` starts a small HTTP server (stdlib
-only) that holds the engine, session, and LSH index warm, and ``find``
-automatically talks to it when it is running — turning the headline warm-find
-latency from ~450 ms into a few milliseconds.
+only) that holds the engine and LSH index warm, and ``find`` automatically
+talks to it when it is running — turning the headline warm-find latency from
+~450 ms into a few milliseconds.
 
 The server writes a port file (``server_<dbhash>.port`` in the cache dir)
-that ``find`` uses to locate it.  Queries are serialized with a lock
-(SQLAlchemy sessions are not thread-safe).
+that ``find`` uses to locate it.  Requests run concurrently: each gets its
+own SQLAlchemy session against the shared (warm) engine, and SQLite's WAL
+mode allows concurrent readers.  The fingerprint migration and the LSH
+index build are done once at startup, so serving is read-only in the normal
+case.
 """
 
 from __future__ import annotations
@@ -16,14 +19,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from sqlmodel import Session
 
-from .cache import cache_dir_get
-from .core import snippet_find_matches
+from .cache import cache_dir_get, lsh_index_build
+from .core import LSH_THRESHOLD, NUM_PERMUTATIONS, db_reindex, snippet_find_matches
+from .lsh import fingerprint_version_get
+from .models import FINGERPRINT_VERSION
 
 
 def server_port_path(db_url: str) -> str:
@@ -33,10 +37,9 @@ def server_port_path(db_url: str) -> str:
 
 
 class _FindHandler(BaseHTTPRequestHandler):
-    """Serves ``POST /find`` against the shared session."""
+    """Serves ``POST /find``; one session per request (concurrent reads)."""
 
-    session: Session = None  # type: ignore[assignment]  # set by serve()
-    lock: threading.Lock = threading.Lock()
+    engine: Any = None  # set by serve()
 
     def do_POST(self) -> None:  # noqa: N802 (http.server API)
         if self.path != "/find":
@@ -50,9 +53,9 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"bad request: {exc}"})
             return
         try:
-            with self.lock:
+            with Session(self.engine) as session:
                 num_candidates, matches = snippet_find_matches(
-                    self.session,
+                    session,
                     query,
                     top_n=int(body.get("top_n", 5)),
                     threshold=body.get("threshold"),
@@ -86,16 +89,24 @@ class _FindHandler(BaseHTTPRequestHandler):
         return
 
 
-def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> HTTPServer:
+def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     """Start the find server for *db_url* and return the bound HTTP server.
 
-    The port file is written on startup and removed on exit.
+    The fingerprint migration (if any) and the LSH index build run once at
+    startup so serving is read-only; the port file is written on startup and
+    removed on exit.
     """
     from .database import create_db_engine
 
     engine = create_db_engine(db_url)
-    _FindHandler.session = Session(engine)
-    httpd = HTTPServer((host, port), _FindHandler)
+    with Session(engine) as session:
+        # One-time migration + index build, before any request is served.
+        if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+            db_reindex(session, jobs=max(1, os.cpu_count() or 1))
+        lsh_index_build(session, LSH_THRESHOLD, NUM_PERMUTATIONS)
+
+    _FindHandler.engine = engine
+    httpd = ThreadingHTTPServer((host, port), _FindHandler)
     port_file = server_port_path(db_url)
     os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
