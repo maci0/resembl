@@ -356,6 +356,12 @@ def serve(
     except ValueError as e:
         err_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
+    except OSError as e:
+        # e.g. --port already in use by another process.
+        err_console.print(
+            f"[red]Error:[/red] could not bind {host}:{port}: {e.strerror or e}"
+        )
+        raise typer.Exit(code=1)
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
 
     # Service managers (systemd, Docker stop, kill) send SIGTERM, whose

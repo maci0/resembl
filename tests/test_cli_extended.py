@@ -469,6 +469,29 @@ class TestCLIServeLifecycle(BaseCLITest):
                     self.fail("first serve did not exit after SIGTERM")
             self.assertFalse(os.path.exists(port_file))
 
+    def test_serve_port_in_use_fails_cleanly(self):
+        """serve --port N on an occupied port errors cleanly, not with a traceback."""
+        import socket
+
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        occupied = blocker.getsockname()[1]
+        try:
+            with tempfile.TemporaryDirectory() as cache_dir:
+                result = subprocess.run(
+                    ["python", "-m", "resembl.cli", "serve", "--port", str(occupied)],
+                    env=self._serve_env(cache_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("could not bind", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+        finally:
+            blocker.close()
+
 
 class TestServerFallback(unittest.TestCase):
     """The thin-client fallback must not orphan a slow-but-live server."""
