@@ -109,6 +109,94 @@ class TestPropertyMinHash(unittest.TestCase):
         self.assertEqual(m1.jaccard(m2), 1.0)
 
 
+class TestPropertyJaccardBatch(unittest.TestCase):
+    """Randomized parity: the vectorized batch Jaccard equals per-blob scoring.
+
+    ``minhash_jaccard_batch`` is the find hot path (SIMD over the whole
+    candidate set), so its values must be bit-identical to the per-blob
+    ``minhash_jaccard`` for arbitrary fingerprints, permutation counts, and
+    duplicate/legacy blobs.
+    """
+
+    @given(
+        n=st.integers(min_value=1, max_value=120),
+        perm=st.sampled_from([32, 64, 128]),
+        seed=st.integers(min_value=0, max_value=2**32 - 1),
+    )
+    @settings(max_examples=40, deadline=10000)
+    def test_batch_matches_per_blob(self, n: int, perm: int, seed: int) -> None:
+        import random
+
+        from resembl.models import (
+            minhash_jaccard,
+            minhash_jaccard_batch,
+            minhash_new,
+            minhash_pack,
+        )
+
+        rng = random.Random(seed)
+        blobs = []
+        for _ in range(n):
+            m = minhash_new(perm)
+            for token in rng.sample(range(10_000), rng.randint(1, 60)):
+                m.update(str(token).encode("utf-8"))
+            blobs.append(minhash_pack(m))
+        # A byte-identical duplicate exercises the memcmp fast path.
+        blobs.append(blobs[0])
+
+        query = blobs[0]
+        batch = minhash_jaccard_batch(query, blobs)
+        per_blob = [minhash_jaccard(query, b) for b in blobs]
+        self.assertEqual(batch, per_blob)
+        self.assertEqual(batch[0], 1.0)
+        self.assertEqual(batch[-1], 1.0)  # the duplicate blob
+
+        # Chunking must not change results (exercises the 50k boundary).
+        chunked = minhash_jaccard_batch(query, blobs, chunk_size=16)
+        self.assertEqual(chunked, per_blob)
+
+    @given(seed=st.integers(min_value=0, max_value=2**32 - 1))
+    @settings(max_examples=10, deadline=10000)
+    def test_permutation_mismatch_raises(self, seed: int) -> None:
+        import random
+
+        from resembl.models import (
+            minhash_jaccard_batch,
+            minhash_new,
+            minhash_pack,
+        )
+
+        rng = random.Random(seed)
+        a = minhash_new(128)
+        b = minhash_new(64)
+        for _ in range(10):
+            a.update(str(rng.random()).encode("utf-8"))
+            b.update(str(rng.random()).encode("utf-8"))
+        with self.assertRaises(ValueError):
+            minhash_jaccard_batch(minhash_pack(a), [minhash_pack(b)])
+
+    def test_legacy_pickle_fallback_parity(self) -> None:
+        """A legacy pickle blob in the list falls back to per-blob scoring."""
+        import pickle
+
+        from resembl.models import (
+            minhash_jaccard,
+            minhash_jaccard_batch,
+            minhash_new,
+            minhash_pack,
+        )
+
+        m = minhash_new(128)
+        m.update(b"query")
+        query = minhash_pack(m)
+        other = minhash_new(128)
+        other.update(b"candidate")
+        legacy = pickle.dumps(other)
+
+        batch = minhash_jaccard_batch(query, [legacy])
+        self.assertEqual(batch, [minhash_jaccard(query, legacy)])
+
+
 class TestPropertyPackedStorage(unittest.TestCase):
     """Property-based tests for the packed fingerprint format."""
 
