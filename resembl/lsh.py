@@ -102,6 +102,48 @@ def dialect_name(session: Session) -> str:
     return session.get_bind().dialect.name
 
 
+#: Rows per multi-row ``VALUES`` statement on DuckDB.  DuckDB's Python
+#: executemany path is pathologically slow (~7k rows/s measured) while
+#: multi-row VALUES inserts reach ~93k rows/s — the difference dominates
+#: the one-time index build on DuckDB (cold find at 15k snippets: 65s vs
+#: ~5s on SQLite).  Statements of 1000 rows keep the SQL string small.
+_DUCKDB_VALUES_CHUNK = 1000
+
+
+def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> None:
+    """Insert *rows* with the dialect's fastest strategy.
+
+    Non-DuckDB dialects use the executemany template *sql* unchanged
+    (SQLAlchemy's executemany is C-accelerated there).  DuckDB falls back
+    to multi-row ``VALUES`` statements, which measured 13x faster than its
+    executemany path.  ``ON CONFLICT`` suffixes present in *sql* (the
+    incremental-sync variant) are preserved.
+
+    The row values are ``(band: int, bucket: hex, checksum: hex)`` — band
+    is a small integer and bucket/checksum are lowercase-hex strings by
+    construction (``bytes.hex()`` / ``sha256`` digests), so interpolating
+    them into the SQL is safe: a hex string cannot contain quotes or other
+    SQL metacharacters.
+    """
+    if not rows:
+        return
+    if dialect_name(session) != "duckdb":
+        session.execute(text(sql), params=rows)
+        return
+    conflict = " ON CONFLICT DO NOTHING" if "ON CONFLICT" in sql else ""
+    for start in range(0, len(rows), _DUCKDB_VALUES_CHUNK):
+        chunk = rows[start : start + _DUCKDB_VALUES_CHUNK]
+        values = ",".join(
+            f"({row['band']}, '{row['bucket']}', '{row['checksum']}')" for row in chunk
+        )
+        session.execute(
+            text(
+                "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
+                f"{values}{conflict}"
+            )
+        )
+
+
 def _insert_sql(session: Session) -> str:
     """Return the dialect-appropriate upsert-ignore statement.
 
@@ -298,7 +340,7 @@ class ResemblLSH:
             # sequential append instead of random probe, which keeps large
             # incremental syncs (importing into an indexed database) fast.
             chunk.sort(key=lambda row: (row["band"], row["bucket"]))
-            self.session.execute(text(_insert_sql(self.session)), params=chunk)
+            _insert_rows(self.session, _insert_sql(self.session), chunk)
             self.session.commit()
         return len(rows)
 

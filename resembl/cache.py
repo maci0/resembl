@@ -22,6 +22,7 @@ from .database import db_checksum_get
 from .lsh import (
     ResemblLSH,
     _build_insert_sql,
+    _insert_rows,
     band_buckets,
     fingerprint_version_set,
     lsh_index_clear,
@@ -123,7 +124,7 @@ def lsh_index_build(
 
     # The build's rows are unique by construction; DuckDB's ON CONFLICT
     # handling is ~7x slower than a plain insert and dominates the build.
-    insert_sql = text(_build_insert_sql(session))
+    insert_sql = _build_insert_sql(session)
     # Rows are buffered per band and inserted band-major, sorted by bucket, so
     # the (band, bucket, checksum) primary key grows by sequential append
     # instead of random probe — random inserts into a deep b-tree decay badly
@@ -132,7 +133,8 @@ def lsh_index_build(
 
     def flush_band(band: int) -> None:
         pairs = sorted(band_rows[band])
-        session.execute(
+        _insert_rows(
+            session,
             insert_sql,
             [
                 {"band": band, "bucket": bucket, "checksum": checksum}

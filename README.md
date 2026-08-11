@@ -383,6 +383,12 @@ the optimization.
   the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
   [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
   in CI on every push; DuckDB runs locally in the suite.
+- **DuckDB fast bulk inserts** — DuckDB's Python `executemany` path is pathologically slow
+  (~7k rows/s measured), so the index build and the snippet import swap in multi-row `VALUES`
+  statements there (values are rendered through a quote-doubling / `FROM_HEX` literal builder — the
+  injection boundary for user text).  At 15k snippets this cut the DuckDB cold find from ~65 s to
+  ~9 s and import from ~9.6 s to ~4.7 s (3.2k files/s), bringing the embedded backend within ~2× of
+  SQLite on both.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
 - **Warm server** — `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
   route through it when running (with automatic in-process fallback), answering concurrent requests
   in milliseconds.
