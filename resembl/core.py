@@ -2135,20 +2135,32 @@ def collection_delete(session: Session, name: str, quiet: bool = False) -> bool:
 
 
 def collection_list(session: Session) -> list[dict]:
-    """List all collections with snippet counts."""
+    """List all collections with snippet counts.
+
+    Counts come from one indexed ``GROUP BY`` over the ``collection``
+    column instead of loading every member's full row per collection —
+    the old per-collection ``get_by_collection`` pulled the whole corpus
+    (code column included) through the ORM just to count it.
+    """
     collections = Collection.get_all(session)
-    results = []
-    for col in collections:
-        snippets = Snippet.get_by_collection(session, col.name)
-        results.append(
-            {
-                "name": col.name,
-                "description": col.description,
-                "snippet_count": len(snippets),
-                "created_at": col.created_at,
-            }
-        )
-    return results
+    counts = dict(
+        session.exec(
+            select(  # type: ignore[arg-type]
+                Snippet.collection, func.count(Snippet.checksum)
+            )
+            .where(Snippet.collection.is_not(None))  # type: ignore[union-attr]
+            .group_by(Snippet.collection)  # type: ignore[union-attr]
+        ).all()
+    )
+    return [
+        {
+            "name": col.name,
+            "description": col.description,
+            "snippet_count": counts.get(col.name, 0),
+            "created_at": col.created_at,
+        }
+        for col in collections
+    ]
 
 
 def collection_add_snippet(
