@@ -2245,17 +2245,16 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 )
                 session.add(new_col)
 
-        # Pre-compute the set of checksums already present in this database
-        # so the per-row lookup below stays in-memory (no per-row query).
-        local_checksums = set(session.exec(select(Snippet.checksum)).all())
-
-        # Source snippets that overlap local content are merged.  Their local
-        # rows are fetched in chunked IN batches instead of one
-        # ``session.get`` per overlap — merging two heavily-overlapping
-        # databases would otherwise issue a round trip per overlap (N+1).
-        # The pending buffer is bounded, so memory stays flat regardless of
-        # how much of the source already exists locally.
-        pending_overlap: list[Snippet] = []
+        # Source snippets that already exist locally are merged; new ones are
+        # bulk-inserted.  Existence is decided by one chunked IN query per
+        # chunk of source, so memory stays O(chunk) regardless of the LOCAL
+        # database size — the old design preloaded every local checksum into
+        # a set (O(local DB) memory, a wall when consolidating against
+        # billions of snippets) and then fetched overlapping rows a second
+        # time.  The chunk's returned rows ARE the merge rows, so there is
+        # no second fetch, and the chunked INs replace both the preload and
+        # the per-overlap ``session.get`` (the N+1 fixed earlier).
+        merge_chunk: list[Snippet] = []
 
         def record_new(src_snippet: Snippet) -> None:
             nonlocal added
@@ -2274,14 +2273,18 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 (src_snippet.checksum, minhash_ensure_packed(src_snippet.minhash))
             )
 
-        def merge_overlap(batch: list[Snippet]) -> None:
+        def flush_merge_chunk() -> None:
             nonlocal updated, skipped
-            local_rows = _snippets_by_checksums(session, [s.checksum for s in batch])
-            for src_snippet in batch:
+            if not merge_chunk:
+                return
+            local_rows = _snippets_by_checksums(
+                session, [s.checksum for s in merge_chunk]
+            )
+            for src_snippet in merge_chunk:
                 existing = local_rows.get(src_snippet.checksum)
                 if existing is None:
-                    # Vanished between the checksum snapshot and the fetch —
-                    # re-add it as new, matching the old session.get fallback.
+                    # Not in the local database (or vanished concurrently) —
+                    # treat as new, matching the old fallback.
                     record_new(src_snippet)
                     continue
                 changed = False
@@ -2312,18 +2315,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 if not existing.collection and src_snippet.collection:
                     existing.collection = src_snippet.collection
                     session.add(existing)
+            merge_chunk.clear()
 
         # Import snippets (streaming, so memory stays bounded for big sources)
         for src_snippet in Snippet.stream_all(source_session):
-            if src_snippet.checksum in local_checksums:
-                pending_overlap.append(src_snippet)
-                if len(pending_overlap) >= 900:
-                    merge_overlap(pending_overlap)
-                    pending_overlap.clear()
-            else:
-                record_new(src_snippet)
-        if pending_overlap:
-            merge_overlap(pending_overlap)
+            merge_chunk.append(src_snippet)
+            if len(merge_chunk) >= 900:
+                flush_merge_chunk()
+        flush_merge_chunk()
 
         # Bulk-insert the new rows instead of per-object ORM adds — the same
         # ~30x write-path win as snippet_add_batch (multi-VALUES on DuckDB).
