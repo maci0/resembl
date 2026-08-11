@@ -40,6 +40,9 @@ from .cache import (
 )
 from .lsh import (
     ResemblLSH,
+    fingerprint_ngram_clear,
+    fingerprint_ngram_get,
+    fingerprint_ngram_set,
     fingerprint_version_clear,
     fingerprint_version_get,
     fingerprint_version_set,
@@ -1336,6 +1339,7 @@ def snippet_add_batch(
     session: Session,
     prepared_items: list[tuple[str, str, str, bytes]],
     batch_size: int = 500,
+    ngram_size: int = 3,
 ) -> dict:
     """Insert many prepared snippets in one pass.
 
@@ -1423,6 +1427,8 @@ def snippet_add_batch(
         _insert_snippet_rows(session, rows, batch_size)
     if new_snippets or aliased:
         session.commit()
+        if new_snippets:
+            fingerprint_ngram_set(session, ngram_size)
 
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
@@ -1470,6 +1476,7 @@ def snippet_add(
     session.add(new_snippet)
     session.commit()
     session.refresh(new_snippet)
+    fingerprint_ngram_set(session, ngram_size)
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
     return new_snippet
@@ -1499,6 +1506,11 @@ def snippet_find_matches(
     # recompute them once so queries never silently mix fingerprint formats.
     # Reindexing current-format blobs is idempotent (identical fingerprints).
     needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
+    if not needs_reindex and fingerprint_ngram_get(session) != ngram_size:
+        # Stored fingerprints encode their n-gram; a config ngram change
+        # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
+        # ngram 5) — reindex once at the new n-gram.
+        needs_reindex = True
     if not needs_reindex and num_permutations != NUM_PERMUTATIONS:
         # A non-default permutation count must match the stored blobs; the
         # version stamp does not cover perm-count changes, so probe one blob.
@@ -1720,6 +1732,7 @@ def db_reindex(
 
     if num_snippets == 0:
         fingerprint_version_set(session, FINGERPRINT_VERSION)
+        fingerprint_ngram_set(session, ngram_size)
         return {"num_reindexed": 0, "time_elapsed": 0, "avg_time_per_snippet": 0}
 
     reindexed = 0
@@ -1807,9 +1820,10 @@ def db_reindex(
             codes = [snippet.code for snippet in batch]
             apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     session.commit()
-    # Fingerprints are now current — stamp the format version so `find`
-    # does not reindex again.
+    # Fingerprints are now current — stamp the format version and n-gram
+    # size so `find` does not reindex again.
     fingerprint_version_set(session, FINGERPRINT_VERSION)
+    fingerprint_ngram_set(session, ngram_size)
 
     end_time = time.time()
     time_elapsed = end_time - start_time
@@ -2465,6 +2479,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # fingerprint format — drop the version stamp so the next `find`
         # reindexes once and normalizes everything.
         fingerprint_version_clear(session)
+        fingerprint_ngram_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e)
         return {"error": str(e)}

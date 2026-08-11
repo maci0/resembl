@@ -723,6 +723,43 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(lsh_meta_get(self.session)[1], 64)
         self.assertEqual(n2, n)
 
+    def test_ngram_change_reindexes_instead_of_silent_zero(self):
+        """A config n-gram change reindexes once; matches are not silently lost.
+
+        Stored fingerprints encode their n-gram, so a query at a different
+        size shares no buckets with the index — previously it returned 0
+        candidates with no rebuild (measured: 40 at ngram 3, 0 at ngram 5).
+        """
+        from resembl.lsh import fingerprint_ngram_get
+
+        self._add(20, "ng")
+        n3, m3 = snippet_find_matches(
+            self.session,
+            "MOV EAX, 5; ADD EBX, 5; RET",
+            top_n=3,
+            ngram_size=3,
+        )
+        self.assertGreater(n3, 0)
+
+        n5, m5 = snippet_find_matches(
+            self.session,
+            "MOV EAX, 5; ADD EBX, 5; RET",
+            top_n=3,
+            ngram_size=5,
+        )
+        # The change triggered a reindex at ngram 5; matches are not lost.
+        self.assertGreater(n5, 0)
+        self.assertEqual(fingerprint_ngram_get(self.session), 5)
+
+        # A third find at ngram 5 does not reindex again.
+        n5b, _ = snippet_find_matches(
+            self.session,
+            "MOV EAX, 5; ADD EBX, 5; RET",
+            top_n=3,
+            ngram_size=5,
+        )
+        self.assertEqual(n5b, n5)
+
     def test_build_reports_progress(self):
         """The build invokes the progress callback with (done, total)."""
         self._add(50, "p")

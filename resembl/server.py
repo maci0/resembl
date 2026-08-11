@@ -48,6 +48,7 @@ _RESULT_CACHE_LOCK = threading.Lock()
 #: config at startup, so served results match in-process find).
 _SERVER_THRESHOLD = 0.5
 _SERVER_NUM_PERM = 128
+_SERVER_NGRAM = 3
 
 
 def _db_version(session: Session) -> int | None:
@@ -66,7 +67,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
         int(body.get("top_n", 5)),
         body.get("threshold"),
         bool(body.get("normalize", True)),
-        int(body.get("ngram_size", 3)),
+        int(body.get("ngram_size", _SERVER_NGRAM)),
         int(body.get("num_permutations", _SERVER_NUM_PERM)),
     )
     version = _db_version(session)
@@ -77,7 +78,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
                 _RESULT_CACHE.move_to_end(key)
                 return entry[1]
     num_candidates, matches = snippet_find_matches(
-        session, query, *key[1:5], num_permutations=key[5]
+        session, query, *key[1:4], ngram_size=key[4], num_permutations=key[5]
     )
     payload = {
         "lsh_candidates": num_candidates,
@@ -219,17 +220,23 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         # Honor the CLI config: the server answers with the same threshold /
         # permutation count as in-process find, so clients using the same
         # config get warm cache hits instead of per-request rebuilds.
-        global _SERVER_THRESHOLD, _SERVER_NUM_PERM
+        global _SERVER_THRESHOLD, _SERVER_NUM_PERM, _SERVER_NGRAM
         from .config import load_config
 
         cfg = load_config()
         _SERVER_THRESHOLD = float(cfg.get("lsh_threshold", LSH_THRESHOLD))
         _SERVER_NUM_PERM = int(cfg.get("num_permutations", NUM_PERMUTATIONS))
+        _SERVER_NGRAM = int(cfg.get("ngram_size", 3))
 
         # One-time migration + index build, before any request is served.
         # The migration worker count scales with the database (spawning a
         # worker per CPU for a small database costs more than the work).
         needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
+        from .lsh import fingerprint_ngram_get
+
+        if not needs_reindex and fingerprint_ngram_get(session) != _SERVER_NGRAM:
+            # A config n-gram change silently zeroes matches — reindex once.
+            needs_reindex = True
         if not needs_reindex and _SERVER_NUM_PERM != NUM_PERMUTATIONS:
             from sqlmodel import func, select
 
@@ -251,6 +258,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
             db_reindex(
                 session,
                 jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+                ngram_size=_SERVER_NGRAM,
                 num_perm=_SERVER_NUM_PERM,
             )
         # Build the index only if it is missing or was built with different

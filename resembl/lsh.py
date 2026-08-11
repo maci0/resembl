@@ -84,15 +84,15 @@ _META_UPSERT_DUCKDB = (
 )
 
 _VERSION_UPSERT_SQLITE_PG = (
-    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
     "ON CONFLICT(key) DO UPDATE SET value = :v"
 )
 _VERSION_UPSERT_MYSQL = (
-    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
     "ON DUPLICATE KEY UPDATE value = :v"
 )
 _VERSION_UPSERT_DUCKDB = (
-    "INSERT INTO app_meta (key, value) VALUES ('fingerprint_version', :v) "
+    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
     "ON CONFLICT (key) DO UPDATE SET value = :v"
 )
 
@@ -184,7 +184,7 @@ def _meta_upsert_sql(session: Session) -> str:
 
 
 def _version_upsert_sql(session: Session) -> str:
-    """Return the dialect-appropriate upsert for the ``app_meta`` key."""
+    """Return the dialect-appropriate upsert for an ``app_meta`` key/value."""
     dialect = dialect_name(session)
     if dialect == "mysql":
         return _VERSION_UPSERT_MYSQL
@@ -250,7 +250,7 @@ def fingerprint_version_set(session: Session, version: int) -> None:
     """Stamp the fingerprint-format version (current algorithm)."""
     session.execute(
         text(_version_upsert_sql(session)),
-        {"v": str(version)},
+        {"k": "fingerprint_version", "v": str(version)},
     )
     session.commit()
 
@@ -258,6 +258,35 @@ def fingerprint_version_set(session: Session, version: int) -> None:
 def fingerprint_version_clear(session: Session) -> None:
     """Remove the version stamp (blobs may be stale; force a reindex)."""
     session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_version'"))
+    session.commit()
+
+
+def fingerprint_ngram_get(session: Session) -> int | None:
+    """Return the n-gram size the stored fingerprints were built with."""
+    row = session.execute(
+        text("SELECT value FROM app_meta WHERE key = 'fingerprint_ngram'")
+    ).one_or_none()
+    return int(row[0]) if row is not None else None
+
+
+def fingerprint_ngram_set(session: Session, ngram_size: int) -> None:
+    """Stamp the n-gram size used to derive the stored fingerprints.
+
+    Changing ``ngram_size`` silently breaks queries — stored fingerprints
+    encode their n-gram, so a query at a different size never shares buckets
+    with the index (measured: 40 candidates at ngram 3, 0 at ngram 5 with no
+    rebuild).  The stamp lets ``find`` detect the change and reindex once.
+    """
+    session.execute(
+        text(_version_upsert_sql(session)),
+        {"k": "fingerprint_ngram", "v": str(ngram_size)},
+    )
+    session.commit()
+
+
+def fingerprint_ngram_clear(session: Session) -> None:
+    """Remove the n-gram stamp (blobs may be from an unknown n-gram)."""
+    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_ngram'"))
     session.commit()
 
 
