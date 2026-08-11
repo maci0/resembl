@@ -863,6 +863,76 @@ def find(
 
 
 @app.command()
+def find_batch(
+    file: typer.FileText = typer.Option(
+        ..., "--file", help="File of queries, one per line ('#' = comment)."
+    ),
+    top_n: int | None = typer.Option(
+        None, "--top-n", help="Number of top matches to return per query."
+    ),
+    threshold: float | None = typer.Option(
+        None, "--threshold", help="LSH threshold override (0.0-1.0)."
+    ),
+) -> None:
+    """Find matches for many queries in one process.
+
+    Processes every query line in *file* in a single invocation, amortizing
+    interpreter startup and the LSH index load across the whole batch — for
+    N queries this is roughly N times faster than N separate ``find`` calls.
+    The first query pays the one-time index build; the rest are warm.
+    """
+    effective_top_n = top_n if top_n is not None else state.config.get("top_n", 5)
+    effective_threshold = (
+        threshold if threshold is not None else state.config.get("lsh_threshold", 0.5)
+    )
+    ngram_size = cast(int, state.config.get("ngram_size", 3))
+
+    queries = [
+        line.strip()
+        for line in file
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not queries:
+        err_console.print("[red]Error:[/red] No queries found in the file.")
+        raise typer.Exit(code=1)
+
+    results: list[dict] = []
+    for raw_query in queries:
+        # Same convenience as `find --query`: single-line ';' separates
+        # statements (in a multi-line batch entry ';' stays a comment).
+        query_string = (
+            raw_query.replace(";", "\n")
+            if ";" in raw_query and "\n" not in raw_query
+            else raw_query
+        )
+        num_candidates, matches = snippet_find_matches(
+            state.session,
+            query_string,
+            effective_top_n,
+            effective_threshold,
+            ngram_size=ngram_size,
+        )
+        results.append(
+            {
+                "query": query_string,
+                "lsh_candidates": num_candidates,
+                "matches": [
+                    {"checksum": s.checksum, "names": s.name_list, "score": score}
+                    for s, score in matches
+                ],
+            }
+        )
+
+    if state.format in ("json", "csv"):
+        _echo_format(results)
+    else:
+        for i, result in enumerate(results, 1):
+            _echo(f"[bold]{i}. {result['query']}[/bold]")
+            _render_find_payload(result)
+            _echo("")
+
+
+@app.command()
 def search(
     pattern: str = typer.Argument(help="The name pattern to search for."),
 ) -> None:

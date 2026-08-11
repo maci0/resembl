@@ -11,6 +11,49 @@ from resembl.core import collection_create, snippet_add, snippet_tag_add
 from tests.test_cli import BaseCLITest
 
 
+class TestCLIFindBatch(BaseCLITest):
+    """find-batch processes many queries in one invocation."""
+
+    def test_find_batch_matches_individual_finds(self):
+        import tempfile
+
+        from resembl.core import snippet_add
+
+        with Session(self.engine) as session:
+            snippet_add(session, "f1", "MOV EAX, 1\nRET")
+            snippet_add(session, "f2", "MOV EAX, 2\nRET")
+            snippet_add(session, "f3", "XOR EBX, EBX\nRET")
+
+        queries_file = tempfile.mktemp(suffix=".txt")
+        with open(queries_file, "w", encoding="utf-8") as f:
+            f.write(
+                "MOV EAX, 1; RET\nMOV EAX, 2; RET\n# a comment\nXOR EBX, EBX; RET\n"
+            )
+
+        try:
+            result = self.run_command(f"--format json find-batch --file {queries_file}")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            self.assertEqual(len(payload), 3)  # comments are skipped
+            by_query = {d["query"]: d for d in payload}
+            self.assertGreater(by_query["MOV EAX, 1\n RET"]["lsh_candidates"], 0)
+            # ';' on a single line is converted to a newline, like `find --query`.
+            self.assertGreater(by_query["MOV EAX, 2\n RET"]["lsh_candidates"], 0)
+            self.assertGreater(by_query["XOR EBX, EBX\n RET"]["lsh_candidates"], 0)
+
+            # Per-query results match individual `find` calls.
+            single = self.run_command("--format json find --query 'MOV EAX, 1; RET'")
+            self.assertEqual(single.returncode, 0, single.stderr)
+            single_payload = json.loads(single.stdout)
+            self.assertEqual(
+                by_query["MOV EAX, 1\n RET"]["lsh_candidates"],
+                single_payload["lsh_candidates"],
+            )
+        finally:
+            if os.path.exists(queries_file):
+                os.remove(queries_file)
+
+
 class TestCLICollections(BaseCLITest):
     """Integration tests for the collection command group."""
 
