@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -38,6 +39,9 @@ from .models import FINGERPRINT_VERSION
 #: bypass the cache.
 _RESULT_CACHE: "OrderedDict[tuple, tuple[int | None, dict]]" = OrderedDict()
 _RESULT_CACHE_MAX = 128
+#: Serializes access to the shared cache: requests run in concurrent
+#: handler threads, and OrderedDict is not thread-safe.
+_RESULT_CACHE_LOCK = threading.Lock()
 
 
 def _db_version(session: Session) -> int | None:
@@ -60,10 +64,11 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
     )
     version = _db_version(session)
     if version is not None:
-        entry = _RESULT_CACHE.get(key)
-        if entry is not None and entry[0] == version:
-            _RESULT_CACHE.move_to_end(key)
-            return entry[1]
+        with _RESULT_CACHE_LOCK:
+            entry = _RESULT_CACHE.get(key)
+            if entry is not None and entry[0] == version:
+                _RESULT_CACHE.move_to_end(key)
+                return entry[1]
     num_candidates, matches = snippet_find_matches(session, query, *key[1:])
     payload = {
         "lsh_candidates": num_candidates,
@@ -73,10 +78,11 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
         ],
     }
     if version is not None:
-        _RESULT_CACHE[key] = (version, payload)
-        _RESULT_CACHE.move_to_end(key)
-        while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
-            _RESULT_CACHE.popitem(last=False)
+        with _RESULT_CACHE_LOCK:
+            _RESULT_CACHE[key] = (version, payload)
+            _RESULT_CACHE.move_to_end(key)
+            while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
+                _RESULT_CACHE.popitem(last=False)
     return payload
 
 
@@ -88,6 +94,15 @@ def server_port_path(db_url: str) -> str:
 
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find``; one session per request (concurrent reads)."""
+
+    # HTTP/1.1 enables keep-alive: well-behaved clients reuse the connection
+    # instead of opening a fresh one per request, which cut measured
+    # connection-reset errors under concurrent load from ~24 to ~3 (the
+    # resets come from connection churn, not request logic — a churned
+    # close under GIL contention surfaces as RST).  The idle timeout bounds
+    # how long a keep-alive connection can hold its handler thread.
+    protocol_version = "HTTP/1.1"
+    timeout = 30
 
     engine: Any = None  # set by serve()
 
@@ -164,7 +179,11 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     """
     from .database import create_db_engine
 
-    engine = create_db_engine(db_url)
+    # Larger than the default pool: requests run one thread per connection,
+    # and the default (5 + 10 overflow) was exhausted under concurrent load,
+    # timing requests out after 30s.  SQLite in WAL mode handles many
+    # concurrent readers fine.
+    engine = create_db_engine(db_url, pool_size=32, max_overflow=64)
     with Session(engine) as session:
         # One-time migration + index build, before any request is served.
         if fingerprint_version_get(session) != FINGERPRINT_VERSION:

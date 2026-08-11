@@ -198,6 +198,23 @@ def table_ensure(session: Session) -> None:
     SQLModel.metadata.create_all(session.get_bind())
 
 
+#: Process-wide guard: the CLI creates all tables at startup (``db_create``),
+#: so ``ResemblLSH`` only needs to run the DDL fallback once per process.
+#: Calling ``create_all`` per construction put a DDL transaction on *every*
+#: find request, which thrashed the serve process's connection pool under
+#: concurrent load.
+_TABLES_ENSURED = False
+
+
+def _ensure_tables_once(session: Session) -> None:
+    """Run :func:`table_ensure` at most once per process."""
+    global _TABLES_ENSURED
+    if _TABLES_ENSURED:
+        return
+    table_ensure(session)
+    _TABLES_ENSURED = True
+
+
 def lsh_meta_get(session: Session) -> tuple[float, int] | None:
     """Return ``(threshold, num_perm)`` of the built index, or ``None``."""
     try:
@@ -299,7 +316,7 @@ class ResemblLSH:
         self.b, self.r = _banding_params(threshold, num_perm)
         if self.b < 2:
             raise ValueError("The number of bands are too small (b < 2)")
-        table_ensure(session)
+        _ensure_tables_once(session)
 
     # -- helpers -----------------------------------------------------------
 

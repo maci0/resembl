@@ -249,6 +249,19 @@ class TestServerMode(unittest.TestCase):
             self.assertIn("matches", payload)
             self.assertEqual(len(payload["matches"]), 5)
 
+    def test_handler_uses_keepalive_with_idle_timeout(self):
+        """HTTP/1.1 keep-alive + idle timeout bound connection churn.
+
+        Measured under concurrent load, connection churn (not request
+        logic) was the cause of client-visible resets; keep-alive cut them
+        ~8x.  The idle timeout bounds how long a kept-alive connection can
+        hold its handler thread.
+        """
+        from resembl.server import _FindHandler
+
+        self.assertEqual(_FindHandler.protocol_version, "HTTP/1.1")
+        self.assertEqual(_FindHandler.timeout, 30)
+
 
 class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""

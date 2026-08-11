@@ -17,7 +17,12 @@ from .models import Snippet
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///assembly.db")
 
 
-def create_db_engine(url: str | None = None):
+def create_db_engine(
+    url: str | None = None,
+    *,
+    pool_size: int | None = None,
+    max_overflow: int | None = None,
+):
     """Create a SQLAlchemy engine for the given URL.
 
     If *url* is ``None``, the ``DATABASE_URL`` environment variable is
@@ -25,9 +30,19 @@ def create_db_engine(url: str | None = None):
 
     SQLite-specific pragmas (WAL mode, synchronous=NORMAL) are applied
     automatically when the URL starts with ``sqlite``.
+
+    ``pool_size`` / ``max_overflow`` override the SQLAlchemy defaults —
+    the ``serve`` process passes a larger pool because it serves one
+    request thread per connection and the default (5 + 10 overflow) was
+    exhausted under concurrent load.
     """
     db_url = url or DATABASE_URL
-    eng = create_engine(db_url, echo=False)
+    kwargs: dict[str, object] = {"echo": False}
+    if pool_size is not None:
+        kwargs["pool_size"] = pool_size
+    if max_overflow is not None:
+        kwargs["max_overflow"] = max_overflow
+    eng = create_engine(db_url, **kwargs)
 
     if db_url.startswith("sqlite"):
 
