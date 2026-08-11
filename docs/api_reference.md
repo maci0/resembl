@@ -48,8 +48,13 @@ List all snippets with names, tags, and checksums.
 ### `snippet_delete(session, checksum: str) → bool`
 Delete a snippet. Returns `True` on success.
 
-### `snippet_find_matches(session, query: str, top_n: int = 5, threshold: float = 0.5, ...) → dict`
-Find similar snippets. Returns a dict with `"matches"` list containing checksums, names, and similarity scores.
+### `snippet_find_matches(session, query: str, top_n: int = 3, threshold: float = 0.5, ...) → tuple[int, list]`
+Find similar snippets. Returns the LSH candidate count and the top matches
+(snippet + hybrid score).  Candidates are scored with a vectorized numpy
+Jaccard pass, an early exit that skips Levenshtein for candidates that
+cannot beat the current top-N, and full rows are fetched only for
+survivors — so the data movement is proportional to the top-N, not the
+candidate count.
 
 ### `snippet_compare(session, checksum_a: str, checksum_b: str) → dict`
 Compare two snippets. Returns Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared normalized token count.
@@ -125,8 +130,10 @@ structure — band buckets live in the `lsh_bucket` table with parameters in
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
 A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the underlying scipy optimization would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.
 
-### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[bytes]`
-Compute the canonical bucket key for each band of a packed fingerprint (big-endian uint32s), matching datasketch's banding math. Malformed blobs raise `ValueError`.
+### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[str]`
+Compute the canonical bucket key for each band of a packed fingerprint
+(fixed-width lowercase hex), matching datasketch's banding math. Malformed
+blobs raise `ValueError`.
 
 ### `lsh_index_build(session, threshold: float, num_perm: int, progress=None) → ResemblLSH | None`
 Build (or replace) the database-backed index in `resembl.cache`. Band-major sorted inserts, periodic commits, a deferred `checksum` index, and a raised page cache keep a 500k-snippet build near-linear (~1.8 min on a busy machine). `progress(done, total)` is invoked as snippets are processed. Rebuilding an index is also the lazy path taken by the first `find` on a fresh database.
@@ -134,8 +141,8 @@ Build (or replace) the database-backed index in `resembl.cache`. Band-major sort
 ### `lsh_index_clear(session)` / `lsh_meta_get(session) → tuple[float, int] | None`
 Drop the bucket table and metadata (the next find rebuilds), and read the `(threshold, num_perm)` the index was built with.
 
-### `minhash_pack(m) → bytes` / `minhash_unpack(data) → MinHash` / `minhash_jaccard(a, b) → float` / `minhash_ensure_packed(data) → bytes`
-Packed uint32 fingerprint serialization (520 bytes at 128 permutations, `RMLH`-prefixed, self-describing) and a fast Jaccard computed directly from packed blobs — legacy pickles load transparently. Malformed packed blobs raise `ValueError` (never low-level `struct` errors), so hostile or corrupted data cannot crash the query path.
+### `minhash_pack(m) → bytes` / `minhash_unpack(data) → MinHash` / `minhash_jaccard(a, b) → float` / `minhash_jaccard_batch(query, blobs) → list[float]` / `minhash_ensure_packed(data) → bytes`
+Packed uint32 fingerprint serialization (520 bytes at 128 permutations, `RMLH`-prefixed, self-describing) and a fast Jaccard computed directly from packed blobs — legacy pickles load transparently. `minhash_jaccard_batch` scores one query against many blobs in a single numpy (SIMD) pass, bit-identical to repeated `minhash_jaccard` calls, with legacy-pickle fallback and chunked memory. Malformed packed blobs raise `ValueError` (never low-level `struct` errors), so hostile or corrupted data cannot crash the query path.
 
 ### `minhash_new(num_perm: int = 128) → MinHash`
 Return a fresh all-max `MinHash` by cloning a cached template instead of calling datasketch's constructor, which regenerates the permutation arrays with numpy random on every call (~260 µs — the dominant cost of building a fingerprint). The permutations depend only on `(num_perm, seed)`, so cloned fingerprints are byte-identical to directly constructed ones — this is what makes bulk import and `reindex` fast (~80 µs/snippet end to end).
