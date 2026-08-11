@@ -701,6 +701,36 @@ class TestFingerprintVersion(BaseScalingTest):
                 if os.path.exists(path):
                     os.remove(path)
 
+    def test_merge_from_duckdb_source(self):
+        """Merge accepts a full URL — a DuckDB source works like a file."""
+        import os
+        import tempfile
+
+        from sqlmodel import Session as _Session
+        from sqlmodel import SQLModel, create_engine
+
+        try:
+            import duckdb_engine  # noqa: F401
+        except ImportError:
+            self.skipTest("duckdb-engine not installed")
+
+        from resembl.database import create_db_engine
+
+        self._add(5)
+        src = tempfile.mktemp(suffix=".duckdb")
+        try:
+            source_engine = create_engine(f"duckdb:///{src}")
+            SQLModel.metadata.create_all(source_engine)
+            with _Session(source_engine) as source_session:
+                snippet_add(source_session, "src", "mov eax, 1; ret")
+                snippet_add(source_session, "src2", "cpuid; rdtsc; ret")
+            result = db_merge(self.session, f"duckdb:///{src}")
+            self.assertNotIn("error", result)
+            self.assertEqual(result["added"], 2)
+        finally:
+            if os.path.exists(src):
+                os.remove(src)
+
 
 class TestLegacyMigration(BaseScalingTest):
     """Databases created by older versions must keep working.

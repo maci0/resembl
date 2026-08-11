@@ -1956,7 +1956,11 @@ def snippet_version_list(session: Session, checksum: str) -> list[dict]:
 
 
 def db_merge(session: Session, source_db_path: str) -> dict:
-    """Merge snippets from *source_db_path* into the current database.
+    """Merge snippets from a source database into the current one.
+
+    *source_db_path* is a SQLite file path, or a full database URL (e.g.
+    ``duckdb:///file.db`` or ``postgresql+pg8000://user:pass@host/db``) —
+    any backend with its driver installed can be a source.
 
     Deduplicates by checksum:
     - New snippets (unique checksum) are inserted.
@@ -1968,7 +1972,11 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     from .database import create_db_engine
 
     start_time = time.time()
-    source_url = f"sqlite:///{source_db_path}"
+    # The source may be any backend: a full URL (e.g. duckdb:///file.db,
+    # postgresql+pg8000://...) is used as-is; otherwise it is a SQLite path.
+    source_url = (
+        source_db_path if "://" in source_db_path else f"sqlite:///{source_db_path}"
+    )
 
     try:
         source_engine = create_db_engine(source_url)

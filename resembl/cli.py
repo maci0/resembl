@@ -1124,13 +1124,18 @@ def clean() -> None:
 
 @app.command()
 def merge(
-    source: str = typer.Argument(help="Path to the source resembl database file."),
+    source: str = typer.Argument(
+        help="Path to the source database file, or a full DATABASE_URL "
+        "(e.g. duckdb:///file.db, postgresql+pg8000://...)."
+    ),
 ) -> None:
     """Merge snippets from another resembl database into this one."""
-    source_path = os.path.abspath(source)
-    if not os.path.exists(source_path):
-        err_console.print(f"[red]Error:[/red] File not found: {source_path}")
-        raise typer.Exit(code=1)
+    source_path = source
+    if "://" not in source:
+        source_path = os.path.abspath(source)
+        if not os.path.exists(source_path):
+            err_console.print(f"[red]Error:[/red] File not found: {source_path}")
+            raise typer.Exit(code=1)
 
     if state.format not in ("json", "csv"):
         _echo(f"Merging from [bold]{source_path}[/bold]...")

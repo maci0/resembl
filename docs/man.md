@@ -102,7 +102,10 @@ The `compare` command also reports control-flow graph similarity.
 :   Wipe the LSH index and any legacy cache files, then vacuum the database.
 
 **merge** *PATH*
-:   Merge snippets from another resembl database file, deduplicating by checksum.
+:   Merge snippets from another resembl database into the current one,
+    deduplicating by checksum.  *PATH* is a database file or a full
+    `DATABASE_URL` (any backend with its driver installed, e.g.
+    `duckdb:///file.db`).
 
 ### Naming & Tags
 
