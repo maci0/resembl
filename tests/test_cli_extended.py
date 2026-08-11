@@ -572,6 +572,35 @@ class TestServerFallback(unittest.TestCase):
         self.assertIsNone(result)
         self.assertFalse(os.path.exists(self.port_file), "stale file should be removed")
 
+    def test_find_batch_timeout_keeps_port_file(self):
+        """The find-batch client has the same timeout-vs-refused behavior."""
+        import urllib.error
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError(TimeoutError("server busy")),
+        ):
+            result = cli._find_batch_via_server(
+                ["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3
+            )
+        self.assertIsNone(result)
+        self.assertTrue(
+            os.path.exists(self.port_file), "port file must survive a timeout"
+        )
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
+        ):
+            result = cli._find_batch_via_server(
+                ["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3
+            )
+        self.assertIsNone(result)
+        self.assertFalse(os.path.exists(self.port_file), "stale file should be removed")
+
 
 if __name__ == "__main__":
     unittest.main()
