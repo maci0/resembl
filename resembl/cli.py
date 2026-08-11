@@ -715,6 +715,13 @@ def list_cmd(
             raise typer.Exit(code=1)
         start, end = map(int, parts)
 
+    if start == 0 and end == 0:
+        # Unbounded list: stream in batches so a large database never loads
+        # every row (including the code column, which dominates the table)
+        # into memory at once.  Use --range to page a specific window.
+        _stream_list(state.session)
+        return
+
     snippets = snippet_list(state.session, start, end)
     if state.format in ("json", "csv"):
         _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
@@ -728,6 +735,59 @@ def list_cmd(
                 str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list)
             )
         _echo(table)
+
+
+def _stream_list(session: Session) -> None:
+    """Render the unbounded ``list`` output in bounded-memory batches.
+
+    Only the (checksum, names) columns are fetched (see
+    ``snippet_names_stream``).  JSON output is written as a single array,
+    CSV as a header plus streamed rows — byte-for-byte the same shape as
+    the in-memory render — and table output is printed per batch so a huge
+    listing never builds one giant table.
+    """
+    import sys
+
+    from .core import snippet_names_stream
+
+    if state.quiet:
+        return
+
+    def names_list(raw: str) -> list[str]:
+        return json.loads(raw)
+
+    if state.format == "json":
+        sys.stdout.write("[")
+        first = True
+        for batch in snippet_names_stream(session):
+            for checksum, raw in batch:
+                if not first:
+                    sys.stdout.write(",")
+                first = False
+                sys.stdout.write(
+                    "\n  "
+                    + json.dumps({"checksum": checksum, "names": names_list(raw)})
+                )
+        sys.stdout.write("\n]\n" if not first else "]\n")
+    elif state.format == "csv":
+        writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names"])
+        writer.writeheader()
+        for batch in snippet_names_stream(session):
+            for checksum, raw in batch:
+                writer.writerow(
+                    {"checksum": checksum, "names": ", ".join(names_list(raw))}
+                )
+    else:
+        offset = 0
+        for batch in snippet_names_stream(session):
+            table = Table(title="Snippets", title_style="bold cyan")
+            table.add_column("#", style="dim", justify="right")
+            table.add_column("Checksum", style="bold")
+            table.add_column("Names")
+            for i, (checksum, raw) in enumerate(batch, offset + 1):
+                table.add_row(str(i), checksum[:12] + "…", ", ".join(names_list(raw)))
+            _echo(table)
+            offset += len(batch)
 
 
 @app.command()

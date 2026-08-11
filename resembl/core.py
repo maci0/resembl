@@ -1860,6 +1860,34 @@ def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet
     return list(Snippet.get_all(session))
 
 
+def snippet_names_stream(
+    session: Session, batch_size: int = 2000
+) -> Iterator[list[tuple[str, str]]]:
+    """Yield ``(checksum, names)`` pairs in batches via keyset pagination.
+
+    Reads only the two columns the ``list`` command renders.  The ``code``
+    column dominates the table, so loading full rows to list a large
+    database would pull the whole corpus through the ORM (~1 GB at 500k
+    snippets) — this keeps the unbounded listing flat in memory regardless
+    of database size.  Each batch is fully consumed before the next is
+    fetched (same keyset semantics as :meth:`Snippet.iter_batches`).
+    """
+    last: str | None = None
+    while True:
+        stmt = (
+            select(Snippet.checksum, Snippet.names)
+            .order_by(Snippet.checksum)  # type: ignore[attr-defined]
+            .limit(batch_size)
+        )
+        if last is not None:
+            stmt = stmt.where(Snippet.checksum > last)  # type: ignore[attr-defined]
+        rows = session.exec(stmt).all()
+        if not rows:
+            return
+        yield [(row[0], row[1]) for row in rows]
+        last = rows[-1][0]
+
+
 def snippet_search_by_name(
     session: Session, pattern: str, limit: int = 50
 ) -> list[Snippet]:

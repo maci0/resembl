@@ -39,8 +39,10 @@ The `compare` command also reports control-flow graph similarity.
 **get** *CHECKSUM*
 :   Show details of a snippet.  Accepts a unique checksum prefix.
 
-**list**
-:   List all stored snippets.
+**list** [--range START-END]
+:   List all stored snippets.  An unbounded listing streams in bounded
+    memory (only checksum and names are read, in batches), so it is safe
+    on databases of any size; use `--range` to page a specific window.
 
 **search** *PATTERN* [--limit N]
 :   Search for snippets by matching their names.  A broad pattern over a

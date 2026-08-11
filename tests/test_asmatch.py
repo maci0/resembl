@@ -1,5 +1,6 @@
 """Unit tests for the resembl core module."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -24,6 +25,7 @@ from resembl.core import (
     snippet_list,
     snippet_name_add,
     snippet_name_remove,
+    snippet_names_stream,
     string_checksum,
 )
 from resembl.models import (
@@ -348,6 +350,20 @@ class TestSnippetCoreFunctions(unittest.TestCase):
         self.assertEqual(len(snippets), 2)
         snippets = snippet_list(self.session, start=1, end=2)
         self.assertEqual(len(snippets), 1)
+
+    def test_snippet_names_stream(self):
+        """snippet_names_stream yields (checksum, names) across batch boundaries."""
+        for i in range(2500):
+            snippet_add(self.session, f"n_{i}", f"MOV EAX, {i}")
+        batches = list(snippet_names_stream(self.session, batch_size=1000))
+        self.assertEqual(len(batches), 3)  # 1000 + 1000 + 500
+        self.assertEqual(sum(len(b) for b in batches), 2500)
+        pairs = [pair for batch in batches for pair in batch]
+        checksums = [c for c, _ in pairs]
+        self.assertEqual(len(checksums), 2500)
+        self.assertEqual(len(set(checksums)), 2500)  # unique, no dupes/omissions
+        all_names = {name for _, raw in pairs for name in json.loads(raw)}
+        self.assertEqual(all_names, {f"n_{i}" for i in range(2500)})
 
     def test_snippet_export(self):
         """Test exporting snippets."""
