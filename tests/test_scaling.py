@@ -674,6 +674,21 @@ class TestFingerprintVersion(BaseScalingTest):
         db_reindex(self.session, jobs=1)
         self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
 
+    def test_verify_reports_health(self):
+        """db_verify flags pending work, then is clean once built."""
+        from resembl.core import db_verify
+
+        self._add(10)
+        report = db_verify(self.session)
+        self.assertGreater(len(report["issues"]), 0)  # no index yet
+        snippet_find_matches(
+            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+        )
+        report = db_verify(self.session)
+        self.assertEqual(report["issues"], [])
+        self.assertEqual(report["num_buckets"], report["expected_buckets"])
+        self.assertEqual(report["num_snippets"], 10)
+
     def test_merge_clears_stamp(self):
         """Merge copies source blobs verbatim — the stamp must be cleared."""
         import os

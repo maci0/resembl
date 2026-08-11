@@ -58,6 +58,7 @@ from .core import (
     db_merge,
     db_reindex,
     db_stats,
+    db_verify,
     snippet_add,
     snippet_add_batch,
     snippet_compare,
@@ -764,6 +765,43 @@ def stats() -> None:
             "Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}"
         )
         _echo(table)
+
+
+@app.command()
+def verify() -> None:
+    """Verify database health (index, fingerprints, pending work).
+
+    Reports the snippet/bucket counts, the fingerprint format version, and
+    any pending work (a missing index or stale fingerprints are healed
+    automatically by the next ``find``; a bucket/snippet mismatch means the
+    index is stale and ``reindex --force`` should run).  Exits 1 when
+    issues are found.
+    """
+    result = db_verify(state.session)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+    else:
+        table = Table(
+            title="Database Health", show_header=False, title_style="bold cyan"
+        )
+        table.add_column("Metric", style="dim")
+        table.add_column("Value", justify="right")
+        table.add_row("Snippets", str(result["num_snippets"]))
+        table.add_row(
+            "Bucket rows",
+            (
+                f"{result['num_buckets']} (expected {result['expected_buckets']})"
+                if result["expected_buckets"] is not None
+                else "—"
+            ),
+        )
+        table.add_row("Fingerprint version", str(result["fingerprint_version"]))
+        _echo(table)
+        if result["issues"]:
+            for issue in result["issues"]:
+                _echo(f"[yellow]• {issue}[/yellow]")
+            raise typer.Exit(code=1)
+        _echo("[green]All checks passed.[/green]")
 
 
 @app.command()

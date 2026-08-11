@@ -98,6 +98,12 @@ The `compare` command also reports control-flow graph similarity.
 **stats**
 :   Show database statistics.
 
+**verify**
+:   Check database health: snippet/bucket counts, fingerprint format
+    version, and any pending work (a missing index or stale fingerprints
+    are healed by the next `find`; a bucket/snippet mismatch means
+    `reindex --force` should run).  Exits 1 when issues are found.
+
 **clean**
 :   Wipe the LSH index and any legacy cache files, then vacuum the database.
 

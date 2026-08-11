@@ -45,6 +45,7 @@ from .lsh import (
 from .models import (
     FINGERPRINT_VERSION,
     Collection,
+    LSHBucket,
     Snippet,
     SnippetVersion,
     minhash_ensure_packed,
@@ -1817,6 +1818,52 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         "avg_time_per_snippet": (
             time_elapsed / num_exported if num_exported > 0 else 0
         ),
+    }
+
+
+def db_verify(session: Session) -> dict:
+    """Report the database's health: index, fingerprints, and pending work.
+
+    Returns a dict with counts plus an ``issues`` list.  The tool self-heals
+    (a missing index is rebuilt and a stale fingerprint version is reindexed
+    on the next ``find``), so an issue here means "work is pending", not
+    "broken" — except a bucket/snippet mismatch, which indicates a stale
+    index that ``reindex --force`` should resolve.
+    """
+    from .lsh import _banding_params, fingerprint_version_get, lsh_meta_get
+    from .models import FINGERPRINT_VERSION
+
+    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    issues: list[str] = []
+
+    stored_version = fingerprint_version_get(session)
+    if stored_version != FINGERPRINT_VERSION:
+        issues.append(
+            "fingerprints are from an older format — the next `find` reindexes once"
+        )
+
+    meta = lsh_meta_get(session)
+    num_buckets = 0
+    expected_buckets: int | None = None
+    if meta is None:
+        issues.append("no LSH index — the next `find` builds it")
+    else:
+        threshold, num_perm = meta
+        b, _r = _banding_params(threshold, num_perm)
+        expected_buckets = num_snippets * b
+        num_buckets = session.exec(select(func.count(LSHBucket.checksum))).one()  # type: ignore[arg-type]
+        if num_snippets > 0 and num_buckets != expected_buckets:
+            issues.append(
+                f"index may be stale ({num_buckets} bucket rows, expected "
+                f"{expected_buckets}) — run `resembl reindex --force`"
+            )
+
+    return {
+        "num_snippets": num_snippets,
+        "num_buckets": num_buckets,
+        "expected_buckets": expected_buckets,
+        "fingerprint_version": stored_version,
+        "issues": issues,
     }
 
 
