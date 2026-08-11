@@ -1178,19 +1178,6 @@ def _checksum_chunks(checksums: list[str], batch_size: int = 900) -> list[list[s
     return [checksums[i : i + batch_size] for i in range(0, len(checksums), batch_size)]
 
 
-def _existing_checksums(session: Session, checksums: list[str]) -> set[str]:
-    """Return the subset of *checksums* that already exist in the database."""
-    existing: set[str] = set()
-    for chunk in _checksum_chunks(list(checksums)):
-        rows = session.exec(
-            select(Snippet.checksum).where(  # type: ignore[attr-defined]
-                Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
-            )
-        ).all()
-        existing.update(rows)
-    return existing
-
-
 def _snippets_by_checksums(
     session: Session, checksums: list[str]
 ) -> dict[str, Snippet]:
@@ -1350,20 +1337,25 @@ def snippet_add_batch(
             "time_elapsed": 0.0,
         }
 
-    existing = _existing_checksums(session, list(by_checksum))
+    # Batch-fetch the full rows for every candidate checksum in one pass of
+    # chunked IN queries.  Checksums absent from the map are new.  This
+    # replaces the old two-step flow (a checksum-only EXISTS select, then a
+    # ``session.get`` per existing row) which issued one round trip per
+    # existing snippet — an N+1 that dominated incremental re-imports of
+    # mostly-known content at scale.
+    existing_map = _snippets_by_checksums(session, list(by_checksum))
 
     aliased = 0
     new_snippets: list[Snippet] = []
     for checksum, (code, minhash_bytes, names) in by_checksum.items():
-        if checksum in existing:
-            snippet = session.get(Snippet, checksum)
-            if snippet is not None:
-                name_list = snippet.name_list
-                merged = list(dict.fromkeys(name_list + names))
-                if len(merged) > len(name_list):
-                    snippet.names = json.dumps(merged)
-                    session.add(snippet)
-                    aliased += 1
+        snippet = existing_map.get(checksum)
+        if snippet is not None:
+            name_list = snippet.name_list
+            merged = list(dict.fromkeys(name_list + names))
+            if len(merged) > len(name_list):
+                snippet.names = json.dumps(merged)
+                session.add(snippet)
+                aliased += 1
             continue
         new_snippets.append(
             Snippet(

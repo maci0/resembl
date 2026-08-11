@@ -279,6 +279,50 @@ class TestSnippetAddBatch(BaseScalingTest):
         self.assertIn("orig", row.name_list)
         self.assertIn("new_alias", row.name_list)
 
+    def test_reimport_batches_existing_lookups(self):
+        """Re-importing known content must not issue one SELECT per snippet.
+
+        The alias path used to call ``session.get`` once per existing
+        checksum (an N+1 that dominates incremental re-imports of mostly
+        known content).  Existing rows are now fetched in one pass of
+        chunked IN queries; assert the SELECT count stays bounded.
+        """
+        import sqlalchemy.event
+
+        # Seed 120 snippets.
+        seed = [
+            snippet_prepare(f"s{i}", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", 3)
+            for i in range(120)
+        ]
+        snippet_add_batch(self.session, [i for i in seed if i])
+
+        # Re-import all 120 codes with fresh names (forces alias merges)
+        # plus 10 brand-new snippets.
+        extra = [
+            snippet_prepare(f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", 3)
+            for i in range(10)
+        ]
+        renamed = [
+            snippet_prepare(f"s{i}_v2", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", 3)
+            for i in range(120)
+        ]
+        counts = {"select": 0}
+
+        @sqlalchemy.event.listens_for(ENGINE, "after_cursor_execute")
+        def _count_selects(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                counts["select"] += 1
+
+        try:
+            result = snippet_add_batch(self.session, [i for i in renamed + extra if i])
+        finally:
+            sqlalchemy.event.remove(ENGINE, "after_cursor_execute", _count_selects)
+
+        self.assertEqual(result["added"], 10)
+        self.assertEqual(result["aliased"], 120)
+        # The 120 existing lookups happen in ~1 chunked IN query, not 120.
+        self.assertLessEqual(counts["select"], 5)
+
     def test_large_batch_chunked_in(self):
         """> 500 unique checksums exercises chunked IN queries."""
         items = []
