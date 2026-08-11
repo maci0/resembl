@@ -77,6 +77,30 @@ class TestCLICommands(BaseCLITest):
         self.assertIn("Top Matches", result.stdout)
         self.assertIn("test_snippet", result.stdout)
 
+    def test_find_rejects_unbuildable_threshold(self):
+        """A threshold leaving <2 bands fails cleanly, not with 0 results.
+
+        Thresholds in [0.981, 0.99) pass the range check but give b=1, which
+        used to make the index build fail and find return zero matches
+        silently.
+        """
+        result = self.run_command("find --query 'MOV EAX, 1' --threshold 0.985")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("too high", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        # find-batch gets the same guard.
+        queries_file = tempfile.mktemp(suffix=".txt")
+        with open(queries_file, "w", encoding="utf-8") as f:
+            f.write("MOV EAX, 1\n")
+        try:
+            batch = self.run_command(
+                f"find-batch --file {queries_file} --threshold 0.985"
+            )
+        finally:
+            os.remove(queries_file)
+        self.assertNotEqual(batch.returncode, 0)
+        self.assertIn("too high", batch.stderr)
+
     def test_find_command_with_stdin(self):
         """Test the find command with stdin."""
         result = self.run_command("find --file -", input_data="MOV EAX, 1")

@@ -383,6 +383,34 @@ def serve(
         httpd.server_close()
 
 
+def _validate_find_threshold(threshold: float, num_perm: int) -> None:
+    """Exit with a clean error if *threshold* cannot build an index.
+
+    The banding needs b >= 2 bands; at 128 permutations that caps the
+    buildable threshold near 0.98 (0.981 gives b=1).  Without this check,
+    an unbuildable threshold made the index build fail and ``find`` return
+    zero results silently.
+    """
+    if not 0.0 <= threshold < 0.99:
+        err_console.print(
+            "[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive)."
+        )
+        raise typer.Exit(code=1)
+    from .lsh import _banding_params
+
+    try:
+        bands, _ = _banding_params(threshold, num_perm)
+    except ValueError:
+        bands = 1
+    if bands < 2:
+        err_console.print(
+            "[red]Error:[/red] --threshold is too high for "
+            f"{num_perm} permutations (it would leave fewer than 2 bands).  "
+            "Lower the threshold or raise num_permutations."
+        )
+        raise typer.Exit(code=1)
+
+
 def _resolve_checksum(prefix: str) -> str | None:
     """Resolve a checksum prefix to a full checksum.
 
@@ -1014,6 +1042,13 @@ def find(
             "[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive)."
         )
         raise typer.Exit(code=1)
+    # The banding requires b >= 2 bands; at 128 permutations that caps the
+    # buildable threshold near 0.98 (0.981 gives b=1).  Reject unbuildable
+    # values up front instead of a silent zero-result build failure.
+    _validate_find_threshold(
+        effective_threshold,
+        cast(int, state.config.get("num_permutations", 128)),
+    )
 
     query_string: str | None = None
     if query:
@@ -1115,6 +1150,10 @@ def find_batch(
         threshold if threshold is not None else state.config.get("lsh_threshold", 0.5)
     )
     ngram_size = cast(int, state.config.get("ngram_size", 3))
+    _validate_find_threshold(
+        effective_threshold,
+        cast(int, state.config.get("num_permutations", 128)),
+    )
 
     queries = [
         line.strip()
