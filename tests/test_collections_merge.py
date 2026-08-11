@@ -281,6 +281,48 @@ class TestDBMerge(BaseDBTest):
         finally:
             os.unlink(source_path)
 
+    def test_merge_overlap_batches_local_lookups(self):
+        """Merging heavily-overlapping databases must not do one SELECT per overlap.
+
+        The overlap path used ``session.get`` once per matching checksum (an
+        N+1 when consolidating two databases that mostly contain the same
+        content).  Local rows are now fetched in chunked IN batches; assert
+        the local SELECT count stays bounded while merging 120 overlaps.
+        """
+        import sqlalchemy.event
+
+        # Seed the local database with 120 snippets.
+        for i in range(120):
+            snippet_add(self.session, f"s{i}", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET")
+
+        # Source: the same 120 codes under new names (forces merges) + 10 new.
+        source_snippets = [
+            (f"s{i}_src", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", [], None)
+            for i in range(120)
+        ] + [
+            (f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", [], None)
+            for i in range(10)
+        ]
+        source_path = self._create_source_db(source_snippets)
+
+        counts = {"select": 0}
+
+        @sqlalchemy.event.listens_for(self.engine, "after_cursor_execute")
+        def _count_selects(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                counts["select"] += 1
+
+        try:
+            result = db_merge(self.session, source_path)
+        finally:
+            sqlalchemy.event.remove(self.engine, "after_cursor_execute", _count_selects)
+            os.unlink(source_path)
+
+        self.assertEqual(result["added"], 10)
+        self.assertEqual(result["updated"], 120)
+        # 120 overlaps resolved via ~1 chunked IN fetch, not 120 SELECTs.
+        self.assertLessEqual(counts["select"], 6)
+
     def test_merge_imports_collections(self):
         """Merging should create collections from the source if missing."""
         source_path = self._create_source_db(
