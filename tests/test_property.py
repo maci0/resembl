@@ -109,6 +109,58 @@ class TestPropertyMinHash(unittest.TestCase):
         self.assertEqual(m1.jaccard(m2), 1.0)
 
 
+class TestPropertyBandBuckets(unittest.TestCase):
+    """Randomized parity: bucket keys match a reference reconstruction.
+
+    ``band_buckets`` derives the LSH band keys straight from the packed
+    fingerprint bytes (bytes slicing + hex) — it drives recall in both the
+    index build and the query path, so the fast slicing must agree with an
+    independent reconstruction from the unpacked uint32 hash values.
+    """
+
+    @given(
+        perm=st.sampled_from([64, 128]),
+        seed=st.integers(min_value=0, max_value=2**32 - 1),
+        br=st.sampled_from([(8, 16), (25, 5), (64, 2), (128, 1)]),
+    )
+    @settings(max_examples=40, deadline=10000)
+    def test_bucket_keys_match_reference(
+        self, perm: int, seed: int, br: tuple[int, int]
+    ) -> None:
+        import random
+        import struct
+
+        from resembl.lsh import band_buckets
+        from resembl.models import minhash_new, minhash_pack
+
+        b, r = br
+        rng = random.Random(seed)
+        m = minhash_new(perm)
+        for token in rng.sample(range(10_000), rng.randint(1, 60)):
+            m.update(str(token).encode("utf-8"))
+        packed = minhash_pack(m)
+
+        # Reference: unpack the uint32 digest, group into b bands of r
+        # values, and hex-encode each band's big-endian bytes.
+        values = struct.unpack(f">{perm}I", packed[8 : 8 + 4 * perm])
+        expected = [
+            b"".join(v.to_bytes(4, "big") for v in values[i * r : (i + 1) * r]).hex()
+            for i in range(b)
+        ]
+
+        self.assertEqual(band_buckets(packed, perm, b, r), expected)
+        self.assertEqual(len(band_buckets(packed, perm, b, r)), b)
+
+    def test_malformed_blob_raises(self) -> None:
+        """Corrupt payloads raise ValueError, never crash the caller."""
+        from resembl.lsh import band_buckets
+
+        with self.assertRaises(ValueError):
+            band_buckets(b"not-a-blob", 128, 25, 5)
+        with self.assertRaises(ValueError):
+            band_buckets(b"RMLH" + b"\x00" * 4, 128, 25, 5)  # bad perm count
+
+
 class TestPropertyJaccardBatch(unittest.TestCase):
     """Randomized parity: the vectorized batch Jaccard equals per-blob scoring.
 
