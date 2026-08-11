@@ -75,6 +75,19 @@ _REINDEX_CLEAR_RETRIES = 3
 #: Linear backoff between clear retries, in seconds.
 _REINDEX_CLEAR_RETRY_BACKOFF = 3
 
+
+def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
+    """Choose a sensible worker count for a parallel job of *num_items* items.
+
+    One worker per CPU is wasteful for small jobs: spawning each ``spawn``
+    worker costs the full interpreter + library import (~450 ms and ~50 MB),
+    so a 300-item job measured 1.85 s with 32 workers vs 0.84 s with 4.
+    The default scales with the work (one worker per ~100 items) and is
+    capped at the CPU count, so small jobs stay single-process and large
+    ones parallelize fully.
+    """
+    return max(1, min(cpu_count, num_items // 100 + 1))
+
 # Reuse a single Pygments lexer instance across all calls.
 lexer = NasmLexer()
 
@@ -1472,10 +1485,11 @@ def snippet_find_matches(
     # queries never silently match old fingerprints against new ones.
     # Reindexing current-format blobs is idempotent (identical fingerprints).
     if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+        num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
         db_reindex(
             session,
             ngram_size=ngram_size,
-            jobs=max(1, os.cpu_count() or 1),
+            jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
             progress=progress,
         )
 

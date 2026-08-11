@@ -186,8 +186,19 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     engine = create_db_engine(db_url, pool_size=32, max_overflow=64)
     with Session(engine) as session:
         # One-time migration + index build, before any request is served.
+        # The migration worker count scales with the database (spawning a
+        # worker per CPU for a small database costs more than the work).
         if fingerprint_version_get(session) != FINGERPRINT_VERSION:
-            db_reindex(session, jobs=max(1, os.cpu_count() or 1))
+            from sqlmodel import func, select
+
+            from .core import adaptive_worker_count
+            from .models import Snippet
+
+            num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+            db_reindex(
+                session,
+                jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+            )
         lsh_index_build(session, LSH_THRESHOLD, NUM_PERMUTATIONS)
 
     _FindHandler.engine = engine

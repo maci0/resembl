@@ -50,6 +50,7 @@ from .config import (
     update_config,
 )
 from .core import (
+    adaptive_worker_count,
     collection_add_snippet,
     collection_create,
     collection_delete,
@@ -520,16 +521,9 @@ def export_yara_cmd(
 
 
 def _default_import_jobs(num_files: int, cpu_count: int) -> int:
-    """Choose the default worker count for an import.
-
-    One worker per CPU is wasteful for small directories: spawning each
-    ``spawn`` worker costs the full interpreter + library import (~450 ms
-    and ~50 MB), so a 300-file import measured 1.85 s with 32 workers vs
-    0.84 s with 4.  The default scales with the directory (one worker per
-    ~100 files) and is capped at the CPU count, so small imports stay
-    light and large ones still parallelize fully.
-    """
-    return max(1, min(cpu_count, num_files // 100 + 1))
+    """Choose the default worker count for an import (see
+    ``resembl.core.adaptive_worker_count``)."""
+    return adaptive_worker_count(num_files, cpu_count)
 
 
 def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] | None:
