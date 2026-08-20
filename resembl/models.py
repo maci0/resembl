@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import json
-import operator
-import pickle
-import struct
 from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -13,200 +10,21 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, Integer, Text
 from sqlmodel import Field, Session, SQLModel, select
 
+from .scoring import (  # noqa: F401  (re-exported; avoids importing sqlmodel for the ORM-less minhash path)
+    _MAX_NUM_PERM,
+    _MINHASH_TEMPLATES,
+    MINHASH_MAGIC,
+    minhash_ensure_packed,
+    minhash_jaccard,
+    minhash_jaccard_batch,
+    minhash_new,
+    minhash_num_perm,
+    minhash_pack,
+    minhash_unpack,
+)
+
 if TYPE_CHECKING:
     from datasketch import MinHash
-
-#: Magic prefix for the compact MinHash byte format.  A stored fingerprint
-#: either starts with this prefix (``struct``-packed uint32 hash values,
-#: self-describing) or is a legacy ``pickle`` blob produced by older versions.
-MINHASH_MAGIC = b"RMLH"
-
-#: Upper bound on the permutation count accepted when unpacking a stored
-#: fingerprint.  Real configurations use 64–128; anything near this limit is
-#: corrupt or hostile.  The bound also keeps ``struct`` format strings and
-#: ``MinHash`` allocations sane on malformed input.
-_MAX_NUM_PERM = 1 << 12
-
-#: Cached MinHash templates keyed by num_perm, used to skip datasketch's
-#: per-construction permutation regeneration (~260 µs — the dominant cost of
-#: building a fingerprint).  Permutations depend only on (num_perm, seed),
-#: so cloning a template produces identical fingerprints.
-_MINHASH_TEMPLATES: dict[int, object] = {}
-
-
-def minhash_new(num_perm: int = 128) -> MinHash:
-    """Return a fresh all-max MinHash without regenerating permutations.
-
-    datasketch's constructor draws the permutation arrays from a numpy
-    random stream on every call (~260 µs at 128 perms — most of the import
-    worker's CPU).  Cloning a cached template (deepcopy of two small numpy
-    arrays) is ~15x faster and yields identical permutations (seed 1), so
-    fingerprints are byte-for-byte the same.
-    """
-    import copy
-
-    from datasketch import MinHash
-
-    template = _MINHASH_TEMPLATES.get(num_perm)
-    if template is None:
-        template = MinHash(num_perm=num_perm)
-        _MINHASH_TEMPLATES[num_perm] = template
-    return copy.deepcopy(template)
-
-
-def minhash_num_perm(data: bytes) -> int:
-    """Return the permutation count encoded in a packed fingerprint header.
-
-    Validates the header (magic, 4-byte count in range) and raises
-    ``ValueError`` on malformed input — callers that unpack untrusted blobs
-    (legacy databases, ``merge`` sources, corrupted files) must never see raw
-    ``struct.error`` or pathological counts.
-    """
-    if len(data) < 8:
-        raise ValueError("Corrupt MinHash payload: shorter than the 8-byte header.")
-    num_perm = struct.unpack(">I", data[4:8])[0]
-    if num_perm < 2 or num_perm > _MAX_NUM_PERM:
-        raise ValueError(
-            f"Corrupt MinHash payload: implausible permutation count {num_perm}."
-        )
-    expected = 8 + 4 * num_perm
-    if len(data) != expected:
-        raise ValueError(
-            f"Corrupt MinHash payload: expected {expected} bytes, got {len(data)}."
-        )
-    return num_perm
-
-
-def minhash_pack(m: MinHash) -> bytes:
-    """Serialize a MinHash into a compact, self-describing byte string.
-
-    The format is ``MINHASH_MAGIC`` + big-endian uint32 ``num_perm`` +
-    ``num_perm`` big-endian uint32 hash values (512 bytes for the default
-    128 permutations — several times smaller than a pickle).
-    """
-    digest = m.digest()
-    num_perm = len(digest)
-    return MINHASH_MAGIC + struct.pack(f">I{num_perm}I", num_perm, *digest)
-
-
-def minhash_unpack(data: bytes) -> MinHash:
-    """Deserialize a MinHash stored with :func:`minhash_pack`.
-
-    Falls back to ``pickle.loads`` for legacy pickled fingerprints, so
-    databases created by older versions keep working unchanged.  Malformed
-    packed payloads raise ``ValueError`` (never low-level ``struct`` errors).
-    """
-    if data.startswith(MINHASH_MAGIC):
-        from datasketch import MinHash
-
-        num_perm = minhash_num_perm(data)
-        values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
-        return MinHash(num_perm=num_perm, hashvalues=list(values))
-    try:
-        return pickle.loads(data)
-    except Exception as e:
-        # Corrupt legacy blobs (truncated pickles, disk rot) surface as
-        # UnpicklingError/EOFError/AttributeError/... — normalize them to
-        # ValueError so every caller's documented "malformed blob raises
-        # ValueError" contract holds and no low-level exception escapes.
-        raise ValueError(f"Corrupt legacy fingerprint: {e}") from e
-
-
-def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
-    """Jaccard similarity of two stored MinHash byte blobs (0.0–1.0).
-
-    Fast path: when both blobs use the compact packed format, similarity is
-    computed directly from the uint32 arrays, bypassing the ``MinHash``
-    constructor — which dominates the cost when scoring thousands of
-    candidates (the constructor is ~300 µs per object).  Falls back to
-    object-based comparison for legacy pickled blobs.
-
-    The metric matches :meth:`datasketch.MinHash.jaccard` exactly: the
-    fraction of positions whose hash values are equal (element-wise), not a
-    set intersection — the two differ on degenerate fingerprints where hash
-    values repeat (e.g. short or empty snippets).
-    """
-    if not (packed_a.startswith(MINHASH_MAGIC) and packed_b.startswith(MINHASH_MAGIC)):
-        return minhash_unpack(packed_a).jaccard(minhash_unpack(packed_b))
-    # Byte-identical blobs are exact matches — a single C-level memcmp that
-    # is ~100x faster than the element-wise loop.  This is the common
-    # self-match / exact-duplicate case in candidate scoring.
-    if packed_a == packed_b:
-        return 1.0
-    # The two blobs may encode different permutation counts; reject the
-    # mismatch the same way datasketch's MinHash.jaccard does.
-    num_perm_a = minhash_num_perm(packed_a)
-    num_perm_b = minhash_num_perm(packed_b)
-    if num_perm_a != num_perm_b:
-        raise ValueError(
-            "Cannot compute Jaccard for MinHash blobs with different "
-            f"permutation counts ({num_perm_a} vs {num_perm_b})."
-        )
-    a = struct.unpack(f">{num_perm_a}I", packed_a[8 : 8 + 4 * num_perm_a])
-    b = struct.unpack(f">{num_perm_b}I", packed_b[8 : 8 + 4 * num_perm_b])
-    # ``map(operator.eq, ...)`` iterates with C-level callbacks instead of a
-    # Python ``for``/generator — ~1.6x faster over 128 hash values.
-    return sum(map(operator.eq, a, b)) / num_perm_a
-
-
-def minhash_jaccard_batch(
-    query_packed: bytes, packed_list: Sequence[bytes], chunk_size: int = 50_000
-) -> list[float]:
-    """Jaccard of one packed fingerprint against many, vectorized with numpy.
-
-    Every blob (query and candidates) must use the compact packed format;
-    if any blob is a legacy pickle the call falls back to per-blob scoring
-    via :func:`minhash_jaccard`, so correctness is preserved on old
-    databases.  The vectorized pass loads each candidate's uint32 hash
-    values with ``numpy.frombuffer`` (no per-blob ``struct.unpack`` Python
-    loops) and compares the whole ``(N, 128)`` array against the query row
-    in one C-level pass — measured ~7x faster than the per-blob path at 10k
-    candidates.  Results are bit-for-bit identical to repeated
-    :func:`minhash_jaccard` calls: equality counts are small integers and
-    the ``num_perm`` divisor is a power of two, so both paths round
-    identically.  Candidates are processed in chunks to bound peak memory.
-
-    Raises ``ValueError`` when the query or a candidate is malformed, or
-    when a candidate uses a different permutation count than the query —
-    matching :func:`minhash_jaccard`.
-    """
-    if not packed_list:
-        return []
-    if not query_packed.startswith(MINHASH_MAGIC):
-        return [minhash_jaccard(query_packed, p) for p in packed_list]
-    num_perm = minhash_num_perm(query_packed)
-    if any(not p.startswith(MINHASH_MAGIC) for p in packed_list):
-        return [minhash_jaccard(query_packed, p) for p in packed_list]
-
-    import numpy as np
-
-    query_values = np.frombuffer(query_packed[8 : 8 + 4 * num_perm], dtype=">u4")
-    results: list[float] = []
-    for start in range(0, len(packed_list), chunk_size):
-        chunk = packed_list[start : start + chunk_size]
-        for p in chunk:
-            p_num_perm = minhash_num_perm(p)
-            if p_num_perm != num_perm:
-                raise ValueError(
-                    "Cannot compute Jaccard for MinHash blobs with different "
-                    f"permutation counts ({num_perm} vs {p_num_perm})."
-                )
-        values = np.frombuffer(b"".join(p[8:] for p in chunk), dtype=">u4").reshape(
-            len(chunk), num_perm
-        )
-        results.extend((values == query_values[None, :]).mean(axis=1).tolist())
-    return results
-
-
-def minhash_ensure_packed(data: bytes) -> bytes:
-    """Return *data* in the compact packed format, converting legacy pickles."""
-    if data.startswith(MINHASH_MAGIC):
-        # Validate rather than trust: blobs from merged databases or legacy
-        # files may be corrupt, and every downstream use (banding, Jaccard,
-        # the query path) assumes a well-formed header.
-        minhash_num_perm(data)
-        return data
-    return minhash_pack(minhash_unpack(data))
 
 
 class Collection(SQLModel, table=True):  # type: ignore

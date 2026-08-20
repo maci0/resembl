@@ -50,7 +50,17 @@ _CORE_EXPORTS = frozenset(
 )
 _MODEL_EXPORTS = frozenset(("Collection", "Snippet", "SnippetVersion"))
 _SUBMODULES = frozenset(
-    ("core", "models", "cache", "cli", "config", "database", "lsh", "server")
+    (
+        "core",
+        "models",
+        "cache",
+        "cli",
+        "config",
+        "database",
+        "lsh",
+        "scoring",
+        "server",
+    )
 )
 
 
