@@ -377,8 +377,8 @@ class TestCLIServerEndToEnd(unittest.TestCase):
             from resembl.server import server_port_path
 
             port_file = server_port_path(f"sqlite:///{self._db}")
-            deadline = time.time() + 20
-            while not os.path.exists(port_file) and time.time() < deadline:
+            deadline = time.monotonic() + 20
+            while not os.path.exists(port_file) and time.monotonic() < deadline:
                 time.sleep(0.1)
             if server.poll() is not None:
                 self.fail(f"serve exited early: {server.stderr.read()}")

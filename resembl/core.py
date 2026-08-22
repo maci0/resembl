@@ -391,7 +391,7 @@ def snippet_add_batch(
 
     Returns ``{"added", "aliased", "skipped", "time_elapsed"}``.
     """
-    start_time = time.time()
+    start_time = time.monotonic()
 
     # Group by checksum: within one batch, identical code is deduplicated and
     # its names are merged.  ``(code, minhash_bytes, names)`` tuples keep the
@@ -470,7 +470,7 @@ def snippet_add_batch(
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
 
-    elapsed = time.time() - start_time
+    elapsed = time.monotonic() - start_time
     return {
         "added": len(new_snippets),
         "aliased": aliased,
@@ -704,7 +704,7 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
 
 def snippet_export_yara(session: Session, output_file: str) -> dict:
     """Export snippets as YARA string matching rules."""
-    start_time = time.time()
+    start_time = time.monotonic()
     num_exported = 0
 
     with open(output_file, "w", encoding="utf-8") as f:
@@ -738,7 +738,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
             f.write(yara_rule)
             num_exported += 1
 
-    end_time = time.time()
+    end_time = time.monotonic()
     time_elapsed = end_time - start_time
 
     return {
@@ -792,7 +792,7 @@ def db_reindex(
     from collections import deque
     from concurrent.futures import Future, ProcessPoolExecutor
 
-    start_time = time.time()
+    start_time = time.monotonic()
     num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
 
     if num_snippets == 0:
@@ -890,7 +890,7 @@ def db_reindex(
     fingerprint_version_set(session, FINGERPRINT_VERSION)
     fingerprint_ngram_set(session, ngram_size)
 
-    end_time = time.time()
+    end_time = time.monotonic()
     time_elapsed = end_time - start_time
 
     return {
@@ -1113,7 +1113,7 @@ def snippet_search_by_name(
 
 def snippet_export(session: Session, export_dir: str) -> dict:
     """Export all snippets to a directory."""
-    start_time = time.time()
+    start_time = time.monotonic()
     num_exported = 0
 
     os.makedirs(export_dir, exist_ok=True)
@@ -1157,7 +1157,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             f.write(snippet.code)
         num_exported += 1
 
-    end_time = time.time()
+    end_time = time.monotonic()
     time_elapsed = end_time - start_time
 
     return {
@@ -1235,7 +1235,7 @@ def db_verify(session: Session) -> dict:
 
 def db_clean(session: Session) -> dict:
     """Clean the LSH cache and vacuum the database."""
-    start_time = time.time()
+    start_time = time.monotonic()
 
     # 1. Wipe the legacy cache files and the DB-backed index.
     lsh_index_clear(session)
@@ -1247,7 +1247,7 @@ def db_clean(session: Session) -> dict:
         session.commit()
         vacuum_success = True
 
-    end_time = time.time()
+    end_time = time.monotonic()
     time_elapsed = end_time - start_time
 
     return {
@@ -1397,7 +1397,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     """
     from .database import create_db_engine
 
-    start_time = time.time()
+    start_time = time.monotonic()
     # The source may be any backend: a full URL (e.g. duckdb:///file.db,
     # postgresql+pg8000://...) is used as-is; otherwise it is a SQLite path.
     source_url = (
@@ -1554,7 +1554,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     finally:
         source_session.close()
 
-    end_time = time.time()
+    end_time = time.monotonic()
     return {
         "added": added,
         "updated": updated,

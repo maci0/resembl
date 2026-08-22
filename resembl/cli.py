@@ -573,7 +573,7 @@ def import_cmd(
             abort=True,
         )
 
-    start_time = time.time()
+    start_time = time.monotonic()
     ngram_size = state.config.ngram_size
 
     file_paths = glob.glob(os.path.join(directory, "**", "*.asm"), recursive=True)
@@ -684,7 +684,7 @@ def import_cmd(
     # write; dedupes by checksum and merges alias names).
     flush_prepared()
 
-    end_time = time.time()
+    end_time = time.monotonic()
     time_elapsed = end_time - start_time
     stats = {
         "num_imported": added_total,
