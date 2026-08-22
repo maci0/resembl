@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, Integer, Text
 from sqlmodel import Field, Session, SQLModel, select
 
-# re-exported: `from resembl.models import minhash_pack` keeps working
+# Re-exported for external backward compatibility only
+# (`from resembl.models import minhash_pack` keeps working); modules inside
+# this package import these from ``resembl.scoring`` directly.
 from .scoring import (  # noqa: F401
     minhash_ensure_packed,
     minhash_jaccard,

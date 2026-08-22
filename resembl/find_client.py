@@ -87,6 +87,8 @@ def _main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # The literal fallbacks below must mirror ``ResemblConfig``'s defaults
+    # (resembl.config); this client stays stdlib-only and cannot import it.
     cfg = _load_config()
     effective_threshold = args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
     effective_ngram = int(cfg.get("ngram_size", 3))

@@ -107,9 +107,7 @@ class TestDuckDBIntegration(unittest.TestCase):
             rows,
         )
         self.session.commit()
-        count = self.session.exec(
-            select(func.count(LSHBucket.band))
-        ).one()
+        count = self.session.exec(select(func.count(LSHBucket.band))).one()
         self.assertEqual(count, 2500)
 
         # Incremental variant with conflict handling: duplicates are no-ops.
@@ -120,9 +118,7 @@ class TestDuckDBIntegration(unittest.TestCase):
             rows[:100],
         )
         self.session.commit()
-        count = self.session.exec(
-            select(func.count(LSHBucket.band))
-        ).one()
+        count = self.session.exec(select(func.count(LSHBucket.band))).one()
         self.assertEqual(count, 2500)
 
     def test_add_batch_tricky_content_roundtrips(self):

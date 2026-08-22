@@ -7,7 +7,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from resembl.core import code_create_minhash
+    from resembl.scoring import code_create_minhash
 
 
 def test_one_input(data):

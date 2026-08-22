@@ -53,11 +53,8 @@ from .models import (
     Snippet,
     SnippetVersion,
 )
-from .scoring import (  # noqa: F401  (re-exported for backward compatibility)
-    BRANCH_INSTRUCTIONS,
-    COMMON_INSTRUCTIONS,
+from .scoring import (
     NUM_PERMUTATIONS,
-    RARE_INSTRUCTIONS,
     _code_tokenize_lexed,
     _minhash_from_tokens,
     _string_normalize_lexed,
@@ -68,13 +65,22 @@ from .scoring import (  # noqa: F401  (re-exported for backward compatibility)
     code_tokenize,
     lexer,
     minhash_ensure_packed,
-    minhash_jaccard,
     minhash_jaccard_batch,
     minhash_num_perm,
     minhash_pack,
     score_hybrid,
-    shingle_weight,
     string_checksum,
+)
+
+# Re-exported for external backward compatibility only; not used in this
+# module (`from resembl.core import string_normalize` keeps working).
+# isort: split
+from .scoring import (  # noqa: F401
+    BRANCH_INSTRUCTIONS,
+    COMMON_INSTRUCTIONS,
+    RARE_INSTRUCTIONS,
+    minhash_jaccard,
+    shingle_weight,
     string_normalize,
 )
 
@@ -265,9 +271,7 @@ def _snippets_by_checksums(session: Session, checksums: list[str]) -> dict[str, 
     result: dict[str, Snippet] = {}
     for chunk in _checksum_chunks(list(checksums)):
         for snippet in session.exec(
-            select(Snippet).where(
-                Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
-            )
+            select(Snippet).where(Snippet.checksum.in_(chunk))  # type: ignore[attr-defined]
         ).all():
             result[snippet.checksum] = snippet
     return result
@@ -993,10 +997,7 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
     key = secrets.token_hex(32)
     rows = list(
         session.exec(
-            select(Snippet)
-            .where(Snippet.checksum >= key)
-            .order_by(Snippet.checksum)
-            .limit(limit)
+            select(Snippet).where(Snippet.checksum >= key).order_by(Snippet.checksum).limit(limit)
         ).all()
     )
     if len(rows) < limit:
@@ -1084,9 +1085,7 @@ def db_stats(session: Session) -> dict:
         }
 
     # Aggregate the average snippet size in SQL instead of loading every row.
-    avg_size = session.exec(
-        select(func.avg(func.length(Snippet.code)))
-    ).one()
+    avg_size = session.exec(select(func.avg(func.length(Snippet.code)))).one()
     avg_snippet_size = float(avg_size or 0.0)
 
     # Vocabulary: tokenize a bounded random sample so the command stays
@@ -1127,11 +1126,7 @@ def snippet_names_stream(
     """
     last: str | None = None
     while True:
-        stmt = (
-            select(Snippet.checksum, Snippet.names)
-            .order_by(Snippet.checksum)
-            .limit(batch_size)
-        )
+        stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(batch_size)
         if last is not None:
             stmt = stmt.where(Snippet.checksum > last)
         rows = session.exec(stmt).all()

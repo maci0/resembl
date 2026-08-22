@@ -7,7 +7,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from resembl.core import code_tokenize
+    from resembl.scoring import code_tokenize
 
 
 def test_one_input(data):

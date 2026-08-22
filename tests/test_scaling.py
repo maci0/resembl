@@ -710,18 +710,12 @@ class TestIndexBuild(BaseScalingTest):
 
         self._add(12, "avg")
         blobs = [
-            minhash_ensure_packed(row.minhash)
-            for row in self.session.exec(select(Snippet)).all()
+            minhash_ensure_packed(row.minhash) for row in self.session.exec(select(Snippet)).all()
         ]
         n = len(blobs)
-        expected = (
-            sum(
-                minhash_jaccard(blobs[i], blobs[j])
-                for i in range(n)
-                for j in range(i + 1, n)
-            )
-            / (n * (n - 1) // 2)
-        )
+        expected = sum(
+            minhash_jaccard(blobs[i], blobs[j]) for i in range(n) for j in range(i + 1, n)
+        ) / (n * (n - 1) // 2)
         # count (12) <= sample_size -> the exact whole-corpus sample is used.
         result = db_calculate_average_similarity(self.session, sample_size=1000)
         self.assertAlmostEqual(result, expected, places=12)

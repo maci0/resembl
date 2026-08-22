@@ -11,7 +11,7 @@ Why SQLite instead of datasketch's in-memory :class:`~datasketch.MinHashLSH`?
 
 The banding math is identical to datasketch (same ``_optimal_param``), so
 recall behavior at a given threshold is equivalent.  Bucket keys are derived
-directly from the packed uint32 fingerprints (see ``models.minhash_pack``),
+directly from the packed uint32 fingerprints (see ``scoring.minhash_pack``),
 which avoids constructing MinHash objects during index builds.
 """
 
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, text
 
-from .models import minhash_num_perm, minhash_pack
+from .scoring import minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
     from datasketch import MinHash

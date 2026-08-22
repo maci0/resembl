@@ -32,14 +32,15 @@ from .lsh import (
     lsh_meta_matches,
     lsh_meta_set,
 )
-from .models import FINGERPRINT_VERSION, Snippet, minhash_ensure_packed
+from .models import FINGERPRINT_VERSION, Snippet
+
+# Default permutation count when (re)building the index: shared with scoring.
+from .scoring import NUM_PERMUTATIONS as DEFAULT_NUM_PERMUTATIONS
+from .scoring import minhash_ensure_packed
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CACHE_DIR = "~/.cache/resembl"
-
-#: Default number of permutations used when (re)building the index.
-DEFAULT_NUM_PERMUTATIONS = 128
 
 #: Rows buffered per band before a sorted bulk insert during index builds.
 _BAND_CHUNK = 100_000

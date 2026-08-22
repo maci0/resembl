@@ -28,6 +28,7 @@ from typing import Any
 from sqlmodel import Session
 
 from .cache import cache_dir_get, lsh_index_build
+from .config import ResemblConfig
 from .core import LSH_THRESHOLD, db_reindex, snippet_find_matches
 
 #: Version-guarded result cache: key -> (db_version, payload).  SQLite's
@@ -43,11 +44,14 @@ _RESULT_CACHE_MAX = 128
 _RESULT_CACHE_LOCK = threading.Lock()
 
 #: Threshold / permutation count the server pre-warms with (set from the CLI
-#: config at startup, so served results match in-process find).
-_SERVER_THRESHOLD = 0.5
-_SERVER_NUM_PERM = 128
-_SERVER_NGRAM = 3
-_SERVER_JACCARD_WEIGHT = 0.4
+#: config at startup, so served results match in-process find).  Until
+#: :func:`serve` runs they mirror :class:`ResemblConfig`'s defaults, so a
+#: direct ``_find_one`` call agrees with a default configuration.
+_DEFAULTS = ResemblConfig()
+_SERVER_THRESHOLD = _DEFAULTS.lsh_threshold
+_SERVER_NUM_PERM = _DEFAULTS.num_permutations
+_SERVER_NGRAM = _DEFAULTS.ngram_size
+_SERVER_JACCARD_WEIGHT = _DEFAULTS.jaccard_weight
 
 
 def _db_version(session: Session) -> int | None:

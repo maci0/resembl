@@ -7,7 +7,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from resembl.core import string_checksum
+    from resembl.scoring import string_checksum
 
 
 def test_one_input(data):

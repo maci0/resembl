@@ -7,7 +7,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from resembl.core import string_normalize
+    from resembl.scoring import string_normalize
 
 
 def test_one_input(data):
