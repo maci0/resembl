@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # pylint: disable=duplicate-code,import-error
-"""A fuzzer for the code_to_minhash function."""
+"""A fuzzer for the code_create_minhash function."""
 
 import sys
 

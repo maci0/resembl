@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # pylint: disable=duplicate-code,import-error
-"""A fuzzer for the get_normalized_string function."""
+"""A fuzzer for the string_normalize function."""
 
 import sys
 

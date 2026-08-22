@@ -5,9 +5,13 @@ functions, analyzing a firmware dump, and generating detection rules.
 
 ## Prerequisites
 
+Install from a checkout of the repository (see the
+[README](../README.md#1-installation) for details):
+
 ```bash
-pip install resembl
-# or: uv pip install resembl
+uv venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
 ## Step 1: Build Your Reference Library

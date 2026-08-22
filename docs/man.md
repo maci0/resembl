@@ -216,8 +216,9 @@ Settings are stored in `~/.config/resembl/config.toml`:
 ## EXAMPLES
 
 ```bash
-# Add a snippet
-resembl add "memcpy" "mov ecx, [esp+8] ; rep movsb"
+# Add a snippet (';' starts a comment in add, like any NASM source:
+# put each statement on its own line for multi-statement code)
+resembl add "memcpy" "mov ecx, [esp+8]"
 
 # Find similar snippets
 resembl find --query "mov ecx, [esp+8]" --top-n 10

@@ -163,8 +163,11 @@ resembl/
 │   ├── config.py
 │   ├── core.py
 │   ├── database.py
+│   ├── find_client.py
 │   ├── lsh.py
-│   └── models.py
+│   ├── models.py
+│   ├── scoring.py
+│   └── server.py
 ├── docs/
 │   ├── adr/
 │   ├── api_reference.md
@@ -217,7 +220,7 @@ default values. Set `RESEMBL_CONFIG_DIR` to override this location.
 
 The database backend is selected with the `DATABASE_URL` environment
 variable: SQLite (default, `sqlite:///assembly.db`), PostgreSQL
-(`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+mysqlconnector://…`), or
+(`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+pymysql://…`), or
 DuckDB (`duckdb:///file.db` via `duckdb-engine`).  See
 [Using a Custom Database](docs/custom_database.md) for details.
 

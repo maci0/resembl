@@ -23,5 +23,5 @@ MinHash with n-gram shingling preserves local token ordering, which is critical 
 
 ## Consequences
 - The `datasketch` library is a runtime dependency.
-- The LSH index must be cached to disk for fast startup (see `cache.py`).
+- ~~The LSH index must be cached to disk for fast startup (see `cache.py`).~~ Superseded by ADR 004: the index lives in the database, not in a disk cache.
 - Threshold is user-configurable via `lsh_threshold` in config.

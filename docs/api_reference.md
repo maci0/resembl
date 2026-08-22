@@ -48,7 +48,7 @@ List snippets, optionally within a `[start, end)` window of the full listing.
 ### `snippet_delete(session, checksum: str) → bool`
 Delete a snippet. Returns `True` on success.
 
-### `snippet_find_matches(session, query: str, top_n: int = 3, threshold: float = 0.5, ...) → tuple[int, list]`
+### `snippet_find_matches(session, query: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
 Find similar snippets. Returns the LSH candidate count and the top matches
 (snippet + hybrid score).  Candidates are scored with a vectorized numpy
 Jaccard pass, an early exit that skips Levenshtein for candidates that
@@ -56,7 +56,7 @@ cannot beat the current top-N, and full rows are fetched only for
 survivors — so the data movement is proportional to the top-N, not the
 candidate count.
 
-### `snippet_compare(session, checksum_a: str, checksum_b: str) → dict`
+### `snippet_compare(session, checksum1: str, checksum2: str) → dict`
 Compare two snippets. Returns Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared normalized token count.
 
 ### `shingle_weight(shingle: str) → int`
@@ -100,7 +100,8 @@ SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes)
 SQLModel with fields: `name` (PK), `description`, `created_at`.
 
 ### `SnippetVersion`
-SQLModel with fields: `id` (auto PK), `snippet_checksum`, `code`, `minhash`, `created_at`.
+SQLModel with fields: `id` (integer PK, set by the caller; no database-side
+autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minhash`, `created_at`.
 
 ## Configuration
 

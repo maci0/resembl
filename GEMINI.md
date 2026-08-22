@@ -99,21 +99,21 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     While the pre-commit hook may run tests on changed files, it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
 
-- **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` to measure how much of the codebase is exercised by the tests.
+- **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `slipcover` for line-level coverage measurement.
     ```bash
-    uv run pytest --cov=resembl
+    uv run python -m slipcover --source resembl -m pytest
     ```
-    This command will run the test suite and then print a report to the console, showing the percentage of code covered by tests for each file. Aim to maintain or increase the coverage percentage with your contributions.
+    This command will run the test suite under Slipcover, which measures how much of the codebase is exercised by the tests and reports coverage per file when the run finishes. Aim to maintain or increase the coverage percentage with your contributions.
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 
-    To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `get_tokens` function:
+    To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `code_tokenize` function:
     ```bash
-    uv run ./fuzzers/fuzz_get_tokens.py
+    uv run ./fuzzers/fuzz_code_tokenize.py
     ```
     The fuzzer will run indefinitely until you stop it manually (with `Ctrl+C`) or until it finds a crash. To run it for a fixed duration, use the `-max_total_time` flag:
     ```bash
-    uv run ./fuzzers/fuzz_get_tokens.py -max_total_time=60
+    uv run ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
     ```
     If a crash is found, the fuzzer will stop and create a `crash-<hash>` file in the root directory containing the input that caused the failure. This file is crucial for debugging and should be included in any bug report.
 
