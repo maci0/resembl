@@ -738,12 +738,21 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
                 rule_name = "r_" + rule_name
             rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
 
+            # Names are user-controlled text embedded in a quoted YARA
+            # string; escape them like the code body so a name cannot break
+            # out of the string literal (or the rule) in the generated file.
+            name_escaped = (
+                primary_name.replace("\\", "\\\\")
+                .replace('"', '\\"')
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
+            )
             code_escaped = snippet.code.replace("\\", "\\\\").replace('"', '\\"')
             code_escaped = code_escaped.replace("\r", "\\r").replace("\n", "\\n")
 
             yara_rule = f"""rule {rule_name} {{
     meta:
-        description = "Resembl exported snippet: {primary_name}"
+        description = "Resembl exported snippet: {name_escaped}"
         checksum = "{snippet.checksum}"
     strings:
         $asm = "{code_escaped}" nocase ascii wide
@@ -930,8 +939,22 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
     if not snippet1 or not snippet2:
         return None
 
-    m1 = snippet1.get_minhash_obj()
-    m2 = snippet2.get_minhash_obj()
+    def _minhash_or_recomputed(snippet: Snippet):
+        """Return the stored fingerprint, or one recomputed from the code.
+
+        Stored blobs are never deserialized in a non-packed format (that
+        would be arbitrary code execution on hostile data), so a corrupt or
+        pre-versioning fingerprint raises ``ValueError`` from unpacking.
+        Recomputing from the snippet's own code keeps ``compare`` working on
+        such databases — identical semantics to the self-healing reindex.
+        """
+        try:
+            return snippet.get_minhash_obj()
+        except ValueError:
+            return code_create_minhash(snippet.code)
+
+    m1 = _minhash_or_recomputed(snippet1)
+    m2 = _minhash_or_recomputed(snippet2)
     jaccard_similarity = m1.jaccard(m2)
 
     levenshtein_score = fuzz.ratio(snippet1.code, snippet2.code)
@@ -1185,8 +1208,12 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 
         file_path = os.path.join(abs_export_dir, f"{safe_name}.asm")
 
-        # Final guard: ensure the resolved path is within the export directory
-        if not os.path.realpath(file_path).startswith(abs_export_dir):
+        # Final guard: the sanitized name cannot contain separators, so every
+        # written file must be a DIRECT child of the export directory.  A
+        # plain ``startswith`` prefix test would accept sibling directories
+        # sharing the prefix (``/out/export-evil`` vs ``/out/export``).
+        resolved_path = os.path.realpath(file_path)
+        if os.path.dirname(resolved_path) != abs_export_dir:
             logger.warning(
                 "Skipping snippet '%s': resolved path is outside export directory.",
                 primary_name,
@@ -1515,21 +1542,32 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             try:
                 packed = minhash_ensure_packed(src_snippet.minhash)
             except ValueError:
-                # One corrupt source blob must not fail the whole merge —
-                # skip the row (a reindex on the target heals nothing here,
-                # but the source row is simply not importable).
+                # A non-packed fingerprint (legacy format or corrupt) is
+                # never deserialized — that would execute attacker-controlled
+                # pickle code from a hostile merge source.  Recompute it from
+                # the source row's code instead; only a row with no usable
+                # code either is skipped.
                 logger.warning(
-                    "Skipping source snippet %s: corrupt fingerprint.",
+                    "Recomputing fingerprint for source snippet %s "
+                    "(unsupported format).",
                     src_snippet.checksum,
                 )
-                skipped += 1
-                return
+                try:
+                    packed = minhash_pack(code_create_minhash(src_snippet.code))
+                except Exception:
+                    logger.warning(
+                        "Skipping source snippet %s: corrupt fingerprint and "
+                        "no recomputable code.",
+                        src_snippet.checksum,
+                    )
+                    skipped += 1
+                    return
             new_rows.append(
                 {
                     "checksum": src_snippet.checksum,
                     "names": src_snippet.names,
                     "code": src_snippet.code,
-                    "minhash": src_snippet.minhash,
+                    "minhash": packed,
                     "tags": src_snippet.tags,
                     "collection": src_snippet.collection,
                 }

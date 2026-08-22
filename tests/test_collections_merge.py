@@ -323,8 +323,14 @@ class TestDBMerge(BaseDBTest):
         # 120 overlaps resolved via ~1 chunked IN fetch, not 120 SELECTs.
         self.assertLessEqual(counts["select"], 6)
 
-    def test_merge_skips_corrupt_source_blob(self):
-        """One corrupt source blob skips that row, not the whole merge."""
+    def test_merge_heals_corrupt_source_blob_from_code(self):
+        """A corrupt source blob is recomputed from its code, never deserialized.
+
+        Source databases are untrusted input: a non-packed fingerprint blob
+        (corrupt or hostile pickle) must not be unpickled.  The row is healed
+        by recomputing the fingerprint from the source row's code instead of
+        skipping it.
+        """
         source_path = self._create_source_db(
             [
                 ("a", "MOV EAX, 1", [], None),
@@ -337,13 +343,17 @@ class TestDBMerge(BaseDBTest):
             with Session(src_engine) as ss:
                 row = ss.exec(select(Snippet)).first()
                 row.minhash = b"corrupt-blob"
+                corrupted_checksum = row.checksum
                 ss.add(row)
                 ss.commit()
             src_engine.dispose()
 
             result = db_merge(self.session, source_path)
-            self.assertEqual(result["added"], 2)
-            self.assertEqual(result["skipped"], 1)  # the corrupt row
+            self.assertEqual(result["added"], 3)  # every row imported
+            self.assertEqual(result["skipped"], 0)
+            healed = Snippet.get_by_checksum(self.session, corrupted_checksum)
+            self.assertIsNotNone(healed)
+            self.assertTrue(healed.minhash.startswith(b"RMLH"))
         finally:
             os.unlink(source_path)
 

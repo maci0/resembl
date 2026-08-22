@@ -131,6 +131,14 @@ def server_port_path(db_url: str) -> str:
     return os.path.join(cache_dir_get(), f"server_{digest}.port")
 
 
+#: Maximum accepted request body (8 MiB — orders of magnitude above any real
+#: find/batch payload).  A bound keeps a local process from making the server
+#: allocate unbounded memory per request, and negative or non-numeric
+#: Content-Length values are rejected instead of hanging the handler thread
+#: reading until EOF.
+_MAX_BODY_BYTES = 8 * 1024 * 1024
+
+
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find``; one session per request (concurrent reads)."""
 
@@ -149,6 +157,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         """Read and parse the JSON request body; None if malformed."""
         try:
             length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return None
+        if length < 0 or length > _MAX_BODY_BYTES:
+            return None
+        try:
             return json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, KeyError):
             return None
@@ -194,7 +207,9 @@ class _FindHandler(BaseHTTPRequestHandler):
                     try:
                         if not isinstance(query, str):
                             raise ValueError("query must be a string")
-                        results.append({"query": query, **_find_one(session, body, query)})
+                        results.append(
+                            {"query": query, **_find_one(session, body, query)}
+                        )
                     except Exception as exc:  # isolate per-query failures
                         results.append({"query": query, "error": str(exc)})
         except Exception as exc:

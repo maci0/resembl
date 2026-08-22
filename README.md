@@ -36,7 +36,7 @@ To make searches nearly instantaneous, `resembl` maintains a **database-backed L
 - **Kept in sync incrementally** — `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
 - **Streamed** during builds — rows are inserted in batches, bounding memory use on very large databases.
 
-Legacy pickle cache files (from older versions) still load transparently and migrate to the database-backed index on the next write operation. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
+Legacy pickle cache files (from older versions) are no longer loaded — unpickling a file is arbitrary code execution, and the cache directory is not a trust boundary. Stale cache files are ignored and removed on the next write; the index simply rebuilds from the database. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
 
 ## How It Works
 

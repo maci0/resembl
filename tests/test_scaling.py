@@ -2,12 +2,12 @@
 
 Covers:
 - Compact raw MinHash storage (``minhash_pack``/``minhash_unpack``) and
-  backwards compatibility with legacy pickle blobs.
+  rejection of legacy pickle blobs (never deserialized).
 - Consistency between ``code_create_minhash`` and
   ``code_create_minhash_batch`` (weighted shingling parity after ``reindex``).
 - ``snippet_add_batch`` bulk import semantics (dedup, alias merge, empty
   skipping, chunked ``IN`` queries for very large batches).
-- The versioned, compressed LSH cache format (and legacy plain-pickle loads).
+- The database-backed LSH cache (legacy cache files ignored, not loaded).
 - Candidate fetching with more than one chunk's worth of LSH candidates.
 """
 
@@ -40,9 +40,20 @@ from resembl.core import (
     snippet_prepare,
 )
 from resembl.lsh import lsh_index_clear, lsh_meta_get
-from resembl.models import Snippet, minhash_jaccard, minhash_pack, minhash_unpack
+from resembl.models import (
+    Snippet,
+    minhash_ensure_packed,
+    minhash_jaccard,
+    minhash_pack,
+    minhash_unpack,
+)
 
 ENGINE = create_engine("sqlite:///:memory:")
+
+
+def _unpickle_canary() -> None:
+    """Called only if a hostile pickle blob is ever deserialized."""
+    raise AssertionError("hostile pickle blob was deserialized")
 
 
 class BaseScalingTest(unittest.TestCase):
@@ -97,12 +108,9 @@ class TestMinHashStorage(BaseScalingTest):
             m1.jaccard(m3),
             places=6,
         )
-        # Legacy pickle fallback still works.
-        self.assertAlmostEqual(
-            minhash_jaccard(pickle.dumps(m1), pickle.dumps(m2)),
-            m1.jaccard(m2),
-            places=6,
-        )
+        # Legacy (non-packed) blobs are rejected, never deserialized.
+        with self.assertRaises(ValueError):
+            minhash_jaccard(pickle.dumps(m1), pickle.dumps(m2))
 
     def test_surrogate_input_does_not_crash(self):
         """Checksum/minhash must be total over any str (fuzzer-found crash).
@@ -121,11 +129,19 @@ class TestMinHashStorage(BaseScalingTest):
         prepared = snippet_prepare("f", nasty)
         self.assertIsNotNone(prepared)
 
-    def test_unpack_legacy_pickle(self):
-        """Databases written by older versions (pickled MinHash) still load."""
+    def test_unpack_legacy_pickle_raises_value_error(self):
+        """Legacy pickled fingerprints are rejected without deserialization.
+
+        Old databases migrate through the version-stamp reindex path, which
+        recomputes fingerprints from code — the blob itself is hostile input
+        (a pickle is executable) and must only produce ``ValueError``.
+        """
         m = code_create_minhash("mov eax, 1")
         legacy = pickle.dumps(m)
-        self.assertAlmostEqual(minhash_unpack(legacy).jaccard(m), 1.0, places=6)
+        with self.assertRaises(ValueError):
+            minhash_unpack(legacy)
+        with self.assertRaises(ValueError):
+            minhash_ensure_packed(legacy)
 
     def test_unpack_corrupt_payload(self):
         raw = b"RMLH" + struct.pack(">I", 128) + b"\x00" * 100
@@ -346,7 +362,7 @@ class TestSnippetAddBatch(BaseScalingTest):
 
 
 class TestCacheFormat(BaseScalingTest):
-    """Database-backed index + legacy pickle cache compatibility."""
+    """Database-backed index + legacy cache-file rejection."""
 
     def test_sqlite_index_roundtrip(self):
         """Build + save + load round-trips through the DB-backed index."""
@@ -357,30 +373,36 @@ class TestCacheFormat(BaseScalingTest):
         # Empty database → query returns no candidates.
         self.assertEqual(loaded.query(code_create_minhash("nop")), [])
 
-    def test_legacy_pickle_roundtrip(self):
-        """Generic objects (legacy/dict caches) still round-trip via pickle."""
-        lsh_cache_save(self.session, {"test": "data"}, 0.5)
-        loaded = lsh_cache_load(self.session, 0.5)
-        self.assertEqual(loaded, {"test": "data"})
+    def test_legacy_pickle_cache_not_loaded(self):
+        """A legacy pickle cache file is ignored, never unpickled.
 
-    def test_legacy_plain_pickle_loads(self):
-        """A cache written by the old format must still load."""
+        Unpickling a cache file is arbitrary code execution; anyone who can
+        plant a file under the cache dir must not gain code execution when
+        ``find`` runs.  The loader consults only the database-backed index,
+        so a planted file yields ``None`` (the caller rebuilds) and the
+        stale file is removed by the next save.
+        """
         import pickle as _pickle
         from pathlib import Path
 
         from resembl.database import db_checksum_get
 
+        class _Canary:
+            def __reduce__(self):  # detonates only if the blob is unpickled
+                return _unpickle_canary, ()
+
         cache_path = Path(os.environ["RESEMBL_CACHE_DIR"]) / "lsh_0.50.pkl"
         with open(cache_path, "wb") as f:
-            _pickle.dump({"legacy": "index"}, f)
+            _pickle.dump(_Canary(), f)
         marker = Path(os.environ["RESEMBL_CACHE_DIR"]) / "db_checksum.txt"
         with open(marker, "w", encoding="utf-8") as f:
             f.write(db_checksum_get(self.session))
-        loaded = lsh_cache_load(self.session, 0.5)
-        self.assertEqual(loaded, {"legacy": "index"})
 
-    def test_corrupted_new_format_raises(self):
-        """Corrupted v2-format legacy cache raises (zlib/pickle error)."""
+        # Not loaded — no execution, no object returned.
+        self.assertIsNone(lsh_cache_load(self.session, 0.5))
+
+    def test_corrupted_new_format_ignored(self):
+        """A corrupted cache file is ignored instead of raising."""
         from pathlib import Path
 
         from resembl.database import db_checksum_get
@@ -391,8 +413,7 @@ class TestCacheFormat(BaseScalingTest):
         marker = Path(os.environ["RESEMBL_CACHE_DIR"]) / "db_checksum.txt"
         with open(marker, "w", encoding="utf-8") as f:
             f.write(db_checksum_get(self.session))
-        with self.assertRaises(Exception):
-            lsh_cache_load(self.session, 0.5)
+        self.assertIsNone(lsh_cache_load(self.session, 0.5))
 
     def test_threshold_change_rebuilds(self):
         """A different threshold than the built index triggers a rebuild."""
@@ -1029,6 +1050,52 @@ class TestFingerprintVersion(BaseScalingTest):
                 snippet_add(source_session, "src", "mov eax, 1; ret")
             db_merge(self.session, src)
             self.assertIsNone(fingerprint_version_get(self.session))
+        finally:
+            for path in (src, src + "-wal", src + "-shm"):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_merge_hostile_pickle_blob_is_not_deserialized(self):
+        """A pickle minhash blob in the source DB must never be unpickled.
+
+        ``merge`` treats another database as untrusted input.  A crafted
+        source row whose fingerprint is a pickle payload used to reach
+        ``pickle.loads`` (arbitrary code execution); it is now recomputed
+        from the row's code instead.
+        """
+        import os
+        import tempfile
+
+        from sqlmodel import Session as _Session
+        from sqlmodel import SQLModel, create_engine
+
+        class _Canary:
+            def __reduce__(self):  # detonates only if the blob is unpickled
+                return _unpickle_canary, ()
+
+        code = "mov eax, 1; ret"
+        m = code_create_minhash(code)
+        src = tempfile.mktemp(suffix=".db")
+        try:
+            source_engine = create_engine(f"sqlite:///{src}")
+            SQLModel.metadata.create_all(source_engine)
+            with _Session(source_engine) as source_session:
+                source_session.add(
+                    Snippet(
+                        checksum="hostile1",
+                        names=json.dumps(["hostile_fn"]),
+                        code=code,
+                        minhash=pickle.dumps(_Canary()),  # hostile blob
+                    )
+                )
+                source_session.commit()
+            result = db_merge(self.session, src)
+            self.assertNotIn("error", result)
+            self.assertEqual(result["added"], 1)
+            stored = snippet_get(self.session, "hostile1")
+            self.assertIsNotNone(stored)
+            # The stored fingerprint was recomputed into the packed format.
+            self.assertTrue(stored.minhash.startswith(b"RMLH"))
         finally:
             for path in (src, src + "-wal", src + "-shm"):
                 if os.path.exists(path):

@@ -1,7 +1,6 @@
 """Tests for the cache module."""
 
 import os
-import pickle
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -16,7 +15,11 @@ from resembl.cache import (
     lsh_index_build,
 )
 from resembl.database import db_checksum_get
-from resembl.models import Snippet
+
+
+def _unpickle_canary() -> None:
+    """Called only if a hostile pickle blob is ever deserialized."""
+    raise AssertionError("hostile pickle blob was deserialized")
 
 
 class TestCache(unittest.TestCase):
@@ -33,19 +36,23 @@ class TestCache(unittest.TestCase):
         path = lsh_cache_path_get(0.75)
         self.assertTrue(path.endswith("lsh_0.75.pkl"))
 
-    def test_lsh_cache_save_and_load(self):
-        """Test saving and loading the LSH cache."""
+    def test_non_lsh_object_not_persisted_and_load_returns_none(self):
+        """Non-DB-backed index objects are not persisted; load never reads files.
+
+        Cache files were historically pickles: loading one executes arbitrary
+        code, so the loader must consult only the database-backed index and
+        treat any cache file as stale.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 lsh = {"test": "data"}
-                self.session.exec.return_value.one.return_value = 1
-                self.session.exec.return_value.first.return_value = Snippet(
-                    checksum="abc", code="code"
-                )
-
                 lsh_cache_save(self.session, lsh, 0.5)
-                loaded_lsh = lsh_cache_load(self.session, 0.5)
-                self.assertEqual(lsh, loaded_lsh)
+                # Nothing was written...
+                self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
+                # ...and a planted file is ignored rather than unpickled.
+                with open(lsh_cache_path_get(0.5), "wb") as f:
+                    f.write(b"hostile pickle payload")
+                self.assertIsNone(lsh_cache_load(self.session, 0.5))
 
     def test_load_nonexistent_cache(self):
         """Test loading a nonexistent cache file."""
@@ -54,37 +61,54 @@ class TestCache(unittest.TestCase):
                 loaded_lsh = lsh_cache_load(self.session, 0.5)
                 self.assertIsNone(loaded_lsh)
 
-    def test_load_corrupted_cache(self):
-        """Test loading a corrupted cache file."""
+    def test_load_corrupted_cache_ignored(self):
+        """A corrupted legacy cache file is ignored (no exception, no load)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
-                lsh = {"test": "data"}
-                self.session.exec.return_value.one.return_value = 1
-                self.session.exec.return_value.first.return_value = Snippet(
-                    checksum="abc", code="code"
-                )
-                lsh_cache_save(self.session, lsh, 0.5)
-
-                # Corrupt the file
                 cache_path = lsh_cache_path_get(0.5)
                 with open(cache_path, "wb") as f:
                     f.write(b"corrupted")
 
-                with self.assertRaises(pickle.UnpicklingError):
-                    lsh_cache_load(self.session, 0.5)
+                self.assertIsNone(lsh_cache_load(self.session, 0.5))
+
+    def test_legacy_pickle_cache_file_is_not_unpickled(self):
+        """A legacy pickle cache in the cache dir must not execute on load."""
+        import pickle
+
+        class _Canary:
+            def __reduce__(self):  # detonates only if the blob is unpickled
+                return _unpickle_canary, ()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
+                with open(lsh_cache_path_get(0.5), "wb") as f:
+                    f.write(b"RESEMBL-CACHE-V2" + pickle.dumps(_Canary()))
+                self.assertIsNone(lsh_cache_load(self.session, 0.5))
 
     def test_cache_invalidation(self):
         """Test that the cache can be invalidated."""
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
-                lsh = {"test": "data"}
-                self.session.exec.return_value.one.return_value = 1
-                self.session.exec.return_value.first.return_value = Snippet(
-                    checksum="abc", code="code"
-                )
-                lsh_cache_save(self.session, lsh, 0.5)
+                # A stale legacy cache file (e.g. left by an older version).
+                with open(lsh_cache_path_get(0.5), "wb") as f:
+                    f.write(b"stale")
                 self.assertTrue(os.path.exists(lsh_cache_path_get(0.5)))
                 lsh_cache_invalidate()
+                self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
+
+    def test_save_removes_stale_legacy_cache_files(self):
+        """Saving the DB-backed index removes any legacy cache file."""
+        from unittest.mock import MagicMock as _MM
+
+        from resembl.lsh import ResemblLSH
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
+                with open(lsh_cache_path_get(0.5), "wb") as f:
+                    f.write(b"stale")
+                real_lsh = _MM(spec=ResemblLSH)
+                real_lsh.session = self.session
+                lsh_cache_save(self.session, real_lsh, 0.5)
                 self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
 
     def test_lsh_index_build_invalid_params(self):

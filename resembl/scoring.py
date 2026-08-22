@@ -7,8 +7,8 @@ deliberately free of the database stack so that it can be imported without
 ``resembl.cache`` / ``resembl.lsh`` / ``resembl.models``).
 
 It imports only:
-- the standard library (``hashlib``, ``re``, ``struct``, ``pickle``,
-  ``operator``, ``copy``)
+- the standard library (``hashlib``, ``re``, ``struct``, ``operator``,
+  ``copy``)
 - ``pygments`` (the ``NasmLexer`` + token types)
 - ``rapidfuzz`` (mirrored from ``core``)
 - ``numpy`` and ``datasketch`` are imported *lazily* inside the function
@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import operator
-import pickle
 import re
 import struct
 from collections.abc import Iterable, Sequence
@@ -40,9 +39,12 @@ if TYPE_CHECKING:
 #: Number of permutation functions for MinHash (higher = more accurate, slower).
 NUM_PERMUTATIONS = 128
 
-#: Magic prefix for the compact MinHash byte format.  A stored fingerprint
-#: either starts with this prefix (``struct``-packed uint32 hash values,
-#: self-describing) or is a legacy ``pickle`` blob produced by older versions.
+#: Magic prefix for the compact MinHash byte format.  Every stored fingerprint
+#: must start with this prefix (``struct``-packed uint32 hash values,
+#: self-describing).  Blobs in any other format are rejected: they are never
+#: deserialized (a pickle blob would be arbitrary code execution when a
+#: hostile ``merge`` source or corrupted database is read) — callers treat the
+#: ``ValueError`` as "corrupt fingerprint" and recompute it from the code.
 MINHASH_MAGIC = b"RMLH"
 
 #: Upper bound on the permutation count accepted when unpacking a stored
@@ -1023,24 +1025,24 @@ def minhash_pack(m: MinHash) -> bytes:
 def minhash_unpack(data: bytes) -> MinHash:
     """Deserialize a MinHash stored with :func:`minhash_pack`.
 
-    Falls back to ``pickle.loads`` for legacy pickled fingerprints, so
-    databases created by older versions keep working unchanged.  Malformed
-    packed payloads raise ``ValueError`` (never low-level ``struct`` errors).
+    Malformed payloads raise ``ValueError`` (never low-level ``struct``
+    errors).  Blobs without the ``RMLH`` magic — including legacy pickled
+    fingerprints from very old databases — raise ``ValueError`` as well:
+    deserializing them would execute attacker-controlled pickle code (a
+    hostile ``merge`` source or a planted cache file becomes remote code
+    execution).  Legacy rows self-heal instead: the version-stamp check
+    routes old databases through :func:`db_reindex`, which recomputes every
+    fingerprint from its snippet's code.
     """
-    if data.startswith(MINHASH_MAGIC):
-        from datasketch import MinHash
+    if not data.startswith(MINHASH_MAGIC):
+        raise ValueError(
+            "Corrupt MinHash payload: missing RMLH magic (unsupported format)."
+        )
+    from datasketch import MinHash
 
-        num_perm = minhash_num_perm(data)
-        values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
-        return MinHash(num_perm=num_perm, hashvalues=list(values))
-    try:
-        return pickle.loads(data)
-    except Exception as e:
-        # Corrupt legacy blobs (truncated pickles, disk rot) surface as
-        # UnpicklingError/EOFError/AttributeError/... — normalize them to
-        # ValueError so every caller's documented "malformed blob raises
-        # ValueError" contract holds and no low-level exception escapes.
-        raise ValueError(f"Corrupt legacy fingerprint: {e}") from e
+    num_perm = minhash_num_perm(data)
+    values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
+    return MinHash(num_perm=num_perm, hashvalues=list(values))
 
 
 def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
@@ -1049,8 +1051,9 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     Fast path: when both blobs use the compact packed format, similarity is
     computed directly from the uint32 arrays, bypassing the ``MinHash``
     constructor — which dominates the cost when scoring thousands of
-    candidates (the constructor is ~300 µs per object).  Falls back to
-    object-based comparison for legacy pickled blobs.
+    candidates (the constructor is ~300 µs per object).  Blobs in any other
+    format raise ``ValueError`` (they are never deserialized — see
+    :func:`minhash_unpack`).
 
     The metric matches :meth:`datasketch.MinHash.jaccard` exactly: the
     fraction of positions whose hash values are equal (element-wise), not a
@@ -1086,16 +1089,16 @@ def minhash_jaccard_batch(
     """Jaccard of one packed fingerprint against many, vectorized with numpy.
 
     Every blob (query and candidates) must use the compact packed format;
-    if any blob is a legacy pickle the call falls back to per-blob scoring
-    via :func:`minhash_jaccard`, so correctness is preserved on old
-    databases.  The vectorized pass loads each candidate's uint32 hash
-    values with ``numpy.frombuffer`` (no per-blob ``struct.unpack`` Python
-    loops) and compares the whole ``(N, 128)`` array against the query row
-    in one C-level pass — measured ~7x faster than the per-blob path at 10k
-    candidates.  Results are bit-for-bit identical to repeated
-    :func:`minhash_jaccard` calls: equality counts are small integers and
-    the ``num_perm`` divisor is a power of two, so both paths round
-    identically.  Candidates are processed in chunks to bound peak memory.
+    a blob in any other format raises ``ValueError`` (blobs are never
+    deserialized — see :func:`minhash_unpack`).  The vectorized pass loads
+    each candidate's uint32 hash values with ``numpy.frombuffer`` (no
+    per-blob ``struct.unpack`` Python loops) and compares the whole
+    ``(N, 128)`` array against the query row in one C-level pass — measured
+    ~7x faster than the per-blob path at 10k candidates.  Results are
+    bit-for-bit identical to repeated :func:`minhash_jaccard` calls:
+    equality counts are small integers and the ``num_perm`` divisor is a
+    power of two, so both paths round identically.  Candidates are processed
+    in chunks to bound peak memory.
 
     Raises ``ValueError`` when the query or a candidate is malformed, or
     when a candidate uses a different permutation count than the query —
@@ -1130,7 +1133,13 @@ def minhash_jaccard_batch(
 
 
 def minhash_ensure_packed(data: bytes) -> bytes:
-    """Return *data* in the compact packed format, converting legacy pickles."""
+    """Return *data* in the compact packed format, validating its header.
+
+    Blobs without the ``RMLH`` magic raise ``ValueError`` (they are never
+    deserialized — see :func:`minhash_unpack`).  Callers treat that as
+    "corrupt fingerprint" and heal it by recomputing from the snippet's
+    code.
+    """
     if data.startswith(MINHASH_MAGIC):
         # Validate rather than trust: blobs from merged databases or legacy
         # files may be corrupt, and every downstream use (banding, Jaccard,

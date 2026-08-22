@@ -227,8 +227,13 @@ class TestPropertyJaccardBatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             minhash_jaccard_batch(minhash_pack(a), [minhash_pack(b)])
 
-    def test_legacy_pickle_fallback_parity(self) -> None:
-        """A legacy pickle blob in the list falls back to per-blob scoring."""
+    def test_non_packed_blob_raises_value_error_everywhere(self) -> None:
+        """A blob in any non-packed format is rejected, never deserialized.
+
+        Pickle blobs from hostile ``merge`` sources or corrupted databases
+        are executable content: both the single-blob and batch scoring paths
+        must raise ``ValueError`` instead of unpickling.
+        """
         import pickle
 
         from resembl.models import (
@@ -245,8 +250,10 @@ class TestPropertyJaccardBatch(unittest.TestCase):
         other.update(b"candidate")
         legacy = pickle.dumps(other)
 
-        batch = minhash_jaccard_batch(query, [legacy])
-        self.assertEqual(batch, [minhash_jaccard(query, legacy)])
+        with self.assertRaises(ValueError):
+            minhash_jaccard(query, legacy)
+        with self.assertRaises(ValueError):
+            minhash_jaccard_batch(query, [legacy])
 
 
 class TestPropertyPackedStorage(unittest.TestCase):
@@ -289,14 +296,12 @@ class TestPropertyPackedStorage(unittest.TestCase):
     @given(data=st.binary(max_size=128))
     @settings(max_examples=200, deadline=2000)
     def test_malformed_packed_blobs_raise_value_error(self, data: bytes) -> None:
-        """Corrupt RMLH-prefixed blobs raise ValueError, never low-level errors.
+        """Hostile blobs always fail with a controlled ``ValueError``.
 
-        Random bytes that happen to carry the ``RMLH`` magic are the hostile
-        case (corrupted databases, malicious ``merge`` sources): unpacking
-        must fail with a controlled ``ValueError`` — not ``struct.error``,
-        ``MemoryError``, ``ZeroDivisionError``, or a huge allocation.  Non-
-        RMLH bytes take the legacy pickle path, which may raise any exception
-        (or, extremely rarely, succeed) — the requirement is no crash.
+        Random bytes (corrupted databases, malicious ``merge`` sources) must
+        never reach a deserializer: unpacking raises ``ValueError`` for every
+        non-``RMLH`` input — no pickle execution, no ``struct.error``, no
+        ``MemoryError``, no huge allocation.
         """
         from resembl.lsh import band_buckets
         from resembl.models import minhash_ensure_packed, minhash_unpack
@@ -309,14 +314,12 @@ class TestPropertyPackedStorage(unittest.TestCase):
             with self.assertRaises(ValueError):
                 band_buckets(data, 128, 25, 5)
         else:
-            # Legacy pickle fallback: any outcome is fine, it must not raise
-            # something unexpected like MemoryError from a crafted payload.
-            try:
+            # Non-packed bytes are rejected outright: ValueError is the only
+            # possible outcome.
+            with self.assertRaises(ValueError):
                 minhash_unpack(data)
-            except ValueError:
-                pass
-            except Exception:
-                pass
+            with self.assertRaises(ValueError):
+                minhash_ensure_packed(data)
 
 
 if __name__ == "__main__":

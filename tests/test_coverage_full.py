@@ -5,7 +5,6 @@ Each test class targets specific uncovered lines identified via coverage analysi
 
 import json
 import os
-import pickle
 import tempfile
 import unittest
 
@@ -220,6 +219,33 @@ class TestExportYara(BaseDBTest):
         finally:
             os.unlink(out_path)
 
+    def test_export_yara_name_cannot_inject_rule_syntax(self):
+        """Names are user-controlled: they must stay inside the quoted string.
+
+        A name containing quotes/backslashes/newlines used to be embedded
+        raw in ``description = "..."``, letting stored names inject
+        arbitrary rule syntax into the generated YARA file.
+        """
+        hostile = 'evil", threat = 100 //\nrule injected {condition: false}'
+        snippet_add(self.session, hostile, "MOV EAX, 1; RET")
+        with tempfile.NamedTemporaryFile(suffix=".yar", delete=False, mode="w") as f:
+            out_path = f.name
+        try:
+            result = snippet_export_yara(self.session, out_path)
+            self.assertEqual(result["num_exported"], 1)
+            with open(out_path, "r") as f:
+                content = f.read()
+            # Exactly one rule header exists: the injected newline stayed
+            # escaped inside the quoted string instead of starting a line.
+            rule_lines = [ln for ln in content.splitlines() if ln.startswith("rule ")]
+            self.assertEqual(len(rule_lines), 1)
+            self.assertTrue(rule_lines[0].startswith("rule resembl_"))
+            # The hostile characters are escaped within the string literal.
+            self.assertIn('\\"', content)
+            self.assertIn("\\n", content)
+        finally:
+            os.unlink(out_path)
+
 
 # ---------------------------------------------------------------------------
 # Average similarity — covers line 660
@@ -269,6 +295,22 @@ class TestSnippetExport(BaseDBTest):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = snippet_export(self.session, tmpdir)
             self.assertEqual(result["num_exported"], 0)
+
+    def test_export_traversal_names_stay_inside_directory(self):
+        """Hostile snippet names must not write outside the export dir."""
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            tempfile.TemporaryDirectory() as sibling,
+        ):
+            for i, hostile in enumerate(("../evil", "..\\..\\evil", "sub/dir/evil")):
+                snippet_add(self.session, hostile, f"MOV EAX, {i}")
+            result = snippet_export(self.session, tmpdir)
+            # Every file landed as a direct child of the export directory.
+            written = os.listdir(tmpdir)
+            self.assertEqual(result["num_exported"], len(written))
+            self.assertTrue(all(f.endswith(".asm") for f in written))
+            # Nothing escaped to a prefix-sharing sibling directory.
+            self.assertEqual(os.listdir(sibling), [])
 
 
 # ---------------------------------------------------------------------------

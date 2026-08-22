@@ -187,19 +187,15 @@ class TestResembl(unittest.TestCase):
         self.assertEqual(batch[0], 1.0)  # byte-identical blob is an exact match
         self.assertEqual(minhash_jaccard_batch(query, []), [])
 
-    def test_minhash_jaccard_batch_legacy_pickle_fallback(self):
-        """Batch jaccard falls back to per-blob scoring for legacy pickles."""
+    def test_minhash_jaccard_batch_rejects_non_packed_blob(self):
+        """Batch jaccard rejects non-packed blobs instead of deserializing."""
         import pickle
-
-        from datasketch import MinHash
 
         query = minhash_pack(code_create_minhash("MOV EAX, 1"))
         legacy = pickle.dumps(code_create_minhash("MOV EBX, 2"))
         packed = minhash_pack(code_create_minhash("MOV EAX, 1"))
-        batch = minhash_jaccard_batch(query, [packed, legacy])
-        per_blob = [minhash_jaccard(query, b) for b in [packed, legacy]]
-        self.assertEqual(batch, per_blob)
-        self.assertEqual(batch[0], 1.0)
+        with self.assertRaises(ValueError):
+            minhash_jaccard_batch(query, [packed, legacy])
 
     def test_minhash_jaccard_batch_permutation_mismatch(self):
         """Batch jaccard rejects candidates with a different permutation count."""

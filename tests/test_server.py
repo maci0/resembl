@@ -127,6 +127,44 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("too high", payload["error"])
 
+    def test_server_rejects_oversized_body(self):
+        """A Content-Length above the cap is refused without reading the body.
+
+        The bound keeps a local process from making the server allocate
+        unbounded memory per request.
+        """
+        import http.client
+
+        port = self._start_server()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.putrequest("POST", "/find")
+            conn.putheader("Content-Type", "application/json")
+            # Announce far more body than the server accepts; send nothing.
+            conn.putheader("Content-Length", str(64 * 1024 * 1024))
+            conn.endheaders()
+            response = conn.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertIn(b"bad request body", response.read())
+        finally:
+            conn.close()
+
+    def test_server_rejects_negative_content_length(self):
+        """A negative Content-Length is rejected instead of blocking the handler."""
+        import http.client
+
+        port = self._start_server()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.putrequest("POST", "/find")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", "-1")
+            conn.endheaders()
+            response = conn.getresponse()
+            self.assertEqual(response.status, 400)
+        finally:
+            conn.close()
+
     def test_port_file_written(self):
         """serve writes a discoverable port file in the cache dir."""
         from resembl.server import server_port_path

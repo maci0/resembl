@@ -318,8 +318,13 @@ class TestCLIShowCommand(BaseCLITest):
         result = self.run_command("show ffffffffffffffff")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_compare_corrupt_blob_clean_error(self):
-        """compare on a corrupt fingerprint errors cleanly, not with a traceback."""
+    def test_compare_corrupt_blob_heals_from_code(self):
+        """compare on a corrupt fingerprint heals it from code, never a traceback.
+
+        Stored blobs are never deserialized in non-packed formats; a corrupt
+        one is recomputed from the snippet's own code (same self-healing
+        semantics as ``find``), so the comparison still succeeds cleanly.
+        """
         from sqlmodel import Session, text
 
         with Session(self.engine) as session:
@@ -332,9 +337,9 @@ class TestCLIShowCommand(BaseCLITest):
             session.commit()
 
         result = self.run_command(f"compare {checksum} {checksum}")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Error", result.stderr)
+        self.assertEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
+        self.assertNotIn("Traceback", result.stdout)
 
 
 class TestImportJobs(BaseCLITest):

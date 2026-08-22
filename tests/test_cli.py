@@ -298,7 +298,7 @@ class TestCLIConfig(BaseCLITest):
             self.assertFalse(os.path.exists(cache_file))
 
     def test_cache_dir_env_override_legacy_path(self):
-        """Legacy pickle caches respect RESEMBL_CACHE_DIR."""
+        """Legacy cache files are not written anymore (index lives in the DB)."""
         with tempfile.TemporaryDirectory() as cache_dir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": cache_dir}):
                 from sqlmodel import Session as _Session
@@ -306,10 +306,11 @@ class TestCLIConfig(BaseCLITest):
                 with _Session(self.engine) as session:
                     from resembl.cache import lsh_cache_path_get, lsh_cache_save
 
+                    # A non-DB-backed object is no longer persisted to a
+                    # cache file (cache files were pickles: loading one is
+                    # arbitrary code execution).
                     lsh_cache_save(session, {"legacy": "index"}, 0.5)
-                    cache_file = lsh_cache_path_get(0.5)
-            self.assertTrue(cache_file.startswith(cache_dir))
-            self.assertTrue(os.path.exists(cache_file))
+                    self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
 
     def test_config_set_and_list(self):
         """`config list` should show values set via `config set`."""

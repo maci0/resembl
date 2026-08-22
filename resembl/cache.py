@@ -5,22 +5,22 @@ tables, see ``resembl.lsh``): building streams rows in batches, queries are
 indexed lookups, and single snippet changes update only that snippet's rows.
 No large in-memory index is ever pickled to disk anymore.
 
-A legacy pickle cache (the pre-SQLite format) is still supported: files
-written by older versions load transparently, and the first write operation
-after an upgrade migrates to the database-backed index.
+Legacy pickle cache files (written by pre-SQLite versions) are *not* loaded:
+an index cache is untrusted executable content once unpickled, so anyone who
+can plant a file under the user's cache directory would otherwise gain code
+execution the next time ``find`` runs.  Stale cache files are ignored and
+removed by the next write operation; the index simply rebuilds from the
+database instead.
 """
 
 import logging
 import os
-import pickle
 import time
-import zlib
 from collections.abc import Callable
 
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
-from .database import db_checksum_get
 from .lsh import (
     ResemblLSH,
     _build_insert_sql,
@@ -40,12 +40,6 @@ DEFAULT_CACHE_DIR = "~/.cache/resembl"
 
 #: Default number of permutations used when (re)building the index.
 DEFAULT_NUM_PERMUTATIONS = 128
-
-#: Magic prefix for the current cache format.  New cache files are written as
-#: this magic + zlib-compressed pickle; files without the prefix are treated as
-#: legacy plain pickles and still load correctly (or raise UnpicklingError
-#: when corrupted, matching previous behavior).
-CACHE_MAGIC = b"RESEMBL-CACHE-V2"
 
 #: Rows buffered per band before a sorted bulk insert during index builds.
 _BAND_CHUNK = 100_000
@@ -344,26 +338,18 @@ def lsh_cache_save(
 
     For the DB-backed index this only records the metadata row (the bucket
     rows are already in the database) and removes any legacy pickle cache.
-    Other objects (legacy datasketch indexes, test doubles) are still saved
-    as zlib-compressed pickles, as before.
+    Other objects (legacy datasketch indexes, test doubles) are not
+    persisted: the database-backed index is the only durable cache format,
+    and writing untrusted-content cache files has no legitimate use.
     """
-    cache_dir = cache_dir_get()
-    os.makedirs(cache_dir, exist_ok=True)
-
     if isinstance(lsh, ResemblLSH):
         lsh_meta_set(session, threshold, num_perm)
         _remove_pickle_cache(threshold)
         return
-
-    lsh_cache_path = lsh_cache_path_get(threshold)
-    payload = CACHE_MAGIC + zlib.compress(
-        pickle.dumps(lsh, protocol=pickle.HIGHEST_PROTOCOL)
+    logger.debug(
+        "Not persisting non-DB-backed LSH object (%s); the index will rebuild.",
+        type(lsh).__name__,
     )
-    with open(lsh_cache_path, "wb") as f:
-        f.write(payload)
-
-    with open(db_checksum_path_get(), "w", encoding="utf-8") as f:
-        f.write(db_checksum_get(session))
 
 
 def lsh_cache_load(
@@ -374,34 +360,15 @@ def lsh_cache_load(
     """Load the LSH index if it is still valid.
 
     The database-backed index is used when its metadata matches the requested
-    parameters.  Otherwise the legacy pickle cache is consulted (validated
-    against the current database checksum), and a rebuilt index takes over on
-    the next save.
+    parameters.  Legacy pickle cache files are deliberately NOT loaded —
+    unpickling a file is arbitrary code execution, and the cache directory is
+    not a trust boundary (see the module docstring).  A stale or missing
+    index returns ``None`` so callers rebuild from the database.
     """
     meta = lsh_meta_get(session)
     if lsh_meta_matches(meta, threshold, num_perm):
         return ResemblLSH(session, threshold, num_perm)
-
-    lsh_cache_path = lsh_cache_path_get(threshold)
-    checksum_path = db_checksum_path_get()
-    if not os.path.exists(lsh_cache_path) or not os.path.exists(checksum_path):
-        return None
-
-    with open(checksum_path, "r", encoding="utf-8") as f:
-        cached_checksum = f.read()
-
-    current_checksum = db_checksum_get(session)
-
-    if cached_checksum != current_checksum:
-        return None  # Cache is stale
-
-    with open(lsh_cache_path, "rb") as f:
-        data = f.read()
-
-    if data.startswith(CACHE_MAGIC):
-        return pickle.loads(zlib.decompress(data[len(CACHE_MAGIC) :]))
-    # Legacy plain pickle (pre-compression format).
-    return pickle.loads(data)
+    return None
 
 
 def lsh_cache_invalidate() -> None:
