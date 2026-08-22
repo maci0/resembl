@@ -6,8 +6,6 @@ import sys
 
 import atheris
 
-# This is needed to allow the fuzzer to import the target module
-# and any dependencies it has.
 with atheris.instrument_imports():
     from resembl.core import code_create_minhash
 
@@ -15,24 +13,18 @@ with atheris.instrument_imports():
 def test_one_input(data):
     """The entry point for the fuzzer."""
     try:
-        # Attempt to decode the data as UTF-8. If it fails, it will
-        # raise a UnicodeDecodeError, which is a valid bug to find.
         fdp = atheris.FuzzedDataProvider(data)
         string_data = fdp.ConsumeUnicode(fdp.remaining_bytes())
-
-        # Call the target function with both normalization options
+        # Both normalization branches must accept arbitrary input.
         code_create_minhash(string_data, normalize=True)
         code_create_minhash(string_data, normalize=False)
     except UnicodeDecodeError:
-        # This is an expected exception when the input is not valid UTF-8.
-        # We can ignore it and let the fuzzer continue.
+        # Expected on non-UTF-8 input; not a finding.
         pass
 
 
 def main():
     """Main function to run the fuzzer."""
-    # atheris.instrument_all() is not used here because we are using
-    # with atheris.instrument_imports() instead.
     atheris.Setup(sys.argv, test_one_input)
     atheris.Fuzz()
 
