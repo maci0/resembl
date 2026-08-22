@@ -340,6 +340,12 @@ class TestCLIOptions(BaseCLITest):
 class TestCLIImport(BaseCLITest):
     """Tests for the import command."""
 
+    def test_import_nonexistent_directory_fails_loudly(self):
+        """Importing from a missing directory errors instead of a silent no-op success."""
+        result = self.run_command("import /nonexistent/resembl_dir --force")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Directory not found", result.stderr)
+
     def test_import_counts_only_new_snippets(self):
         """Re-importing the same files should report 0 new snippets."""
         with tempfile.TemporaryDirectory() as import_dir:

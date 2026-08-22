@@ -237,6 +237,34 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("lsh_candidates", payload["results"][0])
         self.assertIn("error", payload["results"][1])
 
+    def test_find_batch_malformed_container_answers_500(self):
+        """A non-iterable 'queries' value answers 500 JSON, not a dropped connection."""
+        import urllib.error
+
+        port = self._start_server()
+        body = json.dumps({"queries": 12345}).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find-batch",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                status = response.status
+                payload = json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            payload = json.loads(exc.read())
+        self.assertEqual(status, 500)
+        self.assertIn("error", payload)
+
+    def test_thin_client_unreadable_file_errors_cleanly(self):
+        """resembl-find --file with an unreadable file exits 1 without a traceback."""
+        from resembl.find_client import _main
+
+        rc = _main(["--file", "/nonexistent/resembl_query.asm"])
+        self.assertEqual(rc, 1)
+
     def test_result_cache_invalidates_on_db_change(self):
         """Cached finds are served until the database changes (data_version)."""
         from unittest.mock import patch as _patch

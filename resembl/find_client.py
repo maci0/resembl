@@ -68,8 +68,12 @@ def _main(argv: list[str] | None = None) -> int:
     if query and ";" in query and "\n" not in query:
         query = query.replace(";", "\n")
     if query is None and args.file:
-        with open(args.file, encoding="utf-8") as f:
-            query = f.read()
+        try:
+            with open(args.file, encoding="utf-8") as f:
+                query = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"error: cannot read {args.file}: {exc}", file=sys.stderr)
+            return 1
     if not query:
         print("error: no query provided (--query or --file)", file=sys.stderr)
         return 2

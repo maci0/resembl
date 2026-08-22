@@ -39,6 +39,7 @@ from rich.progress import track
 from rich.syntax import Syntax
 from rich.table import Table
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
 from .config import (
@@ -50,6 +51,7 @@ from .config import (
     update_config,
 )
 from .core import (
+    IndexBuildError,
     adaptive_worker_count,
     collection_add_snippet,
     collection_create,
@@ -440,7 +442,14 @@ def app_callback(
 
     state.config = load_config()
     state.format = format_opt or state.config.format
-    db_create()
+    try:
+        db_create()
+    except SQLAlchemyError as e:
+        err_console.print(
+            f"[red]Error:[/red] cannot open the database "
+            f"({os.environ.get('DATABASE_URL', 'sqlite:///assembly.db')}): {e}"
+        )
+        raise typer.Exit(code=1)
     state.session = Session(get_engine())
     atexit.register(state.session.close)
 
@@ -485,7 +494,11 @@ def export_cmd(
             abort=True,
         )
 
-    result = snippet_export(state.session, directory)
+    try:
+        result = snippet_export(state.session, directory)
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] Export failed: {e}")
+        raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -516,7 +529,11 @@ def export_yara_cmd(
             abort=True,
         )
 
-    result = snippet_export_yara(state.session, output_file)
+    try:
+        result = snippet_export_yara(state.session, output_file)
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] YARA export failed: {e}")
+        raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -568,6 +585,10 @@ def import_cmd(
     ),
 ) -> None:
     """Bulk import snippets from a directory."""
+    if not os.path.isdir(directory):
+        err_console.print(f"[red]Error:[/red] Directory not found: {directory}")
+        raise typer.Exit(code=1)
+
     if not force:
         typer.confirm(
             f"Are you sure you want to import all snippets from '{directory}'?",
@@ -1059,17 +1080,21 @@ def find(
         if not lsh_meta_matches(meta, effective_threshold, num_perm):
             _echo("[dim]Building LSH index (first search on this database)…[/dim]")
 
-    num_candidates, matches = snippet_find_matches(
-        state.session,
-        query_string,
-        effective_top_n,
-        effective_threshold,
-        not no_normalization,
-        ngram_size=ngram_size,
-        num_permutations=state.config.num_permutations,
-        jaccard_weight=state.config.jaccard_weight,
-        progress=build_progress,
-    )
+    try:
+        num_candidates, matches = snippet_find_matches(
+            state.session,
+            query_string,
+            effective_top_n,
+            effective_threshold,
+            not no_normalization,
+            ngram_size=ngram_size,
+            num_permutations=state.config.num_permutations,
+            jaccard_weight=state.config.jaccard_weight,
+            progress=build_progress,
+        )
+    except IndexBuildError as e:
+        err_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
 
     _render_find_payload(
         {
@@ -1143,26 +1168,30 @@ def find_batch(
     if server_results is not None:
         results = server_results
     else:
-        for query_string in converted:
-            num_candidates, matches = snippet_find_matches(
-                state.session,
-                query_string,
-                effective_top_n,
-                effective_threshold,
-                ngram_size=ngram_size,
-                num_permutations=state.config.num_permutations,
-                jaccard_weight=state.config.jaccard_weight,
-            )
-            results.append(
-                {
-                    "query": query_string,
-                    "lsh_candidates": num_candidates,
-                    "matches": [
-                        {"checksum": s.checksum, "names": s.name_list, "score": score}
-                        for s, score in matches
-                    ],
-                }
-            )
+        try:
+            for query_string in converted:
+                num_candidates, matches = snippet_find_matches(
+                    state.session,
+                    query_string,
+                    effective_top_n,
+                    effective_threshold,
+                    ngram_size=ngram_size,
+                    num_permutations=state.config.num_permutations,
+                    jaccard_weight=state.config.jaccard_weight,
+                )
+                results.append(
+                    {
+                        "query": query_string,
+                        "lsh_candidates": num_candidates,
+                        "matches": [
+                            {"checksum": s.checksum, "names": s.name_list, "score": score}
+                            for s, score in matches
+                        ],
+                    }
+                )
+        except IndexBuildError as e:
+            err_console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
         _echo_format(results)

@@ -99,6 +99,16 @@ class TestConfig(unittest.TestCase):
             self.assertTrue(os.path.exists(config_dir))
             self.assertTrue(os.path.exists(os.path.join(config_dir, "config.toml")))
 
+    def test_save_config_failure_cleans_temp_file(self):
+        """A failed save must not leave the half-written temp file behind."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertRaises(TypeError):
+                    # object() is not TOML-serializable: the dump fails
+                    # after the temp file was created.
+                    save_config({"top_n": object()})
+            self.assertEqual(os.listdir(temp_dir), [])
+
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""
         with tempfile.TemporaryDirectory() as temp_dir:

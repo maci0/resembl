@@ -259,7 +259,14 @@ def fingerprint_version_get(session: Session) -> int | None:
     row = session.execute(
         text("SELECT value FROM app_meta WHERE key = 'fingerprint_version'")
     ).one_or_none()
-    return int(row[0]) if row is not None else None
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        # A corrupt stamp must not crash every find — treating it as unset
+        # routes through the self-healing reindex instead.
+        return None
 
 
 def fingerprint_version_set(session: Session, version: int) -> None:
@@ -282,7 +289,13 @@ def fingerprint_ngram_get(session: Session) -> int | None:
     row = session.execute(
         text("SELECT value FROM app_meta WHERE key = 'fingerprint_ngram'")
     ).one_or_none()
-    return int(row[0]) if row is not None else None
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        # Corrupt stamp — same self-healing fallback as the version stamp.
+        return None
 
 
 def fingerprint_ngram_set(session: Session, ngram_size: int) -> None:

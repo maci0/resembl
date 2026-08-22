@@ -143,6 +143,19 @@ class TestFindMatchesEmpty(BaseDBTest):
         self.assertEqual(num, 0)
         self.assertEqual(len(matches), 0)
 
+    def test_find_failed_build_raises(self):
+        """A failed index build raises IndexBuildError instead of faking zero matches."""
+        from unittest.mock import patch
+
+        from resembl.core import IndexBuildError
+
+        with (
+            patch("resembl.core.lsh_cache_load", return_value=None),
+            patch("resembl.core.lsh_index_build", return_value=None),
+        ):
+            with self.assertRaises(IndexBuildError):
+                snippet_find_matches(self.session, "MOV EAX, 1", top_n=5)
+
 
 # ---------------------------------------------------------------------------
 # snippet_export_yara — covers lines 544-580
@@ -442,6 +455,34 @@ class TestCacheInsert(BaseDBTest):
         lsh_index_insert(lsh, s1)
         inserted = lsh_index_insert_batch(lsh, [s1])
         self.assertEqual(inserted, 0)
+
+    def test_lsh_insert_corrupt_fingerprint_warns(self):
+        """A corrupt DB-backed fingerprint is skipped with a warning, never silent."""
+        from resembl import cache as cache_mod
+        from resembl.lsh import ResemblLSH
+
+        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+        snippet = snippet_add(self.session, "func", "MOV EAX, 1")
+        snippet.minhash = b"garbage"
+        with self.assertLogs(cache_mod.logger, level="WARNING"):
+            cache_mod.lsh_index_insert(lsh, snippet)
+
+    def test_lsh_insert_batch_corrupt_fingerprint_skips_row(self):
+        """One corrupt blob must not abort a DB-backed batch sync; it is skipped."""
+        from resembl import cache as cache_mod
+        from resembl.lsh import ResemblLSH
+        from resembl.scoring import minhash_ensure_packed
+
+        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+        good = snippet_add(self.session, "good", "MOV EAX, 1")
+        bad = snippet_add(self.session, "bad", "XOR EBX, EBX")
+        bad.minhash = b"garbage"
+        with self.assertLogs(cache_mod.logger, level="WARNING"):
+            inserted = cache_mod.lsh_index_insert_batch(lsh, [good, bad])
+        keys = lsh.query(minhash_ensure_packed(good.minhash))
+        self.assertIn(good.checksum, keys)
+        self.assertNotIn(bad.checksum, keys)
+        self.assertGreater(inserted, 0)
 
 
 # ---------------------------------------------------------------------------

@@ -242,28 +242,45 @@ def lsh_index_insert(lsh: ResemblLSH, snippet: Snippet) -> None:
     """Insert a single snippet into an existing LSH index.
 
     Works with both the DB-backed :class:`ResemblLSH` and legacy datasketch
-    ``MinHashLSH`` objects.  Skips insertion if the key already exists
-    (idempotent).
+    ``MinHashLSH`` objects.  Duplicate keys are idempotent no-ops; a corrupt
+    fingerprint is skipped with a warning (a reindex recomputes it from the
+    code).
     """
     try:
         if isinstance(lsh, ResemblLSH):
             lsh.insert(snippet.checksum, minhash_ensure_packed(snippet.minhash))
         else:
             lsh.insert(snippet.checksum, snippet.get_minhash_obj())
-    except ValueError:
-        # Key already exists in the LSH — safe to ignore.
-        pass
+    except ValueError as e:
+        # Legacy datasketch raises ValueError for an already-present key
+        # (safe to ignore); the DB-backed index raises it for a corrupt
+        # fingerprint (the snippet would be silently missing from the index
+        # until the next rebuild) — log that so it is not a silent drop.
+        if isinstance(lsh, ResemblLSH):
+            logger.warning(
+                "Skipping snippet %s: corrupt fingerprint (%s).",
+                snippet.checksum,
+                e,
+            )
 
 
 def lsh_index_insert_batch(lsh: ResemblLSH, snippets: list[Snippet]) -> int:
     """Insert multiple snippets into an existing LSH index.
 
-    Returns the number of newly inserted entries.
+    Returns the number of newly inserted entries.  Snippets with corrupt
+    fingerprints are skipped with a warning instead of failing the whole
+    sync (matching the index-build behavior).
     """
     if isinstance(lsh, ResemblLSH):
-        return lsh.insert_batch(
-            [(s.checksum, minhash_ensure_packed(s.minhash)) for s in snippets]
-        )
+        items: list[tuple[str, bytes]] = []
+        for s in snippets:
+            try:
+                items.append((s.checksum, minhash_ensure_packed(s.minhash)))
+            except ValueError as e:
+                logger.warning(
+                    "Skipping snippet %s: corrupt fingerprint (%s).", s.checksum, e
+                )
+        return lsh.insert_batch(items)
     inserted = 0
     for snippet in snippets:
         try:

@@ -101,8 +101,14 @@ def save_config(config: dict | ResemblConfig) -> None:
 
     data = config if isinstance(config, dict) else config.to_dict()
     with tempfile.NamedTemporaryFile("wb", dir=cfg_dir, delete=False) as tmp:
-        tomli_w.dump(data, tmp)
         tmp_path = tmp.name
+        try:
+            tomli_w.dump(data, tmp)
+        except Exception:
+            # The half-written temp file must not outlive a failed save.
+            tmp.close()
+            os.unlink(tmp_path)
+            raise
 
     os.replace(tmp_path, cfg_path)
 
@@ -150,11 +156,15 @@ def load_config() -> ResemblConfig:
     if not os.path.exists(cfg_path):
         return cfg
 
-    with open(cfg_path, "rb") as f:
-        try:
+    try:
+        with open(cfg_path, "rb") as f:
             user_config = tomli.load(f)
-            cfg.update(user_config)
-        except tomli.TOMLDecodeError as e:
-            logger.error("Error decoding config file at %s: %s", cfg_path, e)
+        cfg.update(user_config)
+    except tomli.TOMLDecodeError as e:
+        logger.error("Error decoding config file at %s: %s", cfg_path, e)
+    except OSError as e:
+        # Unreadable file (permissions, I/O error): run on defaults like
+        # the malformed-TOML path instead of crashing every command.
+        logger.error("Error reading config file at %s: %s", cfg_path, e)
 
     return cfg

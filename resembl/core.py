@@ -103,6 +103,15 @@ _REINDEX_CLEAR_RETRIES = 3
 _REINDEX_CLEAR_RETRY_BACKOFF = 3
 
 
+class IndexBuildError(RuntimeError):
+    """Raised when the LSH index cannot be built or loaded.
+
+    Distinguishes "no matches" from "search impossible": returning zero
+    matches here would make a transient database-lock failure during the
+    build look identical to a legitimate empty result.
+    """
+
+
 def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
     """Choose a sensible worker count for a parallel job of *num_items* items.
 
@@ -591,7 +600,13 @@ def snippet_find_matches(
             lsh_cache_save(session, lsh, threshold, num_permutations)
 
     if lsh is None:
-        return 0, []  # Error handled in build_lsh_index
+        # The build failed (logged by ``lsh_index_build``): report an error
+        # instead of a silent zero-match result.
+        raise IndexBuildError(
+            "could not build the LSH index (another process may be writing "
+            "to this database, or the parameters are invalid); retry once "
+            "the database is idle"
+        )
 
     query_minhash = code_create_minhash(
         query_string, normalize, ngram_size=ngram_size, num_perm=num_permutations
@@ -1551,10 +1566,13 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         fingerprint_version_clear(session)
         fingerprint_ngram_clear(session)
     except Exception as e:
-        logger.error("Merge failed: %s", e)
+        logger.error("Merge failed: %s", e, exc_info=True)
         return {"error": str(e)}
     finally:
         source_session.close()
+        # Return the pooled connections to the OS — the source engine is
+        # never reused after this call.
+        source_engine.dispose()
 
     end_time = time.monotonic()
     return {

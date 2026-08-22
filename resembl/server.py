@@ -188,12 +188,20 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": f"bad request: {exc}"})
             return
         results: list[dict] = []
-        with Session(self.engine) as session:
-            for query in queries:
-                try:
-                    results.append({"query": query, **_find_one(session, body, query)})
-                except Exception as exc:  # isolate per-query failures
-                    results.append({"query": query, "error": str(exc)})
+        try:
+            with Session(self.engine) as session:
+                for query in queries:
+                    try:
+                        if not isinstance(query, str):
+                            raise ValueError("query must be a string")
+                        results.append({"query": query, **_find_one(session, body, query)})
+                    except Exception as exc:  # isolate per-query failures
+                        results.append({"query": query, "error": str(exc)})
+        except Exception as exc:
+            # Malformed container or session/pool failure — answer 500 rather
+            # than dropping the connection with a handler-thread traceback.
+            self._respond(500, {"error": str(exc)})
+            return
         self._respond(200, {"results": results})
 
     def _respond(self, status: int, payload: dict[str, Any]) -> None:
