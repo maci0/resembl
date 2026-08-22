@@ -1128,6 +1128,37 @@ def snippet_search_by_name(
     )
 
 
+#: Characters invalid in filenames on at least one major filesystem:
+#: Windows forbids ``< > : " / \ | ? *`` plus control characters, and the
+#: others break round-trips between platforms.
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+#: Windows reserves these stems (case-insensitive, extension ignored):
+#: writing "con.asm" targets the console device instead of a file.
+_WINDOWS_RESERVED_STEMS = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
+def _export_safe_filename(name: str) -> str:
+    """Sanitize a snippet name into a portable filename stem.
+
+    Replaces characters that are illegal on Windows (and problematic
+    elsewhere), blocks directory traversal, strips trailing dots/spaces
+    (Windows silently drops them), and prefixes Windows reserved device
+    names so ``con`` cannot target a device.
+    """
+    cleaned = _INVALID_FILENAME_CHARS.sub("_", name.replace("..", "_"))
+    cleaned = os.path.basename(cleaned).rstrip(" .")
+    if not cleaned:
+        return ""
+    if cleaned.split(".", 1)[0].upper() in _WINDOWS_RESERVED_STEMS:
+        cleaned = f"_{cleaned}"
+    return cleaned
+
+
 def snippet_export(session: Session, export_dir: str) -> dict:
     """Export all snippets to a directory."""
     start_time = time.monotonic()
@@ -1136,6 +1167,9 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     os.makedirs(export_dir, exist_ok=True)
 
     abs_export_dir = os.path.realpath(export_dir)
+    # Keys are os.path.normcase()-normalized so names differing only by
+    # case cannot silently overwrite each other on case-insensitive
+    # filesystems (macOS defaults, Windows).
     used_paths: set[str] = set()
 
     for snippet in Snippet.stream_all(session):
@@ -1145,8 +1179,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             if snippet.name_list
             else f"snippet_{snippet.checksum[:16]}"
         )
-        # Strip path separators to prevent directory traversal
-        safe_name = os.path.basename(primary_name.replace("..", "_"))
+        safe_name = _export_safe_filename(primary_name)
         if not safe_name:
             safe_name = snippet.checksum[:12]
 
@@ -1160,15 +1193,18 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             )
             continue
 
-        # Avoid silently overwriting when several snippets share a name.
-        if file_path in used_paths:
+        # Avoid silently overwriting when several snippets share a name
+        # (compared case-insensitively — see used_paths above).
+        used_key = os.path.normcase(file_path)
+        if used_key in used_paths:
             # 12 hex chars (48 bits) keeps the disambiguator collision-free
             # even with hundreds of thousands of same-named snippets (the
             # previous 8 chars collided at ~30 pairs per 500k).
             file_path = os.path.join(
                 abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm"
             )
-        used_paths.add(file_path)
+            used_key = os.path.normcase(file_path)
+        used_paths.add(used_key)
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(snippet.code)

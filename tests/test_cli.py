@@ -164,6 +164,55 @@ class TestCLICommands(BaseCLITest):
                 content = f.read()
                 self.assertEqual(content, "MOV EAX, 1")
 
+    def test_export_sanitizes_portability_unsafe_names(self):
+        """Names illegal on Windows filesystems must still export everywhere.
+
+        Reserved device stems (con, aux), reserved characters (':'), and
+        trailing dots would crash or misbehave on Windows; the sanitizer
+        must produce a writable file for each snippet.
+        """
+        with Session(self.engine) as session:
+            for name, code in (
+                ("con", "MOV AL, 1"),
+                ("aux", "MOV BL, 2"),
+                ("my:name", "MOV CL, 3"),
+                ("trailing.", "MOV DL, 4"),
+            ):
+                self.assertIsNotNone(snippet_add(session, name, code))
+
+        with tempfile.TemporaryDirectory() as export_dir:
+            result = self.run_command(f"export --force {export_dir}")
+            self.assertEqual(result.returncode, 0)
+
+            exported = sorted(os.listdir(export_dir))
+            self.assertEqual(len(exported), 5)  # 4 here + setUp's test_snippet
+            for fname in exported:
+                stem = fname[: -len(".asm")]
+                self.assertNotIn(stem.lower(), ("con", "aux"))
+                self.assertFalse(fname.endswith("."), fname)
+
+    def test_export_case_insensitive_name_collision(self):
+        """Names differing only by case must not silently overwrite.
+
+        macOS and Windows filesystems are case-insensitive: exporting two
+        snippets named 'Memcpy' and 'memcpy' used to write one file.
+        """
+        with Session(self.engine) as session:
+            self.assertIsNotNone(snippet_add(session, "Memcpy", "MOV AX, 1"))
+            self.assertIsNotNone(snippet_add(session, "memcpy", "MOV BX, 2"))
+
+        with tempfile.TemporaryDirectory() as export_dir:
+            result = self.run_command(f"export --force {export_dir}")
+            self.assertEqual(result.returncode, 0)
+
+            contents = {
+                fname: open(os.path.join(export_dir, fname), encoding="utf-8").read()
+                for fname in os.listdir(export_dir)
+            }
+            self.assertEqual(len(contents), 3)  # 2 here + setUp's test_snippet
+            self.assertIn("MOV AX, 1", contents.values())
+            self.assertIn("MOV BX, 2", contents.values())
+
     def test_name_add_and_remove(self):
         """Test the name add and remove commands."""
         with Session(self.engine) as session:
@@ -387,6 +436,31 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 3)
+            self.assertNotIn("skipped", data)
+
+    def test_import_matches_extension_case_insensitively(self):
+        """UPPERCASE extensions must import on every platform.
+
+        The old glob patterns were folded by os.path.normcase on Windows
+        but matched verbatim on Linux/macOS, so a directory of FOO.ASM
+        files imported everything there and zero files here.
+        """
+        import json
+
+        with tempfile.TemporaryDirectory() as import_dir:
+            for fname, code in (
+                ("UPPER.ASM", "MOV AX, 1; RET"),
+                ("mixed.Txt", "MOV BX, 2; RET"),
+            ):
+                with open(os.path.join(import_dir, fname), "w", encoding="utf-8") as f:
+                    f.write(code)
+
+            result = self.run_command(
+                f"--format json import --force --jobs 0 {import_dir}"
+            )
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["num_imported"], 2)
             self.assertNotIn("skipped", data)
 
     def test_list_reversed_range_fails_cleanly(self):

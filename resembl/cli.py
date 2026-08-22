@@ -20,7 +20,6 @@ from __future__ import annotations
 import atexit
 import csv
 import difflib
-import glob
 import json
 import logging
 import multiprocessing
@@ -598,8 +597,17 @@ def import_cmd(
     start_time = time.monotonic()
     ngram_size = state.config.ngram_size
 
-    file_paths = glob.glob(os.path.join(directory, "**", "*.asm"), recursive=True)
-    file_paths += glob.glob(os.path.join(directory, "**", "*.txt"), recursive=True)
+    # Case-insensitive extension match so a directory imports identically
+    # on every platform: glob patterns are folded by os.path.normcase on
+    # Windows but matched verbatim on Linux/macOS, so "*.asm" silently
+    # skipped FOO.ASM there.
+    file_paths: list[str] = []
+    for root, _dirs, files in os.walk(directory):
+        file_paths.extend(
+            os.path.join(root, fname)
+            for fname in files
+            if fname.lower().endswith((".asm", ".txt"))
+        )
 
     if jobs is None:
         jobs = adaptive_worker_count(len(file_paths), os.cpu_count() or 1)
