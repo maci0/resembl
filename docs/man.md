@@ -33,10 +33,10 @@ The `compare` command also reports control-flow graph similarity.
 **add** *NAME* *CODE*
 :   Add a new snippet to the database.
 
-**delete** *CHECKSUM*
-:   Delete a snippet by its checksum.
+**rm** *CHECKSUM* [--force]
+:   Delete a snippet by its checksum (or a unique prefix).
 
-**get** *CHECKSUM*
+**show** *CHECKSUM*
 :   Show details of a snippet.  Accepts a unique checksum prefix.
 
 **list** [--range START-END]
@@ -50,11 +50,13 @@ The `compare` command also reports control-flow graph similarity.
     so results are bounded (default 50; ``N``+ is printed when the limit
     truncates the output).
 
-**find** *QUERY* [--top-n N] [--threshold T] [--no-normalization]
-:   Find snippets similar to the given query string.
+**find** [--query *QUERY*] [--file *FILE*] [--top-n *N*] [--threshold *T*]
+[--no-normalization]
+:   Find snippets similar to the given query string (`--query`, `--file`,
+    or stdin; `-` reads stdin).
     Single-line `--query` strings use `;` as a statement separator
-    (e.g., `find "push eax; pop ebx"`); multi-line input and `--file`
-    keep normal NASM semantics where `;` starts a comment.
+    (e.g., `find --query "push eax; pop ebx"`); multi-line input and
+    `--file` keep normal NASM semantics where `;` starts a comment.
     If a `serve` process is running for this database, the query is
     answered by it (a few milliseconds); otherwise the in-process path
     runs, building the LSH index lazily on the first search.
@@ -66,23 +68,25 @@ The `compare` command also reports control-flow graph similarity.
     faster than N separate `find` calls.  JSON/CSV output is a list of
     per-query payloads.
 
-**compare** *CHECKSUM1* *CHECKSUM2* [--diff]
-:   Compare two snippets side-by-side.  Accepts checksum prefixes.
+**compare** *CHECKSUM1* *CHECKSUM2*
+:   Compare two snippets side-by-side (similarity metrics and a code
+    diff).  Accepts checksum prefixes.
 
 ### Bulk Operations
 
-**import** *PATH* [--jobs N]
+**import** *PATH* [--jobs N] [--force]
 :   Import `.asm` / `.txt` files from a directory (subdirectories are
     included automatically).  The default worker count is adaptive — one
     worker per ~100 files, capped at the CPU count — so small directories
     stay single-process (spawning each worker costs ~450 ms of interpreter
     startup) while large ones parallelize fully.
 
-**export** *DIRECTORY* [--format json|asm]
-:   Export all snippets to a directory.
+**export** *DIRECTORY* [--force]
+:   Export all snippets to a directory as `.asm` files (one per snippet,
+    named after the snippet's primary name).
 
-**yara** *CHECKSUM* [--rule-name NAME]
-:   Generate a YARA rule from a snippet.
+**export-yara** *OUTPUT_FILE* [--force]
+:   Export all snippets to *OUTPUT_FILE* as YARA string-matching rules.
 
 ### Database
 
@@ -216,13 +220,13 @@ Settings are stored in `~/.config/resembl/config.toml`:
 resembl add "memcpy" "mov ecx, [esp+8] ; rep movsb"
 
 # Find similar snippets
-resembl find "mov ecx, [esp+8]" --top-n 10
+resembl find --query "mov ecx, [esp+8]" --top-n 10
 
 # Import a directory of .asm files
 resembl import ./samples --jobs 4
 
-# Generate a YARA rule
-resembl yara abc123 --rule-name suspicious_memcpy
+# Export all snippets as YARA string rules
+resembl export-yara rules.yar --force
 
 # Create and use a collection
 resembl collection create "crypto" -d "Cryptographic routines"

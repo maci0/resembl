@@ -524,11 +524,15 @@ def fingerprints_need_reindex(
 ) -> bool:
     """Return True when stored fingerprints predate the requested parameters.
 
-    Stored blobs carry a format-version stamp, an n-gram stamp, and their
-    permutation count; a mismatch against any of them would silently mix
-    fingerprint formats in query results, so the database must be reindexed
-    once first.  Reindexing current-format blobs is idempotent (identical
-    fingerprints).  Shared by ``find`` and ``serve`` startup.
+    Stored blobs carry a format-version stamp and an n-gram stamp; a mismatch
+    against either would silently mix fingerprint formats in query results,
+    so the database must be reindexed once first.  Neither stamp records the
+    permutation count, so one stored blob is probed: requesting the *default*
+    count does not prove the blobs match it (a database written while
+    ``num_permutations`` was configured differently would otherwise crash the
+    next default-count find instead of healing itself).  Reindexing
+    current-format blobs is idempotent (identical fingerprints).  Shared by
+    ``find`` and ``serve`` startup.
     """
     if fingerprint_version_get(session) != FINGERPRINT_VERSION:
         return True
@@ -537,10 +541,8 @@ def fingerprints_need_reindex(
         # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
         # ngram 5) — reindex once at the new n-gram.
         return True
-    if num_permutations == NUM_PERMUTATIONS:
-        return False
-    # A non-default permutation count must match the stored blobs; the
-    # version stamp does not cover perm-count changes, so probe one blob.
+    # Probe one blob: a non-default stored count, or a corrupt blob, means
+    # the database must be reindexed before queries can mix formats safely.
     blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
     if blob is None:
         return False

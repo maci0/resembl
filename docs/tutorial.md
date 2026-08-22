@@ -25,8 +25,8 @@ rep movsb
 pop ebp
 ret"
 
-# Bulk import from .asm files
-resembl import ./known_functions/ --recursive --jobs 4
+# Bulk import from .asm files (subdirectories are included)
+resembl import ./known_functions/ --jobs 4
 ```
 
 ## Step 2: Organize with Collections
@@ -60,15 +60,15 @@ resembl tag add abc123 "CVE-2024-1234"
 Now, when you encounter a new binary, extract the disassembly and search:
 
 ```bash
-# Search for similar functions
-resembl find "push ebp
+# Search for similar functions (multi-line --query keeps NASM semantics)
+resembl find --query "push ebp
 mov ebp, esp
 sub esp, 20h
 mov eax, [ebp+8]
 mov ecx, [ebp+0Ch]" --top-n 10
 
 # Compare two specific snippets
-resembl compare abc123 xyz789 --diff
+resembl compare abc123 xyz789
 ```
 
 The `find` command uses MinHash + LSH for fast filtering, then ranks
@@ -76,26 +76,24 @@ candidates by a hybrid score combining Jaccard and Levenshtein similarity.
 
 ## Step 5: Generate YARA Rules
 
-Generate detection rules from identified functions:
+Export detection rules for your whole library:
 
 ```bash
-# Generate a YARA rule
-resembl yara abc123 --rule-name suspicious_memcpy
+# Export all snippets as YARA string-matching rules
+resembl export-yara rules.yar --force
 ```
 
-This outputs a YARA rule with hex patterns and metadata derived from the
-snippet's content.
+This writes one YARA rule per snippet, each matching the snippet's code as
+a case-insensitive string (`nocase ascii wide`) with the checksum in its
+metadata.
 
 ## Step 6: Export and Share
 
 Export your library for team use:
 
 ```bash
-# Export as .asm files
-resembl export ./export_dir/
-
-# Export as JSON
-resembl export ./export_dir/ --format json
+# Export all snippets as .asm files (one per snippet)
+resembl export ./export_dir/ --force
 ```
 
 ## Working with Different Architectures
@@ -114,18 +112,19 @@ have high similarity scores.
 
 ```python
 from resembl import code_tokenize, snippet_find_matches
-from resembl.database import engine
+from resembl.database import db_create, get_engine
 from sqlmodel import Session
 
 # Tokenize and inspect
 tokens = code_tokenize("mov eax, [ebp+8]")
-print(tokens)  # ['MOV', 'REG', 'REG', 'IMM']
+print(tokens)  # ['MOV', 'REG', 'REG', '+', 'IMM']
 
 # Search programmatically
-with Session(engine) as session:
-    results = snippet_find_matches(session, "mov eax, [ebp+8]")
-    for match in results["matches"]:
-        print(f"{match['names'][0]}: {match['similarity']:.1%}")
+db_create()
+with Session(get_engine()) as session:
+    num_candidates, matches = snippet_find_matches(session, "mov eax, [ebp+8]")
+    for snippet, score in matches:
+        print(f"{snippet.name_list[0]}: {score:.2f}")
 ```
 
 ## Team Setup with PostgreSQL
@@ -134,7 +133,7 @@ For shared databases, set the `DATABASE_URL` environment variable:
 
 ```bash
 export DATABASE_URL="postgresql://user:password@db-host:5432/resembl"
-resembl import ./shared_samples/ --recursive
+resembl import ./shared_samples/
 ```
 
 All team members point to the same database for a unified library.

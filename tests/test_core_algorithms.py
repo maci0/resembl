@@ -167,6 +167,17 @@ class TestCfgExtract(unittest.TestCase):
         cfg = cfg_extract(code)
         self.assertGreaterEqual(cfg["num_blocks"], 2)
 
+    def test_segment_override_not_a_label(self):
+        """Memory operands with segment overrides must not split blocks.
+
+        ``mov eax, [fs:0]`` contains a colon but is an instruction, not a
+        label — treating it as one fragmented the CFG.
+        """
+        code = "MOV EAX, [FS:0]\nRET"
+        cfg = cfg_extract(code)
+        self.assertEqual(cfg["num_blocks"], 1)
+        self.assertEqual(cfg["block_sizes"], [2])
+
     def test_conditional_branch(self):
         """Conditional branches should create fallthrough + target edges."""
         code = "CMP EAX, 0\nJZ skip\nMOV EBX, 1\nskip:\nRET"

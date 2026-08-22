@@ -145,8 +145,7 @@ def _echo_format(data: object) -> None:
             writer.writerows(data)
         elif isinstance(data, dict):
             data = {
-                k: ", ".join(v) if isinstance(v, list) else v
-                for k, v in data.items()
+                k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()
             }
             writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
             writer.writeheader()
@@ -455,9 +454,7 @@ def add(
     code: str = typer.Argument(help="The assembly code of the snippet."),
 ) -> None:
     """Add a new snippet or an alias to existing code."""
-    snippet = snippet_add(
-        state.session, name, code, ngram_size=state.config.ngram_size
-    )
+    snippet = snippet_add(state.session, name, code, ngram_size=state.config.ngram_size)
     if snippet:
         if state.format in ("json", "csv"):
             _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
@@ -563,7 +560,11 @@ def import_cmd(
     ),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
     jobs: int | None = typer.Option(
-        None, "--jobs", "-j", help="Number of worker processes (default: CPU count)."
+        None,
+        "--jobs",
+        "-j",
+        help="Number of worker processes (default: adaptive — one worker "
+        "per ~100 files, capped at the CPU count).",
     ),
 ) -> None:
     """Bulk import snippets from a directory."""
@@ -609,6 +610,20 @@ def import_cmd(
     # would serialize it.  Spawn (rather than fork) so workers never inherit
     # the parent's SQLite connection.
     rejects = 0
+
+    def handle_prepared(result: tuple[str, str, str, bytes] | None) -> None:
+        nonlocal rejects
+        if result is None:
+            rejects += 1
+        else:
+            prepared.append(result)
+            if len(prepared) >= import_chunk_size:
+                flush_prepared()
+
+    def prepare_sequential() -> None:
+        for fp in file_paths:
+            handle_prepared(_import_prepare_file((fp, ngram_size)))
+
     if file_paths and jobs > 0:
         ctx = multiprocessing.get_context("spawn")
         try:
@@ -643,18 +658,9 @@ def import_cmd(
                             yield future
                             _submit_next()
 
-                def _handle(result) -> None:
-                    nonlocal rejects
-                    if result is None:
-                        rejects += 1
-                    else:
-                        prepared.append(result)
-                        if len(prepared) >= import_chunk_size:
-                            flush_prepared()
-
                 if state.quiet or state.format in ("json", "csv"):
                     for future in _completed_futures():
-                        _handle(future.result())
+                        handle_prepared(future.result())
                 else:
                     for future in track(
                         _completed_futures(),
@@ -662,23 +668,19 @@ def import_cmd(
                         description="Preparing snippets...",
                         console=err_console,
                     ):
-                        _handle(future.result())
+                        handle_prepared(future.result())
         except Exception:
             logger.warning(
                 "Process pool unavailable; falling back to in-process import."
             )
             rejects = 0
             prepared = []
-            for fp in file_paths:
-                result = _import_prepare_file((fp, ngram_size))
-                if result is None:
-                    rejects += 1
-                else:
-                    prepared.append(result)
-                    if len(prepared) >= import_chunk_size:
-                        flush_prepared()
-    else:
-        rejects = len(file_paths)
+            prepare_sequential()
+    elif file_paths:
+        # jobs <= 0: no worker processes — import sequentially in-process,
+        # matching `reindex --jobs 0` (marking every file as skipped here
+        # would silently import nothing).
+        prepare_sequential()
 
     # Phase 2 — flush any remaining prepared snippets (batched single-session
     # write; dedupes by checksum and merges alias names).
@@ -732,6 +734,12 @@ def list_cmd(
             )
             raise typer.Exit(code=1)
         start, end = map(int, parts)
+        if end < start:
+            err_console.print(
+                f"[red]Error:[/red] Invalid range '{range_str}': start must not "
+                "exceed end."
+            )
+            raise typer.Exit(code=1)
 
     if start == 0 and end == 0:
         # Unbounded list: stream in batches so a large database never loads
@@ -1546,7 +1554,7 @@ def collection_add_cmd(
     """Add a snippet to a collection."""
     resolved = _resolve_checksum(checksum)
     if not resolved:
-        return
+        raise typer.Exit(code=1)
     snippet = collection_add_snippet(
         state.session, collection_name, resolved, quiet=state.quiet
     )
@@ -1569,7 +1577,7 @@ def collection_remove_cmd(
     """Remove a snippet from its collection."""
     resolved = _resolve_checksum(checksum)
     if not resolved:
-        return
+        raise typer.Exit(code=1)
     snippet = collection_remove_snippet(state.session, resolved, quiet=state.quiet)
     if snippet:
         _echo(
@@ -1593,7 +1601,7 @@ def version_cmd(
     """Show version history for a snippet."""
     resolved = _resolve_checksum(checksum)
     if not resolved:
-        return
+        raise typer.Exit(code=1)
     versions = snippet_version_list(state.session, resolved)
     if not versions:
         _echo("[dim]No version history for this snippet.[/dim]")
@@ -1657,7 +1665,14 @@ def config_set_cmd(
         err_console.print(f"[red]Error:[/red] Invalid configuration key: '{key}'")
         raise typer.Exit(code=1)
     default_value = DEFAULTS[key]
-    typed_value: int | float = type(default_value)(value)
+    try:
+        typed_value: int | float = type(default_value)(value)
+    except (TypeError, ValueError):
+        err_console.print(
+            f"[red]Error:[/red] Invalid value for '{key}': expected "
+            f"{type(default_value).__name__}, got '{value}'."
+        )
+        raise typer.Exit(code=1)
     new_config = update_config(key, typed_value)
     _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
     state.config.update(new_config)

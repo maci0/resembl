@@ -278,6 +278,13 @@ class TestCLIConfig(BaseCLITest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid configuration key", result.stderr)
 
+    def test_config_set_invalid_value(self):
+        """`config set` should reject values that don't fit the key's type."""
+        result = self.run_command("config set top_n abc")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid value", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_config_get(self):
         """`config get` should retrieve a specific value."""
         with tempfile.TemporaryDirectory() as home:
@@ -353,6 +360,50 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 0)
+
+    def test_import_jobs_zero_imports_sequentially(self):
+        """`--jobs 0` means sequential in-process import, not "skip everything".
+
+        A jobs count below 1 used to fall into the empty-directory branch and
+        mark every readable file as skipped, importing nothing.
+        """
+        import json
+
+        with tempfile.TemporaryDirectory() as import_dir:
+            for i in range(3):
+                file_path = os.path.join(import_dir, f"s{i}.asm")
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(f"MOV R{i}, {i}\nRET")
+
+            result = self.run_command(
+                f"--format json import --force --jobs 0 {import_dir}"
+            )
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["num_imported"], 3)
+            self.assertNotIn("skipped", data)
+
+    def test_list_reversed_range_fails_cleanly(self):
+        """`--range start-end` with start > end errors instead of a
+        backend-dependent negative LIMIT."""
+        result = self.run_command("list --range 4-2")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid range", result.stderr)
+
+    def test_unresolved_checksum_exits_nonzero(self):
+        """Commands taking a checksum must fail loudly when it doesn't resolve.
+
+        `version`, `collection add`, and `collection remove` printed the
+        error but exited 0 (unlike show/rm/name/tag), so scripts saw success.
+        """
+        for command in (
+            "version deadbeef00",
+            "collection add mycoll deadbeef00",
+            "collection remove deadbeef00",
+        ):
+            result = self.run_command(command)
+            self.assertNotEqual(result.returncode, 0, command)
+            self.assertIn("No snippet found", result.stderr)
 
 
 class TestCLIAddSnippet(BaseCLITest):

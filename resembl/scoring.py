@@ -825,14 +825,18 @@ def cfg_extract(code: str) -> dict:
 
         # Detect label (line starts with a label token ending in ':')
         stripped = line.lstrip()
-        is_label = ":" in stripped and not stripped.startswith(";")
+        first_word = stripped.split(None, 1)[0] if stripped else ""
+        # A NASM label is an identifier at the start of the line immediately
+        # followed by ':'.  Checking the leading word alone keeps memory
+        # operands with segment overrides (e.g. ``mov eax, [fs:0]``) from
+        # being misread as labels and needlessly splitting the block.
+        is_label = len(first_word) > 1 and first_word.endswith(":")
         label_name = None
         if is_label:
-            # Extract the label name (part before the first ':')
-            label_name = stripped.split(":")[0].strip()
+            label_name = first_word[:-1]
             # If there's content after the label on the same line, treat as
             # part of the new block
-            remainder = stripped[stripped.index(":") + 1 :].strip()
+            remainder = stripped[len(first_word) :].strip()
 
             # Start a new block at every label
             if current_block:

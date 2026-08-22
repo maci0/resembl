@@ -925,6 +925,45 @@ class TestFingerprintVersion(BaseScalingTest):
         db_reindex(self.session, jobs=1)
         self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
 
+    def test_default_perm_count_reindexes_nondefault_blobs(self):
+        """A find at the default 128 perms heals blobs written at 64.
+
+        ``fingerprints_need_reindex`` used to skip its blob probe whenever the
+        requested count equalled the module default, so a database written
+        while ``num_permutations`` was configured to 64 crashed the next
+        default-count find (uncaught ValueError from the banding) instead of
+        reindexing once.
+        """
+        from resembl.lsh import lsh_meta_get
+
+        self._add()
+        # Write fingerprints and an index at 64 permutations.
+        _, _ = snippet_find_matches(
+            self.session,
+            "push ebx\nmov eax, 5\npop ebx\nret",
+            top_n=3,
+            num_permutations=64,
+        )
+        self.assertEqual(lsh_meta_get(self.session)[1], 64)
+
+        # Back at the default count: must reindex + rebuild, not crash.
+        n, matches = snippet_find_matches(
+            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+        )
+        self.assertGreater(len(matches), 0)
+        self.assertEqual(lsh_meta_get(self.session)[1], NUM_PERMUTATIONS)
+        # And a second find at each count stays consistent (no crash loop).
+        snippet_find_matches(
+            self.session,
+            "push ebx\nmov eax, 5\npop ebx\nret",
+            top_n=3,
+            num_permutations=64,
+        )
+        n64, _ = snippet_find_matches(
+            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+        )
+        self.assertEqual(n64, n)
+
     def test_verify_reports_health(self):
         """db_verify flags pending work as warnings, staleness as an issue."""
         from resembl.core import db_verify
