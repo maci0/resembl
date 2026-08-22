@@ -254,17 +254,31 @@ def lsh_meta_clear(session: Session) -> None:
     session.commit()
 
 
+#: Tolerance for comparing the stored index threshold with the requested
+#: one.  MySQL and DuckDB render the ORM's generic ``Float`` column as a
+#: 4-byte single-precision FLOAT, whose representation error near typical
+#: thresholds (~6e-8 for 0.7) dwarfs the previous 1e-9 comparison — every
+#: ``find`` then believed the stored index used a different threshold and
+#: silently rebuilt it in full.  Banding parameters are identical for
+#: thresholds far closer than 1e-6 apart, so the slack never changes query
+#: behavior.  (SQLite and PostgreSQL store 8-byte doubles, unaffected.)
+_THRESHOLD_MATCH_TOLERANCE = 1e-6
+
+
 def lsh_meta_matches(
     meta: tuple[float, int] | None, threshold: float, num_perm: int
 ) -> bool:
     """Return True when a built index matches the requested parameters.
 
     *meta* is an ``lsh_meta_get`` result.  The threshold compares with a
-    small tolerance because the stored float round-trips through the
-    database; anything else means the index must be rebuilt.
+    small tolerance because the stored value may round-trip through a
+    single-precision column (see ``_THRESHOLD_MATCH_TOLERANCE``); anything
+    else means the index must be rebuilt.
     """
     return (
-        meta is not None and abs(meta[0] - threshold) < 1e-9 and meta[1] == num_perm
+        meta is not None
+        and abs(meta[0] - threshold) < _THRESHOLD_MATCH_TOLERANCE
+        and meta[1] == num_perm
     )
 
 
@@ -330,6 +344,44 @@ def fingerprint_ngram_set(session: Session, ngram_size: int) -> None:
 def fingerprint_ngram_clear(session: Session) -> None:
     """Remove the n-gram stamp (blobs may be from an unknown n-gram)."""
     session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_ngram'"))
+    session.commit()
+
+
+def fingerprint_perm_get(session: Session) -> int | None:
+    """Return the permutation count the stored fingerprints were written with."""
+    row = session.execute(
+        text("SELECT value FROM app_meta WHERE key = 'fingerprint_num_perm'")
+    ).one_or_none()
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        # Corrupt stamp — same self-healing fallback as the version stamp.
+        return None
+
+
+def fingerprint_perm_set(session: Session, num_perm: int) -> None:
+    """Stamp the permutation count used to derive the stored fingerprints.
+
+    Every fingerprint-writing path (``add``, ``import``, ``reindex``)
+    records its count.  The legacy one-blob probe in
+    ``fingerprints_need_reindex`` samples a single arbitrary row, so a
+    database with a few mismatched blobs among many matching ones usually
+    escaped detection — and the mixed database then crashed ``find`` with
+    an uncaught ValueError (banding rejects foreign perm counts).  The
+    stamp makes the mismatch decision exact instead of probabilistic.
+    """
+    session.execute(
+        text(_version_upsert_sql(session)),
+        {"k": "fingerprint_num_perm", "v": str(num_perm)},
+    )
+    session.commit()
+
+
+def fingerprint_perm_clear(session: Session) -> None:
+    """Remove the perm-count stamp (blobs may be from unknown counts)."""
+    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_num_perm'"))
     session.commit()
 
 

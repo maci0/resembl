@@ -1128,6 +1128,144 @@ class TestFingerprintVersion(BaseScalingTest):
                 os.remove(src)
 
 
+class TestFingerprintPermStamp(BaseScalingTest):
+    """Permutation-count stamping and stale-perm fingerprint handling.
+
+    ``snippet_add`` always fingerprints at the module default, while
+    ``find``/``reindex`` honor the configured count — a config flip between
+    writes produced databases with mixed permutation counts that crashed
+    ``find`` (banding and batch Jaccard reject foreign counts).  The perm
+    stamp makes detection exact; build/query skip stray mismatches.
+    """
+
+    def _add(self, n: int = 10) -> None:
+        items = [
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+            for i in range(n)
+        ]
+        snippet_add_batch(self.session, [x for x in items if x])
+
+    def test_writers_stamp_perm_count(self):
+        from resembl.lsh import fingerprint_perm_get
+
+        self._add()
+        self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
+        db_reindex(self.session, jobs=1, num_perm=64)
+        self.assertEqual(fingerprint_perm_get(self.session), 64)
+
+    def test_stamp_mismatch_forces_reindex_deterministically(self):
+        """A stamped count differing from the request reindexes — no probe luck."""
+        from unittest.mock import patch
+
+        from resembl.lsh import fingerprint_perm_get, fingerprint_perm_set
+
+        self._add()
+        # Stamps current for 128; flip only the perm stamp to 64.  Every blob
+        # still matches 128, so the legacy probe would pass — the stamp must
+        # force the reindex regardless of which row it samples.
+        fingerprint_perm_set(self.session, 64)
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            snippet_find_matches(
+                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
+            )
+            mock.assert_called_once()
+        self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
+
+    def _corrupt_last_blob_to_64_perms(self, n: int) -> str:
+        """Rewrite one stored blob to a valid packed blob at 64 permutations."""
+        from datasketch import MinHash
+
+        rows = list(self.session.exec(select(Snippet)).all())
+        victim = rows[-1]
+        victim.minhash = minhash_pack(MinHash(num_perm=64))
+        self.session.add(victim)
+        self.session.commit()
+        return victim.checksum
+
+    def test_index_build_skips_foreign_perm_blob(self):
+        """A valid-format blob at a foreign perm count cannot crash a build."""
+        from sqlmodel import text
+
+        from resembl.lsh import fingerprint_version_set
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add(4)
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        victim = self._corrupt_last_blob_to_64_perms(4)
+
+        lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        self.assertIsNotNone(lsh)
+        rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
+        # Only the 3 healthy snippets contribute bucket rows (25 bands each).
+        self.assertEqual(rows, 3 * 25)
+        # The skipped snippet is still in the snippet table.
+        self.assertIsNotNone(snippet_get(self.session, victim))
+
+    def test_find_survives_foreign_perm_candidate(self):
+        """A stale-perm candidate is excluded from scoring, not fatal."""
+        from resembl.lsh import fingerprint_version_set
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add(4)
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        # Build the index first so every snippet has bucket rows, then make
+        # one stored blob stale: the LSH still routes to its checksum, and
+        # scoring must skip it instead of raising ValueError.
+        n0, _ = snippet_find_matches(
+            self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3
+        )
+        victim = self._corrupt_last_blob_to_64_perms(4)
+
+        n1, matches = snippet_find_matches(
+            self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=4
+        )
+        self.assertGreater(len(matches), 0)
+        self.assertNotIn(victim, [s.checksum for s, _score in matches])
+
+    def test_merge_clears_perm_stamp(self):
+        """Merge copies source blobs verbatim — the perm stamp must be cleared."""
+        import os
+        import tempfile
+
+        from sqlmodel import Session as _Session
+        from sqlmodel import SQLModel, create_engine
+
+        from resembl.lsh import fingerprint_perm_get
+
+        self._add()
+        src = tempfile.mktemp(suffix=".db")
+        try:
+            source_engine = create_engine(f"sqlite:///{src}")
+            SQLModel.metadata.create_all(source_engine)
+            with _Session(source_engine) as source_session:
+                snippet_add(source_session, "src", "mov eax, 1; ret")
+            db_merge(self.session, src)
+            self.assertIsNone(fingerprint_perm_get(self.session))
+        finally:
+            for path in (src, src + "-wal", src + "-shm"):
+                if os.path.exists(path):
+                    os.remove(path)
+
+
+class TestLSHMetaThresholdTolerance(BaseScalingTest):
+    """The stored-index threshold must survive single-precision columns."""
+
+    def test_matches_tolerate_single_precision_storage(self):
+        """MySQL/DuckDB render the ORM Float as 4-byte FLOAT.
+
+        Storing 0.7 there yields ~0.69999998808; an exact comparison made
+        every find believe the index used a different threshold and silently
+        rebuilt it in full on every query.
+        """
+        from resembl.lsh import lsh_meta_matches
+
+        stored32 = struct.unpack("f", struct.pack("f", 0.7))[0]
+        self.assertNotEqual(stored32, 0.7)  # precision actually lost
+        self.assertTrue(lsh_meta_matches((stored32, 128), 0.7, 128))
+        self.assertFalse(lsh_meta_matches((stored32, 128), 0.71, 128))
+        self.assertFalse(lsh_meta_matches(None, 0.7, 128))
+
+
 class TestLegacyMigration(BaseScalingTest):
     """Databases created by older versions must keep working.
 

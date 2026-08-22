@@ -37,6 +37,9 @@ from .lsh import (
     fingerprint_ngram_clear,
     fingerprint_ngram_get,
     fingerprint_ngram_set,
+    fingerprint_perm_clear,
+    fingerprint_perm_get,
+    fingerprint_perm_set,
     fingerprint_version_clear,
     fingerprint_version_get,
     fingerprint_version_set,
@@ -463,6 +466,7 @@ def snippet_add_batch(
         session.commit()
         if new_snippets:
             fingerprint_ngram_set(session, ngram_size)
+            fingerprint_perm_set(session, NUM_PERMUTATIONS)
 
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
@@ -511,6 +515,7 @@ def snippet_add(
     session.commit()
     session.refresh(new_snippet)
     fingerprint_ngram_set(session, ngram_size)
+    fingerprint_perm_set(session, NUM_PERMUTATIONS)
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
     return new_snippet
@@ -521,15 +526,16 @@ def fingerprints_need_reindex(
 ) -> bool:
     """Return True when stored fingerprints predate the requested parameters.
 
-    Stored blobs carry a format-version stamp and an n-gram stamp; a mismatch
-    against either would silently mix fingerprint formats in query results,
-    so the database must be reindexed once first.  Neither stamp records the
-    permutation count, so one stored blob is probed: requesting the *default*
-    count does not prove the blobs match it (a database written while
-    ``num_permutations`` was configured differently would otherwise crash the
-    next default-count find instead of healing itself).  Reindexing
-    current-format blobs is idempotent (identical fingerprints).  Shared by
-    ``find`` and ``serve`` startup.
+    Stored blobs carry a format-version stamp, an n-gram stamp, and a
+    permutation-count stamp; a mismatch against any of them would silently
+    mix fingerprint formats in query results, so the database must be
+    reindexed once first.  When the stamps are missing (legacy databases)
+    one stored blob is probed: requesting the *default* count does not prove
+    the blobs match it (a database written while ``num_permutations`` was
+    configured differently would otherwise crash the next default-count find
+    instead of healing itself).  Reindexing current-format blobs is
+    idempotent (identical fingerprints).  Shared by ``find`` and ``serve``
+    startup.
     """
     if fingerprint_version_get(session) != FINGERPRINT_VERSION:
         return True
@@ -537,6 +543,11 @@ def fingerprints_need_reindex(
         # Stored fingerprints encode their n-gram; a config ngram change
         # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
         # ngram 5) — reindex once at the new n-gram.
+        return True
+    stamped_perm = fingerprint_perm_get(session)
+    if stamped_perm is not None and stamped_perm != num_permutations:
+        # Every fingerprint writer stamps its count, so this is exact — no
+        # reliance on which single blob the legacy probe below samples.
         return True
     # Probe one blob: a non-default stored count, or a corrupt blob, means
     # the database must be reindexed before queries can mix formats safely.
@@ -622,14 +633,23 @@ def snippet_find_matches(
     # Normalize each candidate's blob (legacy pickles -> packed) and skip
     # corrupt ones: a single rotten fingerprint must not crash the query —
     # it is excluded from scoring (a reindex heals it from its code).
+    # Blobs written at a different permutation count are stale for this
+    # query by the same token; scoring them would raise inside the batch
+    # Jaccard, so they are skipped here.
     normalized: list[bytes] = []
     valid_keys: list[str] = []
     for k in keys:
         try:
-            normalized.append(minhash_ensure_packed(minhashes[k]))
+            blob = minhash_ensure_packed(minhashes[k])
+            if minhash_num_perm(blob) != num_permutations:
+                logger.warning(
+                    "Skipping candidate %s: stale fingerprint permutation count.", k
+                )
+                continue
         except ValueError:
             logger.warning("Skipping candidate %s: corrupt fingerprint.", k)
             continue
+        normalized.append(blob)
         valid_keys.append(k)
     keys = valid_keys
     if not keys:
@@ -807,6 +827,7 @@ def db_reindex(
     if num_snippets == 0:
         fingerprint_version_set(session, FINGERPRINT_VERSION)
         fingerprint_ngram_set(session, ngram_size)
+        fingerprint_perm_set(session, num_perm)
         return {"num_reindexed": 0, "time_elapsed": 0, "avg_time_per_snippet": 0}
 
     reindexed = 0
@@ -894,10 +915,11 @@ def db_reindex(
             codes = [snippet.code for snippet in batch]
             apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     session.commit()
-    # Fingerprints are now current — stamp the format version and n-gram
-    # size so `find` does not reindex again.
+    # Fingerprints are now current — stamp the format version, n-gram size,
+    # and permutation count so `find` does not reindex again.
     fingerprint_version_set(session, FINGERPRINT_VERSION)
     fingerprint_ngram_set(session, ngram_size)
+    fingerprint_perm_set(session, num_perm)
 
     end_time = time.monotonic()
     time_elapsed = end_time - start_time
@@ -1618,10 +1640,11 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # Persist the session.add'ed merge updates (aliases, tags, collections).
         session.commit()
         # The source blobs were copied verbatim and may be from an older
-        # fingerprint format — drop the version stamp so the next `find`
-        # reindexes once and normalizes everything.
+        # fingerprint format or permutation count — drop the stamps so the
+        # next `find` reindexes once and normalizes everything.
         fingerprint_version_clear(session)
         fingerprint_ngram_clear(session)
+        fingerprint_perm_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e, exc_info=True)
         return {"error": str(e)}

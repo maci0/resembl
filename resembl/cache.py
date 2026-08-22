@@ -201,7 +201,23 @@ def _build_once(
                 skipped_corrupt += 1
                 logger.warning("Skipping snippet %s: corrupt fingerprint.", checksum)
                 continue
-            for band, bucket in enumerate(band_buckets(packed, num_perm, lsh.b, lsh.r)):
+            try:
+                buckets = band_buckets(packed, num_perm, lsh.b, lsh.r)
+            except ValueError:
+                # A well-formed blob written at a different permutation count
+                # is stale for this build (mixed-perm databases from config
+                # flips between writes).  Skip it like a corrupt blob instead
+                # of crashing the build; a reindex at the requested count
+                # recomputes it from the snippet's code.
+                skipped_corrupt += 1
+                logger.warning(
+                    "Skipping snippet %s: fingerprint permutation count does "
+                    "not match %d.",
+                    checksum,
+                    num_perm,
+                )
+                continue
+            for band, bucket in enumerate(buckets):
                 band_rows[band].append((bucket, checksum))
         processed += len(batch)
         if progress is not None:
@@ -214,7 +230,8 @@ def _build_once(
             flush_band(band)
     if skipped_corrupt:
         logger.warning(
-            "Index build skipped %d snippet(s) with corrupt fingerprints; "
+            "Index build skipped %d snippet(s) with unusable fingerprints "
+            "(corrupt, or written at a different permutation count); "
             "`resembl reindex --force` recomputes them from their code.",
             skipped_corrupt,
         )
