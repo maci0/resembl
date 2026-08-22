@@ -491,6 +491,84 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(_FindHandler.protocol_version, "HTTP/1.1")
         self.assertEqual(_FindHandler.timeout, 30)
 
+    def test_ensure_tables_once_survives_concurrent_first_finds(self):
+        """Concurrent LSH facade construction serializes the one-time DDL.
+
+        Serve runs one handler thread per request, and the first finds
+        after startup all construct ``ResemblLSH`` at once against a
+        database whose tables may not exist yet.  Unsynchronized, two
+        threads interleave ``create_all``'s has-table probe and CREATE
+        TABLE, failing real requests with "table already exists".
+        """
+        from resembl import lsh as lsh_mod
+
+        db_path = tempfile.mktemp(suffix=".db")
+        self.addCleanup(
+            lambda: [
+                os.remove(p)
+                for p in (db_path, db_path + "-wal", db_path + "-shm")
+                if os.path.exists(p)
+            ]
+        )
+        engine = create_engine(f"sqlite:///{db_path}")
+        original_flag = lsh_mod._TABLES_ENSURED
+        lsh_mod._TABLES_ENSURED = False
+        self.addCleanup(setattr, lsh_mod, "_TABLES_ENSURED", original_flag)
+
+        barrier = threading.Barrier(8)
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                barrier.wait(timeout=10)
+                with Session(engine) as session:
+                    lsh_mod._ensure_tables_once(session)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        self.assertEqual(errors, [])
+        self.assertTrue(lsh_mod._TABLES_ENSURED)
+        # The index facade is usable on the now-created tables.
+        with Session(engine) as session:
+            lsh = lsh_mod.ResemblLSH(session, 0.5, 128)
+            self.assertGreaterEqual(lsh.b, 2)
+
+    def test_port_file_cleanup_keeps_foreign_advertisement(self):
+        """An exiting serve must not delete another server's port file.
+
+        Two serve processes started close together both pass the
+        double-serve check (neither has written yet) and both bind; only
+        the last writer owns the advertisement.  The loser exiting must
+        leave the survivor discoverable to find clients.
+        """
+        from resembl.server import _port_file_cleanup
+
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        port_file = os.path.join(cache.name, "server_audit.port")
+
+        # A foreign server's advertisement survives our exit.
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write("4242")
+        _port_file_cleanup(port_file, 1111)
+        self.assertTrue(os.path.exists(port_file))
+        with open(port_file, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "4242")
+
+        # Our own advertisement is removed.
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write("1111")
+        _port_file_cleanup(port_file, 1111)
+        self.assertFalse(os.path.exists(port_file))
+
+        # A missing file is not an error.
+        _port_file_cleanup(port_file, 1111)
+
 
 class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""

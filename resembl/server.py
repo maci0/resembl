@@ -139,6 +139,25 @@ def server_port_path(db_url: str) -> str:
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
+def _port_file_cleanup(port_file: str, port: int) -> None:
+    """Remove the port file only when it still advertises our own *port*.
+
+    The double-serve check in :func:`serve` is not atomic across processes:
+    two ``serve`` invocations started close together both pass it (neither
+    has written yet), both bind, and the last writer owns the advertisement.
+    An unconditional delete on exit would then orphan the surviving server
+    for every ``find`` client, so an exiting process removes the file only
+    while its content is still its own bound port.
+    """
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            if f.read().strip() != str(port):
+                return
+        os.remove(port_file)
+    except OSError:
+        pass
+
+
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find``; one session per request (concurrent reads)."""
 
@@ -151,7 +170,15 @@ class _FindHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 30
 
-    engine: Any = None  # set by serve()
+    @property
+    def engine(self) -> Any:
+        """The request engine, owned by the serving :class:`ThreadingHTTPServer`.
+
+        It lives on the server *instance*, not on this handler class: two
+        ``serve()`` calls in one process must never retarget an older,
+        still-serving server's handler threads to the newer engine.
+        """
+        return self.server.engine  # type: ignore[attr-defined]
 
     def _read_body(self) -> dict | None:
         """Read and parse the JSON request body; None if malformed."""
@@ -308,19 +335,15 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         if not lsh_meta_matches(meta, _SERVER_THRESHOLD, _SERVER_NUM_PERM):
             lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
 
-    _FindHandler.engine = engine
     httpd = ThreadingHTTPServer((host, port), _FindHandler)
+    # Per-instance shared state (see _FindHandler.engine): each server
+    # generation carries its own engine.
+    httpd.engine = engine  # type: ignore[attr-defined]
     os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(str(httpd.server_address[1]))
 
-    def _cleanup() -> None:
-        try:
-            os.remove(port_file)
-        except OSError:
-            pass
-
     import atexit
 
-    atexit.register(_cleanup)
+    atexit.register(_port_file_cleanup, port_file, int(httpd.server_address[1]))
     return httpd

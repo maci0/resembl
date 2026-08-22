@@ -702,6 +702,11 @@ def import_cmd(
             logger.warning(
                 "Process pool unavailable; falling back to in-process import."
             )
+            # Redo every file sequentially, exactly as the pool run would
+            # have (inserts dedupe on checksum): reset the flushed counters
+            # too, or already-flushed chunks are counted twice.
+            added_total = 0
+            aliased_total = 0
             rejects = 0
             prepared = []
             prepare_sequential()
