@@ -117,7 +117,6 @@ class State:
     session: Session
     config: ResemblConfig
     quiet: bool = False
-    no_color: bool = False
     format: str = "table"
 
 
@@ -426,7 +425,6 @@ def app_callback(
     global console, err_console
 
     state.quiet = quiet
-    state.no_color = no_color
 
     if no_color:
         console = Console(no_color=True, highlight=False)
@@ -624,7 +622,9 @@ def import_cmd(
         nonlocal prepared, added_total, aliased_total
         if not prepared:
             return
-        batch_result = snippet_add_batch(state.session, prepared)
+        batch_result = snippet_add_batch(
+            state.session, prepared, ngram_size=ngram_size
+        )
         added_total += batch_result["added"]
         aliased_total += batch_result["aliased"]
         prepared = []
@@ -806,9 +806,6 @@ def _stream_list(session: Session) -> None:
     if state.quiet:
         return
 
-    def names_list(raw: str) -> list[str]:
-        return json.loads(raw)
-
     if state.format == "json":
         sys.stdout.write("[")
         first = True
@@ -818,8 +815,7 @@ def _stream_list(session: Session) -> None:
                     sys.stdout.write(",")
                 first = False
                 sys.stdout.write(
-                    "\n  "
-                    + json.dumps({"checksum": checksum, "names": names_list(raw)})
+                    "\n  " + json.dumps({"checksum": checksum, "names": json.loads(raw)})
                 )
         sys.stdout.write("\n]\n" if not first else "]\n")
     elif state.format == "csv":
@@ -828,7 +824,7 @@ def _stream_list(session: Session) -> None:
         for batch in snippet_names_stream(session):
             for checksum, raw in batch:
                 writer.writerow(
-                    {"checksum": checksum, "names": ", ".join(names_list(raw))}
+                    {"checksum": checksum, "names": ", ".join(json.loads(raw))}
                 )
     else:
         offset = 0
@@ -838,7 +834,7 @@ def _stream_list(session: Session) -> None:
             table.add_column("Checksum", style="bold")
             table.add_column("Names")
             for i, (checksum, raw) in enumerate(batch, offset + 1):
-                table.add_row(str(i), checksum[:12] + "…", ", ".join(names_list(raw)))
+                table.add_row(str(i), checksum[:12] + "…", ", ".join(json.loads(raw)))
             _echo(table)
             offset += len(batch)
 

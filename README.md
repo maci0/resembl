@@ -75,7 +75,7 @@ To avoid the slow process of comparing a query against every single entry in the
 
 - **MinHash:** Each normalized snippet is converted into a **MinHash**. A MinHash is a compact "fingerprint" of the code. Snippets with similar structures will produce similar MinHash fingerprints.
 
-- **Locality Sensitive Hashing (LSH):** We use a `MinHashLSH` index to store all the MinHashes. This data structure acts like a "bucketing" system. Similar MinHashes are likely to be placed into the same buckets. When you search, we hash your query's MinHash and only retrieve candidates from the buckets it lands in. This is an extremely fast way to narrow down a huge database to a handful of potential matches.
+- **Locality Sensitive Hashing (LSH):** We use a banded LSH index stored in the database (the `lsh_bucket` table) to group the MinHashes. This data structure acts like a "bucketing" system. Similar MinHashes are likely to be placed into the same buckets. When you search, we hash your query's MinHash and only retrieve candidates from the buckets it lands in. This is an extremely fast way to narrow down a huge database to a handful of potential matches.
 
 The key idea behind LSH is to hash items so that similar items have a higher probability of ending up in the same "bucket." The banding technique is a method for amplifying this effect, making the process more efficient and reliable for finding collision candidates.
 

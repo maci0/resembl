@@ -418,16 +418,6 @@ class TestResemblConfig(unittest.TestCase):
         cfg = ResemblConfig()
         self.assertEqual(cfg.get("nonexistent", 42), 42)
 
-    def test_contains(self):
-        cfg = ResemblConfig()
-        self.assertIn("lsh_threshold", cfg)
-        self.assertNotIn("nonexistent", cfg)
-
-    def test_getitem_setitem(self):
-        cfg = ResemblConfig()
-        cfg["top_n"] = 20
-        self.assertEqual(cfg["top_n"], 20)
-
     def test_items(self):
         cfg = ResemblConfig()
         items = cfg.items()

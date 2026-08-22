@@ -10,10 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Column, Integer, Text
 from sqlmodel import Field, Session, SQLModel, select
 
-from .scoring import (  # noqa: F401  (re-exported; avoids importing sqlmodel for the ORM-less minhash path)
-    _MAX_NUM_PERM,
-    _MINHASH_TEMPLATES,
-    MINHASH_MAGIC,
+from .scoring import (  # noqa: F401  (re-exported; `from resembl.models import minhash_pack` keeps working)
     minhash_ensure_packed,
     minhash_jaccard,
     minhash_jaccard_batch,

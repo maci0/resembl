@@ -5,10 +5,10 @@ import random
 import shlex
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
-import tomli
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.core import snippet_add
@@ -261,7 +261,7 @@ class TestCLIConfig(BaseCLITest):
 
             config_path = os.path.join(home, ".config", "resembl", "config.toml")
             with open(config_path, "rb") as f:
-                data = tomli.load(f)
+                data = tomllib.load(f)
 
             self.assertEqual(data.get("lsh_threshold"), 0.7)
             self.assertEqual(data.get("top_n"), 10)
@@ -274,7 +274,7 @@ class TestCLIConfig(BaseCLITest):
             )
             config_path = os.path.join(cfgdir, "config.toml")
             with open(config_path, "rb") as f:
-                data = tomli.load(f)
+                data = tomllib.load(f)
             self.assertEqual(data.get("top_n"), 7)
 
             result = self.run_command(
@@ -296,21 +296,6 @@ class TestCLIConfig(BaseCLITest):
             # The index is database-backed: no pickle file should be created.
             cache_file = os.path.join(cache_dir, "lsh_0.50.pkl")
             self.assertFalse(os.path.exists(cache_file))
-
-    def test_cache_dir_env_override_legacy_path(self):
-        """Legacy cache files are not written anymore (index lives in the DB)."""
-        with tempfile.TemporaryDirectory() as cache_dir:
-            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": cache_dir}):
-                from sqlmodel import Session as _Session
-
-                with _Session(self.engine) as session:
-                    from resembl.cache import lsh_cache_path_get, lsh_cache_save
-
-                    # A non-DB-backed object is no longer persisted to a
-                    # cache file (cache files were pickles: loading one is
-                    # arbitrary code execution).
-                    lsh_cache_save(session, {"legacy": "index"}, 0.5)
-                    self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
 
     def test_config_set_and_list(self):
         """`config list` should show values set via `config set`."""

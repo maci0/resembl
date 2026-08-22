@@ -8,17 +8,13 @@ import os
 import tempfile
 import unittest
 
-from datasketch import MinHashLSH
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.cache import (
-    lsh_cache_invalidate,
     lsh_cache_load,
     lsh_cache_path_get,
     lsh_cache_save,
     lsh_index_build,
-    lsh_index_insert,
-    lsh_index_insert_batch,
 )
 from resembl.core import (
     NUM_PERMUTATIONS,
@@ -456,75 +452,26 @@ class TestMergeEdgeCases(BaseDBTest):
 
 
 # ---------------------------------------------------------------------------
-# Cache functions — covers lines 57-61, 69-76
+# Cache functions — index build corrupt-fingerprint handling
 # ---------------------------------------------------------------------------
 
 
-class TestCacheInsert(BaseDBTest):
-    """Tests for lsh_index_insert and lsh_index_insert_batch."""
+class TestCacheBuildCorruptFingerprints(BaseDBTest):
+    """A corrupt stored fingerprint must not abort an index build."""
 
-    def _make_lsh(self):
-        return MinHashLSH(threshold=0.5, num_perm=NUM_PERMUTATIONS)
-
-    def test_lsh_insert_single(self):
-        """Inserting a snippet into LSH should succeed."""
-        lsh = self._make_lsh()
-        snippet = snippet_add(self.session, "func", "MOV EAX, 1")
-        lsh_index_insert(lsh, snippet)
-        # Should be queryable
-        keys = lsh.query(snippet.get_minhash_obj())
-        self.assertIn(snippet.checksum, keys)
-
-    def test_lsh_insert_duplicate(self):
-        """Inserting the same snippet twice should not raise (line 57-61)."""
-        lsh = self._make_lsh()
-        snippet = snippet_add(self.session, "func", "MOV EAX, 1")
-        lsh_index_insert(lsh, snippet)
-        lsh_index_insert(lsh, snippet)  # Should not raise
-
-    def test_lsh_insert_batch(self):
-        """Batch inserting snippets should return count of new entries (line 69-76)."""
-        lsh = self._make_lsh()
-        s1 = snippet_add(self.session, "func1", "MOV EAX, 1")
-        s2 = snippet_add(self.session, "func2", "XOR EBX, EBX")
-        inserted = lsh_index_insert_batch(lsh, [s1, s2])
-        self.assertEqual(inserted, 2)
-
-    def test_lsh_insert_batch_with_duplicates(self):
-        """Batch insert should skip already-inserted snippets."""
-        lsh = self._make_lsh()
-        s1 = snippet_add(self.session, "func1", "MOV EAX, 1")
-        lsh_index_insert(lsh, s1)
-        inserted = lsh_index_insert_batch(lsh, [s1])
-        self.assertEqual(inserted, 0)
-
-    def test_lsh_insert_corrupt_fingerprint_warns(self):
-        """A corrupt DB-backed fingerprint is skipped with a warning, never silent."""
+    def test_build_skips_corrupt_fingerprint_with_warning(self):
+        """Corrupt blobs are skipped with a warning; good ones still index."""
         from resembl import cache as cache_mod
-        from resembl.lsh import ResemblLSH
 
-        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
-        snippet = snippet_add(self.session, "func", "MOV EAX, 1")
-        snippet.minhash = b"garbage"
-        with self.assertLogs(cache_mod.logger, level="WARNING"):
-            cache_mod.lsh_index_insert(lsh, snippet)
-
-    def test_lsh_insert_batch_corrupt_fingerprint_skips_row(self):
-        """One corrupt blob must not abort a DB-backed batch sync; it is skipped."""
-        from resembl import cache as cache_mod
-        from resembl.lsh import ResemblLSH
-        from resembl.scoring import minhash_ensure_packed
-
-        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
         good = snippet_add(self.session, "good", "MOV EAX, 1")
         bad = snippet_add(self.session, "bad", "XOR EBX, EBX")
         bad.minhash = b"garbage"
         with self.assertLogs(cache_mod.logger, level="WARNING"):
-            inserted = cache_mod.lsh_index_insert_batch(lsh, [good, bad])
-        keys = lsh.query(minhash_ensure_packed(good.minhash))
+            lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        self.assertIsNotNone(lsh)
+        keys = lsh.query(good.minhash)
         self.assertIn(good.checksum, keys)
         self.assertNotIn(bad.checksum, keys)
-        self.assertGreater(inserted, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -613,17 +560,16 @@ class TestSnippetAddDedup(BaseDBTest):
 
 
 class TestLSHCacheLifecycle(BaseDBTest):
-    """Tests for LSH cache save/load/invalidate flow."""
+    """Tests for LSH cache save/load flow."""
 
     def test_build_and_save_cache(self):
         """Building and saving cache should produce loadable index."""
         snippet_add(self.session, "func", "MOV EAX, 1")
-        lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
-        self.assertIsNotNone(lsh)
+        self.assertIsNotNone(lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS))
         with tempfile.TemporaryDirectory() as tmpdir:
             os.environ["RESEMBL_CACHE_DIR"] = tmpdir
             try:
-                lsh_cache_save(self.session, lsh, 0.5)
+                lsh_cache_save(self.session, 0.5)
                 loaded = lsh_cache_load(self.session, 0.5)
                 self.assertIsNotNone(loaded)
             finally:

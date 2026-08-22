@@ -6,9 +6,9 @@ import dataclasses
 import logging
 import os
 import tempfile
+import tomllib
 from typing import TypeVar, overload
 
-import tomli
 import tomli_w
 
 DEFAULT_CONFIG_DIR = "~/.config/resembl"
@@ -76,15 +76,6 @@ class ResemblConfig:
         """Return a plain dict representation for serialization."""
         return dataclasses.asdict(self)
 
-    def __contains__(self, key: str) -> bool:
-        return hasattr(self, key)
-
-    def __getitem__(self, key: str) -> object:
-        return getattr(self, key)
-
-    def __setitem__(self, key: str, value: object) -> None:
-        setattr(self, key, value)
-
 
 # Keep DEFAULTS as a dict for backward compatibility (used by CLI validation
 # and test_config.py).
@@ -120,8 +111,8 @@ def update_config(key: str, value: int | float | str) -> dict:
     if os.path.exists(cfg_path):
         with open(cfg_path, "rb") as f:
             try:
-                config = tomli.load(f)
-            except tomli.TOMLDecodeError:
+                config = tomllib.load(f)
+            except tomllib.TOMLDecodeError:
                 config = {}
 
     config[key] = value
@@ -137,8 +128,8 @@ def remove_config_key(key: str) -> dict:
     if os.path.exists(cfg_path):
         with open(cfg_path, "rb") as f:
             try:
-                config = tomli.load(f)
-            except tomli.TOMLDecodeError:
+                config = tomllib.load(f)
+            except tomllib.TOMLDecodeError:
                 config = {}
 
     if key in config:
@@ -158,9 +149,9 @@ def load_config() -> ResemblConfig:
 
     try:
         with open(cfg_path, "rb") as f:
-            user_config = tomli.load(f)
+            user_config = tomllib.load(f)
         cfg.update(user_config)
-    except tomli.TOMLDecodeError as e:
+    except tomllib.TOMLDecodeError as e:
         logger.error("Error decoding config file at %s: %s", cfg_path, e)
     except OSError as e:
         # Unreadable file (permissions, I/O error): run on defaults like

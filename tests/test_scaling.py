@@ -366,8 +366,8 @@ class TestCacheFormat(BaseScalingTest):
 
     def test_sqlite_index_roundtrip(self):
         """Build + save + load round-trips through the DB-backed index."""
-        lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
-        lsh_cache_save(self.session, lsh, 0.5)
+        self.assertIsNotNone(lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS))
+        lsh_cache_save(self.session, 0.5)
         loaded = lsh_cache_load(self.session, 0.5)
         self.assertIsNotNone(loaded)
         # Empty database → query returns no candidates.
@@ -385,8 +385,6 @@ class TestCacheFormat(BaseScalingTest):
         import pickle as _pickle
         from pathlib import Path
 
-        from resembl.database import db_checksum_get
-
         class _Canary:
             def __reduce__(self):  # detonates only if the blob is unpickled
                 return _unpickle_canary, ()
@@ -396,7 +394,7 @@ class TestCacheFormat(BaseScalingTest):
             _pickle.dump(_Canary(), f)
         marker = Path(os.environ["RESEMBL_CACHE_DIR"]) / "db_checksum.txt"
         with open(marker, "w", encoding="utf-8") as f:
-            f.write(db_checksum_get(self.session))
+            f.write("legacy-checksum")
 
         # Not loaded — no execution, no object returned.
         self.assertIsNone(lsh_cache_load(self.session, 0.5))
@@ -405,20 +403,18 @@ class TestCacheFormat(BaseScalingTest):
         """A corrupted cache file is ignored instead of raising."""
         from pathlib import Path
 
-        from resembl.database import db_checksum_get
-
         cache_path = Path(os.environ["RESEMBL_CACHE_DIR"]) / "lsh_0.50.pkl"
         with open(cache_path, "wb") as f:
             f.write(b"RESEMBL-CACHE-V2" + b"not-zlib-data")
         marker = Path(os.environ["RESEMBL_CACHE_DIR"]) / "db_checksum.txt"
         with open(marker, "w", encoding="utf-8") as f:
-            f.write(db_checksum_get(self.session))
+            f.write("legacy-checksum")
         self.assertIsNone(lsh_cache_load(self.session, 0.5))
 
     def test_threshold_change_rebuilds(self):
         """A different threshold than the built index triggers a rebuild."""
-        lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
-        lsh_cache_save(self.session, lsh, 0.5)
+        self.assertIsNotNone(lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS))
+        lsh_cache_save(self.session, 0.5)
         # Different params → no valid index → load returns None.
         self.assertIsNone(lsh_cache_load(self.session, 0.8, NUM_PERMUTATIONS))
 

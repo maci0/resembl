@@ -7,31 +7,27 @@ deliberately free of the database stack so that it can be imported without
 ``resembl.cache`` / ``resembl.lsh`` / ``resembl.models``).
 
 It imports only:
-- the standard library (``hashlib``, ``re``, ``struct``, ``operator``,
-  ``copy``)
+- the standard library (``hashlib``, ``struct``, ``operator``, ``copy``)
 - ``pygments`` (the ``NasmLexer`` + token types)
-- ``rapidfuzz`` (mirrored from ``core``)
 - ``numpy`` and ``datasketch`` are imported *lazily* inside the function
-  bodies that need them, exactly as in the original ``core``/``models``
-  source — so merely importing this module never pulls them in.
+  bodies that need them — so merely importing this module never pulls
+  them in.
 
-``resembl.core`` and ``resembl.models`` re-export everything defined here for
-backward compatibility; ``from resembl.core import code_tokenize`` and
-``from resembl.models import minhash_pack`` keep working unchanged.
+The names used by ``resembl.core`` / ``resembl.models`` are re-exported from
+those modules for backward compatibility; ``from resembl.core import
+code_tokenize`` and ``from resembl.models import minhash_pack`` keep working.
 """
 
 from __future__ import annotations
 
 import hashlib
 import operator
-import re
 import struct
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
 from pygments.lexers.asm import NasmLexer
 from pygments.token import Comment, Name, Number, Punctuation, Text
-from rapidfuzz import fuzz  # noqa: F401  (re-exported surface used by consumers)
 
 if TYPE_CHECKING:
     from datasketch import MinHash

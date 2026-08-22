@@ -19,7 +19,7 @@ import re
 import time
 from collections.abc import Callable, Iterator
 
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
@@ -33,7 +33,6 @@ from .cache import (
     lsh_index_remove,
 )
 from .lsh import (
-    ResemblLSH,
     _banding_params,
     fingerprint_ngram_clear,
     fingerprint_ngram_get,
@@ -51,20 +50,12 @@ from .models import (
     SnippetVersion,
 )
 from .scoring import (  # noqa: F401  (re-exported for backward compatibility)
-    _MEM_SIZE_WORDS,
-    ALL_REGISTERS,
-    ARM_REGISTERS,
     BRANCH_INSTRUCTIONS,
     COMMON_INSTRUCTIONS,
-    MINHASH_MAGIC,
-    MIPS_REGISTERS,
     NUM_PERMUTATIONS,
     RARE_INSTRUCTIONS,
-    REGISTERS,
-    RISCV_REGISTERS,
     _code_tokenize_lexed,
     _minhash_from_tokens,
-    _shingle_weight_tokens,
     _string_normalize_lexed,
     cfg_extract,
     cfg_similarity,
@@ -75,15 +66,12 @@ from .scoring import (  # noqa: F401  (re-exported for backward compatibility)
     minhash_ensure_packed,
     minhash_jaccard,
     minhash_jaccard_batch,
-    minhash_new,
     minhash_num_perm,
     minhash_pack,
-    minhash_unpack,
     score_hybrid,
     shingle_weight,
     string_checksum,
     string_normalize,
-    token_is_label,
 )
 
 logger = logging.getLogger(__name__)
@@ -597,7 +585,7 @@ def snippet_find_matches(
     if not lsh:
         lsh = lsh_index_build(session, threshold, num_permutations, progress=progress)
         if lsh:
-            lsh_cache_save(session, lsh, threshold, num_permutations)
+            lsh_cache_save(session, threshold, num_permutations)
 
     if lsh is None:
         # The build failed (logged by ``lsh_index_build``): report an error
@@ -611,12 +599,7 @@ def snippet_find_matches(
     query_minhash = code_create_minhash(
         query_string, normalize, ngram_size=ngram_size, num_perm=num_permutations
     )
-    if isinstance(lsh, ResemblLSH):
-        # DB-backed index queries against the packed fingerprint.
-        candidate_keys = lsh.query(minhash_pack(query_minhash))
-    else:
-        # Legacy pickled datasketch index expects a MinHash object.
-        candidate_keys = lsh.query(query_minhash)
+    candidate_keys = lsh.query(minhash_pack(query_minhash))
 
     if not candidate_keys:
         return 0, []

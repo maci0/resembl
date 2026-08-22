@@ -46,7 +46,7 @@ def _load_config() -> dict:
 
         with open(path, "rb") as f:
             return tomllib.load(f)
-    except (OSError, ValueError, ImportError):
+    except (OSError, ValueError):
         return {}
 
 

@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 
 from sqlalchemy import event
-from sqlmodel import Session, SQLModel, create_engine, func, select
+from sqlmodel import SQLModel, create_engine
 
-from .models import Snippet
+# Imported for its side effect: defining the SQLModel classes registers the
+# tables that ``db_create`` creates (an empty metadata creates nothing).
+from . import models  # noqa: F401
 
 # Default to assembly.db, but allow overriding for testing or PostgreSQL use.
 # Examples:
@@ -79,18 +81,3 @@ def get_engine():
 def db_create() -> None:
     """Create database tables if they do not already exist."""
     SQLModel.metadata.create_all(get_engine())
-
-
-def db_checksum_get(session: Session) -> str:
-    """Return a checksum representing the current database state."""
-    # Pylint mis-identifies `func.count` as non-callable in SQLModel
-    count = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]  # pylint: disable=not-callable
-    if count == 0:
-        return "empty"
-
-    # `desc` is a SQLAlchemy method generated at runtime
-    last_snippet = session.exec(
-        select(Snippet).order_by(Snippet.checksum.desc())  # type: ignore[attr-defined]  # pylint: disable=no-member
-    ).first()
-    assert last_snippet is not None
-    return f"{count}-{last_snippet.checksum}"
