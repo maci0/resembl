@@ -697,6 +697,35 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(stats["num_snippets"], 30)
         self.assertIsInstance(stats["avg_jaccard_similarity"], float)
 
+    def test_average_similarity_matches_pairwise_jaccard(self):
+        """The vectorized all-pairs estimate must equal the per-pair metric.
+
+        ``db_calculate_average_similarity`` compares its sample all-pairs with
+        one numpy pass instead of ~n^2/2 interpreted ``minhash_jaccard``
+        calls; the per-pair values (equal-count / num_perm) must stay
+        identical, so the returned mean matches the direct loop exactly.
+        """
+        from resembl.core import db_calculate_average_similarity
+        from resembl.models import minhash_jaccard
+
+        self._add(12, "avg")
+        blobs = [
+            minhash_ensure_packed(row.minhash)
+            for row in self.session.exec(select(Snippet)).all()
+        ]
+        n = len(blobs)
+        expected = (
+            sum(
+                minhash_jaccard(blobs[i], blobs[j])
+                for i in range(n)
+                for j in range(i + 1, n)
+            )
+            / (n * (n - 1) // 2)
+        )
+        # count (12) <= sample_size -> the exact whole-corpus sample is used.
+        result = db_calculate_average_similarity(self.session, sample_size=1000)
+        self.assertAlmostEqual(result, expected, places=12)
+
     def test_custom_num_permutations_honored(self):
         """A non-default perm count builds at that count, with no rebuild loop.
 

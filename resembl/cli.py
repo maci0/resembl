@@ -27,7 +27,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from typing import Any, cast
 
@@ -380,22 +380,26 @@ def _resolve_checksum(prefix: str) -> str | None:
     if exact:
         return exact.checksum
 
-    # Prefix search
-    candidates = state.session.exec(
-        select(SnippetModel).where(
+    # Prefix search.  Only the checksum column is fetched: a short prefix can
+    # match thousands of rows, and pulling each match's full row (including
+    # the ``code`` column, which dominates the table) through the ORM just to
+    # count candidates would move megabytes of text for nothing.
+    candidate_checksums: Sequence[str] = state.session.exec(
+        select(SnippetModel.checksum).where(
             SnippetModel.checksum.like(f"{prefix}%")  # type: ignore[attr-defined]
         )
     ).all()
 
-    if len(candidates) == 0:
+    if len(candidate_checksums) == 0:
         err_console.print(f"[red]Error:[/red] No snippet found matching '{prefix}'.")
         return None
-    if len(candidates) > 1:
+    if len(candidate_checksums) > 1:
         err_console.print(
-            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches {len(candidates)} snippets."
+            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches "
+            f"{len(candidate_checksums)} snippets."
         )
         return None
-    return candidates[0].checksum
+    return candidate_checksums[0]
 
 
 @app.callback()

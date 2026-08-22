@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Iterator
 
 from rapidfuzz import fuzz
+from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
@@ -1022,9 +1023,6 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     else:
         sample_snippets = list(Snippet.get_all(session))
 
-    total_similarity: float = 0.0
-    num_comparisons: int = 0
-
     # Normalize and validate each sampled fingerprint, skipping corrupt ones
     # (disk rot) — one bad blob must not crash `stats` on a large database.
     blobs: list[bytes] = []
@@ -1038,12 +1036,38 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
             )
 
     num_snippets = len(blobs)
-    for i in range(num_snippets):
-        for j in range(i + 1, num_snippets):
-            total_similarity += minhash_jaccard(blobs[i], blobs[j])
-            num_comparisons += 1
+    if num_snippets < 2:
+        return 1.0
 
-    return total_similarity / num_comparisons if num_comparisons > 0 else 1.0
+    # The sample is compared all-pairs (i < j).  At the default sample of 100
+    # that is 4,950 pairs; the per-pair ``minhash_jaccard`` path pays two
+    # ``struct.unpack`` calls plus a Python-level 128-element loop each, so
+    # the whole estimate ran ~633k interpreted iterations.  One packed uint32
+    # array is built once and every pair's equality count is then a C-level
+    # numpy pass; per-pair values are identical to ``minhash_jaccard``
+    # (boolean mean == equal-count / num_perm in float64).
+    num_perm = minhash_num_perm(blobs[0])
+    for blob in blobs[1:]:
+        blob_num_perm = minhash_num_perm(blob)
+        if blob_num_perm != num_perm:
+            raise ValueError(
+                "Cannot compute Jaccard for MinHash blobs with different "
+                f"permutation counts ({num_perm} vs {blob_num_perm})."
+            )
+
+    import numpy as np
+
+    values = np.frombuffer(b"".join(blob[8:] for blob in blobs), dtype=">u4").reshape(
+        num_snippets, num_perm
+    )
+    total_similarity = 0.0
+    for i in range(num_snippets - 1):
+        # Per-pair value equals ``minhash_jaccard``: equal-count / num_perm,
+        # each division rounded to float64 exactly as Python's int/int `/`.
+        row_jaccards = (values[i + 1 :] == values[i]).sum(axis=1) / num_perm
+        total_similarity += float(row_jaccards.sum())
+
+    return total_similarity / (num_snippets * (num_snippets - 1) // 2)
 
 
 def db_stats(session: Session) -> dict:
@@ -1334,10 +1358,15 @@ def collection_delete(session: Session, name: str, quiet: bool = False) -> bool:
             logger.error("Collection '%s' not found.", name)
         return False
 
-    # Unassign snippets from this collection
-    for snippet in Snippet.get_by_collection(session, name):
-        snippet.collection = None
-        session.add(snippet)
+    # Unassign snippets in one bulk UPDATE: the per-row loop loaded every
+    # member's full row (the ``code`` column dominates the table) through the
+    # ORM just to null one column, and issued one UPDATE per row on flush —
+    # quadratic round-trip pressure for a large collection.
+    session.execute(
+        update(Snippet)
+        .where(Snippet.collection == name)  # type: ignore[arg-type]
+        .values(collection=None)
+    )
 
     session.delete(collection)
     session.commit()
