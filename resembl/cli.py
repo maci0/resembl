@@ -79,7 +79,7 @@ from .core import (
     snippet_version_list,
 )
 from .database import db_create, get_engine
-from .lsh import lsh_meta_get
+from .lsh import lsh_meta_get, lsh_meta_matches
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +134,6 @@ def _echo_format(data: object) -> None:
     if state.quiet:
         return
     if state.format == "csv":
-        import sys
-
         if isinstance(data, dict) and "matches" in data:
             data = data["matches"]
         if isinstance(data, list) and data and isinstance(data[0], dict):
@@ -146,9 +144,10 @@ def _echo_format(data: object) -> None:
             writer.writeheader()
             writer.writerows(data)
         elif isinstance(data, dict):
-            for k, v in data.items():
-                if isinstance(v, list):
-                    data[k] = ", ".join(v)
+            data = {
+                k: ", ".join(v) if isinstance(v, list) else v
+                for k, v in data.items()
+            }
             writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
             writer.writeheader()
             writer.writerow(data)
@@ -178,20 +177,15 @@ def _build_progress_printer() -> Callable[[int, int], None]:
     return _report
 
 
-def _find_via_server(
-    query: str,
-    top_n: int,
-    threshold: float | None,
-    normalize: bool,
-    ngram_size: int,
-) -> dict | None:
-    """Query a running ``serve`` process for the current database.
+def _server_request(path: str, body: dict, timeout: float) -> dict | None:
+    """Send one JSON request to the running ``serve`` process.
 
-    Returns the JSON payload on success, or ``None`` if no server is running
-    (the caller falls back to the in-process path).  Any connection or
-    protocol error is treated as "no server" — a stale port file is removed.
+    Returns the decoded payload, or ``None`` when no server is reachable
+    (the caller falls back to the in-process path).  A timeout means the
+    server is alive but slow (e.g. busy serving a large find-batch) — its
+    port file is kept; only a dead server's stale file is removed, since
+    deleting it would orphan a healthy server.
     """
-    import json as _json
     import urllib.error
     import urllib.request
 
@@ -205,29 +199,15 @@ def _find_via_server(
     except (OSError, ValueError):
         return None
 
-    body = _json.dumps(
-        {
-            "query": query,
-            "top_n": top_n,
-            "threshold": threshold,
-            "normalize": normalize,
-            "ngram_size": ngram_size,
-        }
-    ).encode("utf-8")
     request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/find",
-        data=body,
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(body).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            payload = _json.loads(response.read())
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read())
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        # Only a dead server (connection refused) means the port file is
-        # stale and should be removed.  A timeout means the server is alive
-        # but slow (e.g. busy serving a large find-batch) — deleting its
-        # port file would orphan a healthy server, so keep it and fall back
-        # in-process for this call only.
         if isinstance(exc, urllib.error.URLError) and isinstance(
             exc.reason, TimeoutError
         ):
@@ -242,6 +222,27 @@ def _find_via_server(
     return payload
 
 
+def _find_via_server(
+    query: str,
+    top_n: int,
+    threshold: float | None,
+    normalize: bool,
+    ngram_size: int,
+) -> dict | None:
+    """Query a running ``serve`` process for the current database."""
+    return _server_request(
+        "/find",
+        {
+            "query": query,
+            "top_n": top_n,
+            "threshold": threshold,
+            "normalize": normalize,
+            "ngram_size": ngram_size,
+        },
+        timeout=5,
+    )
+
+
 def _find_batch_via_server(
     queries: list[str],
     top_n: int,
@@ -249,55 +250,19 @@ def _find_batch_via_server(
     normalize: bool,
     ngram_size: int,
 ) -> list[dict] | None:
-    """Query a running ``serve`` process with a batch (one round trip).
-
-    Returns the per-query payload list on success, or ``None`` if no server
-    is running (the caller falls back to in-process).
-    """
-    import json as _json
-    import urllib.error
-    import urllib.request
-
-    from .server import server_port_path
-
-    db_url = str(cast(Engine, state.session.get_bind()).url)
-    port_file = server_port_path(db_url)
-    try:
-        with open(port_file, encoding="utf-8") as f:
-            port = int(f.read().strip())
-    except (OSError, ValueError):
-        return None
-
-    body = _json.dumps(
+    """Query a running ``serve`` process with a batch (one round trip)."""
+    payload = _server_request(
+        "/find-batch",
         {
             "queries": queries,
             "top_n": top_n,
             "threshold": threshold,
             "normalize": normalize,
             "ngram_size": ngram_size,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/find-batch",
-        data=body,
-        headers={"Content-Type": "application/json"},
+        },
+        timeout=60,
     )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = _json.loads(response.read())
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        # See ``_find_via_server``: a timeout is a slow-but-live server, so
-        # the port file is kept; only a dead server's stale file is removed.
-        if isinstance(exc, urllib.error.URLError) and isinstance(
-            exc.reason, TimeoutError
-        ):
-            return None
-        try:
-            os.remove(port_file)
-        except OSError:
-            pass
-        return None
-    if "error" in payload:
+    if payload is None:
         return None
     return payload["results"]
 
@@ -475,7 +440,7 @@ def app_callback(
     logging.basicConfig(level=log_level, stream=sys.stdout)
 
     state.config = load_config()
-    state.format = format_opt or state.config.get("format", "table")
+    state.format = format_opt or state.config.format
     db_create()
     state.session = Session(get_engine())
     atexit.register(state.session.close)
@@ -491,7 +456,7 @@ def add(
 ) -> None:
     """Add a new snippet or an alias to existing code."""
     snippet = snippet_add(
-        state.session, name, code, ngram_size=state.config.get("ngram_size", 3)
+        state.session, name, code, ngram_size=state.config.ngram_size
     )
     if snippet:
         if state.format in ("json", "csv"):
@@ -572,12 +537,6 @@ def export_yara_cmd(
     _echo(table)
 
 
-def _default_import_jobs(num_files: int, cpu_count: int) -> int:
-    """Choose the default worker count for an import (see
-    ``resembl.core.adaptive_worker_count``)."""
-    return adaptive_worker_count(num_files, cpu_count)
-
-
 def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] | None:
     """Worker: read a file and compute its checksum + MinHash fingerprint.
 
@@ -615,13 +574,13 @@ def import_cmd(
         )
 
     start_time = time.time()
-    ngram_size = cast(int, state.config.get("ngram_size", 3))
+    ngram_size = state.config.ngram_size
 
     file_paths = glob.glob(os.path.join(directory, "**", "*.asm"), recursive=True)
     file_paths += glob.glob(os.path.join(directory, "**", "*.txt"), recursive=True)
 
     if jobs is None:
-        jobs = _default_import_jobs(len(file_paths), os.cpu_count() or 1)
+        jobs = adaptive_worker_count(len(file_paths), os.cpu_count() or 1)
     jobs = min(jobs, max(1, len(file_paths)))
 
     # Prepared results are flushed to the database in chunks, so importing a
@@ -805,8 +764,6 @@ def _stream_list(session: Session) -> None:
     the in-memory render — and table output is printed per batch so a huge
     listing never builds one giant table.
     """
-    import sys
-
     from .core import snippet_names_stream
 
     if state.quiet:
@@ -988,7 +945,7 @@ def reindex(
         jobs = max(1, os.cpu_count() or 1)
     result = db_reindex(
         state.session,
-        ngram_size=cast(int, state.config.get("ngram_size", 3)),
+        ngram_size=state.config.ngram_size,
         jobs=jobs,
         progress=(
             _build_progress_printer()
@@ -1032,22 +989,17 @@ def find(
     ),
 ) -> None:
     """Find similar snippets."""
-    effective_top_n = top_n if top_n is not None else state.config.get("top_n", 5)
+    effective_top_n = top_n if top_n is not None else state.config.top_n
     effective_threshold = (
-        threshold if threshold is not None else state.config.get("lsh_threshold", 0.5)
+        threshold if threshold is not None else state.config.lsh_threshold
     )
 
-    if not 0.0 <= effective_threshold < 0.99:
-        err_console.print(
-            "[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive)."
-        )
-        raise typer.Exit(code=1)
     # The banding requires b >= 2 bands; at 128 permutations that caps the
     # buildable threshold near 0.98 (0.981 gives b=1).  Reject unbuildable
     # values up front instead of a silent zero-result build failure.
     _validate_find_threshold(
         effective_threshold,
-        cast(int, state.config.get("num_permutations", 128)),
+        state.config.num_permutations,
     )
 
     query_string: str | None = None
@@ -1072,7 +1024,7 @@ def find(
     # Fast path: if a `serve` process is running for this database, ask it
     # (~ms) instead of paying interpreter startup (~450 ms).  Falls back to
     # the in-process path when no server is reachable.
-    ngram_size = cast(int, state.config.get("ngram_size", 3))
+    ngram_size = state.config.ngram_size
     server_payload = _find_via_server(
         query_string,
         effective_top_n,
@@ -1095,12 +1047,8 @@ def find(
     )
     if state.format == "table" and not state.quiet:
         meta = lsh_meta_get(state.session)
-        num_perm = cast(int, state.config.get("num_permutations", 128))
-        if (
-            meta is None
-            or abs(meta[0] - effective_threshold) > 1e-9
-            or meta[1] != num_perm
-        ):
+        num_perm = state.config.num_permutations
+        if not lsh_meta_matches(meta, effective_threshold, num_perm):
             _echo("[dim]Building LSH index (first search on this database)…[/dim]")
 
     num_candidates, matches = snippet_find_matches(
@@ -1110,8 +1058,8 @@ def find(
         effective_threshold,
         not no_normalization,
         ngram_size=ngram_size,
-        num_permutations=cast(int, state.config.get("num_permutations", 128)),
-        jaccard_weight=cast(float, state.config.get("jaccard_weight", 0.4)),
+        num_permutations=state.config.num_permutations,
+        jaccard_weight=state.config.jaccard_weight,
         progress=build_progress,
     )
 
@@ -1145,14 +1093,14 @@ def find_batch(
     N queries this is roughly N times faster than N separate ``find`` calls.
     The first query pays the one-time index build; the rest are warm.
     """
-    effective_top_n = top_n if top_n is not None else state.config.get("top_n", 5)
+    effective_top_n = top_n if top_n is not None else state.config.top_n
     effective_threshold = (
-        threshold if threshold is not None else state.config.get("lsh_threshold", 0.5)
+        threshold if threshold is not None else state.config.lsh_threshold
     )
-    ngram_size = cast(int, state.config.get("ngram_size", 3))
+    ngram_size = state.config.ngram_size
     _validate_find_threshold(
         effective_threshold,
-        cast(int, state.config.get("num_permutations", 128)),
+        state.config.num_permutations,
     )
 
     queries = [
@@ -1194,8 +1142,8 @@ def find_batch(
                 effective_top_n,
                 effective_threshold,
                 ngram_size=ngram_size,
-                num_permutations=cast(int, state.config.get("num_permutations", 128)),
-                jaccard_weight=cast(float, state.config.get("jaccard_weight", 0.4)),
+                num_permutations=state.config.num_permutations,
+                jaccard_weight=state.config.jaccard_weight,
             )
             results.append(
                 {

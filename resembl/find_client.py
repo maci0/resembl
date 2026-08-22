@@ -134,10 +134,10 @@ def _main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(_main())
-
-
 def main() -> None:
     """Console-script entry point."""
     sys.exit(_main())
+
+
+if __name__ == "__main__":
+    main()

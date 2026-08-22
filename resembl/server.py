@@ -28,9 +28,7 @@ from typing import Any
 from sqlmodel import Session
 
 from .cache import cache_dir_get, lsh_index_build
-from .core import LSH_THRESHOLD, NUM_PERMUTATIONS, db_reindex, snippet_find_matches
-from .lsh import fingerprint_version_get
-from .models import FINGERPRINT_VERSION
+from .core import LSH_THRESHOLD, db_reindex, snippet_find_matches
 
 #: Version-guarded result cache: key -> (db_version, payload).  SQLite's
 #: ``PRAGMA data_version`` increments on every commit, so a cached result is
@@ -63,14 +61,20 @@ def _db_version(session: Session) -> int | None:
 
 def _find_one(session: Session, body: dict, query: str) -> dict:
     """Run one find, served from the version-guarded cache when possible."""
+    top_n = int(body.get("top_n", 5))
+    threshold = body.get("threshold")
+    normalize = bool(body.get("normalize", True))
+    ngram_size = int(body.get("ngram_size", _SERVER_NGRAM))
+    num_permutations = int(body.get("num_permutations", _SERVER_NUM_PERM))
+    jaccard_weight = float(body.get("jaccard_weight", _SERVER_JACCARD_WEIGHT))
     key = (
         query,
-        int(body.get("top_n", 5)),
-        body.get("threshold"),
-        bool(body.get("normalize", True)),
-        int(body.get("ngram_size", _SERVER_NGRAM)),
-        int(body.get("num_permutations", _SERVER_NUM_PERM)),
-        float(body.get("jaccard_weight", _SERVER_JACCARD_WEIGHT)),
+        top_n,
+        threshold,
+        normalize,
+        ngram_size,
+        num_permutations,
+        jaccard_weight,
     )
     version = _db_version(session)
     if version is not None:
@@ -85,23 +89,25 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
     # losing its ~50 ms startup, so the server is the right place.)
     from .lsh import _banding_params
 
-    threshold = key[2] if key[2] is not None else LSH_THRESHOLD
+    effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
     try:
-        bands, _ = _banding_params(threshold, key[5])
+        bands, _ = _banding_params(effective_threshold, num_permutations)
     except ValueError:
         bands = 1
     if bands < 2:
         return {
-            "error": f"threshold {threshold} is too high for {key[5]} "
-            "permutations (fewer than 2 bands)"
+            "error": f"threshold {effective_threshold} is too high for "
+            f"{num_permutations} permutations (fewer than 2 bands)"
         }
     num_candidates, matches = snippet_find_matches(
         session,
         query,
-        *key[1:4],
-        ngram_size=key[4],
-        num_permutations=key[5],
-        jaccard_weight=key[6],
+        top_n=top_n,
+        threshold=threshold,
+        normalize=normalize,
+        ngram_size=ngram_size,
+        num_permutations=num_permutations,
+        jaccard_weight=jaccard_weight,
     )
     payload = {
         "lsh_candidates": num_candidates,
@@ -247,35 +253,19 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         from .config import load_config
 
         cfg = load_config()
-        _SERVER_THRESHOLD = float(cfg.get("lsh_threshold", LSH_THRESHOLD))
-        _SERVER_NUM_PERM = int(cfg.get("num_permutations", NUM_PERMUTATIONS))
-        _SERVER_NGRAM = int(cfg.get("ngram_size", 3))
-        _SERVER_JACCARD_WEIGHT = float(cfg.get("jaccard_weight", 0.4))
+        _SERVER_THRESHOLD = cfg.lsh_threshold
+        _SERVER_NUM_PERM = cfg.num_permutations
+        _SERVER_NGRAM = cfg.ngram_size
+        _SERVER_JACCARD_WEIGHT = cfg.jaccard_weight
 
         # One-time migration + index build, before any request is served.
         # The migration worker count scales with the database (spawning a
         # worker per CPU for a small database costs more than the work).
-        needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
-        from .lsh import fingerprint_ngram_get
+        from .core import adaptive_worker_count, fingerprints_need_reindex
 
-        if not needs_reindex and fingerprint_ngram_get(session) != _SERVER_NGRAM:
-            # A config n-gram change silently zeroes matches — reindex once.
-            needs_reindex = True
-        if not needs_reindex and _SERVER_NUM_PERM != NUM_PERMUTATIONS:
+        if fingerprints_need_reindex(session, _SERVER_NGRAM, _SERVER_NUM_PERM):
             from sqlmodel import func, select
 
-            from .models import Snippet, minhash_num_perm
-
-            blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
-            if blob is not None:
-                try:
-                    needs_reindex = minhash_num_perm(blob) != _SERVER_NUM_PERM
-                except ValueError:
-                    needs_reindex = True  # corrupt blob — reindex heals it
-        if needs_reindex:
-            from sqlmodel import func, select
-
-            from .core import adaptive_worker_count
             from .models import Snippet
 
             num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
@@ -289,14 +279,10 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         # parameters — rebuilding an already-current index on every restart
         # would make serve startup pay the full build (~2 min at 500k) each
         # time, which bites under process managers that restart often.
-        from .lsh import lsh_meta_get
+        from .lsh import lsh_meta_get, lsh_meta_matches
 
         meta = lsh_meta_get(session)
-        if (
-            meta is None
-            or abs(meta[0] - _SERVER_THRESHOLD) > 1e-9
-            or meta[1] != _SERVER_NUM_PERM
-        ):
+        if not lsh_meta_matches(meta, _SERVER_THRESHOLD, _SERVER_NUM_PERM):
             lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
 
     _FindHandler.engine = engine

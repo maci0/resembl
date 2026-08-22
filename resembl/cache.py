@@ -29,6 +29,7 @@ from .lsh import (
     fingerprint_version_set,
     lsh_index_clear,
     lsh_meta_get,
+    lsh_meta_matches,
     lsh_meta_set,
 )
 from .models import FINGERPRINT_VERSION, Snippet, minhash_ensure_packed
@@ -361,7 +362,7 @@ def lsh_cache_load(
     the next save.
     """
     meta = lsh_meta_get(session)
-    if meta is not None and abs(meta[0] - threshold) < 1e-9 and meta[1] == num_perm:
+    if lsh_meta_matches(meta, threshold, num_perm):
         return ResemblLSH(session, threshold, num_perm)
 
     lsh_cache_path = lsh_cache_path_get(threshold)

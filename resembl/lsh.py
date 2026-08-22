@@ -240,6 +240,20 @@ def lsh_meta_clear(session: Session) -> None:
     session.commit()
 
 
+def lsh_meta_matches(
+    meta: tuple[float, int] | None, threshold: float, num_perm: int
+) -> bool:
+    """Return True when a built index matches the requested parameters.
+
+    *meta* is an ``lsh_meta_get`` result.  The threshold compares with a
+    small tolerance because the stored float round-trips through the
+    database; anything else means the index must be rebuilt.
+    """
+    return (
+        meta is not None and abs(meta[0] - threshold) < 1e-9 and meta[1] == num_perm
+    )
+
+
 def fingerprint_version_get(session: Session) -> int | None:
     """Return the stored fingerprint-format version, or ``None`` if unset."""
     row = session.execute(

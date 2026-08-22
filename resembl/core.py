@@ -34,12 +34,14 @@ from .cache import (
 )
 from .lsh import (
     ResemblLSH,
+    _banding_params,
     fingerprint_ngram_clear,
     fingerprint_ngram_get,
     fingerprint_ngram_set,
     fingerprint_version_clear,
     fingerprint_version_get,
     fingerprint_version_set,
+    lsh_meta_get,
 )
 from .models import (
     FINGERPRINT_VERSION,
@@ -298,18 +300,6 @@ def _snippet_minhashes_by_checksums(
     return result
 
 
-def _snippet_code_batches(
-    session: Session, batch_size: int = 500
-) -> Iterator[list[Snippet]]:
-    """Yield snippets in fixed-size lists, streaming to bound memory usage.
-
-    Uses keyset pagination so each batch is fully consumed before it is
-    yielded — callers commit mid-loop, which SQLite would reject while a
-    streaming read cursor is still open.
-    """
-    yield from Snippet.iter_batches(session, batch_size)
-
-
 #: Parameterized template for one snippet row (the executemany path).
 _SNIPPET_INSERT_SQL = (
     "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
@@ -529,6 +519,37 @@ def snippet_add(
     return new_snippet
 
 
+def fingerprints_need_reindex(
+    session: Session, ngram_size: int, num_permutations: int
+) -> bool:
+    """Return True when stored fingerprints predate the requested parameters.
+
+    Stored blobs carry a format-version stamp, an n-gram stamp, and their
+    permutation count; a mismatch against any of them would silently mix
+    fingerprint formats in query results, so the database must be reindexed
+    once first.  Reindexing current-format blobs is idempotent (identical
+    fingerprints).  Shared by ``find`` and ``serve`` startup.
+    """
+    if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+        return True
+    if fingerprint_ngram_get(session) != ngram_size:
+        # Stored fingerprints encode their n-gram; a config ngram change
+        # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
+        # ngram 5) — reindex once at the new n-gram.
+        return True
+    if num_permutations == NUM_PERMUTATIONS:
+        return False
+    # A non-default permutation count must match the stored blobs; the
+    # version stamp does not cover perm-count changes, so probe one blob.
+    blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
+    if blob is None:
+        return False
+    try:
+        return minhash_num_perm(blob) != num_permutations
+    except ValueError:
+        return True  # corrupt blob — a reindex heals it
+
+
 def snippet_find_matches(
     session: Session,
     query_string: str,
@@ -549,26 +570,9 @@ def snippet_find_matches(
         threshold = LSH_THRESHOLD
 
     # Fingerprint-format migration: if the stored blobs were written by an
-    # older algorithm (stamp missing or outdated), or with a different
-    # permutation count than requested (the config's num_permutations),
-    # recompute them once so queries never silently mix fingerprint formats.
-    # Reindexing current-format blobs is idempotent (identical fingerprints).
-    needs_reindex = fingerprint_version_get(session) != FINGERPRINT_VERSION
-    if not needs_reindex and fingerprint_ngram_get(session) != ngram_size:
-        # Stored fingerprints encode their n-gram; a config ngram change
-        # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
-        # ngram 5) — reindex once at the new n-gram.
-        needs_reindex = True
-    if not needs_reindex and num_permutations != NUM_PERMUTATIONS:
-        # A non-default permutation count must match the stored blobs; the
-        # version stamp does not cover perm-count changes, so probe one blob.
-        blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
-        if blob is not None:
-            try:
-                needs_reindex = minhash_num_perm(blob) != num_permutations
-            except ValueError:
-                needs_reindex = True  # corrupt blob — a reindex heals it
-    if needs_reindex:
+    # older algorithm, recompute them once so queries never silently mix
+    # fingerprint formats.
+    if fingerprints_need_reindex(session, ngram_size, num_permutations):
         num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
         db_reindex(
             session,
@@ -711,7 +715,9 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
                 else f"snippet_{snippet.checksum[:16]}"
             )
             rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
-            if not rule_name[0].isalpha() and rule_name[0] != "_":
+            # A name may be empty (e.g. added with an empty alias) — index
+            # would crash; prefix instead, as for names starting with a digit.
+            if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
                 rule_name = "r_" + rule_name
             rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
 
@@ -847,7 +853,7 @@ def db_reindex(
             with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as executor:
                 in_flight: deque[tuple[list[Snippet], Future[list[bytes]]]] = deque()
                 max_in_flight = jobs * 2
-                for batch in _snippet_code_batches(session, batch_size):
+                for batch in Snippet.iter_batches(session, batch_size):
                     codes = [snippet.code for snippet in batch]
                     in_flight.append(
                         (
@@ -871,11 +877,11 @@ def db_reindex(
             logger.warning("Process pool unavailable; reindexing sequentially.")
             reindexed = 0
             batches_since_commit = 0
-            for batch in _snippet_code_batches(session, batch_size):
+            for batch in Snippet.iter_batches(session, batch_size):
                 codes = [snippet.code for snippet in batch]
                 apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     else:
-        for batch in _snippet_code_batches(session, batch_size):
+        for batch in Snippet.iter_batches(session, batch_size):
             codes = [snippet.code for snippet in batch]
             apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
     session.commit()
@@ -1172,9 +1178,6 @@ def db_verify(session: Session) -> dict:
     ``reindex --force`` should resolve).  Callers typically exit non-zero
     only when ``issues`` is non-empty.
     """
-    from .lsh import _banding_params, fingerprint_version_get, lsh_meta_get
-    from .models import FINGERPRINT_VERSION
-
     num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
     warnings: list[str] = []
     issues: list[str] = []

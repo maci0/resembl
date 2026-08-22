@@ -341,7 +341,10 @@ class TestImportJobs(BaseCLITest):
     """The adaptive default worker count for imports."""
 
     def test_default_jobs_scales_with_directory(self):
-        from resembl.cli import _default_import_jobs as d
+        # The import command derives its default from
+        # core.adaptive_worker_count (one worker per ~100 files, capped at
+        # the CPU count).
+        from resembl.core import adaptive_worker_count as d
 
         self.assertEqual(d(0, 32), 1)
         self.assertEqual(d(50, 32), 1)  # small dirs: no pool spawn at all
