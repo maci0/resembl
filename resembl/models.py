@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Column, Integer, Text
 from sqlmodel import Field, Session, SQLModel, select
 
-from .scoring import (  # noqa: F401  (re-exported; `from resembl.models import minhash_pack` keeps working)
+# re-exported: `from resembl.models import minhash_pack` keeps working
+from .scoring import (  # noqa: F401
     minhash_ensure_packed,
     minhash_jaccard,
     minhash_jaccard_batch,
@@ -24,27 +25,25 @@ if TYPE_CHECKING:
     from datasketch import MinHash
 
 
-class Collection(SQLModel, table=True):  # type: ignore
+class Collection(SQLModel, table=True):
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 
     name: str = Field(primary_key=True, max_length=128)
     description: str = ""
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @classmethod
-    def get_all(cls, session: Session) -> Sequence["Collection"]:
+    def get_all(cls, session: Session) -> Sequence[Collection]:
         """Return all collections."""
         return session.exec(select(cls)).all()
 
     @classmethod
-    def get_by_name(cls, session: Session, name: str) -> "Collection | None":
+    def get_by_name(cls, session: Session, name: str) -> Collection | None:
         """Retrieve a collection by name."""
         return session.get(cls, name)
 
 
-class SnippetVersion(SQLModel, table=True):  # type: ignore
+class SnippetVersion(SQLModel, table=True):
     """A historical version of a snippet's code.
 
     The primary key is a plain integer set by the caller.  DuckDB (as of
@@ -61,14 +60,10 @@ class SnippetVersion(SQLModel, table=True):  # type: ignore
     snippet_checksum: str = Field(index=True, max_length=64)
     code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     @classmethod
-    def get_by_checksum(
-        cls, session: Session, checksum: str
-    ) -> Sequence["SnippetVersion"]:
+    def get_by_checksum(cls, session: Session, checksum: str) -> Sequence[SnippetVersion]:
         """Return all versions for a given snippet, newest first."""
         return session.exec(
             select(cls)
@@ -77,7 +72,7 @@ class SnippetVersion(SQLModel, table=True):  # type: ignore
         ).all()
 
 
-class Snippet(SQLModel, table=True):  # type: ignore
+class Snippet(SQLModel, table=True):
     """Model representing a stored assembly snippet."""
 
     checksum: str = Field(primary_key=True, max_length=64)
@@ -98,12 +93,12 @@ class Snippet(SQLModel, table=True):  # type: ignore
         return json.loads(self.tags)
 
     @classmethod
-    def get_by_checksum(cls, session: Session, checksum: str) -> "Snippet | None":
+    def get_by_checksum(cls, session: Session, checksum: str) -> Snippet | None:
         """Retrieve a snippet by its checksum."""
         return session.get(cls, checksum)
 
     @classmethod
-    def get_by_name(cls, session: Session, name: str) -> "Snippet | None":
+    def get_by_name(cls, session: Session, name: str) -> Snippet | None:
         """Return the snippet containing the given name, if any."""
         # Use SQL LIKE to narrow candidates, then verify in Python
         candidates = session.exec(
@@ -115,21 +110,17 @@ class Snippet(SQLModel, table=True):  # type: ignore
         return None
 
     @classmethod
-    def get_all(cls, session: Session) -> Sequence["Snippet"]:
+    def get_all(cls, session: Session) -> Sequence[Snippet]:
         """Return all snippets in the database."""
         return session.exec(select(cls)).all()
 
     @classmethod
-    def stream_all(
-        cls, session: Session, batch_size: int = 1000
-    ) -> Iterator["Snippet"]:
+    def stream_all(cls, session: Session, batch_size: int = 1000) -> Iterator[Snippet]:
         """Yield all snippets in batches, bounding memory for large databases."""
         yield from session.exec(select(cls)).yield_per(batch_size)
 
     @classmethod
-    def iter_batches(
-        cls, session: Session, batch_size: int = 1000
-    ) -> Iterator[list["Snippet"]]:
+    def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:
         """Yield ``Snippet`` lists via keyset pagination on the checksum PK.
 
         Unlike a streaming cursor (``yield_per``), each batch fully consumes
@@ -164,11 +155,7 @@ class Snippet(SQLModel, table=True):  # type: ignore
         """
         last: str | None = None
         while True:
-            stmt = (
-                select(cls.checksum, cls.minhash)
-                .order_by(cls.checksum)
-                .limit(batch_size)
-            )
+            stmt = select(cls.checksum, cls.minhash).order_by(cls.checksum).limit(batch_size)
             if last is not None:
                 stmt = stmt.where(cls.checksum > last)
             batch = session.exec(stmt).all()
@@ -178,9 +165,7 @@ class Snippet(SQLModel, table=True):  # type: ignore
             last = batch[-1][0]
 
     @classmethod
-    def get_by_collection(
-        cls, session: Session, collection_name: str
-    ) -> Sequence["Snippet"]:
+    def get_by_collection(cls, session: Session, collection_name: str) -> Sequence[Snippet]:
         """Return all snippets in a given collection."""
         return session.exec(select(cls).where(cls.collection == collection_name)).all()
 
@@ -189,7 +174,7 @@ class Snippet(SQLModel, table=True):  # type: ignore
         return minhash_unpack(self.minhash)
 
 
-class LSHBucket(SQLModel, table=True):  # type: ignore
+class LSHBucket(SQLModel, table=True):
     """SQLite-backed LSH index entry (one row per band bucket hit).
 
     The index is a banded Locality-Sensitive Hash: every snippet contributes
@@ -210,7 +195,7 @@ class LSHBucket(SQLModel, table=True):  # type: ignore
     checksum: str = Field(primary_key=True, max_length=64, index=True)
 
 
-class LSHMeta(SQLModel, table=True):  # type: ignore
+class LSHMeta(SQLModel, table=True):
     """Single-row table recording the parameters of the built LSH index.
 
     ``id`` is always 1.  A present row means the ``lsh_bucket`` table holds a
@@ -234,7 +219,7 @@ class LSHMeta(SQLModel, table=True):  # type: ignore
 FINGERPRINT_VERSION = 3
 
 
-class AppMeta(SQLModel, table=True):  # type: ignore
+class AppMeta(SQLModel, table=True):
     """Small key-value store for application metadata (e.g. fingerprint version)."""
 
     __tablename__ = "app_meta"  # noqa: N815

@@ -67,9 +67,7 @@ def minhash_bytes_per_snippet(db_path: str) -> float:
     """Average stored MinHash byte size (compact format should be ~520 B)."""
     conn = sqlite3.connect(db_path)
     try:
-        total, count = conn.execute(
-            "SELECT SUM(LENGTH(minhash)), COUNT(*) FROM snippet"
-        ).fetchone()
+        total, count = conn.execute("SELECT SUM(LENGTH(minhash)), COUNT(*) FROM snippet").fetchone()
     finally:
         conn.close()
     return (total / count) if count else 0.0
@@ -127,9 +125,7 @@ def main() -> None:
 
     if args.seed is not None:
         random.seed(args.seed)
-    query_file = os.path.join(
-        args.data_dir, random.choice([f for f in os.listdir(args.data_dir)])
-    )
+    query_file = os.path.join(args.data_dir, random.choice(os.listdir(args.data_dir)))
 
     print("\n--- Find (cold cache: LSH rebuild + save) ---")
     t_cold = run_command(["--quiet", "find", "--file", query_file], env)

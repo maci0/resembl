@@ -117,9 +117,7 @@ def _generate_one(args: tuple[str, int, int, str, int | None]) -> None:
     name, i, num_files, data_dir, seed = args
     if seed is not None:
         random.seed(seed + i)
-    function_names_sample = [
-        f"generated_func_{random.randrange(num_files):04d}" for _ in range(20)
-    ]
+    function_names_sample = [f"generated_func_{random.randrange(num_files):04d}" for _ in range(20)]
 
     # --- Build the function body ---
     body = []
@@ -200,9 +198,7 @@ def generate_files(
         jobs = max(1, os.cpu_count() or 1) if num_files > 50_000 else 1
     jobs = min(jobs, max(1, num_files))
 
-    args = [
-        (name, i, num_files, data_dir, seed) for i, name in enumerate(function_names)
-    ]
+    args = [(name, i, num_files, data_dir, seed) for i, name in enumerate(function_names)]
 
     if jobs == 1:
         for a in args:
@@ -217,15 +213,11 @@ def generate_files(
             for a in args:
                 _generate_one(a)
 
-    print(
-        f"Successfully generated {num_files} new, more random assembly files in '{data_dir}/'"
-    )
+    print(f"Successfully generated {num_files} new, more random assembly files in '{data_dir}/'")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate random assembly files for testing."
-    )
+    parser = argparse.ArgumentParser(description="Generate random assembly files for testing.")
     parser.add_argument(
         "--num-files",
         type=int,

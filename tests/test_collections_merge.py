@@ -1,6 +1,5 @@
 """Tests for collections, versioning, merge, tags, search, and config dict-compat."""
 
-import json
 import os
 import tempfile
 import unittest
@@ -88,9 +87,7 @@ class TestCollections(BaseDBTest):
     def test_add_snippet_to_nonexistent_collection(self):
         """Adding to a nonexistent collection should return None."""
         snippet = snippet_add(self.session, "func", "RET")
-        result = collection_add_snippet(
-            self.session, "missing", snippet.checksum, quiet=True
-        )
+        result = collection_add_snippet(self.session, "missing", snippet.checksum, quiet=True)
         self.assertIsNone(result)
 
     def test_add_nonexistent_snippet_to_collection(self):
@@ -297,12 +294,8 @@ class TestDBMerge(BaseDBTest):
 
         # Source: the same 120 codes under new names (forces merges) + 10 new.
         source_snippets = [
-            (f"s{i}_src", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", [], None)
-            for i in range(120)
-        ] + [
-            (f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", [], None)
-            for i in range(10)
-        ]
+            (f"s{i}_src", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", [], None) for i in range(120)
+        ] + [(f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", [], None) for i in range(10)]
         source_path = self._create_source_db(source_snippets)
 
         counts = {"select": 0}

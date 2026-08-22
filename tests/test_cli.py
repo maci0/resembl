@@ -6,7 +6,6 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
-from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -41,7 +40,7 @@ class BaseCLITest(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
 
-        result = subprocess.run(
+        return subprocess.run(
             ["python", "-m", "resembl.cli", *shlex.split(command)],
             shell=False,
             capture_output=True,
@@ -50,7 +49,6 @@ class BaseCLITest(unittest.TestCase):
             env=env,
             check=False,
         )
-        return result
 
 
 class TestCLICommands(BaseCLITest):
@@ -92,9 +90,7 @@ class TestCLICommands(BaseCLITest):
         with open(queries_file, "w", encoding="utf-8") as f:
             f.write("MOV EAX, 1\n")
         try:
-            batch = self.run_command(
-                f"find-batch --file {queries_file} --threshold 0.985"
-            )
+            batch = self.run_command(f"find-batch --file {queries_file} --threshold 0.985")
         finally:
             os.remove(queries_file)
         self.assertNotEqual(batch.returncode, 0)
@@ -159,7 +155,7 @@ class TestCLICommands(BaseCLITest):
             exported_file = os.path.join(export_dir, "test_snippet.asm")
             self.assertTrue(os.path.exists(exported_file))
 
-            with open(exported_file, "r", encoding="utf-8") as f:
+            with open(exported_file, encoding="utf-8") as f:
                 content = f.read()
                 self.assertEqual(content, "MOV EAX, 1")
 
@@ -268,17 +264,13 @@ class TestCLIConfig(BaseCLITest):
     def test_config_dir_env_override(self):
         """RESEMBL_CONFIG_DIR should override the default config path."""
         with tempfile.TemporaryDirectory() as cfgdir:
-            self.run_command(
-                "config set top_n 7", extra_env={"RESEMBL_CONFIG_DIR": cfgdir}
-            )
+            self.run_command("config set top_n 7", extra_env={"RESEMBL_CONFIG_DIR": cfgdir})
             config_path = os.path.join(cfgdir, "config.toml")
             with open(config_path, "rb") as f:
                 data = tomllib.load(f)
             self.assertEqual(data.get("top_n"), 7)
 
-            result = self.run_command(
-                "config path", extra_env={"RESEMBL_CONFIG_DIR": cfgdir}
-            )
+            result = self.run_command("config path", extra_env={"RESEMBL_CONFIG_DIR": cfgdir})
             self.assertIn(config_path, result.stdout)
 
     def test_cache_dir_env_override(self):
@@ -415,9 +407,7 @@ class TestCLIImport(BaseCLITest):
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(f"MOV R{i}, {i}\nRET")
 
-            result = self.run_command(
-                f"--format json import --force --jobs 0 {import_dir}"
-            )
+            result = self.run_command(f"--format json import --force --jobs 0 {import_dir}")
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 3)
@@ -440,9 +430,7 @@ class TestCLIImport(BaseCLITest):
                 with open(os.path.join(import_dir, fname), "w", encoding="utf-8") as f:
                     f.write(code)
 
-            result = self.run_command(
-                f"--format json import --force --jobs 0 {import_dir}"
-            )
+            result = self.run_command(f"--format json import --force --jobs 0 {import_dir}")
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 2)
@@ -486,9 +474,7 @@ class TestCLIAddSnippet(BaseCLITest):
         self.run_command("add '' 'MOV EDX, 4'")
         self.run_command("add '' 'MOV ESI, 5'")
         with Session(self.engine) as session:
-            snippets = session.exec(
-                select(Snippet).where(Snippet.names == '[""]')
-            ).all()
+            snippets = session.exec(select(Snippet).where(Snippet.names == '[""]')).all()
             self.assertEqual(len(snippets), 2)
 
     def test_add_multiple_snippets_with_same_name(self):
@@ -496,9 +482,7 @@ class TestCLIAddSnippet(BaseCLITest):
         self.run_command("add same_name 'MOV EDI, 6'")
         self.run_command("add same_name 'MOV EBP, 7'")
         with Session(self.engine) as session:
-            snippets = session.exec(
-                select(Snippet).where(Snippet.names == '["same_name"]')
-            ).all()
+            snippets = session.exec(select(Snippet).where(Snippet.names == '["same_name"]')).all()
             self.assertEqual(len(snippets), 2)
 
 

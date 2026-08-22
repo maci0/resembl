@@ -99,9 +99,7 @@ app = typer.Typer(
 config_app = typer.Typer(help="Manage user configuration.", rich_markup_mode="rich")
 name_app = typer.Typer(help="Manage snippet names.", rich_markup_mode="rich")
 tag_app = typer.Typer(help="Manage snippet tags.", rich_markup_mode="rich")
-collection_app = typer.Typer(
-    help="Manage snippet collections.", rich_markup_mode="rich"
-)
+collection_app = typer.Typer(help="Manage snippet collections.", rich_markup_mode="rich")
 app.add_typer(config_app, name="config")
 app.add_typer(name_app, name="name")
 app.add_typer(tag_app, name="tag")
@@ -144,9 +142,7 @@ def _echo_format(data: object) -> None:
             writer.writeheader()
             writer.writerows(data)
         elif isinstance(data, dict):
-            data = {
-                k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()
-            }
+            data = {k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}
             writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
             writer.writeheader()
             writer.writerow(data)
@@ -207,9 +203,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read())
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        if isinstance(exc, urllib.error.URLError) and isinstance(
-            exc.reason, TimeoutError
-        ):
+        if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, TimeoutError):
             return None
         try:
             os.remove(port_file)
@@ -322,9 +316,7 @@ def serve(
         raise typer.Exit(code=1)
     except OSError as e:
         # e.g. --port already in use by another process.
-        err_console.print(
-            f"[red]Error:[/red] could not bind {host}:{port}: {e.strerror or e}"
-        )
+        err_console.print(f"[red]Error:[/red] could not bind {host}:{port}: {e.strerror or e}")
         raise typer.Exit(code=1)
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
 
@@ -356,9 +348,7 @@ def _validate_find_threshold(threshold: float, num_perm: int) -> None:
     zero results silently.
     """
     if not 0.0 <= threshold < 0.99:
-        err_console.print(
-            "[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive)."
-        )
+        err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
         raise typer.Exit(code=1)
     from .lsh import _banding_params
 
@@ -410,12 +400,8 @@ def _resolve_checksum(prefix: str) -> str | None:
 
 @app.callback()
 def app_callback(
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Suppress informational output."
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Increase output verbosity."
-    ),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational output."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Increase output verbosity."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
     format_opt: str | None = typer.Option(
         None, "--format", help="Output format: table, json, csv. Overrides config."
@@ -473,9 +459,7 @@ def add(
         if state.format in ("json", "csv"):
             _echo_format({"error": "Failed to add snippet."})
         else:
-            err_console.print(
-                "[red]Error:[/red] Snippet could not be added (empty code?)."
-            )
+            err_console.print("[red]Error:[/red] Snippet could not be added (empty code?).")
             raise typer.Exit(code=1)
 
 
@@ -500,17 +484,13 @@ def export_cmd(
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Export Complete", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Export Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
         table.add_column("Value")
         table.add_row("Snippets exported", str(result["num_exported"]))
         table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
         if result["num_exported"] > 0:
-            table.add_row(
-                "Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"
-            )
+            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
         _echo(table)
 
 
@@ -536,9 +516,7 @@ def export_yara_cmd(
         _echo_format(result)
         return
 
-    table = Table(
-        title="YARA Export Complete", show_header=False, title_style="bold cyan"
-    )
+    table = Table(title="YARA Export Complete", show_header=False, title_style="bold cyan")
     table.add_column("Key", style="dim")
     table.add_column("Value")
     table.add_row("Rules exported", str(result["num_exported"]))
@@ -558,7 +536,7 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
     """
     file_path, ngram_size = args
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             code = f.read()
     except (OSError, UnicodeDecodeError):
         # Unreadable or non-UTF-8 files are rejected, never fatal.
@@ -569,9 +547,7 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
 
 @app.command("import")
 def import_cmd(
-    directory: str = typer.Argument(
-        help="The directory containing .asm or .txt files."
-    ),
+    directory: str = typer.Argument(help="The directory containing .asm or .txt files."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
     jobs: int | None = typer.Option(
         None,
@@ -602,9 +578,7 @@ def import_cmd(
     file_paths: list[str] = []
     for root, _dirs, files in os.walk(directory):
         file_paths.extend(
-            os.path.join(root, fname)
-            for fname in files
-            if fname.lower().endswith((".asm", ".txt"))
+            os.path.join(root, fname) for fname in files if fname.lower().endswith((".asm", ".txt"))
         )
 
     if jobs is None:
@@ -622,9 +596,7 @@ def import_cmd(
         nonlocal prepared, added_total, aliased_total
         if not prepared:
             return
-        batch_result = snippet_add_batch(
-            state.session, prepared, ngram_size=ngram_size
-        )
+        batch_result = snippet_add_batch(state.session, prepared, ngram_size=ngram_size)
         added_total += batch_result["added"]
         aliased_total += batch_result["aliased"]
         prepared = []
@@ -671,9 +643,7 @@ def import_cmd(
                     fp = next(file_iter, None)
                     if fp is None:
                         return False
-                    in_flight.append(
-                        executor.submit(_import_prepare_file, (fp, ngram_size))
-                    )
+                    in_flight.append(executor.submit(_import_prepare_file, (fp, ngram_size)))
                     return True
 
                 for _ in range(min(window, len(file_paths))):
@@ -699,9 +669,7 @@ def import_cmd(
                     ):
                         handle_prepared(future.result())
         except Exception:
-            logger.warning(
-                "Process pool unavailable; falling back to in-process import."
-            )
+            logger.warning("Process pool unavailable; falling back to in-process import.")
             # Redo every file sequentially, exactly as the pool run would
             # have (inserts dedupe on checksum): reset the flushed counters
             # too, or already-flushed chunks are counted twice.
@@ -734,9 +702,7 @@ def import_cmd(
     if state.format in ("json", "csv"):
         _echo_format(stats)
     else:
-        table = Table(
-            title="Import Complete", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Import Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
         table.add_column("Value")
         table.add_row("Snippets imported", str(stats["num_imported"]))
@@ -746,9 +712,7 @@ def import_cmd(
             table.add_row("Files skipped", f"{rejects} (empty or unreadable)")
         table.add_row("Time elapsed", f"{stats['time_elapsed']:.4f}s")
         if stats["num_imported"] > 0:
-            table.add_row(
-                "Avg per snippet", f"{stats['avg_time_per_snippet'] * 1000:.4f}ms"
-            )
+            table.add_row("Avg per snippet", f"{stats['avg_time_per_snippet'] * 1000:.4f}ms")
         _echo(table)
 
 
@@ -770,8 +734,7 @@ def list_cmd(
         start, end = map(int, parts)
         if end < start:
             err_console.print(
-                f"[red]Error:[/red] Invalid range '{range_str}': start must not "
-                "exceed end."
+                f"[red]Error:[/red] Invalid range '{range_str}': start must not exceed end."
             )
             raise typer.Exit(code=1)
 
@@ -791,9 +754,7 @@ def list_cmd(
         table.add_column("Checksum", style="bold")
         table.add_column("Names")
         for i, snippet in enumerate(snippets, 1):
-            table.add_row(
-                str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list)
-            )
+            table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
         _echo(table)
 
 
@@ -828,9 +789,7 @@ def _stream_list(session: Session) -> None:
         writer.writeheader()
         for batch in snippet_names_stream(session):
             for checksum, raw in batch:
-                writer.writerow(
-                    {"checksum": checksum, "names": ", ".join(json.loads(raw))}
-                )
+                writer.writerow({"checksum": checksum, "names": ", ".join(json.loads(raw))})
     else:
         offset = 0
         for batch in snippet_names_stream(session):
@@ -855,9 +814,7 @@ def show(
 
     snippet = snippet_get(state.session, resolved)
     if not snippet:
-        err_console.print(
-            f"[red]Error:[/red] Snippet with checksum {resolved} not found."
-        )
+        err_console.print(f"[red]Error:[/red] Snippet with checksum {resolved} not found.")
         raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
@@ -895,9 +852,7 @@ def rm(
             abort=True,
         )
     if not snippet_delete(state.session, resolved, quiet=state.quiet):
-        err_console.print(
-            f"[red]Error:[/red] Snippet with checksum '{resolved}' not found."
-        )
+        err_console.print(f"[red]Error:[/red] Snippet with checksum '{resolved}' not found.")
         raise typer.Exit(code=1)
 
 
@@ -908,17 +863,13 @@ def stats() -> None:
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Database Statistics", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Database Statistics", show_header=False, title_style="bold cyan")
         table.add_column("Metric", style="dim")
         table.add_column("Value", justify="right")
         table.add_row("Number of snippets", str(result["num_snippets"]))
         table.add_row("Avg snippet size", f"{result['avg_snippet_size']:.2f} chars")
         table.add_row("Vocabulary size", f"{result['vocabulary_size']} tokens")
-        table.add_row(
-            "Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}"
-        )
+        table.add_row("Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}")
         _echo(table)
 
 
@@ -936,9 +887,7 @@ def verify() -> None:
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Database Health", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Database Health", show_header=False, title_style="bold cyan")
         table.add_column("Metric", style="dim")
         table.add_column("Value", justify="right")
         table.add_row("Snippets", str(result["num_snippets"]))
@@ -986,39 +935,29 @@ def reindex(
         ngram_size=state.config.ngram_size,
         jobs=jobs,
         progress=(
-            _build_progress_printer()
-            if state.format == "table" and not state.quiet
-            else None
+            _build_progress_printer() if state.format == "table" and not state.quiet else None
         ),
     )
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Re-indexing Complete", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Re-indexing Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
         table.add_column("Value")
         table.add_row("Snippets re-indexed", str(result["num_reindexed"]))
         table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
         if result["num_reindexed"] > 0:
-            table.add_row(
-                "Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"
-            )
+            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
         _echo(table)
 
 
 @app.command()
 def find(
-    query: str | None = typer.Option(
-        None, "--query", help="The query string to search for."
-    ),
+    query: str | None = typer.Option(None, "--query", help="The query string to search for."),
     file: typer.FileText | None = typer.Option(
         None, "--file", help="Path to a file containing the query. Use '-' for stdin."
     ),
-    top_n: int | None = typer.Option(
-        None, "--top-n", help="Number of top matches to return."
-    ),
+    top_n: int | None = typer.Option(None, "--top-n", help="Number of top matches to return."),
     threshold: float | None = typer.Option(
         None, "--threshold", help="LSH threshold override (0.0-1.0)."
     ),
@@ -1028,9 +967,7 @@ def find(
 ) -> None:
     """Find similar snippets."""
     effective_top_n = top_n if top_n is not None else state.config.top_n
-    effective_threshold = (
-        threshold if threshold is not None else state.config.lsh_threshold
-    )
+    effective_threshold = threshold if threshold is not None else state.config.lsh_threshold
 
     # The banding requires b >= 2 bands; at 128 permutations that caps the
     # buildable threshold near 0.98 (0.981 gives b=1).  Reject unbuildable
@@ -1054,9 +991,7 @@ def find(
         query_string = file.read()
 
     if not query_string:
-        err_console.print(
-            "[red]Error:[/red] No query provided. Use --query, --file, or stdin."
-        )
+        err_console.print("[red]Error:[/red] No query provided. Use --query, --file, or stdin.")
         raise typer.Exit(code=1)
 
     # Fast path: if a `serve` process is running for this database, ask it
@@ -1079,9 +1014,7 @@ def find(
     # reindex.  Pass a progress printer in table mode so long-running
     # operations report progress (it is a no-op below 100k snippets).
     build_progress = (
-        _build_progress_printer()
-        if state.format == "table" and not state.quiet
-        else None
+        _build_progress_printer() if state.format == "table" and not state.quiet else None
     )
     if state.format == "table" and not state.quiet:
         meta = lsh_meta_get(state.session)
@@ -1136,34 +1069,25 @@ def find_batch(
     The first query pays the one-time index build; the rest are warm.
     """
     effective_top_n = top_n if top_n is not None else state.config.top_n
-    effective_threshold = (
-        threshold if threshold is not None else state.config.lsh_threshold
-    )
+    effective_threshold = threshold if threshold is not None else state.config.lsh_threshold
     ngram_size = state.config.ngram_size
     _validate_find_threshold(
         effective_threshold,
         state.config.num_permutations,
     )
 
-    queries = [
-        line.strip()
-        for line in file
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+    queries = [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]
     if not queries:
         err_console.print("[red]Error:[/red] No queries found in the file.")
         raise typer.Exit(code=1)
 
     results: list[dict] = []
-    converted = []
-    for raw_query in queries:
+    converted = [
         # Same convenience as `find --query`: single-line ';' separates
         # statements (in a multi-line batch entry ';' stays a comment).
-        converted.append(
-            raw_query.replace(";", "\n")
-            if ";" in raw_query and "\n" not in raw_query
-            else raw_query
-        )
+        raw_query.replace(";", "\n") if ";" in raw_query and "\n" not in raw_query else raw_query
+        for raw_query in queries
+    ]
 
     # Fast path: a running `serve` process answers the whole batch in one
     # round trip with a warm index (fall back to in-process otherwise).
@@ -1232,9 +1156,7 @@ def search(
             table.add_column("Checksum", style="bold")
             table.add_column("Names")
             for i, snippet in enumerate(snippets, 1):
-                table.add_row(
-                    str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list)
-                )
+                table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
             _echo(table)
 
 
@@ -1283,24 +1205,22 @@ def compare(
         "Jaccard Similarity (Structure)",
         f"[magenta]{comp['jaccard_similarity']:.2f}[/magenta]",
     )
-    table.add_row(
-        "Levenshtein Score (Code)", f"[yellow]{comp['levenshtein_score']:.2f}[/yellow]"
-    )
-    table.add_row(
-        "Hybrid Score", f"[bold green]{comp['hybrid_score']:.2f}[/bold green]"
-    )
+    table.add_row("Levenshtein Score (Code)", f"[yellow]{comp['levenshtein_score']:.2f}[/yellow]")
+    table.add_row("Hybrid Score", f"[bold green]{comp['hybrid_score']:.2f}[/bold green]")
     table.add_row("CFG Similarity", f"[blue]{comp['cfg_similarity']:.2f}[/blue]")
-    table.add_row(
-        "Shared Normalized Tokens", f"[cyan]{comp['shared_normalized_tokens']}[/cyan]"
-    )
+    table.add_row("Shared Normalized Tokens", f"[cyan]{comp['shared_normalized_tokens']}[/cyan]")
     _echo(table)
 
     _echo("")
+    snip1 = snippet_get(state.session, resolved1)
+    snip2 = snippet_get(state.session, resolved2)
+    if snip1 is None or snip2 is None:
+        err_console.print("[red]Error:[/red] One or both snippets could not be found.")
+        raise typer.Exit(code=1)
     diff = list(
         difflib.unified_diff(
-            # Both snippets are guaranteed to exist (guarded above).
-            snippet_get(state.session, resolved1).code.splitlines(keepends=True),  # type: ignore[union-attr]
-            snippet_get(state.session, resolved2).code.splitlines(keepends=True),  # type: ignore[union-attr]
+            snip1.code.splitlines(keepends=True),
+            snip2.code.splitlines(keepends=True),
             fromfile=s1["checksum"][:12],
             tofile=s2["checksum"][:12],
             n=3,
@@ -1367,9 +1287,7 @@ def merge(
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Merge Complete", show_header=False, title_style="bold cyan"
-        )
+        table = Table(title="Merge Complete", show_header=False, title_style="bold cyan")
         table.add_column("Key", style="dim")
         table.add_column("Value")
         table.add_row("Added", f"[green]{result['added']}[/green] new snippets")
@@ -1593,12 +1511,12 @@ def collection_add_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    snippet = collection_add_snippet(
-        state.session, collection_name, resolved, quiet=state.quiet
-    )
+    snippet = collection_add_snippet(state.session, collection_name, resolved, quiet=state.quiet)
     if snippet:
+        names = ", ".join(snippet.name_list)
         _echo(
-            f"[green]✓[/green] Added [bold]{', '.join(snippet.name_list)}[/bold] to collection [bold]{collection_name}[/bold]"
+            f"[green]✓[/green] Added [bold]{names}[/bold] to collection "
+            f"[bold]{collection_name}[/bold]"
         )
     else:
         if not state.quiet:
@@ -1618,14 +1536,11 @@ def collection_remove_cmd(
         raise typer.Exit(code=1)
     snippet = collection_remove_snippet(state.session, resolved, quiet=state.quiet)
     if snippet:
-        _echo(
-            f"[green]✓[/green] Removed [bold]{', '.join(snippet.name_list)}[/bold] from its collection"
-        )
+        names = ", ".join(snippet.name_list)
+        _echo(f"[green]✓[/green] Removed [bold]{names}[/bold] from its collection")
     else:
         if not state.quiet:
-            err_console.print(
-                "[red]Error:[/red] Failed to remove snippet from collection."
-            )
+            err_console.print("[red]Error:[/red] Failed to remove snippet from collection.")
         raise typer.Exit(code=1)
 
 

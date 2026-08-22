@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from resembl.config import (
     DEFAULTS,
-    ResemblConfig,
     config_dir_get,
     config_path_get,
     load_config,

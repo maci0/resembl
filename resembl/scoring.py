@@ -693,9 +693,7 @@ def string_normalize(code_snippet: str) -> str:
 def string_checksum(code_snippet: str) -> str:
     """Calculate the SHA256 checksum of a normalized code snippet."""
     normalized_string = string_normalize(code_snippet)
-    return hashlib.sha256(
-        normalized_string.encode("utf-8", errors="surrogatepass")
-    ).hexdigest()
+    return hashlib.sha256(normalized_string.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
 def token_is_label(token_type, value: str) -> bool:
@@ -703,9 +701,7 @@ def token_is_label(token_type, value: str) -> bool:
     return token_type in Name.Label or (token_type in Name and value.endswith(":"))
 
 
-def _code_tokenize_lexed(
-    tokens: Iterable[tuple[object, str]], normalize: bool = True
-) -> list[str]:
+def _code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool = True) -> list[str]:
     """Tokenize an already-lexed token stream (no re-lexing)."""
     output_tokens: list[str] = []
     append = output_tokens.append
@@ -777,9 +773,7 @@ def shingle_weight(shingle: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def score_hybrid(
-    jaccard: float, levenshtein: float, jaccard_weight: float = 0.4
-) -> float:
+def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4) -> float:
     """Combine Jaccard (0–1) and Levenshtein (0–100) into a single 0–100 score.
 
     ``jaccard_weight`` controls the balance:
@@ -806,7 +800,7 @@ def cfg_extract(code: str) -> dict:
     - ``block_sizes``: list of instruction counts per block
     - ``adj``: adjacency list (block index → list of successor indices)
     """
-    lines = [l.strip() for l in code.splitlines() if l.strip()]
+    lines = [line.strip() for line in code.splitlines() if line.strip()]
     if not lines:
         return {"num_blocks": 0, "num_edges": 0, "block_sizes": [], "adj": {}}
 
@@ -995,14 +989,10 @@ def minhash_num_perm(data: bytes) -> int:
         raise ValueError("Corrupt MinHash payload: shorter than the 8-byte header.")
     num_perm = struct.unpack(">I", data[4:8])[0]
     if num_perm < 2 or num_perm > _MAX_NUM_PERM:
-        raise ValueError(
-            f"Corrupt MinHash payload: implausible permutation count {num_perm}."
-        )
+        raise ValueError(f"Corrupt MinHash payload: implausible permutation count {num_perm}.")
     expected = 8 + 4 * num_perm
     if len(data) != expected:
-        raise ValueError(
-            f"Corrupt MinHash payload: expected {expected} bytes, got {len(data)}."
-        )
+        raise ValueError(f"Corrupt MinHash payload: expected {expected} bytes, got {len(data)}.")
     return num_perm
 
 
@@ -1031,9 +1021,7 @@ def minhash_unpack(data: bytes) -> MinHash:
     fingerprint from its snippet's code.
     """
     if not data.startswith(MINHASH_MAGIC):
-        raise ValueError(
-            "Corrupt MinHash payload: missing RMLH magic (unsupported format)."
-        )
+        raise ValueError("Corrupt MinHash payload: missing RMLH magic (unsupported format).")
     from datasketch import MinHash
 
     num_perm = minhash_num_perm(data)
@@ -1193,9 +1181,7 @@ def code_create_minhash(
     Uses configurable n-gram shingling to preserve token ordering so that
     structurally different snippets produce distinct fingerprints.
     """
-    return _minhash_from_tokens(
-        code_tokenize(code_snippet, normalize), ngram_size, num_perm
-    )
+    return _minhash_from_tokens(code_tokenize(code_snippet, normalize), ngram_size, num_perm)
 
 
 def code_create_minhash_batch(

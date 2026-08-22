@@ -1,5 +1,3 @@
-import os
-
 from sqlmodel import Session
 
 from resembl.core import snippet_add

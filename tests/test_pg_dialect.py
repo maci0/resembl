@@ -86,9 +86,8 @@ class TestDialectDispatch(unittest.TestCase):
 
     def test_bucket_keys_are_indexable_hex(self):
         """band_buckets returns 40-char hex keys (indexable on MySQL)."""
-        from datasketch import MinHash
 
-        from resembl.core import code_create_minhash, code_tokenize
+        from resembl.core import code_create_minhash
         from resembl.lsh import band_buckets
 
         m = code_create_minhash("push ebx; mov eax, 1; pop ebx; ret")

@@ -245,12 +245,8 @@ def snippet_prepare(
     # normalized checksum string, once for the MinHash tokens).
     tokens = list(lexer.get_tokens(code))
     normalized = _string_normalize_lexed(tokens)
-    checksum = hashlib.sha256(
-        normalized.encode("utf-8", errors="surrogatepass")
-    ).hexdigest()
-    minhash_bytes = minhash_pack(
-        _minhash_from_tokens(_code_tokenize_lexed(tokens), ngram_size)
-    )
+    checksum = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
+    minhash_bytes = minhash_pack(_minhash_from_tokens(_code_tokenize_lexed(tokens), ngram_size))
     return checksum, name, code, minhash_bytes
 
 
@@ -263,14 +259,12 @@ def _checksum_chunks(checksums: list[str], batch_size: int = 900) -> list[list[s
     return [checksums[i : i + batch_size] for i in range(0, len(checksums), batch_size)]
 
 
-def _snippets_by_checksums(
-    session: Session, checksums: list[str]
-) -> dict[str, Snippet]:
+def _snippets_by_checksums(session: Session, checksums: list[str]) -> dict[str, Snippet]:
     """Fetch snippets by checksum using chunked ``IN`` queries (no N+1)."""
     result: dict[str, Snippet] = {}
     for chunk in _checksum_chunks(list(checksums)):
         for snippet in session.exec(
-            select(Snippet).where(  # type: ignore[attr-defined]
+            select(Snippet).where(
                 Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
             )
         ).all():
@@ -278,9 +272,7 @@ def _snippets_by_checksums(
     return result
 
 
-def _snippet_minhashes_by_checksums(
-    session: Session, checksums: list[str]
-) -> dict[str, bytes]:
+def _snippet_minhashes_by_checksums(session: Session, checksums: list[str]) -> dict[str, bytes]:
     """Fetch only ``(checksum, minhash)`` pairs for many checksums.
 
     The ``code`` column dominates the table, so reading it for every LSH
@@ -292,7 +284,7 @@ def _snippet_minhashes_by_checksums(
     result: dict[str, bytes] = {}
     for chunk in _checksum_chunks(list(checksums)):
         for row in session.exec(
-            select(Snippet.checksum, Snippet.minhash).where(  # type: ignore[attr-defined]
+            select(Snippet.checksum, Snippet.minhash).where(
                 Snippet.checksum.in_(chunk)  # type: ignore[attr-defined]
             )
         ).all():
@@ -480,9 +472,7 @@ def snippet_add_batch(
     }
 
 
-def snippet_add(
-    session: Session, name: str, code: str, ngram_size: int = 3
-) -> Snippet | None:
+def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> Snippet | None:
     """Add a new snippet or alias to the database."""
     if not code.strip():
         return None
@@ -521,9 +511,7 @@ def snippet_add(
     return new_snippet
 
 
-def fingerprints_need_reindex(
-    session: Session, ngram_size: int, num_permutations: int
-) -> bool:
+def fingerprints_need_reindex(session: Session, ngram_size: int, num_permutations: int) -> bool:
     """Return True when stored fingerprints predate the requested parameters.
 
     Stored blobs carry a format-version stamp, an n-gram stamp, and a
@@ -551,7 +539,7 @@ def fingerprints_need_reindex(
         return True
     # Probe one blob: a non-default stored count, or a corrupt blob, means
     # the database must be reindexed before queries can mix formats safely.
-    blob = session.exec(select(Snippet.minhash).limit(1)).first()  # type: ignore[arg-type]
+    blob = session.exec(select(Snippet.minhash).limit(1)).first()
     if blob is None:
         return False
     try:
@@ -583,7 +571,9 @@ def snippet_find_matches(
     # older algorithm, recompute them once so queries never silently mix
     # fingerprint formats.
     if fingerprints_need_reindex(session, ngram_size, num_permutations):
-        num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+        num_snippets = session.exec(
+            select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+        ).one()
         db_reindex(
             session,
             ngram_size=ngram_size,
@@ -642,9 +632,7 @@ def snippet_find_matches(
         try:
             blob = minhash_ensure_packed(minhashes[k])
             if minhash_num_perm(blob) != num_permutations:
-                logger.warning(
-                    "Skipping candidate %s: stale fingerprint permutation count.", k
-                )
+                logger.warning("Skipping candidate %s: stale fingerprint permutation count.", k)
                 continue
         except ValueError:
             logger.warning("Skipping candidate %s: corrupt fingerprint.", k)
@@ -689,8 +677,7 @@ def snippet_find_matches(
             # fuzz.ratio call.
             if (
                 len(scored) >= top_n
-                and 100 * jaccard_weight * jaccard + 100 * (1 - jaccard_weight)
-                < scored[0][0]
+                and 100 * jaccard_weight * jaccard + 100 * (1 - jaccard_weight) < scored[0][0]
             ):
                 continue
             levenshtein = fuzz.ratio(query_string, snippet.code)
@@ -730,9 +717,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     with open(output_file, "w", encoding="utf-8") as f:
         for snippet in Snippet.stream_all(session):
             primary_name = (
-                snippet.name_list[0]
-                if snippet.name_list
-                else f"snippet_{snippet.checksum[:16]}"
+                snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
             )
             rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
             # A name may be empty (e.g. added with an empty alias) — index
@@ -773,9 +758,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     return {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": (
-            (time_elapsed / num_exported) if num_exported > 0 else 0
-        ),
+        "avg_time_per_snippet": ((time_elapsed / num_exported) if num_exported > 0 else 0),
     }
 
 
@@ -787,9 +770,7 @@ def _reindex_prepare(args: tuple[list[str], int, int]) -> list[bytes]:
     codes, ngram_size, num_perm = args
     return [
         minhash_pack(m)
-        for m in code_create_minhash_batch(
-            codes, ngram_size=ngram_size, num_perm=num_perm
-        )
+        for m in code_create_minhash_batch(codes, ngram_size=ngram_size, num_perm=num_perm)
     ]
 
 
@@ -822,7 +803,9 @@ def db_reindex(
     from concurrent.futures import Future, ProcessPoolExecutor
 
     start_time = time.monotonic()
-    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    num_snippets = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
 
     if num_snippets == 0:
         fingerprint_version_set(session, FINGERPRINT_VERSION)
@@ -888,9 +871,7 @@ def db_reindex(
                     in_flight.append(
                         (
                             batch,
-                            executor.submit(
-                                _reindex_prepare, (codes, ngram_size, num_perm)
-                            ),
+                            executor.submit(_reindex_prepare, (codes, ngram_size, num_perm)),
                         )
                     )
                     if len(in_flight) >= max_in_flight:
@@ -1012,8 +993,8 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
     rows = list(
         session.exec(
             select(Snippet)
-            .where(Snippet.checksum >= key)  # type: ignore[attr-defined]
-            .order_by(Snippet.checksum)  # type: ignore[attr-defined]
+            .where(Snippet.checksum >= key)
+            .order_by(Snippet.checksum)
             .limit(limit)
         ).all()
     )
@@ -1021,8 +1002,8 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
         rows += list(
             session.exec(
                 select(Snippet)
-                .where(Snippet.checksum < key)  # type: ignore[attr-defined]
-                .order_by(Snippet.checksum)  # type: ignore[attr-defined]
+                .where(Snippet.checksum < key)
+                .order_by(Snippet.checksum)
                 .limit(limit - len(rows))
             ).all()
         )
@@ -1067,7 +1048,9 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
 
 def db_stats(session: Session) -> dict:
     """Return a dictionary of database statistics."""
-    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    num_snippets = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
     if num_snippets == 0:
         return {
             "num_snippets": 0,
@@ -1078,7 +1061,7 @@ def db_stats(session: Session) -> dict:
 
     # Aggregate the average snippet size in SQL instead of loading every row.
     avg_size = session.exec(
-        select(func.avg(func.length(Snippet.code)))  # type: ignore[arg-type]
+        select(func.avg(func.length(Snippet.code)))
     ).one()
     avg_snippet_size = float(avg_size or 0.0)
 
@@ -1102,9 +1085,7 @@ def db_stats(session: Session) -> dict:
 def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet]:
     """List snippets, optionally within a given range."""
     if end > 0:
-        return list(
-            session.exec(select(Snippet).offset(start).limit(end - start)).all()
-        )
+        return list(session.exec(select(Snippet).offset(start).limit(end - start)).all())
     return list(Snippet.get_all(session))
 
 
@@ -1124,11 +1105,11 @@ def snippet_names_stream(
     while True:
         stmt = (
             select(Snippet.checksum, Snippet.names)
-            .order_by(Snippet.checksum)  # type: ignore[attr-defined]
+            .order_by(Snippet.checksum)
             .limit(batch_size)
         )
         if last is not None:
-            stmt = stmt.where(Snippet.checksum > last)  # type: ignore[attr-defined]
+            stmt = stmt.where(Snippet.checksum > last)
         rows = session.exec(stmt).all()
         if not rows:
             return
@@ -1136,9 +1117,7 @@ def snippet_names_stream(
         last = rows[-1][0]
 
 
-def snippet_search_by_name(
-    session: Session, pattern: str, limit: int = 50
-) -> list[Snippet]:
+def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:
     """Search for snippets where any name matches the pattern (case-insensitive).
 
     The JSON structure means names are embedded in the string, so a standard
@@ -1203,9 +1182,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     for snippet in Snippet.stream_all(session):
         # Use the first name as the primary name, sanitized for safety.
         primary_name = (
-            snippet.name_list[0]
-            if snippet.name_list
-            else f"snippet_{snippet.checksum[:16]}"
+            snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
         )
         safe_name = _export_safe_filename(primary_name)
         if not safe_name:
@@ -1232,9 +1209,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             # 12 hex chars (48 bits) keeps the disambiguator collision-free
             # even with hundreds of thousands of same-named snippets (the
             # previous 8 chars collided at ~30 pairs per 500k).
-            file_path = os.path.join(
-                abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm"
-            )
+            file_path = os.path.join(abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm")
             used_key = os.path.normcase(file_path)
         used_paths.add(used_key)
 
@@ -1248,9 +1223,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     return {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": (
-            time_elapsed / num_exported if num_exported > 0 else 0
-        ),
+        "avg_time_per_snippet": (time_elapsed / num_exported if num_exported > 0 else 0),
     }
 
 
@@ -1263,15 +1236,15 @@ def db_verify(session: Session) -> dict:
     ``reindex --force`` should resolve).  Callers typically exit non-zero
     only when ``issues`` is non-empty.
     """
-    num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    num_snippets = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
     warnings: list[str] = []
     issues: list[str] = []
 
     stored_version = fingerprint_version_get(session)
     if stored_version != FINGERPRINT_VERSION:
-        warnings.append(
-            "fingerprints are from an older format — the next `find` reindexes once"
-        )
+        warnings.append("fingerprints are from an older format — the next `find` reindexes once")
 
     meta = lsh_meta_get(session)
     num_buckets = 0
@@ -1288,9 +1261,9 @@ def db_verify(session: Session) -> dict:
             # bands uniformly — so band0 * b is the exact total for a
             # consistent index, and the scan is 1/b of the full count
             # (~100ms -> ~4ms at 500k, minutes -> seconds at billions).
-            band0 = session.exec(  # type: ignore[arg-type]
+            band0 = session.exec(
                 select(func.count(LSHBucket.checksum)).where(  # type: ignore[arg-type]
-                    LSHBucket.band == 0  # type: ignore[union-attr]
+                    LSHBucket.band == 0
                 )
             ).one()
             num_buckets = band0 * b
@@ -1298,9 +1271,7 @@ def db_verify(session: Session) -> dict:
             # lsh_bucket missing while its meta row says an index exists —
             # e.g. a crash inside the drop/recreate window, or a manual drop.
             # The next `find` rebuilds, so this is a warning, not an issue.
-            warnings.append(
-                "lsh_bucket table is missing — the next `find` rebuilds the index"
-            )
+            warnings.append("lsh_bucket table is missing — the next `find` rebuilds the index")
             num_buckets = 0
         if num_snippets > 0 and num_buckets != expected_buckets:
             issues.append(
@@ -1384,12 +1355,12 @@ def collection_list(session: Session) -> list[dict]:
     collections = Collection.get_all(session)
     counts = dict(
         session.exec(
-            select(  # type: ignore[arg-type]
+            select(
                 Snippet.collection,
                 func.count(Snippet.checksum),  # type: ignore[arg-type]
             )
             .where(Snippet.collection.is_not(None))  # type: ignore[union-attr]
-            .group_by(Snippet.collection)  # type: ignore[union-attr]
+            .group_by(Snippet.collection)
         ).all()
     )
     return [
@@ -1485,9 +1456,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     start_time = time.monotonic()
     # The source may be any backend: a full URL (e.g. duckdb:///file.db,
     # postgresql+pg8000://...) is used as-is; otherwise it is a SQLite path.
-    source_url = (
-        source_db_path if "://" in source_db_path else f"sqlite:///{source_db_path}"
-    )
+    source_url = source_db_path if "://" in source_db_path else f"sqlite:///{source_db_path}"
 
     try:
         source_engine = create_db_engine(source_url)
@@ -1528,9 +1497,9 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # the per-overlap ``session.get`` (the N+1 fixed earlier).
         merge_chunk: list[Snippet] = []
 
-        #: New rows are flushed to the database in chunks so a mostly-new
-        #: merge stays flat in memory regardless of source size.
-        _MERGE_FLUSH_SIZE = 5000
+        # New rows are flushed to the database in chunks so a mostly-new
+        # merge stays flat in memory regardless of source size.
+        merge_flush_size = 5000
 
         def flush_new_rows() -> None:
             """Bulk-insert buffered new rows and sync the index, then clear."""
@@ -1553,8 +1522,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 # the source row's code instead; only a row with no usable
                 # code either is skipped.
                 logger.warning(
-                    "Recomputing fingerprint for source snippet %s "
-                    "(unsupported format).",
+                    "Recomputing fingerprint for source snippet %s (unsupported format).",
                     src_snippet.checksum,
                 )
                 try:
@@ -1579,16 +1547,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             )
             added += 1
             added_minhashes.append((src_snippet.checksum, packed))
-            if len(new_rows) >= _MERGE_FLUSH_SIZE:
+            if len(new_rows) >= merge_flush_size:
                 flush_new_rows()
 
         def flush_merge_chunk() -> None:
             nonlocal updated, skipped
             if not merge_chunk:
                 return
-            local_rows = _snippets_by_checksums(
-                session, [s.checksum for s in merge_chunk]
-            )
+            local_rows = _snippets_by_checksums(session, [s.checksum for s in merge_chunk])
             for src_snippet in merge_chunk:
                 existing = local_rows.get(src_snippet.checksum)
                 if existing is None:

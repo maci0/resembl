@@ -51,8 +51,7 @@ class TestDuckDBIntegration(unittest.TestCase):
         from resembl.lsh import lsh_meta_get
 
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-            for i in range(50)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(50)
         ]
         result = snippet_add_batch(self.session, [x for x in items if x])
         self.assertEqual(result["added"], 50)
@@ -104,13 +103,12 @@ class TestDuckDBIntegration(unittest.TestCase):
         # Plain variant (one-time index build).
         _insert_rows(
             self.session,
-            "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
-            "(:band, :bucket, :checksum)",
+            "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES (:band, :bucket, :checksum)",
             rows,
         )
         self.session.commit()
         count = self.session.exec(
-            select(func.count(LSHBucket.band))  # type: ignore[attr-defined]
+            select(func.count(LSHBucket.band))
         ).one()
         self.assertEqual(count, 2500)
 
@@ -123,7 +121,7 @@ class TestDuckDBIntegration(unittest.TestCase):
         )
         self.session.commit()
         count = self.session.exec(
-            select(func.count(LSHBucket.band))  # type: ignore[attr-defined]
+            select(func.count(LSHBucket.band))
         ).one()
         self.assertEqual(count, 2500)
 
@@ -209,10 +207,7 @@ class TestDuckDBIntegration(unittest.TestCase):
             )
             self.session.commit()
             row = self.session.exec(
-                sqltext(
-                    "SELECT names, code, minhash, collection FROM snippet "
-                    "WHERE checksum = :c"
-                ),
+                sqltext("SELECT names, code, minhash, collection FROM snippet WHERE checksum = :c"),
                 params={"c": checksum},
             ).one()
             self.assertEqual(row[0], json.dumps([name]))

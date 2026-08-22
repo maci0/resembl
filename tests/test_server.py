@@ -28,8 +28,7 @@ class TestServerMode(unittest.TestCase):
         SQLModel.metadata.create_all(self._engine)
         self._session = Session(self._engine)
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-            for i in range(100)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(100)
         ]
         snippet_add_batch(self._session, [x for x in items if x])
         self._env = patch.dict(
@@ -280,9 +279,7 @@ class TestServerMode(unittest.TestCase):
         with contextlib.redirect_stderr(stderr):
             with patch(
                 "urllib.request.urlopen",
-                side_effect=urllib.error.URLError(
-                    ConnectionRefusedError("connection refused")
-                ),
+                side_effect=urllib.error.URLError(ConnectionRefusedError("connection refused")),
             ):
                 rc = _main(["--query", "mov eax, 5"])
         self.assertEqual(rc, 1)
@@ -393,9 +390,9 @@ class TestServerMode(unittest.TestCase):
     def test_find_batch_isolates_bad_queries(self):
         """A malformed query fails itself, not the whole batch."""
         port = self._start_server()
-        body = json.dumps(
-            {"queries": ["push ebx\nmov eax, 5\npop ebx\nret", 12345]}
-        ).encode("utf-8")
+        body = json.dumps({"queries": ["push ebx\nmov eax, 5\npop ebx\nret", 12345]}).encode(
+            "utf-8"
+        )
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}/find-batch",
             data=body,
@@ -437,9 +434,8 @@ class TestServerMode(unittest.TestCase):
 
     def test_result_cache_invalidates_on_db_change(self):
         """Cached finds are served until the database changes (data_version)."""
-        from unittest.mock import patch as _patch
 
-        from resembl.server import _RESULT_CACHE, _db_version
+        from resembl.server import _RESULT_CACHE
 
         _RESULT_CACHE.clear()
         port = self._start_server()
@@ -666,9 +662,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
                     if os.path.isdir(self._cache_dir)
                     else "no cache dir"
                 )
-                self.fail(
-                    f"serve did not start; cache dir: {entries}; port_file: {port_file}"
-                )
+                self.fail(f"serve did not start; cache dir: {entries}; port_file: {port_file}")
 
             query_file = os.path.join(
                 "tests", "test_data", sorted(os.listdir("tests/test_data"))[0]
@@ -705,7 +699,6 @@ class TestLazyPackageInit(unittest.TestCase):
 
         for mod in ("sqlmodel", "pygments", "datasketch", "scipy"):
             sys.modules.pop(mod, None)
-        import resembl
 
         self.assertNotIn("sqlmodel", sys.modules)
         self.assertNotIn("datasketch", sys.modules)

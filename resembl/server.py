@@ -36,7 +36,7 @@ from .core import LSH_THRESHOLD, db_reindex, snippet_find_matches
 #: workflows re-checking the same hashes) answer in ~0.1 ms instead of
 #: ~1.4 ms, never stale.  Non-SQLite backends get no version counter and
 #: bypass the cache.
-_RESULT_CACHE: "OrderedDict[tuple, tuple[int | None, dict]]" = OrderedDict()
+_RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
 _RESULT_CACHE_MAX = 128
 #: Serializes access to the shared cache: requests run in concurrent
 #: handler threads, and OrderedDict is not thread-safe.
@@ -112,8 +112,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
     payload = {
         "lsh_candidates": num_candidates,
         "matches": [
-            {"checksum": s.checksum, "names": s.name_list, "score": score}
-            for s, score in matches
+            {"checksum": s.checksum, "names": s.name_list, "score": score} for s, score in matches
         ],
     }
     if version is not None:
@@ -234,9 +233,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                     try:
                         if not isinstance(query, str):
                             raise ValueError("query must be a string")
-                        results.append(
-                            {"query": query, **_find_one(session, body, query)}
-                        )
+                        results.append({"query": query, **_find_one(session, body, query)})
                     except Exception as exc:  # isolate per-query failures
                         results.append({"query": query, "error": str(exc)})
         except Exception as exc:
@@ -338,7 +335,9 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
 
             from .models import Snippet
 
-            num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+            num_snippets = session.exec(
+                select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+            ).one()
             db_reindex(
                 session,
                 jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
@@ -358,7 +357,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     httpd = _FindServer((host, port), _FindHandler)
     # Per-instance shared state (see _FindHandler.engine): each server
     # generation carries its own engine.
-    httpd.engine = engine  # type: ignore[attr-defined]
+    httpd.engine = engine
     os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(str(httpd.server_address[1]))

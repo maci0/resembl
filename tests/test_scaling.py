@@ -63,9 +63,7 @@ class BaseScalingTest(unittest.TestCase):
         SQLModel.metadata.create_all(ENGINE)
         self.session = Session(ENGINE)
         self._cache_dir = tempfile.TemporaryDirectory()
-        self._env_patch = patch.dict(
-            os.environ, {"RESEMBL_CACHE_DIR": self._cache_dir.name}
-        )
+        self._env_patch = patch.dict(os.environ, {"RESEMBL_CACHE_DIR": self._cache_dir.name})
         self._env_patch.start()
 
     def tearDown(self):
@@ -226,9 +224,7 @@ class TestBatchConsistency(BaseScalingTest):
     def test_parallel_reindex_matches_sequential(self):
         """db_reindex(jobs=N) must produce the same fingerprints as jobs=1."""
         items = [
-            snippet_prepare(
-                f"fn_{i}", f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET", 3
-            )
+            snippet_prepare(f"fn_{i}", f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET", 3)
             for i in range(30)
         ]
         snippet_add_batch(self.session, [i for i in items if i])
@@ -238,15 +234,11 @@ class TestBatchConsistency(BaseScalingTest):
 
         db_reindex(self.session, jobs=2, batch_size=10)
         self.session.expire_all()
-        par_blobs = {
-            s.checksum: s.minhash for s in self.session.exec(select(Snippet)).all()
-        }
+        par_blobs = {s.checksum: s.minhash for s in self.session.exec(select(Snippet)).all()}
 
         db_reindex(self.session, jobs=1, batch_size=10)
         self.session.expire_all()
-        seq_blobs = {
-            s.checksum: s.minhash for s in self.session.exec(select(Snippet)).all()
-        }
+        seq_blobs = {s.checksum: s.minhash for s in self.session.exec(select(Snippet)).all()}
 
         self.assertEqual(set(par_blobs), set(seq_blobs))
         for checksum in checksums:
@@ -307,16 +299,14 @@ class TestSnippetAddBatch(BaseScalingTest):
 
         # Seed 120 snippets.
         seed = [
-            snippet_prepare(f"s{i}", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", 3)
-            for i in range(120)
+            snippet_prepare(f"s{i}", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", 3) for i in range(120)
         ]
         snippet_add_batch(self.session, [i for i in seed if i])
 
         # Re-import all 120 codes with fresh names (forces alias merges)
         # plus 10 brand-new snippets.
         extra = [
-            snippet_prepare(f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", 3)
-            for i in range(10)
+            snippet_prepare(f"t{i}", f"PUSH ECX\nMOV EBX, {i}\nPOP ECX\nRET", 3) for i in range(10)
         ]
         renamed = [
             snippet_prepare(f"s{i}_v2", f"PUSH EBP\nMOV EAX, {i}\nPOP EBP\nRET", 3)
@@ -427,9 +417,7 @@ class TestFindScaling(BaseScalingTest):
         # MinHash) land in the same LSH bucket -> 600 candidates.
         items = []
         for i in range(600):
-            code = (
-                f"; comment {i}\npush ebx\nmov eax, dword [esp+0x{i:X}]\npop ebx\nret"
-            )
+            code = f"; comment {i}\npush ebx\nmov eax, dword [esp+0x{i:X}]\npop ebx\nret"
             items.append(snippet_prepare(f"fn_{i}", code, 3))
         snippet_add_batch(self.session, items)
 
@@ -449,8 +437,7 @@ class TestIncrementalIndexSync(BaseScalingTest):
 
     def _add_batch(self, n: int, prefix: str):
         items = [
-            snippet_prepare(f"{prefix}_{i}", f"MOV EAX, {i}; ADD EBX, {i % 7}", 3)
-            for i in range(n)
+            snippet_prepare(f"{prefix}_{i}", f"MOV EAX, {i}; ADD EBX, {i % 7}", 3) for i in range(n)
         ]
         return snippet_add_batch(self.session, [i for i in items if i])
 
@@ -513,9 +500,7 @@ class TestIncrementalIndexSync(BaseScalingTest):
         self._add_batch(20, "pre")
         snippet_find_matches(self.session, "MOV EAX, 1", top_n=1)
         # Find with a different threshold rebuilds and still works.
-        _, matches = snippet_find_matches(
-            self.session, "MOV EAX, 1", top_n=1, threshold=0.8
-        )
+        _, matches = snippet_find_matches(self.session, "MOV EAX, 1", top_n=1, threshold=0.8)
         self.assertGreaterEqual(len(matches), 0)
 
     def test_reindex_clears_built_index_upfront(self):
@@ -576,9 +561,7 @@ class TestResemblLSH(BaseScalingTest):
         _banding_params.cache_clear()  # deterministic: cache may be warm from other tests
         # The lazy import resolves the name from datasketch.lsh at call time,
         # so patch there.
-        with patch(
-            "datasketch.lsh._optimal_param", side_effect=_real_optimal_param
-        ) as mock:
+        with patch("datasketch.lsh._optimal_param", side_effect=_real_optimal_param) as mock:
             r1 = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
             r2 = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
             self.assertEqual((r1.b, r1.r), (r2.b, r2.r))
@@ -626,10 +609,11 @@ class TestIndexBuild(BaseScalingTest):
     """The optimized cold-build path (projected reads, chunked commits)."""
 
     def _add(self, n: int, prefix: str):
-        items = [
+        prepared = [
             snippet_prepare(f"{prefix}_{i}", f"MOV EAX, {i}; ADD EBX, {i}; RET", 3)
             for i in range(n)
         ]
+        items = [item for item in prepared if item is not None]
         snippet_add_batch(self.session, items)
 
     def test_iter_minhash_batches_projects_only_needed_columns(self):
@@ -893,8 +877,7 @@ class TestFingerprintVersion(BaseScalingTest):
 
     def _add(self, n: int = 10) -> None:
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-            for i in range(n)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(n)
         ]
         snippet_add_batch(self.session, [x for x in items if x])
 
@@ -929,9 +912,7 @@ class TestFingerprintVersion(BaseScalingTest):
         self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
         # Second find: stamp is current — no reindex.
         with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
-            snippet_find_matches(
-                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
-            )
+            snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
             mock.assert_not_called()
 
     def test_reindex_stamps_version(self):
@@ -976,9 +957,7 @@ class TestFingerprintVersion(BaseScalingTest):
             top_n=3,
             num_permutations=64,
         )
-        n64, _ = snippet_find_matches(
-            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
-        )
+        n64, _ = snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
         self.assertEqual(n64, n)
 
     def test_verify_reports_health(self):
@@ -990,9 +969,7 @@ class TestFingerprintVersion(BaseScalingTest):
         # Fresh DB: self-healing states are warnings, not issues.
         self.assertGreater(len(report["warnings"]), 0)
         self.assertEqual(report["issues"], [])
-        snippet_find_matches(
-            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
-        )
+        snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
         report = db_verify(self.session)
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["warnings"], [])
@@ -1011,9 +988,7 @@ class TestFingerprintVersion(BaseScalingTest):
         from resembl.core import db_verify
 
         self._add(10)
-        snippet_find_matches(
-            self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
-        )
+        snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
         # Simulate the crash-window state: meta row present, table dropped.
         from sqlmodel import text
 
@@ -1030,7 +1005,7 @@ class TestFingerprintVersion(BaseScalingTest):
         import tempfile
 
         from sqlmodel import Session as _Session
-        from sqlmodel import SQLModel, create_engine
+        from sqlmodel import SQLModel
 
         from resembl.database import create_db_engine
         from resembl.lsh import fingerprint_version_get, fingerprint_version_set
@@ -1070,7 +1045,7 @@ class TestFingerprintVersion(BaseScalingTest):
                 return _unpickle_canary, ()
 
         code = "mov eax, 1; ret"
-        m = code_create_minhash(code)
+        code_create_minhash(code)
         src = tempfile.mktemp(suffix=".db")
         try:
             source_engine = create_engine(f"sqlite:///{src}")
@@ -1110,8 +1085,6 @@ class TestFingerprintVersion(BaseScalingTest):
         except ImportError:
             self.skipTest("duckdb-engine not installed")
 
-        from resembl.database import create_db_engine
-
         self._add(5)
         src = tempfile.mktemp(suffix=".duckdb")
         try:
@@ -1140,8 +1113,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
 
     def _add(self, n: int = 10) -> None:
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-            for i in range(n)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(n)
         ]
         snippet_add_batch(self.session, [x for x in items if x])
 
@@ -1165,9 +1137,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
         # force the reindex regardless of which row it samples.
         fingerprint_perm_set(self.session, 64)
         with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
-            snippet_find_matches(
-                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
-            )
+            snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
             mock.assert_called_once()
         self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
 
@@ -1211,9 +1181,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
         # Build the index first so every snippet has bucket rows, then make
         # one stored blob stale: the LSH still routes to its checksum, and
         # scoring must skip it instead of raising ValueError.
-        n0, _ = snippet_find_matches(
-            self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3
-        )
+        n0, _ = snippet_find_matches(self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3)
         victim = self._corrupt_last_blob_to_64_perms(4)
 
         n1, matches = snippet_find_matches(

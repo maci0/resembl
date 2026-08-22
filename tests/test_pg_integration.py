@@ -46,8 +46,7 @@ class TestPostgresIntegration(unittest.TestCase):
         from resembl.lsh import lsh_meta_get
 
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-            for i in range(50)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(50)
         ]
         result = snippet_add_batch(self.session, [x for x in items if x])
         self.assertEqual(result["added"], 50)

@@ -16,9 +16,7 @@ from resembl.core import (
 # Strategy for generating random assembly-like strings.
 asm_text = st.text(
     alphabet=st.sampled_from(
-        list(
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ,;[]\n\t+-*"
-        )
+        list("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ,;[]\n\t+-*")
     ),
     min_size=0,
     max_size=500,
@@ -124,9 +122,7 @@ class TestPropertyBandBuckets(unittest.TestCase):
         br=st.sampled_from([(8, 16), (25, 5), (64, 2), (128, 1)]),
     )
     @settings(max_examples=40, deadline=10000)
-    def test_bucket_keys_match_reference(
-        self, perm: int, seed: int, br: tuple[int, int]
-    ) -> None:
+    def test_bucket_keys_match_reference(self, perm: int, seed: int, br: tuple[int, int]) -> None:
         import random
         import struct
 
@@ -282,7 +278,6 @@ class TestPropertyPackedStorage(unittest.TestCase):
         from sqlmodel import Session, SQLModel, create_engine
 
         from resembl.core import snippet_add, snippet_get
-        from resembl.models import Snippet
 
         engine = create_engine("sqlite:///:memory:")
         SQLModel.metadata.create_all(engine)
@@ -290,6 +285,7 @@ class TestPropertyPackedStorage(unittest.TestCase):
             snippet_add(session, "prop", code)
             snippet = snippet_get(session, string_checksum(code))
             self.assertIsNotNone(snippet)
+            assert snippet is not None  # narrow for the type checker
             self.assertTrue(snippet.minhash.startswith(b"RMLH"))
         engine.dispose()
 

@@ -51,6 +51,6 @@ jobs:
       - name: Install dependencies
         run: uv pip install -e .[dev]
       - name: Run mypy
-        run: uv run mypy resembl
+        run: uv run mypy
       - name: Run tests
         run: uv run pytest -q

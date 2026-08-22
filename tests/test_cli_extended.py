@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from sqlmodel import Session
 
-from resembl.core import collection_create, snippet_add, snippet_tag_add
+from resembl.core import collection_create, snippet_add
 from tests.test_cli import BaseCLITest
 
 
@@ -28,9 +28,7 @@ class TestCLIFindBatch(BaseCLITest):
 
         queries_file = tempfile.mktemp(suffix=".txt")
         with open(queries_file, "w", encoding="utf-8") as f:
-            f.write(
-                "MOV EAX, 1; RET\nMOV EAX, 2; RET\n# a comment\nXOR EBX, EBX; RET\n"
-            )
+            f.write("MOV EAX, 1; RET\nMOV EAX, 2; RET\n# a comment\nXOR EBX, EBX; RET\n")
 
         try:
             result = self.run_command(f"--format json find-batch --file {queries_file}")
@@ -61,9 +59,7 @@ class TestCLICollections(BaseCLITest):
 
     def test_collection_create(self):
         """Creating a collection should succeed."""
-        result = self.run_command(
-            "collection create test_col --description 'Test collection'"
-        )
+        result = self.run_command("collection create test_col --description 'Test collection'")
         self.assertEqual(result.returncode, 0)
         self.assertIn("test_col", result.stdout)
 
@@ -399,7 +395,7 @@ class TestCLIServeLifecycle(BaseCLITest):
             except OSError:
                 pass
             time.sleep(0.05)
-        self.fail(f"serve did not write {port_file} within {timeout}s")
+        raise AssertionError(f"serve did not write {port_file} within {timeout}s")
 
     def test_serve_subprocess_answers_find_and_shuts_down(self):
         import hashlib
@@ -422,9 +418,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 payload = json.loads(result.stdout)
                 self.assertGreater(payload["lsh_candidates"], 0)
-                self.assertTrue(
-                    any("test_snippet" in m["names"] for m in payload["matches"])
-                )
+                self.assertTrue(any("test_snippet" in m["names"] for m in payload["matches"]))
 
                 # A repeat find hits the server's version-guarded result cache.
                 result2 = self.run_command(
@@ -561,9 +555,7 @@ class TestServerFallback(unittest.TestCase):
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
-        self.assertTrue(
-            os.path.exists(self.port_file), "port file must survive a timeout"
-        )
+        self.assertTrue(os.path.exists(self.port_file), "port file must survive a timeout")
 
     def test_connection_refused_removes_stale_port_file(self):
         """A dead server's stale port file is cleaned up."""
@@ -591,21 +583,15 @@ class TestServerFallback(unittest.TestCase):
             "urllib.request.urlopen",
             side_effect=urllib.error.URLError(TimeoutError("server busy")),
         ):
-            result = cli._find_batch_via_server(
-                ["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3
-            )
+            result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)
         self.assertIsNone(result)
-        self.assertTrue(
-            os.path.exists(self.port_file), "port file must survive a timeout"
-        )
+        self.assertTrue(os.path.exists(self.port_file), "port file must survive a timeout")
 
         with patch(
             "urllib.request.urlopen",
             side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
         ):
-            result = cli._find_batch_via_server(
-                ["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3
-            )
+            result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)
         self.assertIsNone(result)
         self.assertFalse(os.path.exists(self.port_file), "stale file should be removed")
 

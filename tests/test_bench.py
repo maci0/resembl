@@ -1,8 +1,6 @@
 """Benchmark suite for resembl core operations using pytest-benchmark."""
 
 import os
-import tempfile
-import unittest
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -22,13 +20,11 @@ _SAMPLE_FILES = sorted(
 )
 
 # Read the first sample file for single-snippet benchmarks.
-with open(_SAMPLE_FILES[0], "r", encoding="utf-8") as _f:
+with open(_SAMPLE_FILES[0], encoding="utf-8") as _f:
     _SAMPLE_CODE = _f.read()
 
 # Read a larger snippet for scaling benchmarks.
-_LARGE_CODE = "\n".join(
-    open(p, "r", encoding="utf-8").read() for p in _SAMPLE_FILES[:5]
-)
+_LARGE_CODE = "\n".join(open(p, encoding="utf-8").read() for p in _SAMPLE_FILES[:5])
 
 
 # --- Pure function benchmarks (no DB) ---
@@ -70,7 +66,7 @@ def db_session():
     session = Session(engine)
     for path in _SAMPLE_FILES[:20]:
         name = os.path.splitext(os.path.basename(path))[0]
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             code = f.read()
         snippet_add(session, name, code)
     yield session

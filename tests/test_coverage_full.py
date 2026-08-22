@@ -3,27 +3,23 @@
 Each test class targets specific uncovered lines identified via coverage analysis.
 """
 
-import json
 import os
 import tempfile
 import unittest
 
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 
 from resembl.cache import (
     lsh_cache_load,
-    lsh_cache_path_get,
     lsh_cache_save,
     lsh_index_build,
 )
 from resembl.core import (
     NUM_PERMUTATIONS,
-    code_create_minhash,
     code_create_minhash_batch,
     collection_add_snippet,
     collection_create,
     collection_delete,
-    collection_list,
     collection_remove_snippet,
     db_calculate_average_similarity,
     db_merge,
@@ -36,14 +32,11 @@ from resembl.core import (
     snippet_get,
     snippet_name_add,
     snippet_name_remove,
-    snippet_search_by_name,
     snippet_tag_add,
     snippet_tag_remove,
-    snippet_version_list,
-    string_checksum,
 )
-from resembl.database import create_db_engine, db_create
-from resembl.models import Collection, Snippet, SnippetVersion
+from resembl.database import db_create
+from resembl.models import Collection
 
 
 class BaseDBTest(unittest.TestCase):
@@ -116,9 +109,7 @@ class TestBatchMinhashEdgeCases(BaseDBTest):
 
     def test_batch_minhash_tokens_equal_to_ngram(self):
         """Code with tokens == ngram_size should use shingles."""
-        results = code_create_minhash_batch(
-            ["MOV EAX, 1"], normalize=True, ngram_size=3
-        )
+        results = code_create_minhash_batch(["MOV EAX, 1"], normalize=True, ngram_size=3)
         self.assertEqual(len(results), 1)
 
 
@@ -132,9 +123,7 @@ class TestFindMatchesEmpty(BaseDBTest):
 
     def test_find_matches_empty_db(self):
         """Finding matches in an empty DB should return 0 candidates (line 496)."""
-        num, matches = snippet_find_matches(
-            self.session, "MOV EAX, 1", top_n=5, threshold=0.5
-        )
+        num, matches = snippet_find_matches(self.session, "MOV EAX, 1", top_n=5, threshold=0.5)
         self.assertEqual(num, 0)
         self.assertEqual(len(matches), 0)
 
@@ -168,7 +157,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path, "r") as f:
+            with open(out_path) as f:
                 content = f.read()
             self.assertIn("rule resembl_test_func", content)
             self.assertIn("$asm", content)
@@ -183,7 +172,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path, "r") as f:
+            with open(out_path) as f:
                 content = f.read()
             # Backslashes and quotes should be escaped
             self.assertNotIn('\n"', content.split("$asm")[1].split("nocase")[0])
@@ -197,7 +186,7 @@ class TestExportYara(BaseDBTest):
             out_path = f.name
         try:
             snippet_export_yara(self.session, out_path)
-            with open(out_path, "r") as f:
+            with open(out_path) as f:
                 content = f.read()
             # Should start with "rule resembl_r_"
             self.assertIn("rule resembl_r_", content)
@@ -229,7 +218,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path, "r") as f:
+            with open(out_path) as f:
                 content = f.read()
             # Exactly one rule header exists: the injected newline stayed
             # escaped inside the quoted string instead of starting a line.
@@ -325,17 +314,13 @@ class TestCollectionErrorPaths(BaseDBTest):
     def test_collection_add_snippet_nonexistent_collection_not_quiet(self):
         """Adding to a nonexistent collection with quiet=False should log (line 835)."""
         snippet = snippet_add(self.session, "func", "NOP")
-        result = collection_add_snippet(
-            self.session, "bad_col", snippet.checksum, quiet=False
-        )
+        result = collection_add_snippet(self.session, "bad_col", snippet.checksum, quiet=False)
         self.assertIsNone(result)
 
     def test_collection_add_snippet_nonexistent_snippet_not_quiet(self):
         """Adding a nonexistent snippet with quiet=False should log (line 841)."""
         collection_create(self.session, "col")
-        result = collection_add_snippet(
-            self.session, "col", "bad_checksum", quiet=False
-        )
+        result = collection_add_snippet(self.session, "col", "bad_checksum", quiet=False)
         self.assertIsNone(result)
 
     def test_collection_remove_snippet_nonexistent_not_quiet(self):
@@ -355,9 +340,7 @@ class TestNameOperations(BaseDBTest):
     def test_name_add_duplicate(self):
         """Adding an existing name should return None."""
         snippet = snippet_add(self.session, "original", "NOP")
-        result = snippet_name_add(
-            self.session, snippet.checksum, "original", quiet=True
-        )
+        result = snippet_name_add(self.session, snippet.checksum, "original", quiet=True)
         self.assertIsNone(result)
 
     def test_name_remove_last_name(self):
@@ -412,7 +395,7 @@ class TestMergeEdgeCases(BaseDBTest):
         return tmp.name
 
     def test_merge_assigns_collection_to_existing(self):
-        """Merging should assign source collection to existing snippet without one (line 963-965)."""
+        """Merging should assign source collection to existing snippet without one."""
         snippet = snippet_add(self.session, "func", "MOV EAX, 1")
         # Verify no collection
         self.assertIsNone(snippet.collection)

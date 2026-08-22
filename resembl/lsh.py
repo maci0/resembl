@@ -44,7 +44,7 @@ def _banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     The 64-entry cache keeps varied-threshold workflows (a script cycling
     many thresholds) from thrashing and re-paying the integral on evictions.
     """
-    from datasketch.lsh import _optimal_param  # type: ignore[attr-defined]
+    from datasketch.lsh import _optimal_param
 
     return _optimal_param(threshold, num_perm, 0.5, 0.5)
 
@@ -63,14 +63,10 @@ _INSERT_PG = (
 )
 
 _INSERT_MYSQL = (
-    "INSERT IGNORE INTO lsh_bucket (band, bucket, checksum) "
-    "VALUES (:band, :bucket, :checksum)"
+    "INSERT IGNORE INTO lsh_bucket (band, bucket, checksum) VALUES (:band, :bucket, :checksum)"
 )
 
-_INSERT_PLAIN = (
-    "INSERT INTO lsh_bucket (band, bucket, checksum) "
-    "VALUES (:band, :bucket, :checksum)"
-)
+_INSERT_PLAIN = "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES (:band, :bucket, :checksum)"
 
 #: Upsert variants for the single-row ``lsh_meta`` / ``app_meta`` upserts.
 _META_UPSERT_SQLITE_PG = (
@@ -87,12 +83,10 @@ _META_UPSERT_DUCKDB = (
 )
 
 _VERSION_UPSERT_SQLITE_PG = (
-    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
-    "ON CONFLICT(key) DO UPDATE SET value = :v"
+    "INSERT INTO app_meta (key, value) VALUES (:k, :v) ON CONFLICT(key) DO UPDATE SET value = :v"
 )
 _VERSION_UPSERT_MYSQL = (
-    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
-    "ON DUPLICATE KEY UPDATE value = :v"
+    "INSERT INTO app_meta (key, value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE value = :v"
 )
 _VERSION_UPSERT_DUCKDB = (
     "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
@@ -143,8 +137,7 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
         # and text()'s marker scan would misread literal ``$n`` / ``:name``
         # sequences inside values as bind placeholders.
         session.connection().exec_driver_sql(
-            "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
-            f"{values}{conflict}"
+            f"INSERT INTO lsh_bucket (band, bucket, checksum) VALUES {values}{conflict}"
         )
 
 
@@ -265,9 +258,7 @@ def lsh_meta_clear(session: Session) -> None:
 _THRESHOLD_MATCH_TOLERANCE = 1e-6
 
 
-def lsh_meta_matches(
-    meta: tuple[float, int] | None, threshold: float, num_perm: int
-) -> bool:
+def lsh_meta_matches(meta: tuple[float, int] | None, threshold: float, num_perm: int) -> bool:
     """Return True when a built index matches the requested parameters.
 
     *meta* is an ``lsh_meta_get`` result.  The threshold compares with a
@@ -408,8 +399,7 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:
         raise ValueError("Corrupt MinHash payload: missing RMLH magic.")
     if minhash_num_perm(packed) != num_perm:
         raise ValueError(
-            "Corrupt MinHash payload: permutation count does not match the "
-            f"expected {num_perm}."
+            f"Corrupt MinHash payload: permutation count does not match the expected {num_perm}."
         )
     step = 4 * r
     base = 8
@@ -449,7 +439,7 @@ class ResemblLSH:
         """Normalize a MinHash object or packed blob to packed bytes."""
         if hasattr(value, "digest"):
             return minhash_pack(value)
-        return value  # type: ignore[return-value]
+        return value
 
     def _buckets(self, packed: bytes) -> list[str]:
         return band_buckets(packed, self.num_perm, self.b, self.r)
@@ -488,9 +478,7 @@ class ResemblLSH:
 
     def remove(self, checksum: str) -> None:
         """Remove all index rows for *checksum*."""
-        self.session.execute(
-            text("DELETE FROM lsh_bucket WHERE checksum = :c"), {"c": checksum}
-        )
+        self.session.execute(text("DELETE FROM lsh_bucket WHERE checksum = :c"), {"c": checksum})
         self.session.commit()
 
     # -- query -------------------------------------------------------------

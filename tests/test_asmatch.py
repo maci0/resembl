@@ -243,9 +243,7 @@ class TestResembl(unittest.TestCase):
         got = [m[0].checksum for m in matches]
         expected = [c for _, c in scored[:5]]
         self.assertEqual(sorted(got), sorted(expected))
-        self.assertEqual(
-            sorted(m[1] for m in matches), sorted(h for h, _ in scored[:5])
-        )
+        self.assertEqual(sorted(m[1] for m in matches), sorted(h for h, _ in scored[:5]))
 
 
 class TestDBCoreFunctions(unittest.TestCase):
@@ -443,9 +441,7 @@ class TestSnippetCoreFunctions(unittest.TestCase):
 
     def test_snippet_name_remove_quiet(self):
         """Test the quiet flag in snippet_name_remove."""
-        result = snippet_name_remove(
-            self.session, "nonexistent", "new_name", quiet=True
-        )
+        result = snippet_name_remove(self.session, "nonexistent", "new_name", quiet=True)
         self.assertIsNone(result)
 
     def test_snippet_export_empty_db(self):
@@ -463,9 +459,7 @@ class TestSnippetCoreFunctions(unittest.TestCase):
             # The file should be inside temp_dir, not outside
             for fname in os.listdir(temp_dir):
                 full_path = os.path.join(temp_dir, fname)
-                self.assertTrue(
-                    os.path.realpath(full_path).startswith(os.path.realpath(temp_dir))
-                )
+                self.assertTrue(os.path.realpath(full_path).startswith(os.path.realpath(temp_dir)))
 
 
 if __name__ == "__main__":

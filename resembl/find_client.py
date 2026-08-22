@@ -37,9 +37,7 @@ def _load_config() -> dict:
     The thin client must produce the same results as `resembl find`, which
     honors these settings — ignoring them would silently change matches.
     """
-    config_dir = os.environ.get("RESEMBL_CONFIG_DIR") or os.path.expanduser(
-        "~/.config/resembl"
-    )
+    config_dir = os.environ.get("RESEMBL_CONFIG_DIR") or os.path.expanduser("~/.config/resembl")
     path = os.path.join(config_dir, "config.toml")
     try:
         import tomllib
@@ -59,9 +57,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top-n", type=int, default=5)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--no-normalization", action="store_true")
-    parser.add_argument(
-        "--json", action="store_true", help="Print JSON instead of a table."
-    )
+    parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
     args = parser.parse_args(argv)
 
     query = args.query
@@ -79,9 +75,7 @@ def _main(argv: list[str] | None = None) -> int:
         return 2
 
     db_url = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
-    cache_dir = os.path.expanduser(
-        os.environ.get("RESEMBL_CACHE_DIR", _DEFAULT_CACHE_DIR)
-    )
+    cache_dir = os.path.expanduser(os.environ.get("RESEMBL_CACHE_DIR", _DEFAULT_CACHE_DIR))
     port_file = server_port_path(db_url, cache_dir)
     try:
         with open(port_file, encoding="utf-8") as f:
@@ -94,9 +88,7 @@ def _main(argv: list[str] | None = None) -> int:
         return 1
 
     cfg = _load_config()
-    effective_threshold = (
-        args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
-    )
+    effective_threshold = args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
     effective_ngram = int(cfg.get("ngram_size", 3))
     effective_perm = int(cfg.get("num_permutations", 128))
     effective_jw = float(cfg.get("jaccard_weight", 0.4))

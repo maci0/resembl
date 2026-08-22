@@ -53,15 +53,43 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 
+[tool.black]
+line-length = 100
+
 [tool.ruff]
-line-length = 120
+line-length = 100
 
 [tool.pylint.format]
-max-line-length = 120
+max-line-length = 100
 
 [tool.ruff.lint]
-# Enable the isort rules.
-select = ["I"]
+# pycodestyle errors/subgroups (E4/E7/E9), pyflakes, isort, warnings,
+# flake8-builtins, bugprone-adjacent correctness groups that the tree
+# currently passes, plus autofixable modernization (pyupgrade).
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "W",
+    "F",
+    "I",
+    "A",
+    "DTZ",
+    "ISC",
+    "ICN",
+    "PIE",
+    "RSE",
+    "EXE",
+    "YTT",
+    "FLY",
+    "ASYNC",
+    "FURB",
+    "UP",
+    "C4",
+    "RET",
+    "PERF",
+    "N",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["resembl"]
@@ -74,7 +102,16 @@ pythonVersion = "3.11"
 
 [tool.mypy]
 python_version = "3.11"
+files = ["resembl", "tests"]
 ignore_missing_imports = true
+# Strict flags the tree already passes; tighten further in later passes.
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_equality = true
+warn_unreachable = true
+disallow_subclassing_any = true
+extra_checks = true
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable"

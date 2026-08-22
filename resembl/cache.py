@@ -117,7 +117,8 @@ def lsh_index_build(
         lsh = ResemblLSH(session, threshold, num_perm)
     except ValueError as e:
         logger.error(
-            "Error: Invalid LSH parameters. The threshold (%s) may be too high for the number of permutations (%s).",
+            "Error: Invalid LSH parameters. The threshold (%s) may be too high "
+            "for the number of permutations (%s).",
             threshold,
             num_perm,
         )
@@ -178,15 +179,14 @@ def _build_once(
         _insert_rows(
             session,
             insert_sql,
-            [
-                {"band": band, "bucket": bucket, "checksum": checksum}
-                for bucket, checksum in pairs
-            ],
+            [{"band": band, "bucket": bucket, "checksum": checksum} for bucket, checksum in pairs],
         )
         session.commit()
         band_rows[band].clear()
 
-    total_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    total_snippets = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
     processed = 0
     skipped_corrupt = 0
     for batch in Snippet.iter_minhash_batches(session, _BATCH_SIZE):
@@ -211,8 +211,7 @@ def _build_once(
                 # recomputes it from the snippet's code.
                 skipped_corrupt += 1
                 logger.warning(
-                    "Skipping snippet %s: fingerprint permutation count does "
-                    "not match %d.",
+                    "Skipping snippet %s: fingerprint permutation count does not match %d.",
                     checksum,
                     num_perm,
                 )
@@ -238,10 +237,7 @@ def _build_once(
 
     if is_sqlite:
         session.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_lsh_bucket_checksum "
-                "ON lsh_bucket (checksum)"
-            )
+            text("CREATE INDEX IF NOT EXISTS ix_lsh_bucket_checksum ON lsh_bucket (checksum)")
         )
         session.commit()
 
