@@ -107,6 +107,10 @@ The resembl project follows a test-driven approach to ensure quality and correct
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 
+    Atheris is an optional dependency. Install it with the `fuzz` extra first:
+    ```bash
+    uv pip install -e .[dev,fuzz]
+    ```
     To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `code_tokenize` function:
     ```bash
     uv run ./fuzzers/fuzz_code_tokenize.py
