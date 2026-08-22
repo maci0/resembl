@@ -89,6 +89,23 @@ class TestServerMode(unittest.TestCase):
             httpd.server_close()
         mock_build.assert_called_once()
 
+    def test_server_close_disposes_engine_pool(self):
+        """server_close releases the engine's pooled DB connections.
+
+        The warm engine holds up to pool_size + max_overflow SQLite handles;
+        a stopped server generation must not pin them until interpreter exit.
+        """
+        from resembl.server import serve as serve_start
+
+        httpd = serve_start(f"sqlite:///{self._db}", port=0)
+        try:
+            # Startup's warm-up session returned its connection to the pool.
+            self.assertGreaterEqual(httpd.engine.pool.checkedin(), 1)
+            httpd.server_close()
+            self.assertEqual(httpd.engine.pool.checkedin(), 0)
+        finally:
+            httpd.server_close()
+
     def test_server_query_matches_in_process(self):
         """POST /find returns the same top matches as the in-process path."""
         port = self._start_server()

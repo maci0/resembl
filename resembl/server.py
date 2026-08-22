@@ -259,6 +259,26 @@ class _FindHandler(BaseHTTPRequestHandler):
         return
 
 
+class _FindServer(ThreadingHTTPServer):
+    """The serving :class:`ThreadingHTTPServer`; owns and disposes the engine.
+
+    ``server_close`` releases the engine's pooled DB connections instead of
+    leaving them to interpreter exit: a stopped server generation must not
+    pin up to ``pool_size + max_overflow`` SQLite handles in a process that
+    starts and stops servers repeatedly (tests, embeddings).
+    """
+
+    engine: Any
+
+    def server_close(self) -> None:
+        super().server_close()
+        engine = getattr(self, "engine", None)
+        if engine is not None:
+            # Checked-out connections still finish their request and are
+            # closed on return; idle pooled connections close now.
+            engine.dispose()
+
+
 def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     """Start the find server for *db_url* and return the bound HTTP server.
 
@@ -335,7 +355,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         if not lsh_meta_matches(meta, _SERVER_THRESHOLD, _SERVER_NUM_PERM):
             lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
 
-    httpd = ThreadingHTTPServer((host, port), _FindHandler)
+    httpd = _FindServer((host, port), _FindHandler)
     # Per-instance shared state (see _FindHandler.engine): each server
     # generation carries its own engine.
     httpd.engine = engine  # type: ignore[attr-defined]

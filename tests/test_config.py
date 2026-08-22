@@ -109,6 +109,15 @@ class TestConfig(unittest.TestCase):
                     save_config({"top_n": object()})
             self.assertEqual(os.listdir(temp_dir), [])
 
+    def test_save_config_replace_failure_cleans_temp_file(self):
+        """A failed atomic rename must not leave the temp file behind either."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with patch("os.replace", side_effect=OSError("replace failed")):
+                    with self.assertRaises(OSError):
+                        save_config({"top_n": 10})
+            self.assertEqual(os.listdir(temp_dir), [])
+
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -101,7 +101,16 @@ def save_config(config: dict | ResemblConfig) -> None:
             os.unlink(tmp_path)
             raise
 
-    os.replace(tmp_path, cfg_path)
+    try:
+        os.replace(tmp_path, cfg_path)
+    except OSError:
+        # The temp file would otherwise accumulate in the config directory on
+        # every failed save (e.g. read-only target); remove it and re-raise.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def update_config(key: str, value: int | float | str) -> dict:
