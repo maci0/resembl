@@ -361,12 +361,14 @@ class TestNameOperations(BaseDBTest):
         self.assertIsNone(result)
 
     def test_name_remove_last_name(self):
-        """Removing the last name should fail or return None."""
+        """Removing the last name must be refused, keeping the snippet named."""
         snippet = snippet_add(self.session, "only_name", "NOP")
         result = snippet_name_remove(self.session, snippet.checksum, "only_name")
-        # Should either fail or keep at least one name
-        if result is not None:
-            self.assertTrue(len(result.name_list) >= 0)
+        # The removal is rejected (None) and the name survives.
+        self.assertIsNone(result)
+        refreshed = snippet_get(self.session, snippet.checksum)
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(refreshed.name_list, ["only_name"])
 
     def test_name_add_nonexistent_snippet(self):
         """Adding a name to a nonexistent snippet should return None."""
@@ -483,9 +485,18 @@ class TestDatabaseModule(unittest.TestCase):
     """Tests for database.py functions."""
 
     def test_db_create_runs(self):
-        """db_create should not raise (line 49)."""
-        # This creates the default tables using the module-level engine
-        db_create()
+        """db_create should create all tables in the configured engine (line 49)."""
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine = create_engine(f"sqlite:///{os.path.join(temp_dir, 'test.db')}")
+            try:
+                # Route the module-level engine into the temp DB so the
+                # default `sqlite:///assembly.db` is never created in CWD.
+                with patch("resembl.database._engine", engine):
+                    db_create()
+            finally:
+                engine.dispose()
 
 
 # ---------------------------------------------------------------------------

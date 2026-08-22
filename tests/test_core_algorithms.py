@@ -80,16 +80,14 @@ class TestWeightedMinHash(unittest.TestCase):
         m2 = code_create_minhash(code2)
         m3 = code_create_minhash(code3)
 
-        # code1 and code2 share CPUID (rare) — should be more similar
-        # than code1 and code3 (no rare instruction in common)
+        # Normalization maps every register to REG and every immediate to
+        # IMM, so code1 and code2 share the exact token stream (including
+        # the weighted CPUID shingles) and must fingerprint identically.
+        # code3 has a different stream, so it must not collide with m1.
         sim_with_rare = m1.jaccard(m2)
         sim_without_rare = m1.jaccard(m3)
-        # We can't guarantee the exact values but the weighted MinHash
-        # should not crash and should produce valid similarity values
-        self.assertGreaterEqual(sim_with_rare, 0.0)
-        self.assertLessEqual(sim_with_rare, 1.0)
-        self.assertGreaterEqual(sim_without_rare, 0.0)
-        self.assertLessEqual(sim_without_rare, 1.0)
+        self.assertEqual(sim_with_rare, 1.0)
+        self.assertLess(sim_without_rare, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -285,16 +283,12 @@ class TestSnippetCompareNewMetrics(unittest.TestCase):
 
     def setUp(self):
         """Set up in-memory DB."""
-        from sqlmodel import SQLModel
+        from sqlmodel import Session, SQLModel
 
         from resembl.database import create_db_engine
 
-        os.environ["RESEMBL_CONFIG_DIR"] = "/tmp/resembl_test_algorithms"
-        os.environ["RESEMBL_DB_PATH"] = ":memory:"
         self.engine = create_db_engine("sqlite:///:memory:")
         SQLModel.metadata.create_all(self.engine)
-        from sqlmodel import Session
-
         self.session = Session(self.engine)
 
     def tearDown(self):

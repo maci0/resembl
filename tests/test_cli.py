@@ -1,7 +1,6 @@
 """Integration tests for the resembl CLI."""
 
 import os
-import random
 import shlex
 import subprocess
 import tempfile
@@ -19,8 +18,10 @@ class BaseCLITest(unittest.TestCase):
     """Base class for CLI tests with common setup and helper methods."""
 
     def setUp(self):
-        """Set up a clean, in-memory database for each test."""
-        self.db_name = f"test_{random.randint(0, 100000)}.db"
+        """Set up a clean database for each test."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.db_name = os.path.join(tmp.name, "test.db")
         self.engine = create_engine(f"sqlite:///{self.db_name}")
         SQLModel.metadata.create_all(self.engine)
         with Session(self.engine) as session:
@@ -29,8 +30,6 @@ class BaseCLITest(unittest.TestCase):
     def tearDown(self):
         """Clean up the database after each test."""
         self.engine.dispose()
-        if os.path.exists(self.db_name):
-            os.remove(self.db_name)
 
     def run_command(self, command, input_data=None, extra_env=None):
         """Helper function to run a command and return the output."""

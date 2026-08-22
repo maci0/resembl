@@ -21,7 +21,9 @@ class TestServerMode(unittest.TestCase):
 
     def setUp(self):
         self._db = tempfile.mktemp(suffix=".db")
-        self._cache_dir = tempfile.mkdtemp()
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        self._cache_dir = cache.name
         self._engine = create_engine(f"sqlite:///{self._db}")
         SQLModel.metadata.create_all(self._engine)
         self._session = Session(self._engine)
@@ -230,6 +232,119 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(captured["body"]["threshold"], 0.7)
         self.assertEqual(captured["body"]["ngram_size"], 2)
 
+    def test_thin_client_no_server_running(self):
+        """resembl-find without a port file exits 1 with guidance, no traceback."""
+        import contextlib
+        import io
+
+        from resembl.find_client import _main
+
+        # setUp points RESEMBL_CACHE_DIR/DATABASE_URL at fresh temp paths:
+        # no serve process ever ran for this DB URL.
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = _main(["--query", "mov eax, 5", "--json"])
+        self.assertEqual(rc, 1)
+        self.assertIn("no server running", stderr.getvalue())
+        self.assertIn("resembl serve", stderr.getvalue())
+
+    def test_thin_client_unreachable_server_connection_refused(self):
+        """Connection-refused reaches the clean 'unreachable' exit path."""
+        import contextlib
+        import io
+        import urllib.error
+
+        from resembl.find_client import _main, server_port_path
+
+        port_file = server_port_path(f"sqlite:///{self._db}", self._cache_dir)
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write(str(1))
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError(
+                    ConnectionRefusedError("connection refused")
+                ),
+            ):
+                rc = _main(["--query", "mov eax, 5"])
+        self.assertEqual(rc, 1)
+        self.assertIn("unreachable", stderr.getvalue())
+
+    def test_thin_client_propagates_error_payload(self):
+        """A server error payload surfaces on stderr with a failing exit code."""
+        import contextlib
+        import io
+
+        from resembl.find_client import _main
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"error": "threshold too high"}'
+
+        self._start_server()  # writes a valid port file
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with patch(
+                "urllib.request.urlopen",
+                side_effect=lambda request, timeout=5: _FakeResponse(),
+            ):
+                rc = _main(["--query", "mov eax, 5", "--json"])
+        self.assertEqual(rc, 1)
+        self.assertIn("too high", stderr.getvalue())
+
+    def test_thin_client_table_output(self):
+        """Without --json, the client prints a ranked table and exits 0."""
+        import contextlib
+        import io
+
+        from resembl.find_client import _main
+
+        payload = {
+            "lsh_candidates": 2,
+            "matches": [
+                {"checksum": "a" * 64, "names": ["fn_a"], "score": 97.5},
+                {"checksum": "b" * 64, "names": ["fn_b", "alias"], "score": 51.25},
+            ],
+        }
+
+        class _FakeResponse:
+            def __init__(self, body):
+                self._body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return self._body
+
+        self._start_server()  # writes a valid port file
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            with patch(
+                "urllib.request.urlopen",
+                side_effect=lambda request, timeout=5: _FakeResponse(
+                    json.dumps(payload).encode("utf-8")
+                ),
+            ):
+                rc = _main(["--query", "mov eax, 5"])
+        out = stdout.getvalue()
+        self.assertEqual(rc, 0)
+        self.assertIn("Found 2 candidates via LSH.", out)
+        self.assertIn("fn_a", out)
+        self.assertIn("97.50", out)
+        self.assertIn("fn_b, alias", out)
+        self.assertIn("51.25", out)
+
     def test_find_batch_endpoint(self):
         """POST /find-batch returns per-query results matching single finds."""
         port = self._start_server()
@@ -384,7 +499,9 @@ class TestCLIServerEndToEnd(unittest.TestCase):
         import tempfile
 
         self._db = tempfile.mktemp(suffix=".db")
-        self._cache_dir = tempfile.mkdtemp()
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        self._cache_dir = cache.name
         # Keep the test process and its subprocesses on the same cache dir.
         self._env_patch = patch.dict(
             os.environ,
