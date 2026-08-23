@@ -183,6 +183,27 @@ class TestCfgExtract(unittest.TestCase):
         self.assertGreaterEqual(cfg["num_blocks"], 2)
         self.assertGreaterEqual(cfg["num_edges"], 1)
 
+    def test_dangling_label_no_phantom_edge(self):
+        """A label with no following instruction must not create an edge.
+
+        ``start:`` at the end of the code never materializes as a basic
+        block; the jump to it must be dropped instead of recording a
+        phantom edge to block index num_blocks (inflating num_edges and
+        pointing outside the adjacency list).
+        """
+        cfg = cfg_extract("JMP start\nstart:")
+        self.assertEqual(cfg["num_blocks"], 1)
+        self.assertEqual(cfg["num_edges"], 0)
+        self.assertEqual(cfg["adj"], {0: []})
+
+    def test_dangling_label_conditional_branch(self):
+        """Same dangling-target rule for conditional branches."""
+        cfg = cfg_extract("CMP EAX, 0\nJZ end\nMOV EBX, 1\nend:")
+        self.assertEqual(cfg["num_blocks"], 2)
+        # Only the fallthrough edge survives; the JZ target is dangling.
+        self.assertEqual(cfg["adj"], {0: [1], 1: []})
+        self.assertEqual(cfg["num_edges"], 1)
+
     def test_real_asm_file(self):
         """Test CFG extraction on a real ASM file (1000A133.asm)."""
         asm_path = os.path.join(TEST_DATA_DIR, "1000A133.asm")

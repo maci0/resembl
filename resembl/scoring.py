@@ -852,6 +852,16 @@ def cfg_extract(code: str) -> dict:
         blocks.append(current_block)
 
     # Build adjacency list
+    # A label whose basic block never materialized (e.g. the code ends with
+    # ``label:`` and no instruction follows) maps one past the last block;
+    # such targets are dropped so the graph never contains edges to
+    # non-existent blocks or phantom edge counts.
+    def _resolve(target: str) -> int | None:
+        idx = label_to_block.get(target)
+        if idx is None or idx >= len(blocks):
+            return None
+        return idx
+
     adj: dict[int, list[int]] = {i: [] for i in range(len(blocks))}
     for i, block in enumerate(blocks):
         if not block:
@@ -870,9 +880,9 @@ def cfg_extract(code: str) -> dict:
             # Unconditional jump — try to resolve target
             parts = last_line.split()
             if len(parts) > 1:
-                target = parts[-1].strip()
-                if target in label_to_block:
-                    adj[i].append(label_to_block[target])
+                target_block = _resolve(parts[-1].strip())
+                if target_block is not None:
+                    adj[i].append(target_block)
             # No fallthrough for unconditional jumps
         elif mnemonic in BRANCH_INSTRUCTIONS:
             # Conditional branch — both fallthrough and target
@@ -880,9 +890,9 @@ def cfg_extract(code: str) -> dict:
                 adj[i].append(i + 1)
             parts = last_line.split()
             if len(parts) > 1:
-                target = parts[-1].strip()
-                if target in label_to_block:
-                    adj[i].append(label_to_block[target])
+                target_block = _resolve(parts[-1].strip())
+                if target_block is not None:
+                    adj[i].append(target_block)
         else:
             # Non-branch — fallthrough to next block
             if i + 1 < len(blocks):

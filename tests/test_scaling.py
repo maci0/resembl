@@ -431,6 +431,36 @@ class TestFindScaling(BaseScalingTest):
         for _, score in matches:
             self.assertGreater(score, 90.0)
 
+    def test_exact_score_tie_keeps_earliest_candidate(self):
+        """An exact hybrid-score tie must resolve like a stable sort.
+
+        Six snippets whose normalized token streams are identical (label
+        text survives normalization) produce byte-identical fingerprints
+        and, against the equally-shaped query, identical Jaccard values and
+        Levenshtein ratios, so all six hybrid scores tie exactly.  With
+        top_n >= candidate count nothing is ever evicted, so that ranking
+        reveals the candidate processing order; every truncated top_n must
+        then agree with its prefix.  (The pre-fix heap evicted the
+        earliest tied candidate instead of the latest, so top_n=1 returned
+        the *last* candidate.)
+        """
+        labels = ["aaa", "bbb", "ccc", "ddd", "eee", "fff"]
+        items = [snippet_prepare(lbl, f"{lbl}:\n    ret", 3) for lbl in labels]
+        snippet_add_batch(self.session, [i for i in items if i])
+        query = "ggg:\n    ret"
+
+        _, full = snippet_find_matches(self.session, query, top_n=len(labels))
+        self.assertEqual(len(full), len(labels))
+        expected_order = [s.checksum for s, _ in full]
+
+        for top_n in range(1, len(labels) + 1):
+            _, matches = snippet_find_matches(self.session, query, top_n=top_n)
+            self.assertEqual(
+                [s.checksum for s, _ in matches],
+                expected_order[:top_n],
+                f"top_n={top_n} must be the stable prefix of the full ranking",
+            )
+
 
 class TestIncrementalIndexSync(BaseScalingTest):
     """Add/delete must keep the DB-backed index complete (no full rebuild)."""

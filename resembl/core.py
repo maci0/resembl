@@ -657,9 +657,10 @@ def snippet_find_matches(
     # processed in descending jaccard order so the bound only shrinks: once
     # one candidate is pruned, the rest of the list is provably pruned too,
     # and no further rows are fetched at all.  Full rows are loaded in small
-    # chunks, and the heap keeps the top-n by (hybrid, insertion index) with
-    # a final sort that replicates a stable sort, so the returned matches
-    # are identical to scoring and fetching everything.
+    # chunks, and the heap keeps the top-n by (hybrid, insertion index),
+    # ties evicting the largest index as a stable sort would, with a final
+    # sort that replicates that stable sort, so the returned matches are
+    # identical to scoring and fetching everything.
     order = sorted(range(len(keys)), key=lambda i: jaccards[i], reverse=True)
     scored: list[tuple[float, int, Snippet]] = []
     for start in range(0, len(order), 64):
@@ -667,8 +668,7 @@ def snippet_find_matches(
         # Best possible hybrid in this batch cannot beat the current top-n.
         if (
             len(scored) >= top_n
-            and 100 * jaccard_weight * jaccards[batch[0]] + 100 * (1 - jaccard_weight)
-            < scored[0][0]
+            and score_hybrid(jaccards[batch[0]], 100.0, jaccard_weight) < scored[0][0]
         ):
             break
         full_rows = _snippets_by_checksums(session, [keys[i] for i in batch])
@@ -677,20 +677,27 @@ def snippet_find_matches(
             if snippet is None:
                 continue  # deleted concurrently between the two fetches
             jaccard = jaccards[i]
-            # Upper bound on hybrid = 100*w*jaccard + 100*(1-w); candidates
-            # below the current n-th best are provably out and skip the
+            # Upper bound on hybrid = the score at the maximum Levenshtein
+            # (100), computed through score_hybrid itself so the bound is
+            # bit-identical to what a real lev=100 candidate would score;
+            # hand-inlined arithmetic can round a few ulps lower and then
+            # prune a genuine top-n candidate.  Candidates strictly below
+            # the current n-th best are provably out and skip the
             # fuzz.ratio call.
-            if (
-                len(scored) >= top_n
-                and 100 * jaccard_weight * jaccard + 100 * (1 - jaccard_weight) < scored[0][0]
-            ):
+            if len(scored) >= top_n and score_hybrid(jaccard, 100.0, jaccard_weight) < scored[0][0]:
                 continue
             levenshtein = fuzz.ratio(query_string, snippet.code)
             hybrid = score_hybrid(jaccard, levenshtein, jaccard_weight)
-            heapq.heappush(scored, (hybrid, i, snippet))
+            # The negated index makes the heap root the *worst* entry under
+            # the final ranking (descending hybrid, ascending index): among
+            # candidates tied at the lowest score, the largest index is the
+            # one a stable sort would drop.  With plain ``+i`` the root
+            # would be the smallest tied index and an eviction would remove
+            # exactly the candidate that should have won the tie.
+            heapq.heappush(scored, (hybrid, -i, snippet))
             if len(scored) > top_n:
                 heapq.heappop(scored)
-    scored.sort(key=lambda t: (-t[0], t[1]))
+    scored.sort(key=lambda t: (-t[0], -t[1]))
     top_matches = [(snippet, hybrid) for hybrid, _idx, snippet in scored[:top_n]]
 
     return len(candidate_keys), top_matches
