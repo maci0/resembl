@@ -96,12 +96,17 @@ def _find_one(
     :class:`ResemblConfig` defaults.
     """
     params = params if params is not None else _DEFAULT_FIND_PARAMS
-    top_n = int(body.get("top_n", params.top_n))
-    threshold = body.get("threshold")
-    normalize = bool(body.get("normalize", True))
-    ngram_size = int(body.get("ngram_size", params.ngram_size))
-    num_permutations = int(body.get("num_permutations", params.num_permutations))
-    jaccard_weight = float(body.get("jaccard_weight", params.jaccard_weight))
+    # An explicit JSON ``null`` means "not provided", exactly like an absent
+    # key: dict.get's default only fires on missing keys, so a null would
+    # crash int()/float() (and flip ``normalize`` to False) instead of using
+    # the configured default.
+    provided = {k: v for k, v in body.items() if v is not None}
+    top_n = int(provided.get("top_n", params.top_n))
+    threshold = provided.get("threshold")
+    normalize = bool(provided.get("normalize", True))
+    ngram_size = int(provided.get("ngram_size", params.ngram_size))
+    num_permutations = int(provided.get("num_permutations", params.num_permutations))
+    jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one

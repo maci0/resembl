@@ -664,6 +664,34 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("ngram_size", payload["error"])
 
+    def test_find_treats_explicit_null_params_as_absent(self):
+        """An explicit JSON null for a find parameter uses the configured default.
+
+        ``dict.get``'s default only applies to absent keys, so a ``null``
+        value used to crash int()/float() into a 500 (and ``"normalize":
+        null`` silently disabled normalization) instead of meaning "not
+        provided" like an omitted field.
+        """
+        from resembl.server import _find_one
+
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        omitted = _find_one(self._session, {"query": query}, query)
+        nulled = _find_one(
+            self._session,
+            {
+                "query": query,
+                "top_n": None,
+                "threshold": None,
+                "normalize": None,
+                "ngram_size": None,
+                "num_permutations": None,
+                "jaccard_weight": None,
+            },
+            query,
+        )
+        self.assertEqual(nulled, omitted)
+        self.assertIn("matches", nulled)
+
     def test_result_cache_evicts_oldest_beyond_max(self):
         """The version-guarded result cache evicts its oldest entry past the cap."""
         from resembl.server import _RESULT_CACHE, _RESULT_CACHE_MAX, _find_one
