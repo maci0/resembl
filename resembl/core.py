@@ -1782,10 +1782,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         session.commit()
         # The source blobs were copied verbatim and may be from an older
         # fingerprint format or permutation count — drop the stamps so the
-        # next `find` reindexes once and normalizes everything.
-        fingerprint_version_clear(session)
-        fingerprint_ngram_clear(session)
-        fingerprint_perm_clear(session)
+        # next `find` reindexes once and normalizes everything.  Only new
+        # rows can change the stored population: an alias/tag-only merge
+        # (added == 0) leaves every fingerprint untouched, and clearing the
+        # stamps there would force a pointless full reindex on the next find.
+        if added:
+            fingerprint_version_clear(session)
+            fingerprint_ngram_clear(session)
+            fingerprint_perm_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e, exc_info=True)
         return {"error": str(e)}

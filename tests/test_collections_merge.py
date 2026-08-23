@@ -309,6 +309,69 @@ class TestDBMerge(BaseDBTest):
         finally:
             os.unlink(source_path)
 
+    def test_alias_only_merge_keeps_fingerprint_stamps(self):
+        """A merge that adds no snippets leaves the fingerprint stamps alone.
+
+        The stamps vouch for the whole stored fingerprint population; only
+        new rows can change it (merge updates touch names/tags only).
+        Clearing them on an alias-only merge would force the next ``find``
+        into a full reindex for nothing.
+        """
+        from resembl.lsh import (
+            fingerprint_ngram_get,
+            fingerprint_ngram_set,
+            fingerprint_perm_get,
+            fingerprint_perm_set,
+            fingerprint_version_get,
+            fingerprint_version_set,
+        )
+        from resembl.models import FINGERPRINT_VERSION
+
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        fingerprint_ngram_set(self.session, 3)
+        fingerprint_perm_set(self.session, 128)
+        snippet_add(self.session, "original", "MOV EAX, 1")
+        source_path = self._create_source_db([("alias", "MOV EAX, 1", [], None)])
+        try:
+            result = db_merge(self.session, source_path)
+            self.assertEqual(result["added"], 0)
+            self.assertEqual(result["updated"], 1)
+            self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
+            self.assertEqual(fingerprint_ngram_get(self.session), 3)
+            self.assertEqual(fingerprint_perm_get(self.session), 128)
+        finally:
+            os.unlink(source_path)
+
+    def test_merge_with_additions_clears_fingerprint_stamps(self):
+        """A merge that lands new rows still clears the stamps.
+
+        Source blobs are copied verbatim and may carry a foreign format or
+        permutation count, so the stamps must go whenever anything was
+        added; the next ``find`` then reindexes once and normalizes.
+        """
+        from resembl.lsh import (
+            fingerprint_ngram_get,
+            fingerprint_ngram_set,
+            fingerprint_perm_get,
+            fingerprint_perm_set,
+            fingerprint_version_get,
+            fingerprint_version_set,
+        )
+        from resembl.models import FINGERPRINT_VERSION
+
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        fingerprint_ngram_set(self.session, 3)
+        fingerprint_perm_set(self.session, 128)
+        source_path = self._create_source_db([("new_func", "MOV ECX, 9", [], None)])
+        try:
+            result = db_merge(self.session, source_path)
+            self.assertEqual(result["added"], 1)
+            self.assertIsNone(fingerprint_version_get(self.session))
+            self.assertIsNone(fingerprint_ngram_get(self.session))
+            self.assertIsNone(fingerprint_perm_get(self.session))
+        finally:
+            os.unlink(source_path)
+
     def test_merge_adds_new_names(self):
         """Merging should add new names to existing snippets."""
         snippet_add(self.session, "original_name", "MOV EAX, 1")

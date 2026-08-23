@@ -18,6 +18,7 @@ which avoids constructing MinHash objects during index builds.
 
 from __future__ import annotations
 
+import logging
 import threading
 import weakref
 from collections.abc import Callable, Sequence
@@ -27,11 +28,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, text
 
-from .models import FINGERPRINT_VERSION
+from .models import FINGERPRINT_VERSION, LSH_BUCKET_KEY_MAX
 from .scoring import MINHASH_MAGIC, minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
     from .minhash import MinHash
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=64)
@@ -523,6 +526,20 @@ class ResemblLSH:
         self.b, self.r = banding_params(threshold, num_perm)
         if self.b < 2:
             raise ValueError("The number of bands are too small (b < 2)")
+        # The bucket key is the hex encoding of one band (8 * r chars).  It
+        # must fit the indexed column: wider keys would be silently accepted
+        # by SQLite while PostgreSQL/MySQL fail mid-build with a dialect
+        # error.  High-threshold/high-permutation configurations can reach
+        # that width (e.g. threshold 0.95 at 4096 permutations -> 696 chars),
+        # so reject them here, where every backend fails identically and
+        # before any rows are written.
+        if 8 * self.r > LSH_BUCKET_KEY_MAX:
+            raise ValueError(
+                f"threshold {threshold} with {num_perm} permutations needs "
+                f"{self.r}-value bands ({8 * self.r}-character bucket keys), "
+                f"exceeding the lsh_bucket.bucket column limit of "
+                f"{LSH_BUCKET_KEY_MAX}; lower the threshold or the permutation count"
+            )
         _ensure_tables_once(session)
 
     # -- helpers -----------------------------------------------------------
@@ -540,23 +557,48 @@ class ResemblLSH:
     # -- mutation ----------------------------------------------------------
 
     def insert(self, key: str, value: bytes | MinHash) -> None:
-        """Insert one fingerprint under *key* (MinHash or packed bytes)."""
+        """Insert one fingerprint under *key* (MinHash or packed bytes).
+
+        A blob that cannot be banded against this index (corrupt, or written
+        at a different permutation count) is skipped with a warning instead
+        of raising — the same tolerance as a full index build.  Callers run
+        inserts *after* their snippet rows are already committed; a crash
+        here would turn an add/import/merge into a partial, error-reported
+        write and leave the new snippets invisible until the next rebuild.
+        A reindex recomputes skipped fingerprints from their code.
+        """
         packed = self._as_packed(value)
+        try:
+            buckets = self._buckets(packed)
+        except ValueError as e:
+            logger.warning("Skipping index insert for %s: %s", key, e)
+            return
         params = [
             {"band": band, "bucket": bucket, "checksum": key}
-            for band, bucket in enumerate(self._buckets(packed))
+            for band, bucket in enumerate(buckets)
         ]
         self.session.execute(text(_insert_sql(self.session)), params=params)
         self.session.commit()
 
     def insert_batch(self, items: Sequence[tuple[str, bytes | MinHash]]) -> int:
-        """Insert many ``(key, fingerprint)`` pairs; returns the row count."""
+        """Insert many ``(key, fingerprint)`` pairs; returns the row count.
+
+        Items whose fingerprint cannot be banded against this index (corrupt,
+        or written at a different permutation count) are skipped with a
+        warning — same tolerance as :meth:`insert` and the index build — and
+        do not contribute to the returned row count.
+        """
         rows: list[dict[str, object]] = []
         for key, value in items:
             packed = self._as_packed(value)
+            try:
+                buckets = self._buckets(packed)
+            except ValueError as e:
+                logger.warning("Skipping index insert for %s: %s", key, e)
+                continue
             rows.extend(
                 {"band": band, "bucket": bucket, "checksum": key}
-                for band, bucket in enumerate(self._buckets(packed))
+                for band, bucket in enumerate(buckets)
             )
         for i in range(0, len(rows), _INSERT_CHUNK):
             chunk = rows[i : i + _INSERT_CHUNK]

@@ -757,6 +757,75 @@ class TestResemblLSH(BaseScalingTest):
         self.assertNotIn("k1", lsh.query(m))
         self.assertEqual(len(lsh.query(m)), 0)
 
+    def test_insert_skips_foreign_format_blob(self):
+        """An incremental insert of an incompatible blob warns, never raises.
+
+        ``add``/``import``/``merge`` sync the built index *after* their
+        snippet rows are committed.  A fingerprint written at a different
+        permutation count than the index (a config flip between writes, or
+        a merge source at another count) must be skipped with a warning —
+        the same tolerance as a full index build — instead of crashing the
+        write path that already succeeded.
+        """
+        from resembl.lsh import ResemblLSH
+        from resembl.scoring import minhash_new
+
+        lsh_index_build(self.session, 0.5, 64)  # index banded at 64 permutations
+        lsh = ResemblLSH(self.session, 0.5, 64)
+        foreign = minhash_pack(minhash_new(128))
+        good = minhash_pack(code_create_minhash("MOV EAX, 1; RET", num_perm=64))
+        with self.assertLogs("resembl.lsh", level="WARNING"):
+            lsh.insert("foreign", foreign)  # must not raise
+        # Nothing was indexed for the skipped key; a usable blob still is.
+        from resembl.models import LSHBucket
+
+        stored = set(
+            self.session.exec(select(LSHBucket.checksum).distinct()).all()  # type: ignore[arg-type]
+        )
+        self.assertEqual(stored, set())
+        lsh.insert("good", good)
+        self.assertIn("good", lsh.query(good))
+
+    def test_insert_batch_skips_foreign_format_items(self):
+        """Batch inserts skip unusable items and count only usable rows."""
+        from resembl.lsh import ResemblLSH, banding_params
+        from resembl.models import LSHBucket
+        from resembl.scoring import minhash_new
+
+        lsh = ResemblLSH(self.session, 0.5, 64)
+        b, _r = banding_params(0.5, 64)
+        good = minhash_pack(code_create_minhash("MOV EAX, 1; RET", num_perm=64))
+        foreign = minhash_pack(minhash_new(128))  # different permutation count
+        corrupt = b"RMLH" + b"\x00" * 4  # implausible perm count in the header
+        with self.assertLogs("resembl.lsh", level="WARNING"):
+            inserted = lsh.insert_batch([("good", good), ("f", foreign), ("c", corrupt)])
+        self.assertEqual(inserted, b)  # exactly one item's worth of bands
+        stored = set(
+            self.session.exec(select(LSHBucket.checksum).distinct()).all()  # type: ignore[arg-type]
+        )
+        self.assertEqual(stored, {"good"})
+
+    def test_constructor_rejects_bucket_key_overflow(self):
+        """Bandings wider than the bucket column are refused up front.
+
+        threshold 0.95 at 4096 permutations bands to (47, 87): hex keys of
+        696 characters against the 640-character ``lsh_bucket.bucket``
+        column.  SQLite would silently store out-of-spec keys and
+        PostgreSQL/MySQL would fail mid-build; rejecting at construction
+        makes every backend fail identically before any row is written.
+        """
+        from resembl.lsh import ResemblLSH, banding_params
+        from resembl.models import LSH_BUCKET_KEY_MAX
+
+        b, r = banding_params(0.95, 4096)
+        self.assertGreaterEqual(b, 2)  # passes every other validation gate
+        self.assertGreater(8 * r, LSH_BUCKET_KEY_MAX)
+        with self.assertRaisesRegex(ValueError, "bucket key|column limit"):
+            ResemblLSH(self.session, 0.95, 4096)
+        # The default configuration stays comfortably inside the bound.
+        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+        self.assertLessEqual(8 * lsh.r, LSH_BUCKET_KEY_MAX)
+
 
 class TestIndexBuild(BaseScalingTest):
     """The optimized cold-build path (projected reads, chunked commits)."""

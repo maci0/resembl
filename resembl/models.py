@@ -213,6 +213,17 @@ class Snippet(SQLModel, table=True):
         return minhash_unpack(self.minhash)
 
 
+#: Maximum width of the ``lsh_bucket.bucket`` hex key column.  The bound is
+#: the widest key a composite primary key may have while staying inside
+#: MySQL InnoDB's 3072-byte index-key limit (utf8mb4: 640*4 + checksum
+#: 64*4 + int).  Banding configurations that would need wider keys are
+#: rejected when the index object is constructed (see
+#: :class:`resembl.lsh.ResemblLSH`), so every backend fails identically and
+#: early instead of silently writing out-of-spec keys (SQLite) or failing
+#: mid-build with a dialect-specific error (PostgreSQL/MySQL).
+LSH_BUCKET_KEY_MAX = 640
+
+
 class LSHBucket(SQLModel, table=True):
     """SQLite-backed LSH index entry (one row per band bucket hit).
 
@@ -227,17 +238,15 @@ class LSHBucket(SQLModel, table=True):
     ``num_perm``), which every supported database can index — a raw
     ``BLOB`` column cannot be part of a primary key on MySQL/MariaDB.
     The width is bounded by the column rather than fixed: higher
-    thresholds / permutation counts grow ``r``, and enforcing backends
-    (PostgreSQL, MySQL) reject overlong inserts into a narrow column.
-    640 chars covers any realistic configuration while keeping the
-    composite primary key inside MySQL InnoDB's 3072-byte index-key
-    limit (utf8mb4: 640*4 + checksum 64*4 + int).
+    thresholds / permutation counts grow ``r``, and configurations whose
+    keys would exceed the bound are rejected at index construction (see
+    :data:`LSH_BUCKET_KEY_MAX`).
     """
 
     __tablename__ = "lsh_bucket"
 
     band: int = Field(primary_key=True)
-    bucket: str = Field(primary_key=True, max_length=640)
+    bucket: str = Field(primary_key=True, max_length=LSH_BUCKET_KEY_MAX)
     checksum: str = Field(primary_key=True, max_length=64, index=True)
 
 
