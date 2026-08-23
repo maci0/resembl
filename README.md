@@ -305,11 +305,11 @@ uv run pytest
 
 #### Code Coverage
 
-This project uses `slipcover` for line-level coverage measurement. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
+This project uses `pytest-cov` for line-level coverage measurement. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
 
 You can run the coverage report locally with:
 ```bash
-uv run python -m slipcover --source resembl -m pytest
+uv run pytest --cov=resembl --cov-report=term-missing
 ```
 
 ## Advanced Usage

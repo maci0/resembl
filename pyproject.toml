@@ -32,7 +32,6 @@ dev = [
     # which would turn the Pylint CI gate red for everyone on next resolve.
     # Lift the cap in a pass that fixes the new findings, not before.
     "pylint>=3.3.7,<4",
-    "slipcover>=1.0.17",
     "hypothesis>=6.0.0",
     "pg8000>=1.31.0",
     "duckdb>=1.0.0",

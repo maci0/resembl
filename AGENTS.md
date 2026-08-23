@@ -99,11 +99,11 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     While the pre-commit hook may run tests on changed files, it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
 
-- **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `slipcover` for line-level coverage measurement.
+- **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
-    uv run python -m slipcover --source resembl -m pytest
+    uv run pytest --cov=resembl --cov-report=term-missing
     ```
-    This command will run the test suite under Slipcover, which measures how much of the codebase is exercised by the tests and reports coverage per file when the run finishes. Aim to maintain or increase the coverage percentage with your contributions.
+    This command runs the test suite under coverage.py, which measures how much of the codebase is exercised by the tests and reports coverage per file when the run finishes. Aim to maintain or increase the coverage percentage with your contributions.
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 

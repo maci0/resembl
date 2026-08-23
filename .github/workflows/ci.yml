@@ -46,10 +46,10 @@ jobs:
           python-version: '3.11'
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
-      - name: Create virtual environment
-        run: uv venv
       - name: Install dependencies
-        run: uv pip install -e .[dev]
+        # Installs exactly the committed uv.lock (hash-verified, reproducible)
+        # and fails if the lock has drifted from pyproject.toml.
+        run: uv sync --locked --extra dev
       - name: Run mypy
         run: uv run mypy
       - name: Run tests
