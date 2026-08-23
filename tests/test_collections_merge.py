@@ -548,6 +548,19 @@ class TestModelMethods(BaseDBTest):
         found = Snippet.get_by_name(self.session, "my_function")
         self.assertIsNotNone(found)
 
+    def test_snippet_get_by_name_special_characters(self):
+        """Names with quotes, backslashes, or LIKE wildcards stay findable.
+
+        The stored names are JSON-encoded, so a name containing ``"`` is
+        persisted as ``\\"``: a probe built from the raw name could never
+        match its own stored form.  ``%`` and ``_`` must match themselves,
+        not widen the SQL pattern.
+        """
+        for name in ('quote"name', "back\\slash", "percent%name", "under_score"):
+            snippet_add(self.session, name, f"NOP  # {name}")
+            found = Snippet.get_by_name(self.session, name)
+            self.assertIsNotNone(found, name)
+
     def test_snippet_get_by_collection_empty(self):
         """get_by_collection should return empty for nonexistent collection."""
         results = Snippet.get_by_collection(self.session, "none")

@@ -589,26 +589,29 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("lsh_candidates", payload["results"][0])
         self.assertIn("error", payload["results"][1])
 
-    def test_find_batch_malformed_container_answers_500(self):
-        """A non-iterable 'queries' value answers 500 JSON, not a dropped connection."""
+    def test_find_batch_rejects_non_list_queries(self):
+        """A non-list 'queries' value answers 400 JSON, not per-char finds."""
         import urllib.error
 
         port = self._start_server()
-        body = json.dumps({"queries": 12345}).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find-batch",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                status = response.status
-                payload = json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            status = exc.code
-            payload = json.loads(exc.read())
-        self.assertEqual(status, 500)
-        self.assertIn("error", payload)
+        # An integer is not iterable; a bare string would otherwise iterate
+        # one single-character find per letter.
+        for bad in (12345, "push ebx\nret"):
+            body = json.dumps({"queries": bad}).encode("utf-8")
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find-batch",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    status = response.status
+                    payload = json.loads(response.read())
+            except urllib.error.HTTPError as exc:
+                status = exc.code
+                payload = json.loads(exc.read())
+            self.assertEqual(status, 400)
+            self.assertIn("queries must be a list", payload["error"])
 
     def test_server_rejects_malformed_requests(self):
         """Malformed requests answer 4xx errors instead of crashing handlers.
@@ -1005,7 +1008,7 @@ class TestServerMode(unittest.TestCase):
         the last writer owns the advertisement.  The loser exiting must
         leave the survivor discoverable to find clients.
         """
-        from resembl.server import _port_file_cleanup
+        from resembl.server import port_file_cleanup
 
         cache = tempfile.TemporaryDirectory()
         self.addCleanup(cache.cleanup)
@@ -1014,7 +1017,7 @@ class TestServerMode(unittest.TestCase):
         # A foreign server's advertisement survives our exit.
         with open(port_file, "w", encoding="utf-8") as f:
             f.write("4242")
-        _port_file_cleanup(port_file, 1111)
+        port_file_cleanup(port_file, 1111)
         self.assertTrue(os.path.exists(port_file))
         with open(port_file, encoding="utf-8") as f:
             self.assertEqual(f.read().strip(), "4242")
@@ -1022,11 +1025,11 @@ class TestServerMode(unittest.TestCase):
         # Our own advertisement is removed.
         with open(port_file, "w", encoding="utf-8") as f:
             f.write("1111")
-        _port_file_cleanup(port_file, 1111)
+        port_file_cleanup(port_file, 1111)
         self.assertFalse(os.path.exists(port_file))
 
         # A missing file is not an error.
-        _port_file_cleanup(port_file, 1111)
+        port_file_cleanup(port_file, 1111)
 
 
 class TestCLIServerEndToEnd(unittest.TestCase):

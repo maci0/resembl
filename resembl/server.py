@@ -194,15 +194,17 @@ def server_port_path(db_url: str) -> str:
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 
 
-def _port_file_cleanup(port_file: str, port: int) -> None:
+def port_file_cleanup(port_file: str, port: int) -> None:
     """Remove the port file only when it still advertises our own *port*.
 
-    The double-serve check in :func:`serve` is not atomic across processes:
-    two ``serve`` invocations started close together both pass it (neither
-    has written yet), both bind, and the last writer owns the advertisement.
+    Shared by the server's exit path (:func:`serve`) and any client that
+    verified the advertised port is dead (``cli._server_request``): the
+    double-serve check in :func:`serve` is not atomic across processes, two
+    ``serve`` invocations started close together both pass it (neither has
+    written yet), both bind, and the last writer owns the advertisement.
     An unconditional delete on exit would then orphan the surviving server
-    for every ``find`` client, so an exiting process removes the file only
-    while its content is still its own bound port.
+    for every ``find`` client, so the file is removed only while its
+    content is still the known *port*.
     """
     try:
         with open(port_file, encoding="utf-8") as f:
@@ -291,6 +293,11 @@ class _FindHandler(BaseHTTPRequestHandler):
             queries = body["queries"]
         except KeyError as exc:
             self._respond(400, {"error": f"bad request: {exc}"})
+            return
+        # A bare string would iterate per character below, silently turning
+        # one malformed request into one single-character find per letter.
+        if not isinstance(queries, list):
+            self._respond(400, {"error": "bad request: queries must be a list"})
             return
         results: list[dict] = []
         try:
@@ -526,7 +533,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # handlers.  The hook remains only as a backstop for callers that never
     # close the returned server.
     port = int(httpd.server_address[1])
-    cleanup = functools.partial(_port_file_cleanup, port_file, port)
+    cleanup = functools.partial(port_file_cleanup, port_file, port)
     httpd.set_atexit_cleanup(cleanup)
     atexit.register(cleanup)
     return httpd

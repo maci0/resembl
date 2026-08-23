@@ -1210,6 +1210,29 @@ def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet
     return list(Snippet.get_all(session))
 
 
+def _names_stream(
+    session: Session, collection_name: str | None, batch_size: int
+) -> Iterator[list[tuple[str, str]]]:
+    """Yield ``(checksum, names)`` pairs in batches via keyset pagination.
+
+    Shared implementation of :func:`snippet_names_stream` and
+    :func:`snippet_collection_names_stream`; only the two rendered columns
+    are read so the ``code`` column never enters memory.
+    """
+    last: str | None = None
+    while True:
+        stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(batch_size)
+        if collection_name is not None:
+            stmt = stmt.where(Snippet.collection == collection_name)
+        if last is not None:
+            stmt = stmt.where(Snippet.checksum > last)
+        rows = session.exec(stmt).all()
+        if not rows:
+            return
+        yield [(row[0], row[1]) for row in rows]
+        last = rows[-1][0]
+
+
 def snippet_names_stream(
     session: Session, batch_size: int = 2000
 ) -> Iterator[list[tuple[str, str]]]:
@@ -1222,16 +1245,7 @@ def snippet_names_stream(
     of database size.  Each batch is fully consumed before the next is
     fetched (same keyset semantics as :meth:`Snippet.iter_batches`).
     """
-    last: str | None = None
-    while True:
-        stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(batch_size)
-        if last is not None:
-            stmt = stmt.where(Snippet.checksum > last)
-        rows = session.exec(stmt).all()
-        if not rows:
-            return
-        yield [(row[0], row[1]) for row in rows]
-        last = rows[-1][0]
+    return _names_stream(session, None, batch_size)
 
 
 def snippet_collection_names_stream(
@@ -1247,21 +1261,7 @@ def snippet_collection_names_stream(
     before the next is fetched (same keyset semantics as
     :func:`snippet_names_stream`).
     """
-    last: str | None = None
-    while True:
-        stmt = (
-            select(Snippet.checksum, Snippet.names)
-            .where(Snippet.collection == collection_name)
-            .order_by(Snippet.checksum)
-            .limit(batch_size)
-        )
-        if last is not None:
-            stmt = stmt.where(Snippet.checksum > last)
-        rows = session.exec(stmt).all()
-        if not rows:
-            return
-        yield [(row[0], row[1]) for row in rows]
-        last = rows[-1][0]
+    return _names_stream(session, collection_name, batch_size)
 
 
 def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:

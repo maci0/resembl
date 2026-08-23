@@ -61,14 +61,16 @@ class MinHash:
         seed: int = 1,
         hashvalues: Iterable[int] | None = None,
     ) -> None:
-        if hashvalues is not None:
-            num_perm = len(tuple(hashvalues))
         if num_perm > _HASH_RANGE:
             raise ValueError(f"Cannot have more than {_HASH_RANGE} number of permutation functions")
         self.seed = seed
         self.num_perm = num_perm
         if hashvalues is not None:
-            self.hashvalues = np.array(list(hashvalues), dtype=np.uint64)
+            # Materialize once: consuming *hashvalues* twice (e.g. when a
+            # generator is passed) would leave this array empty.
+            values = list(hashvalues)
+            self.num_perm = len(values)
+            self.hashvalues = np.array(values, dtype=np.uint64)
         else:
             self.hashvalues = np.ones(num_perm, dtype=np.uint64) * _MAX_HASH
         self._permutations: tuple[np.ndarray, np.ndarray] | None = None

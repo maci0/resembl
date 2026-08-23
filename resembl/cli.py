@@ -261,7 +261,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     import urllib.error
     import urllib.request
 
-    from .server import server_port_path
+    from .server import port_file_cleanup, server_port_path
 
     db_url = _session_db_url(state.session)
     port_file = server_port_path(db_url)
@@ -289,18 +289,10 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
         if isinstance(reason, ConnectionRefusedError):
             # Retire the stale advertisement only while it still names the
-            # dead *port* this request failed on.  Between reading the file
+            # dead *port* this request failed on; between reading the file
             # and the refused connect, another ``serve`` may have bound and
-            # rewritten it; deleting unconditionally then would orphan the
-            # healthy newcomer for every find client until it restarts —
-            # the same rule :func:`resembl.server._port_file_cleanup`
-            # applies on the server's exit path.
-            try:
-                with open(port_file, encoding="utf-8") as f:
-                    if f.read().strip() == str(port):
-                        os.remove(port_file)
-            except OSError:
-                pass
+            # rewritten it.  Same rule as the server's own exit path.
+            port_file_cleanup(port_file, port)
         return None
     if "error" in payload:
         return None

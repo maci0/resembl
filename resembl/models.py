@@ -128,9 +128,19 @@ class Snippet(SQLModel, table=True):
         # before one verifies, and full rows would pull each match's ``code``
         # (the column that dominates the table) through the ORM for nothing.
         # The winner's full row is fetched via the identity map afterwards.
+        #
+        # The probe must reproduce the stored (JSON-encoded) spelling of
+        # *name*, or a name containing ``"`` or ``\`` can never match its own
+        # row: first encode like ``json.dumps`` does, then LIKE-escape the
+        # result ('\\' is the escape character, so every stored backslash —
+        # including the ones JSON just introduced — must be doubled) and
+        # protect ``%`` / ``_`` so they match themselves instead of widening
+        # the probe.
+        encoded = name.replace("\\", "\\\\").replace('"', '\\"')
+        literal = encoded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         candidates = session.exec(
             select(cls.checksum, cls.names).where(
-                cls.names.like(f'%"{name}"%')  # type: ignore[attr-defined]
+                cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]
             )
         ).all()
         for checksum, names in candidates:
