@@ -295,6 +295,53 @@ class TestBatchConsistency(BaseScalingTest):
                 f"fingerprint for {checksum} was not persisted by the parallel reindex",
             )
 
+    def test_parallel_reindex_survives_broken_pool(self):
+        """An unusable process pool degrades to a correct sequential reindex.
+
+        The pool can be unavailable at runtime (e.g. spawned from a stdin
+        script).  ``db_reindex`` must log a warning and redo every batch
+        sequentially instead of failing or leaving stale fingerprints.
+        """
+        codes = [f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET" for i in range(30)]
+        prepared = [p for p in (snippet_prepare(f"fn_{i}", c, 3) for i, c in enumerate(codes)) if p]
+        rows = [
+            {
+                "checksum": cs,
+                "names": json.dumps([name]),
+                "code": code,
+                "minhash": minhash_pack(code_create_minhash(code + "\nNOP", 3)),
+                "tags": "[]",
+                "collection": None,
+            }
+            for cs, name, code, _mh in prepared
+        ]
+        insert_sql = (
+            "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
+            "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
+        )
+        self.session.execute(text(insert_sql), rows)
+        self.session.commit()
+        expected = {
+            row["checksum"]: minhash_pack(code_create_minhash(row["code"], 3)) for row in rows
+        }
+
+        with (
+            patch(
+                "concurrent.futures.ProcessPoolExecutor",
+                side_effect=OSError("process pool unavailable"),
+            ),
+            self.assertLogs("resembl.core", level="WARNING") as logs,
+        ):
+            result = db_reindex(self.session, jobs=2, batch_size=10)
+
+        self.assertTrue(any("sequentially" in message for message in logs.output))
+        self.assertEqual(result["num_reindexed"], len(expected))
+
+        self.session.expire_all()
+        stored = dict(self.session.exec(select(Snippet.checksum, Snippet.minhash)).all())
+        for checksum, blob in expected.items():
+            self.assertEqual(stored[checksum], blob)
+
 
 class TestSnippetAddBatch(BaseScalingTest):
     """Bulk import semantics."""
@@ -657,6 +704,18 @@ class TestResemblLSH(BaseScalingTest):
             ResemblLSH(self.session, 1.5, 128)
         with self.assertRaises(ValueError):
             ResemblLSH(self.session, 0.5, 1)
+
+    def test_constructor_rejects_threshold_leaving_one_band(self):
+        """A threshold whose banding yields b=1 is refused, not silently built.
+
+        An index with a single band admits every candidate (no false-positive
+        filter at all); the guard is what the CLI's ``too high`` rejection
+        surfaces.  0.985 bands to exactly (1, 110) at 128 permutations.
+        """
+        from resembl.lsh import ResemblLSH
+
+        with self.assertRaises(ValueError):
+            ResemblLSH(self.session, 0.985, 128)
 
     def test_banding_params_are_cached(self):
         """The banding search must run once per (threshold, perms).

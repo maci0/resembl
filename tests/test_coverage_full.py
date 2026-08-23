@@ -17,6 +17,7 @@ from resembl.cache import (
 )
 from resembl.core import (
     NUM_PERMUTATIONS,
+    code_create_minhash,
     code_create_minhash_batch,
     collection_add_snippet,
     collection_create,
@@ -37,6 +38,7 @@ from resembl.core import (
     snippet_tag_remove,
 )
 from resembl.database import db_create
+from resembl.minhash import MinHash
 from resembl.models import Collection
 
 
@@ -81,12 +83,14 @@ class TestTagEdgeCases(BaseDBTest):
 
     def test_tag_add_nonexistent_not_quiet(self):
         """Adding a tag with quiet=False to nonexistent snippet should log (line 307)."""
-        result = snippet_tag_add(self.session, "bad_checksum", "tag", quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = snippet_tag_add(self.session, "bad_checksum", "tag", quiet=False)
         self.assertIsNone(result)
 
     def test_tag_remove_nonexistent_not_quiet(self):
         """Removing a tag from nonexistent snippet with quiet=False should log (line 328)."""
-        result = snippet_tag_remove(self.session, "bad_checksum", "tag", quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = snippet_tag_remove(self.session, "bad_checksum", "tag", quiet=False)
         self.assertIsNone(result)
 
 
@@ -99,19 +103,27 @@ class TestBatchMinhashEdgeCases(BaseDBTest):
     """Tests for code_create_minhash_batch with short/empty snippets."""
 
     def test_batch_minhash_empty_code(self):
-        """Empty code should produce a MinHash with default values (line 420-421)."""
+        """Empty code must yield a MinHash identical to the single path (line 420-421)."""
         results = code_create_minhash_batch([""], normalize=True, ngram_size=3)
         self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], MinHash)
+        self.assertEqual(results[0].jaccard(code_create_minhash("")), 1.0)
 
     def test_batch_minhash_short_tokens(self):
-        """Code shorter than ngram_size should still produce a MinHash (line 422-425)."""
+        """Code shorter than ngram_size must match the single path (line 422-425)."""
         results = code_create_minhash_batch(["NOP"], normalize=True, ngram_size=3)
         self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0], MinHash)
+        self.assertEqual(results[0].jaccard(code_create_minhash("NOP")), 1.0)
 
     def test_batch_minhash_tokens_equal_to_ngram(self):
         """Code with tokens == ngram_size should use shingles."""
         results = code_create_minhash_batch(["MOV EAX, 1"], normalize=True, ngram_size=3)
         self.assertEqual(len(results), 1)
+        self.assertEqual(
+            results[0].jaccard(code_create_minhash("MOV EAX, 1", ngram_size=3)),
+            1.0,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -309,24 +321,30 @@ class TestCollectionErrorPaths(BaseDBTest):
 
     def test_collection_delete_nonexistent_not_quiet(self):
         """Deleting a nonexistent collection with quiet=False should log (line 800)."""
-        result = collection_delete(self.session, "nope", quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = collection_delete(self.session, "nope", quiet=False)
         self.assertFalse(result)
 
     def test_collection_add_snippet_nonexistent_collection_not_quiet(self):
         """Adding to a nonexistent collection with quiet=False should log (line 835)."""
         snippet = snippet_add(self.session, "func", "NOP")
-        result = collection_add_snippet(self.session, "bad_col", snippet.checksum, quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = collection_add_snippet(
+                self.session, "bad_col", snippet.checksum, quiet=False
+            )
         self.assertIsNone(result)
 
     def test_collection_add_snippet_nonexistent_snippet_not_quiet(self):
         """Adding a nonexistent snippet with quiet=False should log (line 841)."""
         collection_create(self.session, "col")
-        result = collection_add_snippet(self.session, "col", "bad_checksum", quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = collection_add_snippet(self.session, "col", "bad_checksum", quiet=False)
         self.assertIsNone(result)
 
     def test_collection_remove_snippet_nonexistent_not_quiet(self):
         """Removing a nonexistent snippet with quiet=False should log (line 858)."""
-        result = collection_remove_snippet(self.session, "bad_checksum", quiet=False)
+        with self.assertLogs("resembl.core", level="ERROR"):
+            result = collection_remove_snippet(self.session, "bad_checksum", quiet=False)
         self.assertIsNone(result)
 
 

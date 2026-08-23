@@ -353,6 +353,29 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         all_names = {name for _, raw in pairs for name in json.loads(raw)}
         self.assertEqual(all_names, {f"n_{i}" for i in range(2500)})
 
+    def test_snippet_collection_names_stream(self):
+        """snippet_collection_names_stream yields only that collection's rows."""
+        from resembl.core import collection_add_snippet, collection_create
+        from resembl.core import snippet_collection_names_stream
+
+        collection_create(self.session, "col")
+        for i in range(50):
+            checksum = snippet_add(self.session, f"in_{i}", f"MOV R{ i }, {i}").checksum
+            collection_add_snippet(self.session, "col", checksum)
+        for i in range(20):
+            snippet_add(self.session, f"out_{i}", f"XOR R{i}, {i}")
+
+        batches = list(snippet_collection_names_stream(self.session, "col", batch_size=20))
+        self.assertEqual(len(batches), 3)  # 20 + 20 + 10
+        pairs = [pair for batch in batches for pair in batch]
+        checksums = [c for c, _ in pairs]
+        self.assertEqual(len(checksums), 50)
+        self.assertEqual(len(set(checksums)), 50)  # keyset pagination, no dupes/omissions
+        all_names = {name for _, raw in pairs for name in json.loads(raw)}
+        self.assertEqual(all_names, {f"in_{i}" for i in range(50)})
+        # An unknown collection yields nothing.
+        self.assertEqual(list(snippet_collection_names_stream(self.session, "nope")), [])
+
     def test_snippet_export(self):
         """Test exporting snippets."""
         snippet_add(self.session, "test", "MOV EAX, 1")

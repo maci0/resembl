@@ -36,6 +36,25 @@ class TestConfig(unittest.TestCase):
                 config = load_config()
         self.assertEqual(config.to_dict(), DEFAULTS)
 
+    def test_load_unreadable_config(self):
+        """An unreadable config file runs on defaults instead of crashing."""
+        import stat
+
+        if os.geteuid() == 0:  # root ignores directory/file write bits
+            self.skipTest("running as root")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("top_n = 9\n")
+            os.chmod(config_path, 0)
+            try:
+                with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                    with self.assertLogs("resembl.config", level="ERROR"):
+                        config = load_config()
+            finally:
+                os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)
+        self.assertEqual(config.to_dict(), DEFAULTS)
+
     def test_update_and_load_config(self):
         """Test that update_config correctly writes a value and load_config reads it."""
         with tempfile.TemporaryDirectory() as temp_dir:
