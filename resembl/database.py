@@ -51,9 +51,10 @@ def create_db_engine(
     if db_url.startswith("sqlite"):
 
         @event.listens_for(eng, "connect")
+        # Fixed SQLAlchemy connect-listener signature.
         def _set_sqlite_pragma(
             dbapi_connection: DBAPIConnection,
-            connection_record: ConnectionPoolEntry,
+            connection_record: ConnectionPoolEntry,  # pylint: disable=unused-argument
         ) -> None:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")

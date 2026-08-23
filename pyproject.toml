@@ -94,8 +94,9 @@ disable = [
     # Module-level engine/config singletons need module globals.
     "global-statement",
     # Interface-conformance signatures (SQLAlchemy listeners, hypothesis
-    # @given, http.server overrides) must keep their named parameters.
-    "unused-argument",
+    # @given, http.server overrides) must keep their named parameters. Only
+    # two such stubs exist in the tree; both scope the message inline in
+    # tests/test_server.py instead of disabling it here.
     # Parallel test/fuzzer boilerplate is intentional.
     "duplicate-code",
     # astroid cannot see through SQLModel's dynamic field proxies or the
@@ -152,7 +153,10 @@ select = [
     "PERF",
     "N",
     "T10",
-    "RUF100",
+    # Full ruff group (includes RUF100, which keeps `# noqa` honest):
+    # ambiguous-unicode docstring/comment checks are enabled and the tree
+    # is kept free of confusable characters.
+    "RUF",
 ]
 
 [tool.ruff.lint.isort]
@@ -171,6 +175,10 @@ strict_equality = true
 warn_unreachable = true
 disallow_subclassing_any = true
 extra_checks = true
+# Extra error codes the whole tree passes; each catches a defect class:
+# unscoped (bare) suppressions, tautological expressions, always-truthy
+# assertions on bool-typed objects.
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 
 # Ratchet: the library package must stay fully annotated; tests remain gradual.
 [[tool.mypy.overrides]]

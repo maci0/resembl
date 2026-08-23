@@ -455,7 +455,10 @@ class TestDBMerge(BaseDBTest):
         counts = {"select": 0}
 
         @sqlalchemy.event.listens_for(self.engine, "after_cursor_execute")
-        def _count_selects(conn, cursor, statement, parameters, context, executemany):
+        # Fixed SQLAlchemy listener signature; only `statement` is needed.
+        def _count_selects(
+            conn, cursor, statement, parameters, context, executemany
+        ):  # pylint: disable=unused-argument
             if statement.lstrip().upper().startswith("SELECT"):
                 counts["select"] += 1
 

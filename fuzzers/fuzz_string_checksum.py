@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pylint: disable=duplicate-code,import-error
+# pylint: disable=import-error
 """A fuzzer for the string_checksum function."""
 
 import sys

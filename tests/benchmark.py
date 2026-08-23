@@ -13,8 +13,7 @@ import subprocess
 import sys
 import time
 
-# The following is needed for standalone execution, but triggers a lint error.
-# pylint: disable=wrong-import-position
+# Needed for standalone execution.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from tests.generate_data import generate_files
 

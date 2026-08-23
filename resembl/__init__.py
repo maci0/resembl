@@ -15,6 +15,9 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "Collection",
+    "Snippet",
+    "SnippetVersion",
     "code_create_minhash",
     "code_create_minhash_batch",
     "code_tokenize",
@@ -28,9 +31,6 @@ __all__ = [
     "snippet_prepare",
     "string_checksum",
     "string_normalize",
-    "Collection",
-    "Snippet",
-    "SnippetVersion",
 ]
 
 _CORE_EXPORTS = frozenset(

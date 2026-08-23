@@ -139,24 +139,20 @@ def _generate_one(args: tuple[str, int, int, str, int | None]) -> None:
         body.append("")  # Add a blank line for spacing
 
     # --- Assemble the final file content ---
-    content = (
-        [
-            f"; Function: {name}",
-            "; Description: A highly randomized, auto-generated function.",
-            "section .text",
-            f"global {name}",
-            f"{name}:",
-            "    push    ebp",
-            "    mov     ebp, esp",
-            f"    sub     esp, {random.randint(4, 64)} ; Allocate stack space",
-        ]
-        + body
-        + [
-            "    mov     esp, ebp",
-            "    pop     ebp",
-            "    ret",
-        ]
-    )
+    content = [
+        f"; Function: {name}",
+        "; Description: A highly randomized, auto-generated function.",
+        "section .text",
+        f"global {name}",
+        f"{name}:",
+        "    push    ebp",
+        "    mov     ebp, esp",
+        f"    sub     esp, {random.randint(4, 64)} ; Allocate stack space",
+        *body,
+        "    mov     esp, ebp",
+        "    pop     ebp",
+        "    ret",
+    ]
 
     # Write the file
     file_path = os.path.join(data_dir, f"{name}.asm")

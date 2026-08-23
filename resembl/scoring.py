@@ -49,7 +49,7 @@ NUM_PERMUTATIONS = 128
 MINHASH_MAGIC = b"RMLH"
 
 #: Upper bound on the permutation count accepted when unpacking a stored
-#: fingerprint.  Real configurations use 64–128; anything near this limit is
+#: fingerprint.  Real configurations use 64-128; anything near this limit is
 #: corrupt or hostile.  The bound also keeps ``struct`` format strings and
 #: ``MinHash`` allocations sane on malformed input.
 MAX_NUM_PERM = 1 << 12
@@ -642,7 +642,7 @@ RARE_INSTRUCTIONS = {
 }
 
 #: The most common x86 instructions. Shingles composed entirely of these
-#: receive reduced weight (1×) to avoid drowning out distinctive patterns.
+#: receive reduced weight (1x) to avoid drowning out distinctive patterns.
 COMMON_INSTRUCTIONS = {
     "MOV",
     "PUSH",
@@ -821,7 +821,7 @@ def shingle_weight(shingle: str) -> int:
 
 
 def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4) -> float:
-    """Combine Jaccard (0–1) and Levenshtein (0–100) into a single 0–100 score.
+    """Combine Jaccard (0-1) and Levenshtein (0-100) into a single 0-100 score.
 
     ``jaccard_weight`` controls the balance:
     - 0.0 = pure Levenshtein
@@ -957,13 +957,13 @@ def cfg_extract(code: str) -> dict:
 
 
 def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
-    """Compute structural similarity between two CFGs (0.0–1.0).
+    """Compute structural similarity between two CFGs (0.0-1.0).
 
     Combines three sub-metrics with equal weight:
 
-    1. **Block-count ratio** – min/max of block counts.
-    2. **Edge-count ratio** – min/max of edge counts.
-    3. **Block-size histogram cosine similarity** – how similar the
+    1. **Block-count ratio** - min/max of block counts.
+    2. **Edge-count ratio** - min/max of edge counts.
+    3. **Block-size histogram cosine similarity** - how similar the
        distribution of instructions per block is.
     """
     b1, b2 = cfg1["num_blocks"], cfg2["num_blocks"]
@@ -1110,7 +1110,7 @@ def _require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:
 
 
 def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
-    """Jaccard similarity of two stored MinHash byte blobs (0.0–1.0).
+    """Jaccard similarity of two stored MinHash byte blobs (0.0-1.0).
 
     Fast path: when both blobs use the compact packed format, similarity is
     computed directly from the uint32 arrays, bypassing the ``MinHash``

@@ -680,7 +680,8 @@ class TestServerFallback(unittest.TestCase):
 
         import resembl.cli as cli
 
-        def refused_after_retarget(request, timeout=None):
+        # Signature-conformance stub for urllib.request.urlopen.
+        def refused_after_retarget(request, timeout=None):  # pylint: disable=unused-argument
             # Simulate the newcomer winning the advertisement race between
             # this client's read of the port file and its connect attempt.
             with open(self.port_file, "w", encoding="utf-8") as f:

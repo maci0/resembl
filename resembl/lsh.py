@@ -574,8 +574,7 @@ class ResemblLSH:
             logger.warning("Skipping index insert for %s: %s", key, e)
             return
         params = [
-            {"band": band, "bucket": bucket, "checksum": key}
-            for band, bucket in enumerate(buckets)
+            {"band": band, "bucket": bucket, "checksum": key} for band, bucket in enumerate(buckets)
         ]
         self.session.execute(text(_insert_sql(self.session)), params=params)
         self.session.commit()

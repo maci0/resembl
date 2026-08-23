@@ -7,11 +7,11 @@ global options.
 
 Key design choices
 ------------------
-* **Checksum prefix resolution** – Any command that accepts a checksum
+* **Checksum prefix resolution** - Any command that accepts a checksum
   also accepts a unique prefix, resolved via ``_resolve_checksum``.
-* **Structured output** – Every command supports ``--format json`` and
+* **Structured output** - Every command supports ``--format json`` and
   ``--format csv`` in addition to the default Rich table output.
-* **Quiet mode** – ``_echo`` is used instead of ``console.print`` so
+* **Quiet mode** - ``_echo`` is used instead of ``console.print`` so
   that ``--quiet`` suppresses all informational output.
 """
 

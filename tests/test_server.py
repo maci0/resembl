@@ -405,7 +405,9 @@ class TestServerMode(unittest.TestCase):
             def read(self):
                 return b'{"lsh_candidates": 0, "matches": []}'
 
-        def fake_urlopen(request, timeout=5):
+        # Signature-conformance stub for urllib.request.urlopen; the real
+        # call site passes timeout but the fake needs no fetch delay.
+        def fake_urlopen(request, timeout=5):  # pylint: disable=unused-argument
             captured["body"] = json.loads(request.data)
             return _FakeResponse()
 
@@ -849,7 +851,9 @@ class TestServerMode(unittest.TestCase):
         port = self._start_server()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
 
-        def do_find(i: int) -> dict:
+        # ThreadPoolExecutor.map supplies each item's index; the worker
+        # ignores it but must accept the positional argument.
+        def do_find(i: int) -> dict:  # pylint: disable=unused-argument
             return _post_json(port, "/find", {"query": query, "top_n": 5}, timeout=30)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -1193,5 +1197,8 @@ class TestLazyPackageInit(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=60,
+            # The next line asserts returncode == 0 with a useful message;
+            # a CalledProcessError would hide result.stderr from the output.
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

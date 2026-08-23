@@ -13,6 +13,7 @@ Covers:
 
 # pylint: disable=protected-access  # tests exercise private internals
 
+import itertools
 import json
 import os
 import pickle
@@ -396,7 +397,10 @@ class TestSnippetAddBatch(BaseScalingTest):
         counts = {"select": 0}
 
         @sqlalchemy.event.listens_for(ENGINE, "after_cursor_execute")
-        def _count_selects(conn, cursor, statement, parameters, context, executemany):
+        # Fixed SQLAlchemy listener signature; only `statement` is needed.
+        def _count_selects(
+            conn, cursor, statement, parameters, context, executemany
+        ):  # pylint: disable=unused-argument
             if statement.lstrip().upper().startswith("SELECT"):
                 counts["select"] += 1
 
@@ -779,9 +783,7 @@ class TestResemblLSH(BaseScalingTest):
         # Nothing was indexed for the skipped key; a usable blob still is.
         from resembl.models import LSHBucket
 
-        stored = set(
-            self.session.exec(select(LSHBucket.checksum).distinct()).all()  # type: ignore[arg-type]
-        )
+        stored = set(self.session.exec(select(LSHBucket.checksum).distinct()).all())
         self.assertEqual(stored, set())
         lsh.insert("good", good)
         self.assertIn("good", lsh.query(good))
@@ -800,9 +802,7 @@ class TestResemblLSH(BaseScalingTest):
         with self.assertLogs("resembl.lsh", level="WARNING"):
             inserted = lsh.insert_batch([("good", good), ("f", foreign), ("c", corrupt)])
         self.assertEqual(inserted, b)  # exactly one item's worth of bands
-        stored = set(
-            self.session.exec(select(LSHBucket.checksum).distinct()).all()  # type: ignore[arg-type]
-        )
+        stored = set(self.session.exec(select(LSHBucket.checksum).distinct()).all())
         self.assertEqual(stored, {"good"})
 
     def test_constructor_rejects_bucket_key_overflow(self):
@@ -1044,7 +1044,7 @@ class TestIndexBuild(BaseScalingTest):
         self.assertTrue(calls)
         self.assertEqual(calls[-1], (50, 50))
         self.assertTrue(all(done <= total for done, total in calls))
-        self.assertTrue(all(a <= b for (a, _), (b, _) in zip(calls, calls[1:])))
+        self.assertTrue(all(a <= b for (a, _), (b, _) in itertools.pairwise(calls)))
 
     def test_build_retries_on_locked_database(self):
         """A concurrent-writer lock mid-build is retried, not crashed on.
@@ -1502,7 +1502,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
             mock.assert_called_once()
         self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
 
-    def _corrupt_last_blob_to_64_perms(self, n: int) -> str:
+    def _corrupt_last_blob_to_64_perms(self) -> str:
         """Rewrite one stored blob to a valid packed blob at 64 permutations."""
         from datasketch import MinHash
 
@@ -1522,7 +1522,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
 
         self._add(4)
         fingerprint_version_set(self.session, FINGERPRINT_VERSION)
-        victim = self._corrupt_last_blob_to_64_perms(4)
+        victim = self._corrupt_last_blob_to_64_perms()
 
         lsh = lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
         self.assertIsNotNone(lsh)
@@ -1543,7 +1543,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
         # one stored blob stale: the LSH still routes to its checksum, and
         # scoring must skip it instead of raising ValueError.
         _n0, _ = snippet_find_matches(self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3)
-        victim = self._corrupt_last_blob_to_64_perms(4)
+        victim = self._corrupt_last_blob_to_64_perms()
 
         _n1, matches = snippet_find_matches(
             self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=4

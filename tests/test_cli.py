@@ -443,7 +443,7 @@ class TestCLIImport(BaseCLITest):
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write("PUSH EBP; MOV EBP, ESP; POP EBP; RET")
 
-            # First import – should report 1 new snippet
+            # First import - should report 1 new snippet
             result = self.run_command(f"--format json import --force {import_dir}")
             self.assertEqual(result.returncode, 0)
             import json
@@ -451,7 +451,7 @@ class TestCLIImport(BaseCLITest):
             data = json.loads(result.stdout)
             self.assertEqual(data["num_imported"], 1)
 
-            # Second import of the same file – should report 0 new snippets
+            # Second import of the same file - should report 0 new snippets
             result = self.run_command(f"--format json import --force {import_dir}")
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
