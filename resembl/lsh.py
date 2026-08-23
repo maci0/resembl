@@ -18,12 +18,14 @@ which avoids constructing MinHash objects during index builds.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, text
 
+from .models import FINGERPRINT_VERSION
 from .scoring import minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
@@ -355,8 +357,10 @@ def fingerprint_perm_get(session: Session) -> int | None:
 def fingerprint_perm_set(session: Session, num_perm: int) -> None:
     """Stamp the permutation count used to derive the stored fingerprints.
 
-    Every fingerprint-writing path (``add``, ``import``, ``reindex``)
-    records its count.  The legacy one-blob probe in
+    Whole-population writers (``db_reindex``) record their count directly;
+    partial writers (``add`` / ``import``) go through
+    :func:`fingerprint_stamps_reconcile`, which only publishes a value that
+    holds for every stored row.  The legacy one-blob probe in
     ``fingerprints_need_reindex`` samples a single arbitrary row, so a
     database with a few mismatched blobs among many matching ones usually
     escaped detection — and the mixed database then crashed ``find`` with
@@ -374,6 +378,70 @@ def fingerprint_perm_clear(session: Session) -> None:
     """Remove the perm-count stamp (blobs may be from unknown counts)."""
     session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_num_perm'"))
     session.commit()
+
+
+def fingerprint_stamps_reconcile(
+    session: Session,
+    *,
+    ngram_size: int,
+    num_perm: int,
+    fresh_database: bool,
+) -> None:
+    """Reconcile the fingerprint stamps after a *partial* fingerprint write.
+
+    ``snippet_add`` / ``snippet_add_batch`` write fingerprints for some rows
+    at ``(ngram_size, num_perm)`` without rewriting the rest of the
+    database.  The stamps describe the WHOLE stored population:
+    ``fingerprints_need_reindex`` compares them against the requested
+    parameters to decide whether one healing reindex is required.  A partial
+    writer may therefore only publish a stamp value it has verified for
+    every row (see the rule inside).  Blindly restamping here used to strand
+    every foreign-format row: after an n-gram or permutation-count config
+    flip, a single ``add`` re-declared the old population current, so its
+    snippets stopped sharing LSH buckets with any query and became
+    permanently invisible until a manual ``reindex --force``.
+    """
+
+    def reconcile(
+        get: Callable[[], int | None],
+        set_: Callable[[], None],
+        clear: Callable[[], None],
+        expected: int,
+    ) -> None:
+        current = get()
+        if current == expected:
+            return
+        if current is not None:
+            # The write introduced rows at other parameters than stamped:
+            # the population is now mixed, so the stamp must go — keeping
+            # it would tell ``find`` everything matches and silently hide
+            # the old rows.
+            clear()
+        elif fresh_database:
+            # No pre-existing rows: the rows just written ARE the population.
+            set_()
+        # else: stamp absent with pre-existing rows (legacy database, or a
+        # merge cleared it) — leave it absent; publishing a value here would
+        # vouch for rows this write never saw.
+
+    reconcile(
+        lambda: fingerprint_version_get(session),
+        lambda: fingerprint_version_set(session, FINGERPRINT_VERSION),
+        lambda: fingerprint_version_clear(session),
+        FINGERPRINT_VERSION,
+    )
+    reconcile(
+        lambda: fingerprint_ngram_get(session),
+        lambda: fingerprint_ngram_set(session, ngram_size),
+        lambda: fingerprint_ngram_clear(session),
+        ngram_size,
+    )
+    reconcile(
+        lambda: fingerprint_perm_get(session),
+        lambda: fingerprint_perm_set(session, num_perm),
+        lambda: fingerprint_perm_clear(session),
+        num_perm,
+    )
 
 
 def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:

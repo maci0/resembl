@@ -196,6 +196,19 @@ def _build_progress_printer() -> Callable[[int, int], None]:
     return _report
 
 
+def _session_db_url(session: Session) -> str:
+    """Return the session bind's URL exactly as clients address it.
+
+    ``str(URL)`` masks the password (``user:***@host``), so hashing that
+    string for the port-file name diverges from the raw ``DATABASE_URL``
+    the standalone ``resembl-find`` client hashes: with credentials in the
+    URL, the server would advertise under one digest while every thin
+    client looked under another, and warm finds would silently fall back to
+    cold process startups.  Render the URL unmasked instead.
+    """
+    return cast(Engine, session.get_bind()).url.render_as_string(hide_password=False)
+
+
 def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     """Send one JSON request to the running ``serve`` process.
 
@@ -210,7 +223,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
 
     from .server import server_port_path
 
-    db_url = str(cast(Engine, state.session.get_bind()).url)
+    db_url = _session_db_url(state.session)
     port_file = server_port_path(db_url)
     try:
         with open(port_file, encoding="utf-8") as f:
@@ -339,7 +352,7 @@ def serve(
     """
     from .server import serve as serve_start
 
-    db_url = str(cast(Engine, state.session.get_bind()).url)
+    db_url = _session_db_url(state.session)
     if host not in ("127.0.0.1", "localhost", "::1"):
         _echo(
             "[yellow]Warning: binding a non-loopback interface exposes an "

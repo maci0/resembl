@@ -348,6 +348,38 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("unreachable", stderr.getvalue())
 
+    def test_port_file_digest_uses_unmasked_url(self):
+        """serve-side port files hash the raw URL the thin client hashes.
+
+        ``str(engine.url)`` masks the password (``user:***@host``); hashing
+        that masked string made ``resembl-find`` look under a different
+        port-file name than ``resembl serve`` wrote whenever DATABASE_URL
+        carried credentials — the warm server was undiscoverable and every
+        find silently fell back to cold process startups.
+        """
+        from sqlalchemy import create_engine as sa_create_engine
+        from sqlmodel import Session
+
+        from resembl.cache import cache_dir_get
+        from resembl.cli import _session_db_url
+        from resembl.find_client import server_port_path as client_port_path
+        from resembl.server import server_port_path as server_port_path_for
+
+        url = "postgresql+pg8000://user:secretpw@dbhost/resembl"
+        engine = sa_create_engine(url)
+        try:
+            with Session(engine) as session:
+                db_url = _session_db_url(session)
+        finally:
+            engine.dispose()
+        # The password is rendered back, not masked to ***.
+        self.assertEqual(db_url, url)
+        # Both sides resolve the same port file for the same DATABASE_URL.
+        self.assertEqual(
+            server_port_path_for(db_url),
+            client_port_path(url, cache_dir_get()),
+        )
+
     def test_thin_client_propagates_error_payload(self):
         """A server error payload surfaces on stderr with a failing exit code."""
         import contextlib

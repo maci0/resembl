@@ -378,7 +378,9 @@ class TestSnippetAddBatch(BaseScalingTest):
         self.assertEqual(result["added"], 10)
         self.assertEqual(result["aliased"], 120)
         # The 120 existing lookups happen in ~1 chunked IN query, not 120.
-        self.assertLessEqual(counts["select"], 5)
+        # (+1: the single row-count that the stamp reconciliation needs to
+        # decide whether this batch owns the whole fingerprint population.)
+        self.assertLessEqual(counts["select"], 6)
 
     def test_large_batch_chunked_in(self):
         """> 500 unique checksums exercises chunked IN queries."""
@@ -1041,10 +1043,13 @@ class TestFingerprintVersion(BaseScalingTest):
 
     def test_find_auto_reindexes_when_unstamped(self):
         """A DB with blobs but no stamp is migrated on the first find."""
-        from resembl.lsh import fingerprint_version_get
+        from resembl.lsh import fingerprint_version_clear, fingerprint_version_get
         from resembl.models import FINGERPRINT_VERSION
 
         self._add()
+        # A fresh write stamps the version (its rows ARE the population);
+        # simulate a legacy database whose blobs predate stamping.
+        fingerprint_version_clear(self.session)
         self.assertIsNone(fingerprint_version_get(self.session))
         _, matches = snippet_find_matches(
             self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
@@ -1282,6 +1287,84 @@ class TestFingerprintPermStamp(BaseScalingTest):
         self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
         db_reindex(self.session, jobs=1, num_perm=64)
         self.assertEqual(fingerprint_perm_get(self.session), 64)
+
+    def test_fresh_import_stamps_version_and_skips_migration(self):
+        """A write into an empty database owns the population: stamp it all.
+
+        Without the version stamp, the first ``find`` after every fresh
+        import ran a full spurious ``db_reindex`` (recomputing fingerprints
+        that were just computed).
+        """
+        from unittest.mock import patch
+
+        from resembl.lsh import fingerprint_version_get
+        from resembl.models import FINGERPRINT_VERSION
+
+        self._add()
+        self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
+            mock.assert_not_called()
+
+    def test_partial_write_never_clobbers_conflicting_ngram_stamp(self):
+        """An add at another n-gram must clear the stamp, not restamp it.
+
+        Restamping used to declare a foreign-n-gram population current: its
+        snippets then stopped sharing LSH buckets with any query and were
+        permanently invisible, with no stamp mismatch left to trigger the
+        healing reindex.
+        """
+        from unittest.mock import patch
+
+        from resembl.lsh import fingerprint_ngram_get
+
+        self._add(10)
+        # Simulate a corpus written at n-gram 5 (as after a find at 5):
+        # rewrite every blob and move the stamp, like db_reindex would.
+        db_reindex(self.session, jobs=1, ngram_size=5)
+        self.assertEqual(fingerprint_ngram_get(self.session), 5)
+
+        # Config flips back to 3; a plain add must not vouch for old rows.
+        snippet_add(self.session, "late", "push ebx\nmov eax, 99\npop ebx\nret", ngram_size=3)
+        self.assertIsNone(fingerprint_ngram_get(self.session))
+
+        # The next find heals once instead of silently missing old rows...
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            n, matches = snippet_find_matches(
+                self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3, ngram_size=3
+            )
+            mock.assert_called_once()
+        self.assertEqual(fingerprint_ngram_get(self.session), 3)
+        # ...and the pre-existing snippets are findable again afterwards.
+        self.assertGreater(n, 0)
+
+    def test_batch_write_keeps_conflicting_perm_stamp_healable(self):
+        """Same rule for snippet_add_batch and the permutation stamp."""
+        from unittest.mock import patch
+
+        from resembl.lsh import fingerprint_perm_get
+
+        self._add(10)
+        db_reindex(self.session, jobs=1, num_perm=64)
+        self.assertEqual(fingerprint_perm_get(self.session), 64)
+
+        items = [snippet_prepare(f"g{i}", "pop eax\npush eax\nret", 3) for i in range(4)]
+        snippet_add_batch(self.session, [x for x in items if x])
+        self.assertIsNone(fingerprint_perm_get(self.session))
+
+        with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
+            snippet_find_matches(self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3)
+            mock.assert_called_once()
+        self.assertEqual(fingerprint_perm_get(self.session), NUM_PERMUTATIONS)
+
+    def test_partial_write_leaves_unknown_stamp_unset(self):
+        """With pre-existing rows and no stamp, an add must not invent one."""
+        from resembl.lsh import fingerprint_ngram_clear, fingerprint_ngram_get
+
+        self._add(10)
+        fingerprint_ngram_clear(self.session)  # e.g. a merge just cleared it
+        snippet_add(self.session, "late", "push ebx\nmov eax, 98\npop ebx\nret")
+        self.assertIsNone(fingerprint_ngram_get(self.session))
 
     def test_stamp_mismatch_forces_reindex_deterministically(self):
         """A stamped count differing from the request reindexes — no probe luck."""

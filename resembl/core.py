@@ -44,6 +44,7 @@ from .lsh import (
     fingerprint_perm_clear,
     fingerprint_perm_get,
     fingerprint_perm_set,
+    fingerprint_stamps_reconcile,
     fingerprint_version_clear,
     fingerprint_version_get,
     fingerprint_version_set,
@@ -450,6 +451,13 @@ def snippet_add_batch(
     # write-path bottleneck — while alias name merges flush through the ORM.
     # DuckDB swaps in multi-row VALUES statements (its executemany is ~7x
     # slower; see ``_insert_snippet_rows``).  One commit persists everything.
+    # Count rows before inserting: the stamp reconciliation below may only
+    # publish values that hold for the whole database, so it must know
+    # whether pre-existing (possibly foreign-format) rows exist alongside
+    # this batch's new ones.
+    preexisting_rows = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
     if new_snippets:
         rows: list[dict[str, object]] = [
             {
@@ -466,8 +474,12 @@ def snippet_add_batch(
     if new_snippets or aliased:
         session.commit()
         if new_snippets:
-            fingerprint_ngram_set(session, ngram_size)
-            fingerprint_perm_set(session, NUM_PERMUTATIONS)
+            fingerprint_stamps_reconcile(
+                session,
+                ngram_size=ngram_size,
+                num_perm=NUM_PERMUTATIONS,
+                fresh_database=preexisting_rows == 0,
+            )
 
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
@@ -504,6 +516,11 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     minhash_obj = code_create_minhash(code, ngram_size=ngram_size)
     minhash_bytes = minhash_pack(minhash_obj)
 
+    # Count rows before inserting: the stamp reconciliation below may only
+    # publish stamp values that hold for the whole database, so it must know
+    # whether pre-existing rows (possibly foreign-format) are present.
+    preexisting_rows = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+
     new_snippet = Snippet(
         checksum=checksum,
         names=json.dumps([name]),
@@ -513,8 +530,12 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     session.add(new_snippet)
     session.commit()
     session.refresh(new_snippet)
-    fingerprint_ngram_set(session, ngram_size)
-    fingerprint_perm_set(session, NUM_PERMUTATIONS)
+    fingerprint_stamps_reconcile(
+        session,
+        ngram_size=ngram_size,
+        num_perm=NUM_PERMUTATIONS,
+        fresh_database=preexisting_rows == 0,
+    )
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
     return new_snippet
