@@ -97,7 +97,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```bash
     uv run pytest
     ```
-    While the pre-commit hook may run tests on changed files, it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
+    The pre-commit hooks run formatting, linting, and type checks, but no tests, so it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
 
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
@@ -230,12 +230,12 @@ Dependencies represent a long-term maintenance cost and security liability. Ther
 - **Adding a Dependency:** If a new dependency is approved, add it to the project using uv. Do not manually edit `pyproject.toml`.
     ```bash
     # For a runtime dependency
-    uv pip install <package-name>
+    uv add <package-name>
 
-    # For a development-only dependency
-    uv pip install -e .[dev]
+    # For a development-only dependency (lands in [project.optional-dependencies].dev)
+    uv add --optional dev <package-name>
     ```
-Using `uv` ensures that both `pyproject.toml` is updated correctly, guaranteeing reproducible builds for all contributors.  
+Unlike `uv pip install`, which only touches the virtual environment, `uv add` records the dependency in `pyproject.toml` and the lockfile, guaranteeing reproducible builds for all contributors.  
 
 ## Part 5: Submitting Your Contribution
 This final part walks you through the process of getting your work reviewed and merged into the project.

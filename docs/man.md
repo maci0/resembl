@@ -103,7 +103,7 @@ The `compare` command also reports control-flow graph similarity.
     second server for the same database is refused (as is an occupied
     `--port`), with a clean error rather than a traceback.
 
-**reindex**
+**reindex** [--jobs N] [--force]
 :   Recalculate MinHash fingerprints for all snippets.
     Accepts `--jobs N` to run the CPU-bound recomputation in parallel
     (default: one worker per CPU core).

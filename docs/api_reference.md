@@ -95,7 +95,7 @@ Remove a snippet from its collection.
 ## Models
 
 ### `Snippet`
-SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes), `tags` (JSON), `collection` (optional FK).
+SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes), `tags` (JSON), `collection` (optional collection name; a soft reference to `Collection.name`, not an enforced FK).
 
 ### `Collection`
 SQLModel with fields: `name` (PK), `description`, `created_at`.
