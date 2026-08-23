@@ -55,6 +55,33 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 ---
 
+### Title: Search for many queries in one run
+
+**As a** security researcher (Ben),
+**I want to** use the `find-batch` command to run a whole file of queries in one process,
+**so that** I can screen thousands of snippets without paying interpreter startup per query.
+
+**Acceptance Criteria:**
+- `resembl find-batch --file <queries.txt>` processes every non-empty line as a query.
+- Lines starting with `#` are treated as comments.
+- The number of results per query can be limited with `--top-n`, and the LSH threshold overridden with `--threshold`.
+- Results can be formatted as JSON or CSV via the global `--format` option.
+
+---
+
+### Title: Serve finds from a warm process
+
+**As a** reverse engineer (Alex),
+**I want to** start a `serve` process once so repeated `find` calls skip interpreter startup,
+**so that** interactive searches return near-instantly.
+
+**Acceptance Criteria:**
+- `resembl serve` binds to loopback (127.0.0.1) by default; the port is auto-assigned when not given.
+- `resembl find` transparently talks to the running server and falls back to the in-process path when no server is reachable.
+- Binding a non-loopback interface prints a warning that the service is unauthenticated.
+
+---
+
 ### Title: Add a new code snippet or alias
 
 **As a** reverse engineer (Alex),
@@ -106,6 +133,34 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 - The filename is the primary name of the snippet.
 - The user is prompted for confirmation before the export begins.
 - The user can bypass the confirmation prompt with the `--force` flag.
+
+---
+
+### Title: Export snippets as YARA rules
+
+**As a** security researcher (Ben),
+**I want to** use the `export-yara` command to write all snippets as YARA string patterns,
+**so that** I can reuse the database in YARA-based scanning workflows.
+
+**Acceptance Criteria:**
+- `resembl export-yara <output_file>` writes one YARA rule per snippet to the given file.
+- The rule name is derived from the primary name, sanitized to valid rule characters.
+- The user is prompted for confirmation before writing begins.
+- The user can bypass the confirmation prompt with the `--force` flag.
+
+---
+
+### Title: Browse and inspect stored snippets
+
+**As a** reverse engineer (Alex),
+**I want to** use the `list` and `show` commands to browse the database and inspect a single snippet,
+**so that** I can see what is stored without exporting anything.
+
+**Acceptance Criteria:**
+- `resembl list` lists all snippets as checksum plus names.
+- `resembl list --range 10-30` lists a specific window; a malformed range (or start greater than end) exits with an error.
+- `resembl show <checksum>` prints the full code of one snippet; checksum prefixes are accepted.
+- Both support JSON and CSV output via the global `--format` option.
 
 ---
 
@@ -188,7 +243,49 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **Acceptance Criteria:**
 - `resembl rm <checksum>` removes a snippet from the database.
+- Checksum prefixes are accepted.
 - The tool prompts for confirmation before deleting.
+- The user can bypass the confirmation prompt with the `--force` flag.
+
+---
+
+### Title: Merge a teammate's database
+
+**As a** database maintainer (Chris),
+**I want to** use the `merge` command to pull snippets from another resembl database,
+**so that** team databases can be combined without losing anyone's entries.
+
+**Acceptance Criteria:**
+- `resembl merge <source>` accepts a path to another database file, or a full database URL for non-SQLite sources.
+- Snippets already present (same checksum) are skipped, not duplicated.
+- For existing snippets, names and tags from the source are merged in.
+- The summary reports added, updated, skipped, and total source counts.
+
+---
+
+### Title: Check database health
+
+**As a** database maintainer (Chris),
+**I want to** use the `verify` command to check that the index and fingerprints are consistent,
+**so that** I can detect staleness or corruption before it affects search results.
+
+**Acceptance Criteria:**
+- `resembl verify` reports snippet count, bucket-row count, and fingerprint format version.
+- A missing index or stale fingerprints is reported as a warning (healed automatically by the next `find`).
+- A bucket/snippet mismatch is reported as an issue, and the command exits with code 1.
+
+---
+
+### Title: View a snippet's version history
+
+**As a** database maintainer (Chris),
+**I want to** use the `version` command to see recorded history for a snippet,
+**so that** I can audit how an entry came to be.
+
+**Acceptance Criteria:**
+- `resembl version <checksum>` lists recorded versions (id and timestamp); checksum prefixes are accepted.
+- When no history exists, the tool says so instead of erroring.
+- The output can be formatted as JSON or CSV via the global `--format` option.
 
 ---
 
@@ -226,8 +323,9 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **Acceptance Criteria:**
 - `resembl config path` shows the location of the config file.
 - `resembl config list` displays the current settings.
+- `resembl config get <key>` prints the effective value of a single setting.
 - `resembl config set <key> <value>` sets a new default value.
-- The tool reads default values for `lsh_threshold` and `top_n` from `~/.config/resembl/config.toml`. This location can be changed with the `RESEMBL_CONFIG_DIR` environment variable.
+- The tool reads user overrides for `lsh_threshold`, `top_n`, and other keys from `~/.config/resembl/config.toml`. `$XDG_CONFIG_HOME` is honored when set, and `RESEMBL_CONFIG_DIR` overrides both.
 
 ---
 
@@ -248,7 +346,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **As a** reverse engineer (Alex),
 **I want to** add a snippet and immediately search for it,
-**so that** I can verify the tool and cache are working.
+**so that** I can verify the tool and its LSH index are working.
 
 **Acceptance Criteria:**
 - `resembl add my_snippet "MOV EAX, EBX"` stores the snippet and updates the LSH index.
