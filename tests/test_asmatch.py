@@ -246,8 +246,8 @@ class TestResembl(unittest.TestCase):
         self.assertEqual(sorted(m[1] for m in matches), sorted(h for h, _ in scored[:5]))
 
 
-class TestDBCoreFunctions(unittest.TestCase):
-    """Tests for core database functions."""
+class _IsolatedDBTest(unittest.TestCase):
+    """Shared per-test in-memory database."""
 
     def setUp(self):
         """Set up a clean, in-memory database for each test."""
@@ -259,6 +259,10 @@ class TestDBCoreFunctions(unittest.TestCase):
         """Clean up the database after each test."""
         self.session.close()
         SQLModel.metadata.drop_all(self.engine)
+
+
+class TestDBCoreFunctions(_IsolatedDBTest):
+    """Tests for core database functions."""
 
     def test_db_reindex(self):
         """Test reindexing the database."""
@@ -288,19 +292,8 @@ class TestDBCoreFunctions(unittest.TestCase):
         self.assertEqual(stats["num_snippets"], 0)
 
 
-class TestSnippetCoreFunctions(unittest.TestCase):
+class TestSnippetCoreFunctions(_IsolatedDBTest):
     """Tests for core snippet functions."""
-
-    def setUp(self):
-        """Set up a clean, in-memory database for each test."""
-        self.engine = create_engine("sqlite:///:memory:")
-        SQLModel.metadata.create_all(self.engine)
-        self.session = Session(self.engine)
-
-    def tearDown(self):
-        """Clean up the database after each test."""
-        self.session.close()
-        SQLModel.metadata.drop_all(self.engine)
 
     def test_snippet_name_add(self):
         """Test adding a name to a snippet."""

@@ -16,6 +16,17 @@ import resembl.models  # noqa: F401  (registers tables)
 from resembl.core import snippet_add_batch, snippet_find_matches, snippet_prepare
 
 
+def _post_json(port: int, path: str, payload: dict, timeout: int = 10) -> dict:
+    """POST *payload* as JSON to the server on *port* and decode the reply."""
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read())
+
+
 class TestServerMode(unittest.TestCase):
     """The server serves find queries equivalent to the in-process path."""
 
@@ -109,14 +120,7 @@ class TestServerMode(unittest.TestCase):
         """POST /find returns the same top matches as the in-process path."""
         port = self._start_server()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
-        body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read())
+        payload = _post_json(port, "/find", {"query": query, "top_n": 5})
 
         num_candidates, matches = snippet_find_matches(self._session, query, top_n=5)
         self.assertEqual(payload["lsh_candidates"], num_candidates)
@@ -132,16 +136,11 @@ class TestServerMode(unittest.TestCase):
     def test_server_rejects_unbuildable_threshold(self):
         """The server answers an unbuildable threshold with an error payload."""
         port = self._start_server()
-        body = json.dumps(
-            {"query": "push ebx\nmov eax, 5\npop ebx\nret", "threshold": 0.985}
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find",
-            data=body,
-            headers={"Content-Type": "application/json"},
+        payload = _post_json(
+            port,
+            "/find",
+            {"query": "push ebx\nmov eax, 5\npop ebx\nret", "threshold": 0.985},
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read())
         self.assertIn("error", payload)
         self.assertIn("too high", payload["error"])
 
@@ -158,33 +157,18 @@ class TestServerMode(unittest.TestCase):
 
         port = self._start_server()
         absurd = 1 << 20
-        body = json.dumps(
-            {
-                "query": "push ebx\nmov eax, 5\npop ebx\nret",
-                "num_permutations": absurd,
-            }
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find",
-            data=body,
-            headers={"Content-Type": "application/json"},
+        payload = _post_json(
+            port,
+            "/find",
+            {"query": "push ebx\nmov eax, 5\npop ebx\nret", "num_permutations": absurd},
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read())
         self.assertIn("error", payload)
         self.assertIn("num_permutations", payload["error"])
         # The rejected value must not leave a cached fingerprint template.
         self.assertNotIn(absurd, _MINHASH_TEMPLATES)
 
         # The lower bound is enforced by the same check.
-        low_body = json.dumps({"query": "mov eax, 5", "num_permutations": 1}).encode("utf-8")
-        low_request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find",
-            data=low_body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(low_request, timeout=10) as response:
-            low_payload = json.loads(response.read())
+        low_payload = _post_json(port, "/find", {"query": "mov eax, 5", "num_permutations": 1})
         self.assertIn("error", low_payload)
 
     def test_serve_bind_failure_disposes_engine(self):
@@ -441,42 +425,23 @@ class TestServerMode(unittest.TestCase):
         port = self._start_server()
         q1 = "push ebx\nmov eax, 5\npop ebx\nret"
         q2 = "push ebx\nmov eax, 99\npop ebx\nret"
-        body = json.dumps({"queries": [q1, q2], "top_n": 5}).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find-batch",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read())
+        payload = _post_json(port, "/find-batch", {"queries": [q1, q2], "top_n": 5})
 
         self.assertEqual(len(payload["results"]), 2)
         for query, result in zip((q1, q2), payload["results"]):
             self.assertEqual(result["query"], query)
             # Matches the single /find result for the same query.
-            single_body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
-            single_request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/find",
-                data=single_body,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(single_request, timeout=10) as response:
-                single = json.loads(response.read())
+            single = _post_json(port, "/find", {"query": query, "top_n": 5})
             self.assertEqual(result["lsh_candidates"], single["lsh_candidates"])
 
     def test_find_batch_isolates_bad_queries(self):
         """A malformed query fails itself, not the whole batch."""
         port = self._start_server()
-        body = json.dumps({"queries": ["push ebx\nmov eax, 5\npop ebx\nret", 12345]}).encode(
-            "utf-8"
+        payload = _post_json(
+            port,
+            "/find-batch",
+            {"queries": ["push ebx\nmov eax, 5\npop ebx\nret", 12345]},
         )
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/find-batch",
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read())
         self.assertEqual(len(payload["results"]), 2)
         self.assertIn("lsh_candidates", payload["results"][0])
         self.assertIn("error", payload["results"][1])
@@ -519,14 +484,7 @@ class TestServerMode(unittest.TestCase):
         query = "push ebx\nmov eax, 5\npop ebx\nret"
 
         def find_once() -> dict:
-            body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/find",
-                data=body,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return json.loads(response.read())
+            return _post_json(port, "/find", {"query": query, "top_n": 5})
 
         first = find_once()
         self.assertGreater(first["lsh_candidates"], 0)
@@ -552,14 +510,7 @@ class TestServerMode(unittest.TestCase):
         query = "push ebx\nmov eax, 5\npop ebx\nret"
 
         def do_find(i: int) -> dict:
-            body = json.dumps({"query": query, "top_n": 5}).encode("utf-8")
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/find",
-                data=body,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read())
+            return _post_json(port, "/find", {"query": query, "top_n": 5}, timeout=30)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(do_find, range(16)))
