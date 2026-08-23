@@ -137,10 +137,16 @@ def _config_file_lock() -> Iterator[None]:
 
             fcntl.flock(fd, fcntl.LOCK_EX)
         except ImportError:
-            import msvcrt
+            try:
+                import msvcrt
 
-            # typeshed provides these attributes for Windows only.
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
+                # typeshed provides these attributes for Windows only.
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+            except ImportError:
+                # A platform with neither locking API (some non-CPython
+                # builds) runs unlocked rather than refusing every config
+                # update — the historical behavior.
+                pass
         yield
     finally:
         # Closing the descriptor releases both the flock and the msvcrt lock.

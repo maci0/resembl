@@ -125,6 +125,22 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.get("top_n"), 10)
         self.assertEqual(config.get("lsh_threshold"), DEFAULTS.get("lsh_threshold"))
 
+    def test_update_without_locking_api_falls_back_to_unlocked(self):
+        """A platform with neither fcntl nor msvcrt must still update config.
+
+        The lock is best-effort: on a runtime offering neither locking API
+        (some non-CPython builds), the historical unlocked behavior applies
+        instead of every config write crashing with ImportError.  A ``None``
+        entry in ``sys.modules`` makes the import raise ImportError, which
+        simulates both modules being absent.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with patch.dict(sys.modules, {"fcntl": None, "msvcrt": None}):
+                    config = update_config("top_n", 11)
+                    self.assertEqual(load_config().get("top_n"), 11)
+        self.assertEqual(config.get("top_n"), 11)
+
     def test_save_config_creates_directory(self):
         """save_config should create the config directory if it doesn't exist."""
         with tempfile.TemporaryDirectory() as temp_dir:
