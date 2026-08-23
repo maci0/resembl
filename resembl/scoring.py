@@ -842,7 +842,8 @@ def cfg_extract(code: str) -> dict:
         current_block.append(stripped)
 
         # Check if this instruction is a branch (terminates the block)
-        mnemonic = stripped.split()[0].upper() if stripped.split() else ""
+        words = stripped.split()
+        mnemonic = words[0].upper() if words else ""
         if mnemonic in BRANCH_INSTRUCTIONS:
             blocks.append(current_block)
             current_block = []
@@ -871,16 +872,16 @@ def cfg_extract(code: str) -> dict:
             continue
 
         last_line = block[-1]
-        mnemonic = last_line.split()[0].upper() if last_line.split() else ""
+        words = last_line.split()
+        mnemonic = words[0].upper() if words else ""
 
         if mnemonic in {"RET", "RETN", "RETF"}:
             # No successor — function exit
             pass
         elif mnemonic == "JMP":
             # Unconditional jump — try to resolve target
-            parts = last_line.split()
-            if len(parts) > 1:
-                target_block = _resolve(parts[-1].strip())
+            if len(words) > 1:
+                target_block = _resolve(words[-1].strip())
                 if target_block is not None:
                     adj[i].append(target_block)
             # No fallthrough for unconditional jumps
@@ -888,9 +889,8 @@ def cfg_extract(code: str) -> dict:
             # Conditional branch — both fallthrough and target
             if i + 1 < len(blocks):
                 adj[i].append(i + 1)
-            parts = last_line.split()
-            if len(parts) > 1:
-                target_block = _resolve(parts[-1].strip())
+            if len(words) > 1:
+                target_block = _resolve(words[-1].strip())
                 if target_block is not None:
                     adj[i].append(target_block)
         else:
@@ -1043,6 +1043,20 @@ def minhash_unpack(data: bytes) -> MinHash:
     return MinHash(num_perm=num_perm, hashvalues=list(values))
 
 
+def _require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:
+    """Raise the shared mismatch error when two blobs disagree on num_perm.
+
+    datasketch's ``MinHash.jaccard`` rejects differently-sized fingerprints;
+    every Jaccard path here (scalar, batched, sampled) raises this exact
+    error for the same condition, so the message lives in one place.
+    """
+    if num_perm_a != num_perm_b:
+        raise ValueError(
+            "Cannot compute Jaccard for MinHash blobs with different "
+            f"permutation counts ({num_perm_a} vs {num_perm_b})."
+        )
+
+
 def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     """Jaccard similarity of two stored MinHash byte blobs (0.0–1.0).
 
@@ -1068,14 +1082,9 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     # The two blobs may encode different permutation counts; reject the
     # mismatch the same way datasketch's MinHash.jaccard does.
     num_perm_a = minhash_num_perm(packed_a)
-    num_perm_b = minhash_num_perm(packed_b)
-    if num_perm_a != num_perm_b:
-        raise ValueError(
-            "Cannot compute Jaccard for MinHash blobs with different "
-            f"permutation counts ({num_perm_a} vs {num_perm_b})."
-        )
+    _require_same_num_perm(num_perm_a, minhash_num_perm(packed_b))
     a = struct.unpack(f">{num_perm_a}I", packed_a[8 : 8 + 4 * num_perm_a])
-    b = struct.unpack(f">{num_perm_b}I", packed_b[8 : 8 + 4 * num_perm_b])
+    b = struct.unpack(f">{num_perm_a}I", packed_b[8 : 8 + 4 * num_perm_a])
     # ``map(operator.eq, ...)`` iterates with C-level callbacks instead of a
     # Python ``for``/generator — ~1.6x faster over 128 hash values.
     return sum(map(operator.eq, a, b)) / num_perm_a
@@ -1117,12 +1126,7 @@ def minhash_jaccard_batch(
     for start in range(0, len(packed_list), chunk_size):
         chunk = packed_list[start : start + chunk_size]
         for p in chunk:
-            p_num_perm = minhash_num_perm(p)
-            if p_num_perm != num_perm:
-                raise ValueError(
-                    "Cannot compute Jaccard for MinHash blobs with different "
-                    f"permutation counts ({num_perm} vs {p_num_perm})."
-                )
+            _require_same_num_perm(num_perm, minhash_num_perm(p))
         values = np.frombuffer(b"".join(p[8:] for p in chunk), dtype=">u4").reshape(
             len(chunk), num_perm
         )

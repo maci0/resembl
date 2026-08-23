@@ -281,10 +281,16 @@ def lsh_meta_matches(meta: tuple[float, int] | None, threshold: float, num_perm:
     )
 
 
-def fingerprint_version_get(session: Session) -> int | None:
-    """Return the stored fingerprint-format version, or ``None`` if unset."""
+#: The three ``app_meta`` stamps describing the stored fingerprint population.
+_VERSION_STAMP_KEY = "fingerprint_version"
+_NGRAM_STAMP_KEY = "fingerprint_ngram"
+_PERM_STAMP_KEY = "fingerprint_num_perm"
+
+
+def _stamp_get(session: Session, key: str) -> int | None:
+    """Return one integer ``app_meta`` stamp, or ``None`` if unset or corrupt."""
     row = session.execute(
-        text("SELECT value FROM app_meta WHERE key = 'fingerprint_version'")
+        text("SELECT value FROM app_meta WHERE key = :key"), {"key": key}
     ).one_or_none()
     if row is None:
         return None
@@ -296,33 +302,39 @@ def fingerprint_version_get(session: Session) -> int | None:
         return None
 
 
-def fingerprint_version_set(session: Session, version: int) -> None:
-    """Stamp the fingerprint-format version (current algorithm)."""
+def _stamp_set(session: Session, key: str, value: int) -> None:
+    """Upsert one integer ``app_meta`` stamp."""
     session.execute(
         text(_version_upsert_sql(session)),
-        {"k": "fingerprint_version", "v": str(version)},
+        {"k": key, "v": str(value)},
     )
     session.commit()
 
 
+def _stamp_clear(session: Session, key: str) -> None:
+    """Delete one ``app_meta`` stamp row."""
+    session.execute(text("DELETE FROM app_meta WHERE key = :key"), {"key": key})
+    session.commit()
+
+
+def fingerprint_version_get(session: Session) -> int | None:
+    """Return the stored fingerprint-format version, or ``None`` if unset."""
+    return _stamp_get(session, _VERSION_STAMP_KEY)
+
+
+def fingerprint_version_set(session: Session, version: int) -> None:
+    """Stamp the fingerprint-format version (current algorithm)."""
+    _stamp_set(session, _VERSION_STAMP_KEY, version)
+
+
 def fingerprint_version_clear(session: Session) -> None:
     """Remove the version stamp (blobs may be stale; force a reindex)."""
-    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_version'"))
-    session.commit()
+    _stamp_clear(session, _VERSION_STAMP_KEY)
 
 
 def fingerprint_ngram_get(session: Session) -> int | None:
     """Return the n-gram size the stored fingerprints were built with."""
-    row = session.execute(
-        text("SELECT value FROM app_meta WHERE key = 'fingerprint_ngram'")
-    ).one_or_none()
-    if row is None:
-        return None
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        # Corrupt stamp — same self-healing fallback as the version stamp.
-        return None
+    return _stamp_get(session, _NGRAM_STAMP_KEY)
 
 
 def fingerprint_ngram_set(session: Session, ngram_size: int) -> None:
@@ -333,31 +345,17 @@ def fingerprint_ngram_set(session: Session, ngram_size: int) -> None:
     with the index (measured: 40 candidates at ngram 3, 0 at ngram 5 with no
     rebuild).  The stamp lets ``find`` detect the change and reindex once.
     """
-    session.execute(
-        text(_version_upsert_sql(session)),
-        {"k": "fingerprint_ngram", "v": str(ngram_size)},
-    )
-    session.commit()
+    _stamp_set(session, _NGRAM_STAMP_KEY, ngram_size)
 
 
 def fingerprint_ngram_clear(session: Session) -> None:
     """Remove the n-gram stamp (blobs may be from an unknown n-gram)."""
-    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_ngram'"))
-    session.commit()
+    _stamp_clear(session, _NGRAM_STAMP_KEY)
 
 
 def fingerprint_perm_get(session: Session) -> int | None:
     """Return the permutation count the stored fingerprints were written with."""
-    row = session.execute(
-        text("SELECT value FROM app_meta WHERE key = 'fingerprint_num_perm'")
-    ).one_or_none()
-    if row is None:
-        return None
-    try:
-        return int(row[0])
-    except (TypeError, ValueError):
-        # Corrupt stamp — same self-healing fallback as the version stamp.
-        return None
+    return _stamp_get(session, _PERM_STAMP_KEY)
 
 
 def fingerprint_perm_set(session: Session, num_perm: int) -> None:
@@ -373,17 +371,12 @@ def fingerprint_perm_set(session: Session, num_perm: int) -> None:
     an uncaught ValueError (banding rejects foreign perm counts).  The
     stamp makes the mismatch decision exact instead of probabilistic.
     """
-    session.execute(
-        text(_version_upsert_sql(session)),
-        {"k": "fingerprint_num_perm", "v": str(num_perm)},
-    )
-    session.commit()
+    _stamp_set(session, _PERM_STAMP_KEY, num_perm)
 
 
 def fingerprint_perm_clear(session: Session) -> None:
     """Remove the perm-count stamp (blobs may be from unknown counts)."""
-    session.execute(text("DELETE FROM app_meta WHERE key = 'fingerprint_num_perm'"))
-    session.commit()
+    _stamp_clear(session, _PERM_STAMP_KEY)
 
 
 def fingerprint_stamps_reconcile(

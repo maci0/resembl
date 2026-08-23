@@ -129,9 +129,11 @@ def update_config(key: str, value: int | float | str) -> dict:
     """Update ``key`` in the config file with ``value`` and return the new config."""
     config = _read_config_dict()
     config[key] = value
-    merged = {**DEFAULTS, **config}
-    save_config(merged)
-    return merged
+    # The file stores user overrides only (like ``remove_config_key``):
+    # baking every default into the file would pin users to this release's
+    # default values forever.  Callers get the effective merged view.
+    save_config(config)
+    return {**DEFAULTS, **config}
 
 
 def remove_config_key(key: str) -> dict:

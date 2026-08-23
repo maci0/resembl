@@ -62,6 +62,7 @@ from .scoring import (
     NUM_PERMUTATIONS,
     _code_tokenize_lexed,
     _minhash_from_tokens,
+    _require_same_num_perm,
     _string_normalize_lexed,
     cfg_extract,
     cfg_similarity,
@@ -746,6 +747,21 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
     return True
 
 
+def _snippet_primary_name(snippet: Snippet) -> str:
+    """Return a snippet's first alias, or a checksum-derived placeholder."""
+    return snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
+
+
+def _yara_string_escape(text: str) -> str:
+    """Escape *text* for embedding in a quoted YARA string literal.
+
+    User-controlled names and code are embedded in generated rules, so a
+    name cannot be allowed to break out of the string literal (or the rule).
+    """
+    escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+    return escaped.replace("\r", "\\r").replace("\n", "\\n")
+
+
 def snippet_export_yara(session: Session, output_file: str) -> dict:
     """Export snippets as YARA string matching rules."""
     start_time = time.monotonic()
@@ -753,9 +769,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
 
     with open(output_file, "w", encoding="utf-8") as f:
         for snippet in Snippet.stream_all(session):
-            primary_name = (
-                snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
-            )
+            primary_name = _snippet_primary_name(snippet)
             rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
             # A name may be empty (e.g. added with an empty alias) — index
             # would crash; prefix instead, as for names starting with a digit.
@@ -763,17 +777,8 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
                 rule_name = "r_" + rule_name
             rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
 
-            # Names are user-controlled text embedded in a quoted YARA
-            # string; escape them like the code body so a name cannot break
-            # out of the string literal (or the rule) in the generated file.
-            name_escaped = (
-                primary_name.replace("\\", "\\\\")
-                .replace('"', '\\"')
-                .replace("\r", "\\r")
-                .replace("\n", "\\n")
-            )
-            code_escaped = snippet.code.replace("\\", "\\\\").replace('"', '\\"')
-            code_escaped = code_escaped.replace("\r", "\\r").replace("\n", "\\n")
+            name_escaped = _yara_string_escape(primary_name)
+            code_escaped = _yara_string_escape(snippet.code)
 
             yara_rule = f"""rule {rule_name} {{
     meta:
@@ -1093,12 +1098,7 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     # (boolean mean == equal-count / num_perm in float64).
     num_perm = minhash_num_perm(blobs[0])
     for blob in blobs[1:]:
-        blob_num_perm = minhash_num_perm(blob)
-        if blob_num_perm != num_perm:
-            raise ValueError(
-                "Cannot compute Jaccard for MinHash blobs with different "
-                f"permutation counts ({num_perm} vs {blob_num_perm})."
-            )
+        _require_same_num_perm(num_perm, minhash_num_perm(blob))
 
     import numpy as np
 
@@ -1247,9 +1247,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 
     for snippet in Snippet.stream_all(session):
         # Use the first name as the primary name, sanitized for safety.
-        primary_name = (
-            snippet.name_list[0] if snippet.name_list else f"snippet_{snippet.checksum[:16]}"
-        )
+        primary_name = _snippet_primary_name(snippet)
         safe_name = _export_safe_filename(primary_name)
         if not safe_name:
             safe_name = snippet.checksum[:12]
@@ -1531,9 +1529,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
 
     try:
         source_engine = create_db_engine(source_url)
-        from sqlmodel import Session as SourceSession
-
-        source_session = SourceSession(source_engine)
+        source_session = Session(source_engine)
     except Exception as e:
         logger.error("Failed to open source database: %s", e)
         return {"error": str(e)}

@@ -90,7 +90,7 @@ def _find_one(
     :class:`ResemblConfig` defaults.
     """
     params = params if params is not None else _DEFAULT_FIND_PARAMS
-    top_n = int(body.get("top_n", 5))
+    top_n = int(body.get("top_n", params.top_n))
     threshold = body.get("threshold")
     normalize = bool(body.get("normalize", True))
     ngram_size = int(body.get("ngram_size", params.ngram_size))
@@ -402,6 +402,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         cfg = load_config()
         find_defaults = ResemblConfig(
             lsh_threshold=cfg.lsh_threshold,
+            top_n=cfg.top_n,
             num_permutations=cfg.num_permutations,
             ngram_size=cfg.ngram_size,
             jaccard_weight=cfg.jaccard_weight,

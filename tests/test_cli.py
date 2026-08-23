@@ -258,6 +258,26 @@ class TestCLICommands(BaseCLITest):
             snippet = Snippet.get_by_checksum(session, checksum)
             self.assertNotIn("new_name", snippet.name_list)
 
+    def test_failed_mutations_exit_nonzero_in_every_mode(self):
+        """A failed name/tag mutation exits 1 regardless of --quiet/--format.
+
+        The exit code used to be swallowed in quiet mode and JSON/CSV mode,
+        so scripts running `--quiet tag add ...` saw success after a no-op.
+        Output may be suppressed; the failure signal may not.
+        """
+        cases = (
+            "name add deadbeef x",
+            "name remove deadbeef x",
+            "tag add deadbeef x",
+            "tag remove deadbeef x",
+        )
+        for command in cases:
+            for flag in ("--quiet", "--format json", "--format csv"):
+                result = self.run_command(f"{flag} {command}")
+                self.assertNotEqual(
+                    result.returncode, 0, f"'{flag} {command}' reported success"
+                )
+
     def test_rm_with_force_flag(self):
         """Removing with --force should skip confirmation."""
         with Session(self.engine) as session:

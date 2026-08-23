@@ -23,6 +23,7 @@ import difflib
 import json
 import logging
 import multiprocessing
+import operator
 import os
 import signal
 import sys
@@ -30,7 +31,7 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import UTC, datetime, tzinfo
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import typer
 from rich.console import Console
@@ -82,6 +83,9 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .lsh import lsh_meta_get, lsh_meta_matches
+
+if TYPE_CHECKING:
+    from .models import Snippet
 
 logger = logging.getLogger(__name__)
 
@@ -471,6 +475,38 @@ def _resolve_checksum(prefix: str) -> str | None:
     return candidate_checksums[0]
 
 
+def _apply_snippet_field_mutation(
+    mutate: Callable[[], Snippet | None],
+    *,
+    get_values: Callable[[Snippet], list[str]],
+    plural: str,
+    failure_message: str,
+) -> None:
+    """Apply one name/tag mutation and render its outcome.
+
+    The four ``name add/remove`` / ``tag add/remove`` sub-commands differ
+    only in the core mutator and the rendered field; routing them through
+    here keeps their JSON/CSV payload, quiet suppression, and exit codes
+    identical by construction.  A failure exits 1 regardless of ``--quiet``
+    or ``--format``: quiet suppresses output, never the failure signal.
+    """
+    snippet = mutate()
+    if snippet is None:
+        if state.format in ("json", "csv"):
+            _echo_format({"error": failure_message})
+        elif not state.quiet:
+            err_console.print(f"[red]Error:[/red] {failure_message}")
+        raise typer.Exit(code=1)
+    values = get_values(snippet)
+    if state.format in ("json", "csv"):
+        _echo_format({"checksum": snippet.checksum, plural: values})
+    else:
+        _echo(
+            f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
+            f"now has {plural}: {values}"
+        )
+
+
 @app.callback()
 def app_callback(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational output."),
@@ -533,7 +569,7 @@ def add(
             _echo_format({"error": "Failed to add snippet."})
         else:
             err_console.print("[red]Error:[/red] Snippet could not be added (empty code?).")
-            raise typer.Exit(code=1)
+        raise typer.Exit(code=1)
 
 
 @app.command("export")
@@ -1398,21 +1434,12 @@ def name_add_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    snippet = snippet_name_add(state.session, resolved, name, quiet=state.quiet)
-    if snippet:
-        if state.format in ("json", "csv"):
-            _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
-        else:
-            _echo(
-                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-                f"now has names: {snippet.name_list}"
-            )
-    else:
-        if state.format in ("json", "csv"):
-            _echo_format({"error": "Failed to add name to snippet."})
-        elif not state.quiet:
-            err_console.print("[red]Error:[/red] Failed to add name to snippet.")
-            raise typer.Exit(code=1)
+    _apply_snippet_field_mutation(
+        lambda: snippet_name_add(state.session, resolved, name, quiet=state.quiet),
+        get_values=operator.attrgetter("name_list"),
+        plural="names",
+        failure_message="Failed to add name to snippet.",
+    )
 
 
 @name_app.command("remove")
@@ -1424,21 +1451,12 @@ def name_remove_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    snippet = snippet_name_remove(state.session, resolved, name, quiet=state.quiet)
-    if snippet:
-        if state.format in ("json", "csv"):
-            _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
-        else:
-            _echo(
-                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-                f"now has names: {snippet.name_list}"
-            )
-    else:
-        if state.format in ("json", "csv"):
-            _echo_format({"error": "Failed to remove name from snippet."})
-        elif not state.quiet:
-            err_console.print("[red]Error:[/red] Failed to remove name from snippet.")
-            raise typer.Exit(code=1)
+    _apply_snippet_field_mutation(
+        lambda: snippet_name_remove(state.session, resolved, name, quiet=state.quiet),
+        get_values=operator.attrgetter("name_list"),
+        plural="names",
+        failure_message="Failed to remove name from snippet.",
+    )
 
 
 # --- Tag sub-commands ---
@@ -1453,21 +1471,12 @@ def tag_add_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    snippet = snippet_tag_add(state.session, resolved, tag, quiet=state.quiet)
-    if snippet:
-        if state.format in ("json", "csv"):
-            _echo_format({"checksum": snippet.checksum, "tags": snippet.tag_list})
-        else:
-            _echo(
-                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-                f"now has tags: {snippet.tag_list}"
-            )
-    else:
-        if state.format in ("json", "csv"):
-            _echo_format({"error": "Failed to add tag to snippet."})
-        elif not state.quiet:
-            err_console.print("[red]Error:[/red] Failed to add tag to snippet.")
-            raise typer.Exit(code=1)
+    _apply_snippet_field_mutation(
+        lambda: snippet_tag_add(state.session, resolved, tag, quiet=state.quiet),
+        get_values=operator.attrgetter("tag_list"),
+        plural="tags",
+        failure_message="Failed to add tag to snippet.",
+    )
 
 
 @tag_app.command("remove")
@@ -1479,21 +1488,12 @@ def tag_remove_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    snippet = snippet_tag_remove(state.session, resolved, tag, quiet=state.quiet)
-    if snippet:
-        if state.format in ("json", "csv"):
-            _echo_format({"checksum": snippet.checksum, "tags": snippet.tag_list})
-        else:
-            _echo(
-                f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-                f"now has tags: {snippet.tag_list}"
-            )
-    else:
-        if state.format in ("json", "csv"):
-            _echo_format({"error": "Failed to remove tag from snippet."})
-        elif not state.quiet:
-            err_console.print("[red]Error:[/red] Failed to remove tag from snippet.")
-            raise typer.Exit(code=1)
+    _apply_snippet_field_mutation(
+        lambda: snippet_tag_remove(state.session, resolved, tag, quiet=state.quiet),
+        get_values=operator.attrgetter("tag_list"),
+        plural="tags",
+        failure_message="Failed to remove tag from snippet.",
+    )
 
 
 # --- Collection sub-commands ---
