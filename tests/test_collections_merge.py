@@ -22,7 +22,7 @@ from resembl.core import (
     snippet_version_list,
     string_checksum,
 )
-from resembl.models import Collection, Snippet, SnippetVersion
+from resembl.models import Collection, Snippet, SnippetVersion, timestamp_normalize
 
 
 class BaseDBTest(unittest.TestCase):
@@ -184,6 +184,41 @@ class TestSearch(BaseDBTest):
 
 
 # ---------------------------------------------------------------------------
+# Timestamp normalization tests
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampNormalize(unittest.TestCase):
+    """Tests for the canonical created_at form used for string ordering."""
+
+    def test_aware_utc_passthrough(self):
+        """Already-canonical UTC values round-trip unchanged."""
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T10:00:00+00:00"), "2024-06-01T10:00:00+00:00"
+        )
+
+    def test_offset_converted_to_utc(self):
+        """A foreign offset is re-expressed in UTC so ordering stays valid.
+
+        ``SnippetVersion.get_by_checksum`` orders by raw string comparison,
+        which matches chronological order only when every value carries the
+        same offset; a verbatim +02:00 value would sort wrongly against
+        +00:00 rows.
+        """
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T12:00:00+02:00"), "2024-06-01T10:00:00+00:00"
+        )
+
+    def test_naive_interpreted_as_utc(self):
+        """Naive values (legacy writer format) are stamped as UTC, not shifted."""
+        self.assertEqual(timestamp_normalize("2024-06-01T10:00:00"), "2024-06-01T10:00:00+00:00")
+
+    def test_unparseable_returned_verbatim(self):
+        """Garbage input is never fabricated into a timestamp."""
+        self.assertEqual(timestamp_normalize("not-a-date"), "not-a-date")
+
+
+# ---------------------------------------------------------------------------
 # DB Merge tests
 # ---------------------------------------------------------------------------
 
@@ -211,6 +246,37 @@ class TestDBMerge(BaseDBTest):
                     collection_add_snippet(src_session, col, s.checksum)
         source_engine.dispose()
         return tmp.name
+
+    def test_merge_normalizes_foreign_created_at(self):
+        """Imported collection timestamps are re-expressed in UTC.
+
+        A source database written with a non-UTC offset (or naively) must
+        not leak verbatim into the local DB: rows are ordered by string
+        comparison elsewhere, which only matches chronological order while
+        every stored value carries the same offset.
+        """
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        source_engine = create_engine(f"sqlite:///{tmp.name}")
+        SQLModel.metadata.create_all(source_engine)
+        with Session(source_engine) as src_session:
+            src_session.add(
+                Collection(
+                    name="offset_col",
+                    description="d",
+                    created_at="2024-06-01T12:00:00+02:00",
+                )
+            )
+            src_session.commit()
+        source_engine.dispose()
+        try:
+            result = db_merge(self.session, tmp.name)
+            self.assertEqual(result["added"], 0)
+            merged = Collection.get_by_name(self.session, "offset_col")
+            self.assertIsNotNone(merged)
+            self.assertEqual(merged.created_at, "2024-06-01T10:00:00+00:00")
+        finally:
+            os.unlink(tmp.name)
 
     def test_merge_new_snippets(self):
         """Merging a source with unique snippets should add them."""
@@ -477,14 +543,14 @@ class TestModelMethods(BaseDBTest):
             snippet_checksum=snippet.checksum,
             code="v1",
             minhash=snippet.minhash,
-            created_at="2024-01-01T00:00:00",
+            created_at="2024-01-01T00:00:00+00:00",
         )
         v2 = SnippetVersion(
             id=2,
             snippet_checksum=snippet.checksum,
             code="v2",
             minhash=snippet.minhash,
-            created_at="2025-01-01T00:00:00",
+            created_at="2025-01-01T00:00:00+00:00",
         )
         self.session.add_all([v1, v2])
         self.session.commit()

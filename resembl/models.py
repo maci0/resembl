@@ -27,6 +27,27 @@ if TYPE_CHECKING:
     from datasketch import MinHash
 
 
+def timestamp_normalize(value: str) -> str:
+    """Normalize a ``created_at`` string to the canonical stored form.
+
+    Timestamps are stored as aware-UTC ISO 8601 strings, exactly as written
+    by ``datetime.now(UTC).isoformat()``.  Rows are ordered by string
+    comparison (e.g. ``SnippetVersion.get_by_checksum``), which matches
+    chronological order only while every value carries the same offset, so
+    timestamps imported from foreign databases must be re-expressed in UTC
+    before being persisted.  Naive values are interpreted as UTC (the
+    historical writer's zone).  Unparseable input is returned unchanged:
+    a merge never fabricates metadata.
+    """
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat()
+
+
 class Collection(SQLModel, table=True):
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 

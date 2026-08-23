@@ -29,6 +29,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from datetime import UTC, datetime, tzinfo
 from typing import Any, cast
 
 import typer
@@ -130,6 +131,24 @@ def _echo(message: object, **kwargs: Any) -> None:
     """Print a message unless ``--quiet`` is set."""
     if not state.quiet:
         console.print(message, **kwargs)
+
+
+def _format_created_at(value: str, fmt: str, tz: tzinfo | None = None) -> str:
+    """Render a stored ``created_at`` string in the viewer's local zone.
+
+    Stored values are aware-UTC ISO 8601 strings (see ``Collection.created_at``);
+    they are converted to *tz* (the system's local zone by default) before
+    formatting so table output matches the user's wall clock.  Naive legacy
+    values are interpreted as UTC; unparseable values are shown verbatim.
+    Structured (JSON/CSV) output keeps the raw stored string.
+    """
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(tz).strftime(fmt)
 
 
 def _echo_format(data: object) -> None:
@@ -1486,7 +1505,7 @@ def collection_list_cmd() -> None:
             col["name"],
             col["description"],
             str(col["snippet_count"]),
-            col["created_at"][:10],
+            _format_created_at(col["created_at"] or "", "%Y-%m-%d"),
         )
     _echo(table)
 
@@ -1590,7 +1609,7 @@ def version_cmd(
     table.add_column("ID", justify="right")
     table.add_column("Created At")
     for v in versions:
-        table.add_row(str(v["id"]), v["created_at"])
+        table.add_row(str(v["id"]), _format_created_at(v["created_at"], "%Y-%m-%d %H:%M:%S %z"))
     _echo(table)
 
 

@@ -52,6 +52,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    timestamp_normalize,
 )
 from .scoring import (
     NUM_PERMUTATIONS,
@@ -1521,7 +1522,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 new_col = Collection(
                     name=col.name,
                     description=col.description,
-                    created_at=col.created_at,
+                    created_at=timestamp_normalize(col.created_at),
                 )
                 session.add(new_col)
 

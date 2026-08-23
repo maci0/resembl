@@ -7,9 +7,12 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from resembl.cli import _format_created_at
 from resembl.core import snippet_add
 from resembl.models import Snippet
 
@@ -485,6 +488,52 @@ class TestCLIAddSnippet(BaseCLITest):
         with Session(self.engine) as session:
             snippets = session.exec(select(Snippet).where(Snippet.names == '["same_name"]')).all()
             self.assertEqual(len(snippets), 2)
+
+
+class TestFormatCreatedAt(unittest.TestCase):
+    """Tests for local-zone rendering of stored UTC timestamps."""
+
+    TOKYO = ZoneInfo("Asia/Tokyo")
+    UTC = ZoneInfo("UTC")
+
+    def test_utc_value_rendered_in_target_zone(self):
+        """A stored UTC instant is shown at the viewer's wall-clock time."""
+        self.assertEqual(
+            _format_created_at("2024-06-01T15:00:00+00:00", "%Y-%m-%d %H:%M", self.TOKYO),
+            "2024-06-02 00:00",
+        )
+
+    def test_date_shifts_across_zones(self):
+        """The calendar date must come from the display zone, not the stored one.
+
+        Slicing the raw string (the old behavior) shows 2024-06-01 even for a
+        viewer in Tokyo, whose wall clock already reads June 2nd.
+        """
+        self.assertEqual(
+            _format_created_at("2024-06-01T15:00:00+00:00", "%Y-%m-%d", self.UTC),
+            "2024-06-01",
+        )
+        self.assertEqual(
+            _format_created_at("2024-06-01T15:00:00+00:00", "%Y-%m-%d", self.TOKYO),
+            "2024-06-02",
+        )
+
+    def test_naive_interpreted_as_utc(self):
+        """Legacy naive values are treated as UTC, never as local time."""
+        self.assertEqual(
+            _format_created_at("2024-06-01T23:30:00", "%Y-%m-%dT%H:%M%z", self.TOKYO),
+            "2024-06-02T08:30+0900",
+        )
+
+    def test_unparseable_shown_verbatim(self):
+        """Garbage from a foreign database is displayed without crashing."""
+        self.assertEqual(_format_created_at("not-a-date", "%Y-%m-%d", self.TOKYO), "not-a-date")
+
+    def test_default_zone_is_system_local(self):
+        """Without an explicit zone the system local zone is used."""
+        value = "2024-06-01T00:00:00+00:00"
+        expected = datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M %z")
+        self.assertEqual(_format_created_at(value, "%Y-%m-%d %H:%M %z"), expected)
 
 
 if __name__ == "__main__":
