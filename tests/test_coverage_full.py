@@ -6,6 +6,7 @@ Each test class targets specific uncovered lines identified via coverage analysi
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -561,13 +562,10 @@ class TestLSHCacheLifecycle(BaseDBTest):
         snippet_add(self.session, "func", "MOV EAX, 1")
         self.assertIsNotNone(lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS))
         with tempfile.TemporaryDirectory() as tmpdir:
-            os.environ["RESEMBL_CACHE_DIR"] = tmpdir
-            try:
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 lsh_cache_save(self.session, 0.5)
                 loaded = lsh_cache_load(self.session, 0.5)
                 self.assertIsNotNone(loaded)
-            finally:
-                del os.environ["RESEMBL_CACHE_DIR"]
 
 
 if __name__ == "__main__":

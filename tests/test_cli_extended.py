@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -374,7 +375,7 @@ class TestCLIServeLifecycle(BaseCLITest):
 
     def _start_serve(self, cache_dir):
         return subprocess.Popen(
-            ["python", "-m", "resembl.cli", "serve"],
+            [sys.executable, "-m", "resembl.cli", "serve"],
             env=self._serve_env(cache_dir),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -471,7 +472,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                 self._wait_for_port_file(port_file)
                 # Second serve must refuse (already running) with a clean error.
                 second = subprocess.run(
-                    ["python", "-m", "resembl.cli", "serve"],
+                    [sys.executable, "-m", "resembl.cli", "serve"],
                     env=self._serve_env(cache_dir),
                     capture_output=True,
                     text=True,
@@ -500,7 +501,7 @@ class TestCLIServeLifecycle(BaseCLITest):
         try:
             with tempfile.TemporaryDirectory() as cache_dir:
                 result = subprocess.run(
-                    ["python", "-m", "resembl.cli", "serve", "--port", str(occupied)],
+                    [sys.executable, "-m", "resembl.cli", "serve", "--port", str(occupied)],
                     env=self._serve_env(cache_dir),
                     capture_output=True,
                     text=True,

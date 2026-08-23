@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import unittest
 
 # This must match the DATA_DIR used in the benchmark script.
@@ -40,7 +41,7 @@ class TestBenchmarkScript(unittest.TestCase):
         env = os.environ.copy()
         env["PYTHONPATH"] = "."
         result = subprocess.run(
-            ["python", "tests/benchmark.py"],
+            [sys.executable, "tests/benchmark.py"],
             capture_output=True,
             text=True,
             check=False,

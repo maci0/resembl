@@ -34,7 +34,7 @@ def run_command(command, extra_env=None):
 
     start_time = time.monotonic()
     subprocess.run(
-        ["python", "-m", "resembl.cli", *command.split()],
+        [sys.executable, "-m", "resembl.cli", *command.split()],
         shell=False,
         capture_output=True,
         text=True,

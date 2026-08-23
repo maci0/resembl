@@ -3,6 +3,7 @@
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -41,7 +42,7 @@ class BaseCLITest(unittest.TestCase):
             env.update(extra_env)
 
         return subprocess.run(
-            ["python", "-m", "resembl.cli", *shlex.split(command)],
+            [sys.executable, "-m", "resembl.cli", *shlex.split(command)],
             shell=False,
             capture_output=True,
             text=True,

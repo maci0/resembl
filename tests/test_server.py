@@ -467,6 +467,81 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(status, 500)
         self.assertIn("error", payload)
 
+    def test_server_rejects_malformed_requests(self):
+        """Malformed requests answer 4xx errors instead of crashing handlers.
+
+        Contract for the /find API boundary: a non-numeric or negative
+        Content-Length, a non-JSON body, an unknown path, and missing
+        required keys each produce a clean error response.
+        """
+        import http.client
+
+        port = self._start_server()
+
+        def raw_post(path: str, body: bytes, content_length=None):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                conn.putrequest("POST", path)
+                conn.putheader("Content-Type", "application/json")
+                if content_length is None:
+                    content_length = str(len(body))
+                conn.putheader("Content-Length", content_length)
+                conn.endheaders()
+                if body:
+                    conn.send(body)
+                response = conn.getresponse()
+                return response.status, response.read()
+            finally:
+                conn.close()
+
+        # Non-numeric Content-Length.
+        status, _body = raw_post("/find", b"{}", content_length="abc")
+        self.assertEqual(status, 400)
+
+        # Valid length but non-JSON body.
+        status, payload = raw_post("/find", b"not-json")
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(payload), {"error": "bad request body"})
+
+        # Unknown path.
+        status, _body = raw_post("/other", b"{}")
+        self.assertEqual(status, 404)
+
+        # /find without the required "query" key.
+        status, payload = raw_post("/find", b"{}")
+        self.assertEqual(status, 400)
+        self.assertIn("bad request", json.loads(payload)["error"])
+
+        # /find-batch without the required "queries" key.
+        status, payload = raw_post("/find-batch", b"{}")
+        self.assertEqual(status, 400)
+        self.assertIn("bad request", json.loads(payload)["error"])
+
+    def test_result_cache_evicts_oldest_beyond_max(self):
+        """The version-guarded result cache evicts its oldest entry past the cap."""
+        from resembl.server import _RESULT_CACHE, _RESULT_CACHE_MAX, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+
+        def find(query: str) -> dict:
+            return _find_one(self._session, {"top_n": 5}, query)
+
+        first_query = "push ebx\nmov eax, 1000\npop ebx\nret"
+        find(first_query)
+        last_payload = None
+        for i in range(_RESULT_CACHE_MAX + 5):
+            last_payload = find(f"push ebx\nmov eax, {i}\npop ebx\nret")
+
+        self.assertLessEqual(len(_RESULT_CACHE), _RESULT_CACHE_MAX)
+        self.assertFalse(
+            any(k[0] == first_query for k in _RESULT_CACHE), "oldest entry must have been evicted"
+        )
+        newest = f"push ebx\nmov eax, {_RESULT_CACHE_MAX + 4}\npop ebx\nret"
+        self.assertTrue(any(k[0] == newest for k in _RESULT_CACHE), "newest entry must be retained")
+        self.assertIsNotNone(last_payload)
+        self.assertIn("matches", last_payload)
+
     def test_thin_client_unreadable_file_errors_cleanly(self):
         """resembl-find --file with an unreadable file exits 1 without a traceback."""
         from resembl.find_client import _main

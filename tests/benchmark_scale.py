@@ -49,7 +49,7 @@ def run_command(command: list[str], extra_env: dict | None = None) -> float:
         env.update(extra_env)
     start = time.monotonic()
     subprocess.run(
-        ["python", "-m", "resembl.cli", *command],
+        [sys.executable, "-m", "resembl.cli", *command],
         capture_output=True,
         text=True,
         env=env,
@@ -145,7 +145,7 @@ def main() -> None:
         "PYTHONPATH": os.path.join(os.getcwd(), "."),
     }
     serve_proc = subprocess.Popen(
-        ["python", "-m", "resembl.cli", "--quiet", "serve"],
+        [sys.executable, "-m", "resembl.cli", "--quiet", "serve"],
         env=serve_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -169,7 +169,7 @@ def main() -> None:
         for _ in range(n_runs):
             subprocess.run(
                 [
-                    "python",
+                    sys.executable,
                     "-m",
                     "resembl.find_client",
                     "--query",

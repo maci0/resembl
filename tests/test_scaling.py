@@ -431,6 +431,25 @@ class TestFindScaling(BaseScalingTest):
         for _, score in matches:
             self.assertGreater(score, 90.0)
 
+    def test_find_survives_corrupt_candidate(self):
+        """A corrupt stored blob among the candidates is skipped, never deserialized."""
+        items = [snippet_prepare(f"c{i}", f"MOV EAX, {i}; ADD EBX, {i}; RET", 3) for i in range(4)]
+        snippet_add_batch(self.session, [i for i in items if i])
+        snippet_find_matches(self.session, "MOV EAX, 1; ADD EBX, 1; RET", top_n=1)
+        # Corrupt one stored fingerprint AFTER the build so its bucket rows
+        # still route it into the candidate set.  The last row keeps the
+        # reindex-probe blob (first row) healthy, so no auto-reindex heals it
+        # before scoring.
+        victim = list(self.session.exec(select(Snippet)).all())[-1]
+        checksum = victim.checksum
+        victim.minhash = b"garbage"
+        self.session.add(victim)
+        self.session.commit()
+
+        _, matches = snippet_find_matches(self.session, "MOV EAX, 1; ADD EBX, 1; RET", top_n=4)
+        self.assertGreater(len(matches), 0)
+        self.assertNotIn(checksum, [s.checksum for s, _score in matches])
+
     def test_exact_score_tie_keeps_earliest_candidate(self):
         """An exact hybrid-score tie must resolve like a stable sort.
 
@@ -517,13 +536,23 @@ class TestIncrementalIndexSync(BaseScalingTest):
         self.assertNotIn(checksum, [m[0].checksum for m in matches])
 
     def test_batch_add_after_build_is_findable(self):
+        """A batch of NEW snippets after a build must be findable without a rebuild."""
         self._add_batch(50, "pre")
         snippet_find_matches(self.session, "MOV EAX, 1", top_n=1)
-        self._add_batch(50, "post")
-        _, matches = snippet_find_matches(self.session, "MOV EAX, 77", top_n=3)
-        self.assertGreater(len(matches), 0)
-        names = [n for m in matches for n in m[0].name_list]
-        self.assertTrue(any(n.startswith("post_") for n in names))
+        # Distinct code (not name-only variants of the pre_* rows), so this
+        # batch inserts new rows and exercises the incremental
+        # ``lsh_index_add_batch`` sync instead of alias merging.  Each
+        # snippet's length is unique because immediates and registers
+        # normalize away — only structure distinguishes fingerprints.
+        items = [
+            snippet_prepare(f"post_{i}", "\n".join(["NOP"] * (i + 1)) + "\nRET", 3)
+            for i in range(50)
+        ]
+        result = snippet_add_batch(self.session, [i for i in items if i])
+        self.assertEqual(result["added"], 50)
+        _, matches = snippet_find_matches(self.session, "\n".join(["NOP"] * 43) + "\nRET", top_n=1)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][0].name_list, ["post_42"])
 
     def test_threshold_mismatch_rebuilds(self):
         """Changing the threshold invalidates the built index (rebuild)."""
@@ -923,6 +952,31 @@ class TestIndexBuild(BaseScalingTest):
 
         self.assertEqual(raised["n"], 1)  # one lock failure, recovered
         self.assertEqual(result["num_reindexed"], 20)
+
+    def test_reindex_clear_gives_up_after_repeated_locks(self):
+        """Exhausting the clear retries degrades to a zero report, never raises."""
+        import sqlite3
+        from unittest.mock import patch
+
+        import sqlalchemy.exc
+
+        self._add(20, "reidx")
+
+        def always_locked(session):
+            raise sqlalchemy.exc.OperationalError(
+                "stmt", {}, sqlite3.OperationalError("database is locked")
+            )
+
+        with (
+            patch("resembl.core.lsh_index_clear", side_effect=always_locked),
+            patch("resembl.core.time.sleep"),
+            patch("resembl.core._REINDEX_CLEAR_RETRIES", 2),
+            patch("resembl.core._REINDEX_CLEAR_RETRY_BACKOFF", 0),
+            self.assertLogs("resembl.core", level="ERROR"),
+        ):
+            result = db_reindex(self.session, jobs=1)
+
+        self.assertEqual(result["num_reindexed"], 0)
 
 
 class TestFingerprintVersion(BaseScalingTest):
