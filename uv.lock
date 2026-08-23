@@ -1108,6 +1108,7 @@ dependencies = [
     { name = "pygments" },
     { name = "rapidfuzz" },
     { name = "rich" },
+    { name = "sqlalchemy" },
     { name = "sqlmodel" },
     { name = "tomli-w" },
     { name = "typer" },
@@ -1131,12 +1132,12 @@ dev = [
     { name = "slipcover" },
 ]
 fuzz = [
-    { name = "atheris" },
+    { name = "atheris", marker = "python_full_version >= '3.12'" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "atheris", marker = "extra == 'fuzz'", specifier = ">=2.3.0" },
+    { name = "atheris", marker = "python_full_version >= '3.12' and extra == 'fuzz'", specifier = ">=2.3.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.1.0" },
     { name = "datasketch", specifier = ">=1.6.5" },
     { name = "duckdb", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -1156,6 +1157,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.2" },
     { name = "slipcover", marker = "extra == 'dev'", specifier = ">=1.0.17" },
+    { name = "sqlalchemy", specifier = ">=2.0.24" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.9.0" },

@@ -665,7 +665,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
                 self.fail(f"serve did not start; cache dir: {entries}; port_file: {port_file}")
 
             query_file = os.path.join(
-                "tests", "test_data", sorted(os.listdir("tests/test_data"))[0]
+                "tests", "test_data", min(os.listdir("tests/test_data"))
             )
             result = subprocess.run(
                 [

@@ -7,6 +7,7 @@ license = { text = "GPLv3" }
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "sqlalchemy>=2.0.24",
     "sqlmodel>=0.0.24",
     "pygments>=2.19.2",
     "datasketch>=1.6.5",
@@ -38,8 +39,10 @@ dev = [
     "pytest-benchmark>=4.0.0",
     "pytest-cov>=5.0.0",
 ]
+# atheris publishes wheels only for Python >= 3.12 (no sdist since 2.x);
+# gate the extra so `.[dev,fuzz]` stays installable on every supported Python.
 fuzz = [
-    "atheris>=2.3.0",
+    "atheris>=2.3.0; python_version >= '3.12'",
 ]
 
 [project.scripts]
