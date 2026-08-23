@@ -15,6 +15,7 @@ from unittest.mock import patch
 from sqlmodel import Session, SQLModel, create_engine
 
 import resembl.models  # noqa: F401  (registers tables)
+from resembl.config import ResemblConfig
 from resembl.core import snippet_add_batch, snippet_find_matches, snippet_prepare
 
 
@@ -611,6 +612,85 @@ class TestServerMode(unittest.TestCase):
         self.assertGreater(after["lsh_candidates"], first["lsh_candidates"])
         self.assertNotEqual(after["lsh_candidates"], first["lsh_candidates"])
 
+    def test_result_cache_keys_isolate_served_databases(self):
+        """One process serving two databases never shares result-cache hits.
+
+        ``_RESULT_CACHE`` is shared by every server generation in the
+        process, while SQLite's ``data_version`` counter is per database:
+        two identically built fresh databases carry equal counters, so
+        without the per-database key component a query against database B
+        could be answered from database A's cached payload.
+        """
+        from resembl.server import _RESULT_CACHE, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+
+        db_b = tempfile.mktemp(suffix=".db")
+        engine_b = create_engine(f"sqlite:///{db_b}")
+        self.addCleanup(engine_b.dispose)
+        self.addCleanup(
+            lambda: [
+                os.remove(p) for p in (db_b, db_b + "-wal", db_b + "-shm") if os.path.exists(p)
+            ]
+        )
+        SQLModel.metadata.create_all(engine_b)
+        # Database A (setUp) holds 100 snippets; database B is empty.  Both
+        # were built with the same operation sequence, so their
+        # ``data_version`` counters match.
+        session_b = Session(engine_b)
+        self.addCleanup(session_b.close)
+
+        params = ResemblConfig()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        payload_a = _find_one(self._session, {"top_n": 5}, query, params)
+        payload_b = _find_one(session_b, {"top_n": 5}, query, params)
+
+        self.assertGreater(payload_a["lsh_candidates"], 0)
+        self.assertEqual(payload_b["lsh_candidates"], 0)
+        # Each database owns its own entry; B must never see A's payload.
+        self.assertEqual(len(_RESULT_CACHE), 2)
+        again_b = _find_one(session_b, {"top_n": 5}, query, params)
+        self.assertEqual(again_b["lsh_candidates"], 0)
+
+    def test_second_serve_keeps_first_servers_find_defaults(self):
+        """Each server generation carries its own find defaults.
+
+        Two ``serve()`` calls in one process must not retarget the older,
+        still-serving server's default n-gram / permutation / jaccard-weight
+        values — the same hazard ``_FindHandler.engine`` documents for the
+        engine itself.
+        """
+        from resembl import server as server_mod
+        from resembl.config import ResemblConfig
+
+        db_a = tempfile.mktemp(suffix=".db")
+        db_b = tempfile.mktemp(suffix=".db")
+        for db_path in (db_a, db_b):
+            engine = create_engine(f"sqlite:///{db_path}")
+            self.addCleanup(engine.dispose)
+            SQLModel.metadata.create_all(engine)
+        self.addCleanup(
+            lambda: [
+                os.remove(p)
+                for p in (db_a, db_a + "-wal", db_a + "-shm", db_b, db_b + "-wal", db_b + "-shm")
+                if os.path.exists(p)
+            ]
+        )
+
+        with patch("resembl.config.load_config", return_value=ResemblConfig(ngram_size=5)):
+            httpd_a = server_mod.serve(f"sqlite:///{db_a}", port=0)
+        self.addCleanup(httpd_a.server_close)
+        self.assertEqual(httpd_a.find_defaults.ngram_size, 5)
+
+        with patch("resembl.config.load_config", return_value=ResemblConfig(ngram_size=7)):
+            httpd_b = server_mod.serve(f"sqlite:///{db_b}", port=0)
+        self.addCleanup(httpd_b.server_close)
+
+        # The newer serve call must not have retargeted the older server.
+        self.assertEqual(httpd_a.find_defaults.ngram_size, 5)
+        self.assertEqual(httpd_b.find_defaults.ngram_size, 7)
+
     def test_concurrent_requests_all_succeed(self):
         """The server answers concurrent finds correctly (per-request sessions)."""
         import concurrent.futures
@@ -661,9 +741,6 @@ class TestServerMode(unittest.TestCase):
             ]
         )
         engine = create_engine(f"sqlite:///{db_path}")
-        original_flag = lsh_mod._TABLES_ENSURED
-        lsh_mod._TABLES_ENSURED = False
-        self.addCleanup(setattr, lsh_mod, "_TABLES_ENSURED", original_flag)
 
         barrier = threading.Barrier(8)
         errors: list[Exception] = []
@@ -682,9 +759,29 @@ class TestServerMode(unittest.TestCase):
         for thread in threads:
             thread.join(timeout=30)
         self.assertEqual(errors, [])
-        self.assertTrue(lsh_mod._TABLES_ENSURED)
-        # The index facade is usable on the now-created tables.
+        self.assertIn(engine, lsh_mod._TABLES_ENSURED)
+
+        # The marker is per engine, not process-wide: a second engine for a
+        # different database in the same process must get its own DDL run —
+        # with the old module-global flag it silently skipped table creation.
+        db_path2 = tempfile.mktemp(suffix=".db")
+        self.addCleanup(
+            lambda: [
+                os.remove(p)
+                for p in (db_path2, db_path2 + "-wal", db_path2 + "-shm")
+                if os.path.exists(p)
+            ]
+        )
+        engine2 = create_engine(f"sqlite:///{db_path2}")
+        with Session(engine2) as session:
+            lsh_mod._ensure_tables_once(session)
+        self.assertIn(engine2, lsh_mod._TABLES_ENSURED)
+
+        # The index facade is usable on both engines' now-created tables.
         with Session(engine) as session:
+            lsh = lsh_mod.ResemblLSH(session, 0.5, 128)
+            self.assertGreaterEqual(lsh.b, 2)
+        with Session(engine2) as session:
             lsh = lsh_mod.ResemblLSH(session, 0.5, 128)
             self.assertGreaterEqual(lsh.b, 2)
 

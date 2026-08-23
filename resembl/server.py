@@ -25,6 +25,8 @@ from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from sqlalchemy import Connection
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from .cache import cache_dir_get, lsh_index_build
@@ -36,22 +38,33 @@ from .core import LSH_THRESHOLD, db_reindex, snippet_find_matches
 #: returned only while the database is unchanged — repeated queries (triage
 #: workflows re-checking the same hashes) answer in ~0.1 ms instead of
 #: ~1.4 ms, never stale.  Non-SQLite backends get no version counter and
-#: bypass the cache.
+#: bypass the cache.  The key ends with the serving engine's URL: one
+#: process may run several servers for different databases (tests,
+#: embeddings), and ``data_version`` is per-database — without that final
+#: component a hit computed for database A could be served to database B
+#: whenever both counters happened to carry the same value.
 _RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
 _RESULT_CACHE_MAX = 128
 #: Serializes access to the shared cache: requests run in concurrent
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
 
-#: Threshold / permutation count the server pre-warms with (set from the CLI
-#: config at startup, so served results match in-process find).  Until
-#: :func:`serve` runs they mirror :class:`ResemblConfig`'s defaults, so a
-#: direct ``_find_one`` call agrees with a default configuration.
-_DEFAULTS = ResemblConfig()
-_SERVER_THRESHOLD = _DEFAULTS.lsh_threshold
-_SERVER_NUM_PERM = _DEFAULTS.num_permutations
-_SERVER_NGRAM = _DEFAULTS.ngram_size
-_SERVER_JACCARD_WEIGHT = _DEFAULTS.jaccard_weight
+#: Find parameters used *only* when ``_find_one`` is called without a
+#: serving server (tests, direct API use): they mirror
+#: :class:`ResemblConfig`'s defaults.  Real requests take their defaults
+#: from the per-instance ``find_defaults`` of the server that owns the
+#: handler thread (see :func:`serve`) — module globals would let a second
+#: ``serve`` call retarget an older, still-serving server's threads, exactly
+#: the bug ``_FindHandler.engine`` avoids for the engine itself.
+_DEFAULT_FIND_PARAMS = ResemblConfig()
+
+
+def _session_engine(session: Session) -> Engine:
+    """Return the engine behind *session* (``get_bind`` may return a Connection)."""
+    bind = session.get_bind()
+    if isinstance(bind, Connection):
+        return bind.engine
+    return bind
 
 
 def _db_version(session: Session) -> int | None:
@@ -63,14 +76,25 @@ def _db_version(session: Session) -> int | None:
     return int(session.execute(text("PRAGMA data_version")).scalar() or 0)
 
 
-def _find_one(session: Session, body: dict, query: str) -> dict:
-    """Run one find, served from the version-guarded cache when possible."""
+def _find_one(
+    session: Session,
+    body: dict,
+    query: str,
+    params: ResemblConfig | None = None,
+) -> dict:
+    """Run one find, served from the version-guarded cache when possible.
+
+    *params* supplies the serving server's configured defaults for values
+    absent from *body*; direct callers without a server get plain
+    :class:`ResemblConfig` defaults.
+    """
+    params = params if params is not None else _DEFAULT_FIND_PARAMS
     top_n = int(body.get("top_n", 5))
     threshold = body.get("threshold")
     normalize = bool(body.get("normalize", True))
-    ngram_size = int(body.get("ngram_size", _SERVER_NGRAM))
-    num_permutations = int(body.get("num_permutations", _SERVER_NUM_PERM))
-    jaccard_weight = float(body.get("jaccard_weight", _SERVER_JACCARD_WEIGHT))
+    ngram_size = int(body.get("ngram_size", params.ngram_size))
+    num_permutations = int(body.get("num_permutations", params.num_permutations))
+    jaccard_weight = float(body.get("jaccard_weight", params.jaccard_weight))
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one
@@ -83,6 +107,9 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
 
     if not 2 <= num_permutations <= _MAX_NUM_PERM:
         return {"error": f"num_permutations must be between 2 and {_MAX_NUM_PERM}"}
+    # The masked URL identifies the served database without retaining
+    # credentials in the long-lived cache keys.
+    db_id = str(_session_engine(session).url)
     key = (
         query,
         top_n,
@@ -91,6 +118,7 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
         ngram_size,
         num_permutations,
         jaccard_weight,
+        db_id,
     )
     version = _db_version(session)
     if version is not None:
@@ -195,6 +223,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         """
         return self.server.engine  # type: ignore[attr-defined]
 
+    @property
+    def find_defaults(self) -> ResemblConfig:
+        """This server's configured find defaults (see :func:`serve`)."""
+        # type: ignore[attr-defined] as for ``engine`` above
+        return self.server.find_defaults  # type: ignore[attr-defined]
+
     def _read_body(self) -> dict | None:
         """Read and parse the JSON request body; None if malformed."""
         try:
@@ -229,7 +263,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         try:
             with Session(self.engine) as session:
-                payload = _find_one(session, body, query)
+                payload = _find_one(session, body, query, self.find_defaults)
         except Exception as exc:  # pragma: no cover - defensive
             self._respond(500, {"error": str(exc)})
             return
@@ -249,7 +283,9 @@ class _FindHandler(BaseHTTPRequestHandler):
                     try:
                         if not isinstance(query, str):
                             raise ValueError("query must be a string")
-                        results.append({"query": query, **_find_one(session, body, query)})
+                        results.append(
+                            {"query": query, **_find_one(session, body, query, self.find_defaults)}
+                        )
                     except Exception as exc:  # isolate per-query failures
                         results.append({"query": query, "error": str(exc)})
         except Exception as exc:
@@ -284,6 +320,11 @@ class _FindServer(ThreadingHTTPServer):
     """
 
     engine: Any
+
+    #: Per-server find defaults; every instance overwrites this class-level
+    #: fallback in :func:`serve` (see there for why it cannot be a module
+    #: global).
+    find_defaults: ResemblConfig = _DEFAULT_FIND_PARAMS
 
     def server_close(self) -> None:
         super().server_close()
@@ -333,22 +374,26 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     with Session(engine) as session:
         # Honor the CLI config: the server answers with the same threshold /
         # permutation count as in-process find, so clients using the same
-        # config get warm cache hits instead of per-request rebuilds.
-        global _SERVER_THRESHOLD, _SERVER_NUM_PERM, _SERVER_NGRAM, _SERVER_JACCARD_WEIGHT
+        # config get warm cache hits instead of per-request rebuilds.  The
+        # values are carried on the server *instance* (like ``engine``):
+        # module globals would leak into any older server still serving
+        # another database in this process.
         from .config import load_config
 
         cfg = load_config()
-        _SERVER_THRESHOLD = cfg.lsh_threshold
-        _SERVER_NUM_PERM = cfg.num_permutations
-        _SERVER_NGRAM = cfg.ngram_size
-        _SERVER_JACCARD_WEIGHT = cfg.jaccard_weight
+        find_defaults = ResemblConfig(
+            lsh_threshold=cfg.lsh_threshold,
+            num_permutations=cfg.num_permutations,
+            ngram_size=cfg.ngram_size,
+            jaccard_weight=cfg.jaccard_weight,
+        )
 
         # One-time migration + index build, before any request is served.
         # The migration worker count scales with the database (spawning a
         # worker per CPU for a small database costs more than the work).
         from .core import adaptive_worker_count, fingerprints_need_reindex
 
-        if fingerprints_need_reindex(session, _SERVER_NGRAM, _SERVER_NUM_PERM):
+        if fingerprints_need_reindex(session, cfg.ngram_size, cfg.num_permutations):
             from sqlmodel import func, select
 
             from .models import Snippet
@@ -359,8 +404,8 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
             db_reindex(
                 session,
                 jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
-                ngram_size=_SERVER_NGRAM,
-                num_perm=_SERVER_NUM_PERM,
+                ngram_size=cfg.ngram_size,
+                num_perm=cfg.num_permutations,
             )
         # Build the index only if it is missing or was built with different
         # parameters — rebuilding an already-current index on every restart
@@ -369,8 +414,8 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         from .lsh import lsh_meta_get, lsh_meta_matches
 
         meta = lsh_meta_get(session)
-        if not lsh_meta_matches(meta, _SERVER_THRESHOLD, _SERVER_NUM_PERM):
-            lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
+        if not lsh_meta_matches(meta, cfg.lsh_threshold, cfg.num_permutations):
+            lsh_index_build(session, cfg.lsh_threshold, cfg.num_permutations)
 
     # A failed bind (port already in use) must not leak the engine: it holds
     # up to pool_size + max_overflow SQLite handles once warmed, and this
@@ -382,8 +427,9 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         engine.dispose()
         raise
     # Per-instance shared state (see _FindHandler.engine): each server
-    # generation carries its own engine.
+    # generation carries its own engine and find defaults.
     httpd.engine = engine
+    httpd.find_defaults = find_defaults
     os.makedirs(os.path.dirname(port_file), exist_ok=True)
     with open(port_file, "w", encoding="utf-8") as f:
         f.write(str(httpd.server_address[1]))

@@ -18,6 +18,7 @@ which avoids constructing MinHash objects during index builds.
 from __future__ import annotations
 
 import threading
+import weakref
 from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -197,16 +198,20 @@ def table_ensure(session: Session) -> None:
 
 
 #: Process-wide guard: the CLI creates all tables at startup (``db_create``),
-#: so ``ResemblLSH`` only needs to run the DDL fallback once per process.
+#: so ``ResemblLSH`` only needs to run the DDL fallback once per *engine*.
 #: Calling ``create_all`` per construction put a DDL transaction on *every*
 #: find request, which thrashed the serve process's connection pool under
-#: concurrent load.
-_TABLES_ENSURED = False
+#: concurrent load.  The marker is a weak set of engines, not a plain bool:
+#: one process can hold several engines (two ``serve`` calls, tests), and a
+#: process-wide flag set by the first engine would silently skip the DDL
+#: fallback for every later engine's still-uncreated tables.  Weak refs keep
+#: disposed engines (and their pools) collectable.
+_TABLES_ENSURED: weakref.WeakSet[object] = weakref.WeakSet()
 _TABLES_ENSURED_LOCK = threading.Lock()
 
 
 def _ensure_tables_once(session: Session) -> None:
-    """Run :func:`table_ensure` at most once per process.
+    """Run :func:`table_ensure` at most once per session bind.
 
     Serve runs one handler thread per request, and the first concurrent
     finds after startup all construct a :class:`ResemblLSH` at the same
@@ -214,16 +219,17 @@ def _ensure_tables_once(session: Session) -> None:
     (checkfirst) concurrently and lose the race between its has-table probe
     and another thread's CREATE — surfacing as a spurious "table already
     exists" / "database is locked" failure on real requests.  The unlocked
-    fast path keeps the steady state (one bool read per request) lock-free;
-    the flag is only published under the lock after the DDL completed.
+    fast path keeps the steady state (one set-membership read per request)
+    lock-free; the marker is only published under the lock after the DDL
+    completed.
     """
-    global _TABLES_ENSURED
-    if _TABLES_ENSURED:
+    engine = session.get_bind()
+    if engine in _TABLES_ENSURED:
         return
     with _TABLES_ENSURED_LOCK:
-        if not _TABLES_ENSURED:
+        if engine not in _TABLES_ENSURED:
             table_ensure(session)
-            _TABLES_ENSURED = True
+            _TABLES_ENSURED.add(engine)
 
 
 def lsh_meta_get(session: Session) -> tuple[float, int] | None:
