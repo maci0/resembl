@@ -113,17 +113,21 @@ def save_config(config: dict | ResemblConfig) -> None:
         raise
 
 
+def _read_config_dict() -> dict:
+    """Read the raw config file as a dict (empty when missing or malformed)."""
+    cfg_path = config_path_get()
+    if not os.path.exists(cfg_path):
+        return {}
+    try:
+        with open(cfg_path, "rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError:
+        return {}
+
+
 def update_config(key: str, value: int | float | str) -> dict:
     """Update ``key`` in the config file with ``value`` and return the new config."""
-    config: dict = {}
-    cfg_path = config_path_get()
-    if os.path.exists(cfg_path):
-        with open(cfg_path, "rb") as f:
-            try:
-                config = tomllib.load(f)
-            except tomllib.TOMLDecodeError:
-                config = {}
-
+    config = _read_config_dict()
     config[key] = value
     merged = {**DEFAULTS, **config}
     save_config(merged)
@@ -132,15 +136,7 @@ def update_config(key: str, value: int | float | str) -> dict:
 
 def remove_config_key(key: str) -> dict:
     """Remove ``key`` from the config file and return the new config."""
-    config: dict = {}
-    cfg_path = config_path_get()
-    if os.path.exists(cfg_path):
-        with open(cfg_path, "rb") as f:
-            try:
-                config = tomllib.load(f)
-            except tomllib.TOMLDecodeError:
-                config = {}
-
+    config = _read_config_dict()
     if key in config:
         del config[key]
         save_config(config)

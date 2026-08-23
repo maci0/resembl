@@ -609,7 +609,8 @@ def snippet_find_matches(
     query_minhash = code_create_minhash(
         query_string, normalize, ngram_size=ngram_size, num_perm=num_permutations
     )
-    candidate_keys = lsh.query(minhash_pack(query_minhash))
+    query_minhash_bytes = minhash_pack(query_minhash)
+    candidate_keys = lsh.query(query_minhash_bytes)
 
     if not candidate_keys:
         return 0, []
@@ -628,7 +629,6 @@ def snippet_find_matches(
     # pass over the (N, 128) uint32 array — SIMD under the hood.  This is
     # what keeps find fast when a query lands in a crowded band (thousands
     # of candidates at scale).
-    query_minhash_bytes = minhash_pack(query_minhash)
     # Normalize each candidate's blob (legacy pickles -> packed) and skip
     # corrupt ones: a single rotten fingerprint must not crash the query —
     # it is excluded from scoring (a reindex heals it from its code).
