@@ -16,6 +16,8 @@ case.
 
 from __future__ import annotations
 
+import atexit
+import functools
 import hashlib
 import json
 import os
@@ -322,6 +324,13 @@ class _FindServer(ThreadingHTTPServer):
     """
 
     engine: Any
+    #: This generation's exit-hook callback, set by :func:`serve`.
+    #: ``server_close`` runs it (retiring the port file) and unregisters it,
+    #: so a process cycling servers accumulates neither stale advertisements
+    #: nor exit handlers.  It is a per-generation ``functools.partial``
+    #: because ``atexit.unregister`` matches by callable alone — sharing one
+    #: bare function would let one close drop every server's registration.
+    _atexit_cleanup: functools.partial[None]
 
     #: Per-server find defaults; every instance overwrites this class-level
     #: fallback in :func:`serve` (see there for why it cannot be a module
@@ -335,6 +344,13 @@ class _FindServer(ThreadingHTTPServer):
             # Checked-out connections still finish their request and are
             # closed on return; idle pooled connections close now.
             engine.dispose()
+        cleanup = getattr(self, "_atexit_cleanup", None)
+        if cleanup is not None:
+            # This generation is stopping: retire its advertisement now (only
+            # while it still names our own port) and release its exit hook so
+            # repeated serve/close cycles do not accumulate handlers.
+            cleanup()
+            atexit.unregister(cleanup)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         """Swallow routine client-disconnection failures; delegate the rest.
@@ -457,7 +473,12 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         httpd.server_close()
         raise
 
-    import atexit
-
-    atexit.register(_port_file_cleanup, port_file, int(httpd.server_address[1]))
+    # The advertisement's lifecycle is owned by the server instance: closing
+    # it retires the file (while it still names our port) and releases this
+    # registration, so repeated serve/close cycles do not accumulate exit
+    # handlers.  The hook remains only as a backstop for callers that never
+    # close the returned server.
+    port = int(httpd.server_address[1])
+    httpd._atexit_cleanup = functools.partial(_port_file_cleanup, port_file, port)
+    atexit.register(httpd._atexit_cleanup)
     return httpd

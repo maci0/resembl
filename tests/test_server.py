@@ -119,6 +119,52 @@ class TestServerMode(unittest.TestCase):
         finally:
             httpd.server_close()
 
+    def test_server_close_retires_port_file_and_atexit_registration(self):
+        """server_close retires the advertisement and releases its exit hook.
+
+        ``serve`` registers one atexit cleanup per call.  A long-lived
+        embedder starting and stopping servers repeatedly must not accumulate
+        one handler (plus one stale port file) per cycle: ``server_close``
+        runs the cleanup eagerly and unregisters exactly its own entry,
+        leaving other servers' registrations and advertisements intact.
+        """
+        import atexit
+
+        from resembl import server as server_mod
+        from resembl.server import server_port_path
+
+        db_url = f"sqlite:///{self._db}"
+        httpd_a = server_mod.serve(db_url, port=0)
+        port_file = server_port_path(db_url)
+        self.assertTrue(os.path.exists(port_file))
+
+        # A second server for another database shares this cache directory
+        # and holds its own exit-hook registration.  (serve assumes the CLI
+        # already created its schema, so initialize the other database first.)
+        other_db_url = f"sqlite:///{self._db}-other"
+        other_engine = create_engine(other_db_url)
+        try:
+            SQLModel.metadata.create_all(other_engine)
+        finally:
+            other_engine.dispose()
+        httpd_b = server_mod.serve(other_db_url, port=0)
+        self.addCleanup(httpd_b.server_close)
+
+        with patch("atexit.unregister", wraps=atexit.unregister) as mock_unreg:
+            httpd_a.server_close()
+        # Exactly A's callback is released (atexit.unregister matches by
+        # callable alone, hence the per-generation partial).
+        mock_unreg.assert_called_once_with(httpd_a._atexit_cleanup)
+        self.assertIsNot(httpd_a._atexit_cleanup, httpd_b._atexit_cleanup)
+        # A's advertisement is retired eagerly, not left for interpreter exit.
+        self.assertFalse(os.path.exists(port_file))
+        # B's advertisement is untouched by A's close.
+        self.assertTrue(os.path.exists(server_port_path(other_db_url)))
+
+        # Closing again is idempotent (callers with finally blocks may repeat).
+        httpd_a.server_close()
+        self.assertFalse(os.path.exists(port_file))
+
     def test_server_query_matches_in_process(self):
         """POST /find returns the same top matches as the in-process path."""
         port = self._start_server()
