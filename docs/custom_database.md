@@ -85,7 +85,7 @@ To use your own database with `resembl`, follow these steps:
 3.  **Create Tables:** Call `SQLModel.metadata.create_all(your_engine)` to create the tables for all registered models in your database.
 4.  **Create and Pass the Session:** Whenever you need to call an `resembl` core function, create a `Session` from your engine and pass it as the `session` argument.
 
-By following this pattern, you can seamlessly integrate `resembl`'s functionality into any application while maintaining full control over the database.
+By following this pattern, you can integrate `resembl`'s functionality into any application while maintaining full control over the database.
 
 ## Scaling to Millions of Snippets and Beyond
 
