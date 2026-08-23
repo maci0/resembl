@@ -1,9 +1,0 @@
-{
-  "include": [
-    "resembl",
-    "tests"
-  ],
-  "venvPath": ".",
-  "venv": ".venv",
-  "pythonVersion": "3.11"
-}

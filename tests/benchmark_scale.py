@@ -35,7 +35,7 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tests.generate_data import generate_files  # noqa: E402
+from tests.generate_data import generate_files
 
 DEFAULT_NUM_FILES = 5000
 DEFAULT_DATA_DIR = "scale_data"

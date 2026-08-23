@@ -211,7 +211,8 @@ class TestDuckDBIntegration(unittest.TestCase):
             self.assertEqual(bytes(row[2]), blob)
             self.assertEqual(row[3], col)
 
-        _roundtrip()
+        # Arguments are injected by hypothesis's @given decorator.
+        _roundtrip()  # pylint: disable=no-value-for-parameter
 
 
 if __name__ == "__main__":

@@ -218,7 +218,7 @@ class LSHBucket(SQLModel, table=True):
     limit (utf8mb4: 640*4 + checksum 64*4 + int).
     """
 
-    __tablename__ = "lsh_bucket"  # noqa: N815
+    __tablename__ = "lsh_bucket"
 
     band: int = Field(primary_key=True)
     bucket: str = Field(primary_key=True, max_length=640)
@@ -233,7 +233,7 @@ class LSHMeta(SQLModel, table=True):
     for different parameters, the index is rebuilt.
     """
 
-    __tablename__ = "lsh_meta"  # noqa: N815
+    __tablename__ = "lsh_meta"
 
     id: int = Field(default=1, primary_key=True)
     threshold: float
@@ -252,7 +252,7 @@ FINGERPRINT_VERSION = 3
 class AppMeta(SQLModel, table=True):
     """Small key-value store for application metadata (e.g. fingerprint version)."""
 
-    __tablename__ = "app_meta"  # noqa: N815
+    __tablename__ = "app_meta"
 
     key: str = Field(primary_key=True, max_length=64)
     value: str = Field(sa_column=Column(Text, nullable=False))

@@ -158,7 +158,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path) as f:
+            with open(out_path, encoding="utf-8") as f:
                 content = f.read()
             self.assertIn("rule resembl_test_func", content)
             self.assertIn("$asm", content)
@@ -173,7 +173,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path) as f:
+            with open(out_path, encoding="utf-8") as f:
                 content = f.read()
             # Backslashes and quotes should be escaped
             self.assertNotIn('\n"', content.split("$asm")[1].split("nocase")[0])
@@ -187,7 +187,7 @@ class TestExportYara(BaseDBTest):
             out_path = f.name
         try:
             snippet_export_yara(self.session, out_path)
-            with open(out_path) as f:
+            with open(out_path, encoding="utf-8") as f:
                 content = f.read()
             # Should start with "rule resembl_r_"
             self.assertIn("rule resembl_r_", content)
@@ -219,7 +219,7 @@ class TestExportYara(BaseDBTest):
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
-            with open(out_path) as f:
+            with open(out_path, encoding="utf-8") as f:
                 content = f.read()
             # Exactly one rule header exists: the injected newline stayed
             # escaped inside the quoted string instead of starting a line.

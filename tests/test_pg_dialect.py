@@ -6,6 +6,8 @@ the full integration test (``test_pg_integration.py``) runs against a real
 server when ``RESEMBL_TEST_PG_URL`` is set.
 """
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import unittest
 
 

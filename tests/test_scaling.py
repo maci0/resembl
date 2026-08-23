@@ -11,6 +11,8 @@ Covers:
 - Candidate fetching with more than one chunk's worth of LSH candidates.
 """
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import os
 import pickle
@@ -836,7 +838,7 @@ class TestIndexBuild(BaseScalingTest):
         config — so a non-default setting rebuilt the index on every find.
         """
         self._add(20, "perm")
-        n, m = snippet_find_matches(
+        n, _m = snippet_find_matches(
             self.session,
             "MOV EAX, 5; ADD EBX, 5; RET",
             top_n=3,
@@ -846,7 +848,7 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(lsh_meta_get(self.session)[1], 64)
         # Stored blobs were reindexed at 64 (the migration reindexes on a
         # perm-count change), so the second find does not rebuild.
-        n2, m2 = snippet_find_matches(
+        n2, _m2 = snippet_find_matches(
             self.session,
             "MOV EAX, 5; ADD EBX, 5; RET",
             top_n=3,
@@ -865,7 +867,7 @@ class TestIndexBuild(BaseScalingTest):
         from resembl.lsh import fingerprint_ngram_get
 
         self._add(20, "ng")
-        n3, m3 = snippet_find_matches(
+        n3, _m3 = snippet_find_matches(
             self.session,
             "MOV EAX, 5; ADD EBX, 5; RET",
             top_n=3,
@@ -873,7 +875,7 @@ class TestIndexBuild(BaseScalingTest):
         )
         self.assertGreater(n3, 0)
 
-        n5, m5 = snippet_find_matches(
+        n5, _m5 = snippet_find_matches(
             self.session,
             "MOV EAX, 5; ADD EBX, 5; RET",
             top_n=3,
@@ -1337,10 +1339,10 @@ class TestFingerprintPermStamp(BaseScalingTest):
         # Build the index first so every snippet has bucket rows, then make
         # one stored blob stale: the LSH still routes to its checksum, and
         # scoring must skip it instead of raising ValueError.
-        n0, _ = snippet_find_matches(self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3)
+        _n0, _ = snippet_find_matches(self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=3)
         victim = self._corrupt_last_blob_to_64_perms(4)
 
-        n1, matches = snippet_find_matches(
+        _n1, matches = snippet_find_matches(
             self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=4
         )
         self.assertGreater(len(matches), 0)

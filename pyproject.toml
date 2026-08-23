@@ -29,7 +29,10 @@ dev = [
     "ruff>=0.12.2",
     "black>=25.1.0",
     "pre-commit>=4.2.0",
-    "pylint>=3.3.7",
+    # Cap at <4: pylint 4.x adds checks the tree has not been adapted to,
+    # which would turn the Pylint CI gate red for everyone on next resolve.
+    # Lift the cap in a pass that fixes the new findings, not before.
+    "pylint>=3.3.7,<4",
     "slipcover>=1.0.17",
     "hypothesis>=6.0.0",
     "pg8000>=1.31.0",
@@ -65,10 +68,63 @@ line-length = 100
 [tool.pylint.format]
 max-line-length = 100
 
+[tool.pylint."messages control"]
+# Pylint is the defect gate (error-level checks stay on). The messages below
+# are disabled with cause: they conflict with deliberate project conventions
+# or duplicate checks owned by ruff/mypy. Revisit when the underlying cause
+# changes; do not extend this list to silence a one-off (use an inline,
+# scoped `# pylint: disable=<msg>` instead).
+disable = [
+    # Lazy imports are architecture, not accidents: the package is
+    # import-light by design and CLI commands import heavy modules on use.
+    "import-outside-toplevel",
+    "wrong-import-position",
+    "consider-using-from-import",
+    # core/models re-export blocks keep `from resembl.core import X` working;
+    # unused-import/reimported hygiene is ruff's F401/F811 territory.
+    "reimported",
+    "unused-import",
+    # Typer command/callback signatures rebind parameter names by convention.
+    "redefined-outer-name",
+    # Boundary handlers (CLI, server) catch Exception deliberately.
+    "broad-exception-caught",
+    # Module-level engine/config singletons need module globals.
+    "global-statement",
+    # Interface-conformance signatures (SQLAlchemy listeners, hypothesis
+    # @given, http.server overrides) must keep their named parameters.
+    "unused-argument",
+    # Parallel test/fuzzer boilerplate is intentional.
+    "duplicate-code",
+    # astroid cannot see through SQLModel's dynamic field proxies or the
+    # package's lazy __getattr__ exports; these fire only on false positives.
+    "not-callable",
+    "no-member",
+    "undefined-all-variable",
+    "no-name-in-module",
+    # Complexity refactoring (god-files, long functions) is tracked as its
+    # own work; blocking every push on it keeps the gate permanently red.
+    "too-few-public-methods",
+    "too-many-public-methods",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-branches",
+    "too-many-locals",
+    "too-many-return-statements",
+    "too-many-statements",
+    "too-many-lines",
+    # Docstring coverage is not enforced anywhere in this project.
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    # Tests hold temp files/dirs across the whole test body on purpose.
+    "consider-using-with",
+]
+
 [tool.ruff.lint]
 # pycodestyle errors/subgroups (E4/E7/E9), pyflakes, isort, warnings,
 # flake8-builtins, bugprone-adjacent correctness groups that the tree
 # currently passes, plus autofixable modernization (pyupgrade).
+# RUF100 keeps `# noqa` directives honest: stale suppressions fail lint.
 select = [
     "E4",
     "E7",
@@ -92,22 +148,17 @@ select = [
     "RET",
     "PERF",
     "N",
+    "RUF100",
 ]
 
 [tool.ruff.lint.isort]
 known-first-party = ["resembl"]
 
-[tool.pyright]
-include = ["resembl", "tests"]
-venvPath = "."
-venv = ".venv"
-pythonVersion = "3.11"
-
 [tool.mypy]
 python_version = "3.11"
 files = ["resembl", "tests"]
 ignore_missing_imports = true
-# Strict flags the tree already passes; tighten further in later passes.
+# Strict flags the whole tree (package + tests) already passes.
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
@@ -115,6 +166,14 @@ strict_equality = true
 warn_unreachable = true
 disallow_subclassing_any = true
 extra_checks = true
+
+# Ratchet: the library package must stay fully annotated; tests remain gradual.
+[[tool.mypy.overrides]]
+module = "resembl.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_globals = true
+disallow_untyped_decorators = true
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable"

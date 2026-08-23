@@ -27,8 +27,8 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable, Sequence
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import UTC, datetime, tzinfo
 from typing import Any, cast
 
@@ -678,7 +678,7 @@ def import_cmd(
                 # the workers stay saturated.
                 file_iter = iter(file_paths)
                 window = max(jobs * 4, 16)
-                in_flight: deque = deque()
+                in_flight: deque[Future[tuple[str, str, str, bytes] | None]] = deque()
 
                 def _submit_next() -> bool:
                     fp = next(file_iter, None)
@@ -690,7 +690,7 @@ def import_cmd(
                 for _ in range(min(window, len(file_paths))):
                     _submit_next()
 
-                def _completed_futures():
+                def _completed_futures() -> Iterator[Future[tuple[str, str, str, bytes] | None]]:
                     while in_flight:
                         done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
                         for future in done:
@@ -1515,7 +1515,7 @@ def collection_show_cmd(
     name: str = typer.Argument(help="Name of the collection to show."),
 ) -> None:
     """Show all snippets in a collection."""
-    from .models import Snippet as SnippetModel  # noqa: F811
+    from .models import Snippet as SnippetModel
 
     snippets = SnippetModel.get_by_collection(state.session, name)
     if not snippets:
@@ -1661,12 +1661,12 @@ def config_set_cmd(
     default_value = DEFAULTS[key]
     try:
         typed_value: int | float = type(default_value)(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
         err_console.print(
             f"[red]Error:[/red] Invalid value for '{key}': expected "
             f"{type(default_value).__name__}, got '{value}'."
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     new_config = update_config(key, typed_value)
     _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
     state.config.update(new_config)

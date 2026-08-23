@@ -12,6 +12,8 @@ client and any import-time-sensitive consumer fast.
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = [
     "code_create_minhash",
     "code_create_minhash_batch",
@@ -64,7 +66,7 @@ _SUBMODULES = frozenset(
 )
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Resolve public exports (and submodules) lazily."""
     import importlib
 

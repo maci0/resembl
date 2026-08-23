@@ -696,7 +696,7 @@ def string_checksum(code_snippet: str) -> str:
     return hashlib.sha256(normalized_string.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def token_is_label(token_type, value: str) -> bool:
+def token_is_label(token_type: object, value: str) -> bool:
     """Check if a token is a label."""
     return token_type in Name.Label or (token_type in Name and value.endswith(":"))
 
@@ -941,7 +941,11 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     # Sub-metric 3: block-size histogram cosine similarity
     sizes1 = cfg1["block_sizes"]
     sizes2 = cfg2["block_sizes"]
-    max_size = max(max(sizes1, default=0), max(sizes2, default=0)) + 1
+    # Element-wise max of each list, then combined (max(sizes1, sizes2)
+    # would compare the lists, not their elements).
+    widest1 = max(sizes1, default=0)
+    widest2 = max(sizes2, default=0)
+    max_size = max(widest1, widest2) + 1
 
     hist1 = [0] * max_size
     hist2 = [0] * max_size

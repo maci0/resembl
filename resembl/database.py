@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import event
+from sqlalchemy import Engine, event
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.pool import ConnectionPoolEntry
 from sqlmodel import SQLModel, create_engine
 
 # Imported for its side effect: defining the SQLModel classes registers the
@@ -24,7 +26,7 @@ def create_db_engine(
     *,
     pool_size: int | None = None,
     max_overflow: int | None = None,
-):
+) -> Engine:
     """Create a SQLAlchemy engine for the given URL.
 
     If *url* is ``None``, the ``DATABASE_URL`` environment variable is
@@ -49,7 +51,10 @@ def create_db_engine(
     if db_url.startswith("sqlite"):
 
         @event.listens_for(eng, "connect")
-        def _set_sqlite_pragma(dbapi_connection, connection_record):
+        def _set_sqlite_pragma(
+            dbapi_connection: DBAPIConnection,
+            connection_record: ConnectionPoolEntry,
+        ) -> None:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
@@ -62,10 +67,10 @@ def create_db_engine(
     return eng
 
 
-_engine: object | None = None
+_engine: Engine | None = None
 
 
-def get_engine():
+def get_engine() -> Engine:
     """Return the module-level engine, creating it on first use.
 
     Creating the engine opens a SQLite connection and applies the WAL

@@ -1,5 +1,7 @@
 """Tests for the warm ``serve`` server and the thin find client."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import os
 import subprocess

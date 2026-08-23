@@ -208,7 +208,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         except (ValueError, KeyError):
             return None
 
-    def do_POST(self) -> None:  # noqa: N802 (http.server API)
+    def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
         body = self._read_body()
         if body is None:
             self._respond(400, {"error": "bad request body"})
@@ -267,7 +267,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(
+        self, format: str, *args: Any  # noqa: A002  # pylint: disable=redefined-builtin
+    ) -> None:
         # Quiet by default; the CLI prints its own status line.
         return
 

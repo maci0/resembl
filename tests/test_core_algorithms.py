@@ -210,7 +210,7 @@ class TestCfgExtract(unittest.TestCase):
         if not os.path.exists(asm_path):
             self.skipTest("Test data file not found")
 
-        with open(asm_path) as f:
+        with open(asm_path, encoding="utf-8") as f:
             code = f.read()
 
         cfg = cfg_extract(code)
@@ -271,6 +271,8 @@ class TestCfgSimilarity(unittest.TestCase):
 
     def test_symmetry(self):
         """cfg_similarity(a, b) should equal cfg_similarity(b, a)."""
+        # Swapped-order calls are the point of this test.
+        # pylint: disable=arguments-out-of-order
         cfg1 = {"num_blocks": 3, "num_edges": 4, "block_sizes": [2, 3, 1], "adj": {}}
         cfg2 = {
             "num_blocks": 5,
@@ -278,7 +280,10 @@ class TestCfgSimilarity(unittest.TestCase):
             "block_sizes": [1, 2, 3, 4, 5],
             "adj": {},
         }
-        self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), cfg_similarity(cfg2, cfg1))
+        forward = cfg_similarity(cfg1, cfg2)
+        reverse = cfg_similarity(cfg2, cfg1)
+        self.assertAlmostEqual(forward, reverse)
+        # pylint: enable=arguments-out-of-order
 
     def test_no_edges(self):
         """CFGs with blocks but no edges — edge ratio should be 1.0."""

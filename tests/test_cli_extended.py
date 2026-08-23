@@ -1,5 +1,7 @@
 """CLI integration tests for collection, version, merge, and search commands."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import os
 import subprocess
@@ -477,6 +479,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    check=False,
                 )
                 self.assertNotEqual(second.returncode, 0)
                 self.assertIn("already running", second.stderr)
@@ -506,6 +509,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                     capture_output=True,
                     text=True,
                     timeout=30,
+                    check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("could not bind", result.stderr)

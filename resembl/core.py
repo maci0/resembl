@@ -18,12 +18,15 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
 from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
+if TYPE_CHECKING:
+    from datasketch import MinHash
 from .cache import (
     lsh_cache_load,
     lsh_cache_save,
@@ -943,7 +946,7 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
     if not snippet1 or not snippet2:
         return None
 
-    def _minhash_or_recomputed(snippet: Snippet):
+    def _minhash_or_recomputed(snippet: Snippet) -> MinHash:
         """Return the stored fingerprint, or one recomputed from the code.
 
         Stored blobs are never deserialized in a non-packed format (that
