@@ -37,7 +37,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import track
-from rich.syntax import Syntax
 from rich.table import Table
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -998,6 +997,10 @@ def show(
             }
         )
     else:
+        # Deferred import: rich.syntax pulls in pygments.lexers (~30 ms),
+        # which only `show`/`compare` render; every other command skips it.
+        from rich.syntax import Syntax
+
         syntax = Syntax(snippet.code, "nasm", theme="monokai", word_wrap=True)
         _echo(
             Panel(
@@ -1398,6 +1401,8 @@ def compare(
     )
     if diff:
         diff_text = "".join(diff)
+        from rich.syntax import Syntax
+
         syntax = Syntax(diff_text, "diff", theme="monokai", word_wrap=True)
         _echo(Panel(syntax, title="[bold]Code Diff[/bold]", border_style="cyan"))
     else:

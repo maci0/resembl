@@ -20,7 +20,6 @@ import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
-from rapidfuzz import fuzz
 from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
@@ -69,7 +68,7 @@ from .scoring import (
     code_create_minhash,
     code_create_minhash_batch,
     code_tokenize,
-    lexer,
+    get_lexer,
     minhash_ensure_packed,
     minhash_jaccard_batch,
     minhash_num_perm,
@@ -256,7 +255,7 @@ def snippet_prepare(
         return None
     # Materialize the token stream: it is consumed twice (once for the
     # normalized checksum string, once for the MinHash tokens).
-    tokens = list(lexer.get_tokens(code))
+    tokens = list(get_lexer().get_tokens(code))
     normalized = _string_normalize_lexed(tokens)
     checksum = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
     minhash_bytes = minhash_pack(_minhash_from_tokens(_code_tokenize_lexed(tokens), ngram_size))
@@ -597,6 +596,10 @@ def snippet_find_matches(
     ``progress`` is forwarded to the lazy index build and to a one-time
     automatic reindex (see below) when either is triggered.
     """
+    # Deferred like the lexer: Levenshtein scoring is only reached by
+    # find/compare paths, so light commands never pay rapidfuzz's import.
+    from rapidfuzz import fuzz
+
     if threshold is None:
         threshold = LSH_THRESHOLD
 
@@ -1022,6 +1025,8 @@ def snippet_get(session: Session, checksum: str) -> Snippet | None:
 
 def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | None:
     """Compare two snippets and return similarity metrics."""
+    from rapidfuzz import fuzz
+
     snippet1 = snippet_get(session, checksum1)
     snippet2 = snippet_get(session, checksum2)
 

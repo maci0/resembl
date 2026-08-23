@@ -1172,3 +1172,23 @@ class TestLazyPackageInit(unittest.TestCase):
         ):
             with self.subTest(submodule=name):
                 self.assertIsNotNone(getattr(resembl, name))
+
+    def test_core_import_defers_scoring_stack(self):
+        # Importing resembl.core must not pull in the tokenize/score stack:
+        # every CLI invocation imports core, and light commands (list,
+        # export, config, collections, ...) never lex or Levenshtein-score.
+        # A subprocess isolates sys.modules from this test process's own
+        # imports.  pygments.token stays eager (~1 ms); only the lexer
+        # package and rapidfuzz are the deferred heavyweights.
+        code = (
+            "import sys, importlib; importlib.import_module('resembl.core'); "
+            "heavy = [m for m in ('pygments.lexers', 'rapidfuzz') if m in sys.modules]; "
+            "assert not heavy, f'eagerly imported: {heavy}'"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)

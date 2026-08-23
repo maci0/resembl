@@ -8,7 +8,10 @@ deliberately free of the database stack so that it can be imported without
 
 It imports only:
 - the standard library (``hashlib``, ``struct``, ``operator``, ``copy``)
-- ``pygments`` (the ``NasmLexer`` + token types)
+- ``pygments.token`` (cheap constant types); the ``NasmLexer`` itself is
+  constructed lazily on first use (:func:`get_lexer`) — importing
+  ``pygments.lexers`` costs ~65 ms, which commands that never touch
+  assembly text must not pay at startup
 - ``numpy`` is imported *lazily* inside the function bodies that need it,
   and :class:`~resembl.minhash.MinHash` is imported lazily too (it needs
   numpy) — so merely importing this module never pulls them in.
@@ -27,11 +30,12 @@ import threading
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
-from pygments.lexers.asm import NasmLexer
-from pygments.token import Comment, Name, Number, Punctuation, Text
-
 if TYPE_CHECKING:
+    from pygments.lexers.asm import NasmLexer
+
     from .minhash import MinHash
+
+from pygments.token import Comment, Name, Number, Punctuation, Text
 
 #: Number of permutation functions for MinHash (higher = more accurate, slower).
 NUM_PERMUTATIONS = 128
@@ -65,8 +69,37 @@ _MINHASH_TEMPLATES: dict[int, MinHash] = {}
 #: entry exists) stays lock-free, like ``lsh._ensure_tables_once``.
 _MINHASH_TEMPLATES_LOCK = threading.Lock()
 
-# Reuse a single Pygments lexer instance across all calls.
-lexer = NasmLexer()
+#: Shared Pygments lexer instance, created on first tokenize/normalize (see
+#: :func:`get_lexer`).
+_lexer: NasmLexer | None = None
+
+#: Serializes first-time lexer construction: the serve process runs one
+#: handler thread per request, and the first concurrent tokenizations race
+#: this check-then-set on a plain global.  A double construction would be
+#: harmless anyway (both instances are equivalent), but the lock guarantees
+#: the documented single shared instance; the steady-state fast path (the
+#: instance exists) stays lock-free.
+_lexer_lock = threading.Lock()
+
+
+def get_lexer() -> NasmLexer:
+    """Return the shared NasmLexer, constructing it on first call.
+
+    ``pygments.lexers.asm`` costs ~65 ms to import, so the import and the
+    instance creation are deferred until a snippet is actually lexed:
+    commands that never touch assembly text (``list``, ``export``,
+    ``config``, the collections/name/tag groups, ...) skip that cost at
+    every startup.
+    """
+    global _lexer
+    if _lexer is None:
+        with _lexer_lock:
+            if _lexer is None:  # double-checked: loser re-probes before returning
+                from pygments.lexers.asm import NasmLexer
+
+                _lexer = NasmLexer()
+    return _lexer
+
 
 # A set of common register names to assist the lexer
 REGISTERS = {
@@ -697,7 +730,7 @@ def _string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
 
 def string_normalize(code_snippet: str) -> str:
     """Normalize an assembly snippet and return a canonical string."""
-    return _string_normalize_lexed(lexer.get_tokens(code_snippet))
+    return _string_normalize_lexed(get_lexer().get_tokens(code_snippet))
 
 
 def string_checksum(code_snippet: str) -> str:
@@ -750,7 +783,7 @@ def _code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool =
 
 def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     """Return a list of tokens from a code snippet."""
-    return _code_tokenize_lexed(lexer.get_tokens(code_snippet), normalize)
+    return _code_tokenize_lexed(get_lexer().get_tokens(code_snippet), normalize)
 
 
 # ---------------------------------------------------------------------------
