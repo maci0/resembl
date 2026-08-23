@@ -80,13 +80,32 @@ class ResemblConfig:
     def update(self, other: dict | ResemblConfig) -> None:
         """Merge values from *other* into this config.
 
-        An out-of-enum ``format`` is rejected here (warn and keep the current
-        value) so a hand-edited or stale config file cannot put every command
-        into an undefined render branch.
+        Every value is coerced to its field's type before being applied:
+        a hand-edited or stale config file must not put a raw TOML value
+        (a quoted ``lsh_threshold = "0.7"``, say) into a field whose readers
+        compare it numerically — unvalidated, every ``find`` crashed with a
+        TypeError instead of running on defaults.  Numeric coercion accepts
+        the legal cross-type spellings (``0`` for a float field,
+        ``128.0`` for an int field); anything the constructor rejects is
+        warned about and skipped, like the malformed-TOML path in
+        :func:`load_config`.  An out-of-enum ``format`` is likewise rejected
+        (warn and keep the current value) so the file cannot put every
+        command into an undefined render branch.
         """
         source = other if isinstance(other, dict) else dataclasses.asdict(other)
         for key, value in source.items():
             if not hasattr(self, key):
+                continue
+            default = DEFAULTS[key]
+            try:
+                value = type(default)(value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Ignoring %s: expected %s, got %r.",
+                    key,
+                    type(default).__name__,
+                    value,
+                )
                 continue
             if key == "format" and value not in FORMATS:
                 logger.warning(

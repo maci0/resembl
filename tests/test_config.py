@@ -53,6 +53,26 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.format, "table")
         self.assertEqual(config.top_n, 9)  # unrelated keys still apply
 
+    def test_load_mistyped_values_are_coerced_or_rejected(self):
+        """A hand-edited wrong-typed value must not crash every command.
+
+        ``update`` coerces each value to its field's type: quoted numerics
+        ("0.9") and legal cross-type spellings (7.0 for an int field) are
+        accepted, while garbage ("oops") is warned about and skipped so the
+        field keeps its default.  Unvalidated, a string ``lsh_threshold``
+        crashed every ``find`` with a TypeError at the first comparison.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write('lsh_threshold = "0.9"\ntop_n = 7.0\nngram_size = "oops"\n')
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertLogs("resembl.config", level="WARNING"):
+                    config = load_config()
+        self.assertEqual(config.lsh_threshold, 0.9)
+        self.assertEqual(config.top_n, 7)
+        self.assertEqual(config.ngram_size, DEFAULTS["ngram_size"])
+
     def test_load_unreadable_config(self):
         """An unreadable config file runs on defaults instead of crashing."""
         import stat

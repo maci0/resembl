@@ -596,5 +596,40 @@ class TestFormatCreatedAt(unittest.TestCase):
         self.assertEqual(_format_created_at(value, "%Y-%m-%d %H:%M %z"), expected)
 
 
+class TestResolveChecksum(unittest.TestCase):
+    """Unit tests for the checksum-prefix resolver's LIKE handling."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.engine = create_engine(f"sqlite:///{tmp.name}/test.db")
+        SQLModel.metadata.create_all(self.engine)
+
+    def test_wildcard_prefix_matches_nothing(self):
+        """LIKE metacharacters in a prefix are matched literally.
+
+        Checksums are hex, so "%"/"_" can never be a real prefix: unescaped,
+        "%" matched every row and resolved (e.g. for ``rm``) to an arbitrary
+        snippet instead of reporting that no snippet matches.
+        """
+        from resembl import cli
+
+        with Session(self.engine) as session:
+            snippet = snippet_add(session, "t1", "MOV EAX, 1")
+            old_session = getattr(cli.state, "session", None)
+            cli.state.session = session
+            try:
+                for garbage in ("%", "_", "%%", "_%", "%_"):
+                    self.assertIsNone(cli._resolve_checksum(garbage), garbage)
+                # A literal underscore inside a longer garbage prefix too.
+                self.assertIsNone(cli._resolve_checksum(f"{snippet.checksum[:4]}_%"))
+                # Real prefixes keep resolving.
+                self.assertEqual(cli._resolve_checksum(snippet.checksum[:8]), snippet.checksum)
+            finally:
+                cli.state.session = old_session
+                if old_session is None:
+                    del cli.state.session
+
+
 if __name__ == "__main__":
     unittest.main()

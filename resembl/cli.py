@@ -514,7 +514,12 @@ def _resolve_checksum(prefix: str) -> str | None:
     # print its size).
     from sqlmodel import func
 
-    like_expr = SnippetModel.checksum.like(f"{prefix}%")  # type: ignore[attr-defined]
+    # Checksums are hex, so a legitimate prefix never contains SQL LIKE
+    # metacharacters — escape them so garbage input ("%", "_") is matched
+    # literally and reports "no snippet found" instead of silently resolving
+    # to (and e.g. deleting) an arbitrary wildcard-matched snippet.
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like_expr = SnippetModel.checksum.like(f"{escaped}%", escape="\\")  # type: ignore[attr-defined]
     candidate_checksums: Sequence[str] = state.session.exec(
         select(SnippetModel.checksum).where(like_expr).limit(2)
     ).all()

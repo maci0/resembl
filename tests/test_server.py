@@ -736,11 +736,18 @@ class TestServerMode(unittest.TestCase):
 
         A hostile or broken client sending e.g. ``"top_n": {"a": 1}`` must
         not crash int()/float() inside the handler: that surfaced as a 500
-        echoing the internal exception text.
+        echoing the internal exception text.  ``threshold`` is coerced in
+        the same guard: a string threshold used to slip past the numeric
+        conversions and raise TypeError at the range check, leaking a 500.
         """
         port = self._start_server()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
-        for bad in ({"top_n": "many"}, {"ngram_size": [3]}, {"jaccard_weight": {}}):
+        for bad in (
+            {"top_n": "many"},
+            {"ngram_size": [3]},
+            {"jaccard_weight": {}},
+            {"threshold": "high"},
+        ):
             payload = _post_json(port, "/find", {"query": query, **bad})
             self.assertIn("error", payload)
             self.assertIn("bad request", payload["error"])

@@ -104,7 +104,12 @@ def _find_one(
     provided = {k: v for k, v in body.items() if v is not None}
     try:
         top_n = int(provided.get("top_n", params.top_n))
-        threshold = provided.get("threshold")
+        # Coerce inside the same guard as the numeric fields: a JSON string
+        # threshold ("0.9") must answer the clean bad-request payload, not
+        # raise TypeError at the range check below and surface as a 500
+        # echoing internal error text.
+        threshold_raw = provided.get("threshold")
+        threshold = float(threshold_raw) if threshold_raw is not None else None
         normalize = bool(provided.get("normalize", True))
         ngram_size = int(provided.get("ngram_size", params.ngram_size))
         num_permutations = int(provided.get("num_permutations", params.num_permutations))
