@@ -343,5 +343,34 @@ class TestSnippetCompareNewMetrics(unittest.TestCase):
         self.assertLessEqual(comp["cfg_similarity"], 1.0)
 
 
+class TestDbUrlMask(unittest.TestCase):
+    """db_url_mask hides credentials before URLs reach output/messages."""
+
+    def test_masks_password(self):
+        from resembl.database import db_url_mask
+
+        self.assertEqual(
+            db_url_mask("postgresql+pg8000://user:secret@db.example.com/resembl"),
+            "postgresql+pg8000://user:***@db.example.com/resembl",
+        )
+
+    def test_leaves_clean_urls_unchanged(self):
+        from resembl.database import db_url_mask
+
+        for url in (
+            "sqlite:///assembly.db",
+            "sqlite:////absolute/path/db.sqlite",
+            "duckdb:///file.db",
+            "postgresql+pg8000://db.example.com/resembl",
+        ):
+            self.assertEqual(db_url_mask(url), url)
+
+    def test_masks_first_password_only_and_keeps_path(self):
+        from resembl.database import db_url_mask
+
+        masked = db_url_mask("mysql://bob:hunter2@host:3306/db?charset=utf8")
+        self.assertEqual(masked, "mysql://bob:***@host:3306/db?charset=utf8")
+
+
 if __name__ == "__main__":
     unittest.main()

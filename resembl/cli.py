@@ -82,7 +82,7 @@ from .core import (
     snippet_tag_remove,
     snippet_version_list,
 )
-from .database import db_create, get_engine
+from .database import db_create, db_url_mask, get_engine
 from .lsh import lsh_meta_get, lsh_meta_matches
 
 if TYPE_CHECKING:
@@ -595,9 +595,11 @@ def app_callback(
     try:
         db_create()
     except SQLAlchemyError as e:
+        # The URL may carry credentials (DATABASE_URL=...://user:pass@host/db):
+        # mask them before the message reaches the terminal.
         err_console.print(
             f"[red]Error:[/red] cannot open the database "
-            f"({os.environ.get('DATABASE_URL', 'sqlite:///assembly.db')}): {e}"
+            f"({db_url_mask(os.environ.get('DATABASE_URL', 'sqlite:///assembly.db'))}): {e}"
         )
         raise typer.Exit(code=1)
     state.session = Session(get_engine())
@@ -1444,7 +1446,8 @@ def merge(
             raise typer.Exit(code=1)
 
     if state.format not in ("json", "csv"):
-        _echo(f"Merging from [bold]{source_path}[/bold]...")
+        # A full source URL may embed credentials; mask them for display.
+        _echo(f"Merging from [bold]{db_url_mask(source_path)}[/bold]...")
     result = db_merge(state.session, source_path)
 
     if "error" in result:

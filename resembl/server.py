@@ -102,12 +102,28 @@ def _find_one(
     # crash int()/float() (and flip ``normalize`` to False) instead of using
     # the configured default.
     provided = {k: v for k, v in body.items() if v is not None}
-    top_n = int(provided.get("top_n", params.top_n))
-    threshold = provided.get("threshold")
-    normalize = bool(provided.get("normalize", True))
-    ngram_size = int(provided.get("ngram_size", params.ngram_size))
-    num_permutations = int(provided.get("num_permutations", params.num_permutations))
-    jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
+    try:
+        top_n = int(provided.get("top_n", params.top_n))
+        threshold = provided.get("threshold")
+        normalize = bool(provided.get("normalize", True))
+        ngram_size = int(provided.get("ngram_size", params.ngram_size))
+        num_permutations = int(provided.get("num_permutations", params.num_permutations))
+        jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
+    except (TypeError, ValueError):
+        # A non-numeric parameter is a bad request: answer with a clean error
+        # payload instead of letting int()/float() raise inside the handler,
+        # which would surface as a 500 echoing the exception text.
+        return {
+            "error": "bad request: top_n, ngram_size, num_permutations must be "
+            "integers; threshold and jaccard_weight must be numbers"
+        }
+    # Range-check the threshold up front: :class:`ResemblLSH` rejects values
+    # outside [0.0, 1.0] anyway, so without this every out-of-range request
+    # surfaced as a 500 leaking that internal error instead of a clean one.
+    # (NaN fails both comparisons and is rejected too.)
+    effective_threshold_now = threshold if threshold is not None else LSH_THRESHOLD
+    if not 0.0 <= effective_threshold_now <= 1.0:
+        return {"error": f"threshold {effective_threshold_now} is not in [0.0, 1.0]"}
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one
@@ -276,6 +292,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         except KeyError as exc:
             self._respond(400, {"error": f"bad request: {exc}"})
             return
+        # Same type rule as /find-batch's per-query check: a non-string query
+        # (dict, number, list) would otherwise crash the lexer downstream and
+        # answer 500 with the internal exception text instead of a clean 400.
+        if not isinstance(query, str):
+            self._respond(400, {"error": "bad request: query must be a string"})
+            return
         try:
             with Session(self.engine) as session:
                 payload = _find_one(session, body, query, self.find_defaults)
@@ -325,6 +347,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        # The payload is always JSON; forbid content-type sniffing so a
+        # response can never be reinterpreted as HTML/script by a browser
+        # pointed at the endpoint.
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

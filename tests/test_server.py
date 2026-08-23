@@ -704,6 +704,61 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("ngram_size", payload["error"])
 
+    def test_find_rejects_non_string_query(self):
+        """A non-string query answers 400, never a 500 with internal error text.
+
+        Mirrors the /find-batch per-query type rule at the /find boundary: a
+        dict or number would otherwise crash the lexer downstream and leak
+        the exception message through a 500 payload.
+        """
+        import urllib.error
+
+        port = self._start_server()
+        for bad_query in ({"query": "push ebx"}, 12345, ["push ebx"]):
+            body = json.dumps({"query": bad_query}).encode("utf-8")
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    status = response.status
+                    payload = json.loads(response.read())
+            except urllib.error.HTTPError as exc:
+                status = exc.code
+                payload = json.loads(exc.read())
+            self.assertEqual(status, 400)
+            self.assertIn("query must be a string", payload["error"])
+
+    def test_find_rejects_non_numeric_params_cleanly(self):
+        """Non-numeric find parameters answer a clean error payload, not a 500.
+
+        A hostile or broken client sending e.g. ``"top_n": {"a": 1}`` must
+        not crash int()/float() inside the handler: that surfaced as a 500
+        echoing the internal exception text.
+        """
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        for bad in ({"top_n": "many"}, {"ngram_size": [3]}, {"jaccard_weight": {}}):
+            payload = _post_json(port, "/find", {"query": query, **bad})
+            self.assertIn("error", payload)
+            self.assertIn("bad request", payload["error"])
+
+    def test_find_rejects_out_of_range_threshold_cleanly(self):
+        """A threshold outside [0, 1] answers a clean error, never a 500.
+
+        ResemblLSH rejects such values anyway; without this boundary check
+        every out-of-range request surfaced as a 500 echoing that internal
+        error instead of an error payload.
+        """
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        for bad_threshold in (-0.5, 1.5):
+            payload = _post_json(port, "/find", {"query": query, "threshold": bad_threshold})
+            self.assertIn("error", payload)
+            self.assertIn("threshold", payload["error"])
+
     def test_find_treats_explicit_null_params_as_absent(self):
         """An explicit JSON null for a find parameter uses the configured default.
 

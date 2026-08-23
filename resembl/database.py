@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from sqlalchemy import Engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
@@ -19,6 +20,22 @@ from . import models  # noqa: F401
 #   sqlite:///:memory:           (in-memory, for tests)
 #   postgresql://user:pass@host/db  (PostgreSQL for teams)
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///assembly.db")
+
+#: Matches the credentials component of ``scheme://user:password@host/...``.
+#: The password run stops at the first character a URL may not carry bare;
+#: percent-encoded passwords round-trip untouched.
+_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
+
+
+def db_url_mask(url: str) -> str:
+    """Return *url* with any embedded password replaced by ``***``.
+
+    Display helper for messages that echo a database URL (connection
+    failures, merge progress): URLs like
+    ``postgresql+pg8000://user:pass@host/db`` must not print the password.
+    URLs without credentials are returned unchanged.
+    """
+    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
 
 
 def create_db_engine(

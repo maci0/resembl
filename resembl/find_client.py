@@ -17,12 +17,22 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
 
 _DEFAULT_DB_URL = "sqlite:///assembly.db"
 _DEFAULT_CACHE_DIR = "~/.cache/resembl"
+
+#: Mirrors resembl.database.db_url_mask (this module stays stdlib-only):
+#: hides an embedded password before a URL reaches stderr.
+_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
+
+
+def _mask_db_url(url: str) -> str:
+    """Return *url* with any embedded password replaced by ``***``."""
+    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
 
 
 def server_port_path(db_url: str, cache_dir: str) -> str:
@@ -104,7 +114,7 @@ def _main(argv: list[str] | None = None) -> int:
             port = int(f.read().strip())
     except (OSError, ValueError):
         print(
-            f"error: no server running for {db_url} (start `resembl serve`)",
+            f"error: no server running for {_mask_db_url(db_url)} (start `resembl serve`)",
             file=sys.stderr,
         )
         return 1
