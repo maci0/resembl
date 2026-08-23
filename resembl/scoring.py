@@ -1014,7 +1014,7 @@ def minhash_pack(m: MinHash) -> bytes:
     """Serialize a MinHash into a compact, self-describing byte string.
 
     The format is ``MINHASH_MAGIC`` + big-endian uint32 ``num_perm`` +
-    ``num_perm`` big-endian uint32 hash values (512 bytes for the default
+    ``num_perm`` big-endian uint32 hash values (520 bytes for the default
     128 permutations — several times smaller than a pickle).
     """
     digest = m.digest()

@@ -192,8 +192,10 @@ The `compare` command also reports control-flow graph similarity.
 
 **RESEMBL_CACHE_DIR**
 :   Override the default cache directory (`~/.cache/resembl`).
-    The LSH index itself lives in the database; this variable only applies to
-    legacy pickle cache files written by older versions.
+    The LSH index itself lives in the database; this directory holds only
+    small auxiliary files: legacy pickle cache files written by older
+    versions (removed on write) and the `serve` port file used by `find`
+    and `resembl-find` to locate a running server.
 
 **DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.

@@ -238,7 +238,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 ### Title: Remove a snippet
 
 **As a** database maintainer (Chris),
-**I want to** use the `rm` (or `del`) command to remove an obsolete or incorrect snippet,
+**I want to** use the `rm` command to remove an obsolete or incorrect snippet,
 **so that** the search results remain clean and accurate.
 
 **Acceptance Criteria:**

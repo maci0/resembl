@@ -45,7 +45,7 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
 - **Incremental maintenance:** `add`, `import`, `merge`, and `rm` update only
   the affected snippets' bucket rows, so a search never requires a rebuild.
 - **Streaming builds:** rows are inserted in batches; on SQLite the build
-  commits periodically (every ~100k rows) so WAL autocheckpoint keeps the
+  commits whenever a band's buffer fills so WAL autocheckpoint keeps the
   write-ahead log bounded — one giant transaction spanning the whole build
   would grow the WAL to the size of the index (hundreds of MB at scale) and
   force one huge checkpoint at commit.  A crash mid-build leaves only a

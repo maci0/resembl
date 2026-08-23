@@ -243,7 +243,7 @@ The CLI can be invoked through uv or by running the module directly after activa
 **Examples:**
 ```bash
 # Run commands through uv
-uv run resembl add my_memcpy "MOV EAX, EBX; ..."
+uv run resembl add my_memcpy "MOV EAX, EBX"
 
 # Or, after activating the virtual environment, you can call it directly
 resembl find --query "MOV EAX"

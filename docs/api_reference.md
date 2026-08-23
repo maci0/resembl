@@ -49,7 +49,7 @@ List snippets, optionally within a `[start, end)` window of the full listing.
 ### `snippet_delete(session, checksum: str) → bool`
 Delete a snippet. Returns `True` on success.
 
-### `snippet_find_matches(session, query: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
+### `snippet_find_matches(session, query_string: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
 Find similar snippets. Returns the LSH candidate count and the top matches
 (snippet + hybrid score).  Candidates are scored with a vectorized numpy
 Jaccard pass, an early exit that skips Levenshtein for candidates that
@@ -123,11 +123,15 @@ Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard �
 ### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1, num_perm: int = 128, progress=None) → dict`
 Recompute every snippet's MinHash. With `jobs > 1` the CPU-bound tokenization runs in a process pool. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded. `progress(done, total)` is called with snippets processed so far.
 
-## LSH Index (`resembl.lsh`)
+## LSH Index & Fingerprints
 
 The similarity index is database-backed rather than an in-memory datasketch
 structure — band buckets live in the `lsh_bucket` table with parameters in
-`lsh_meta`.
+`lsh_meta`. `ResemblLSH`, `band_buckets`, and `lsh_index_clear` / `lsh_meta_get`
+live in `resembl.lsh`; the build/save/load helpers (`lsh_index_build`,
+`lsh_cache_save`, `lsh_cache_load`) live in `resembl.cache`; the packed
+fingerprint primitives below are defined in `resembl.scoring` and re-exported
+by `resembl.models`.
 
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
 A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the underlying scipy optimization would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.

@@ -273,7 +273,7 @@ You are now ready to open a pull request on GitHub.
 ### The Review Process
 Once your pull request is submitted, it will go through a review process. Here is what to expect:
 
-- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite on multiple Python versions and other quality checks. The PR cannot be merged if these checks fail.
+- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite (with PostgreSQL and MySQL integration tests), coverage measurement, and lint, type, and style checks (pylint runs on Python 3.11–3.13). The PR cannot be merged if these checks fail.
 - **Human Review:** A project maintainer will review your code for correctness, architectural soundness, and adherence to project standards.
 - **Responding to Feedback:** It is common for reviewers to request changes. This is a normal and healthy part of the collaborative process. Please engage in the discussion and address the feedback by pushing new commits to your branch. The pull request will update automatically.
 - **Approval and Merge:** Once all automated checks are passing and a maintainer has approved the changes, your pull request will be merged.
