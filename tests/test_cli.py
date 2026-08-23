@@ -407,7 +407,7 @@ class TestCLIConfig(BaseCLITest):
 
 
 class TestCLIOptions(BaseCLITest):
-    """--no-color Tests for global command-line options like --quiet and."""
+    """Tests for global command-line options like --quiet and --no-color."""
 
     def test_quiet_option(self):
         """Test that --quiet suppresses informational output."""
@@ -416,7 +416,7 @@ class TestCLIOptions(BaseCLITest):
         self.assertEqual(result.stdout.strip(), "")
 
     def test_no_color_flag(self):
-        """--no-color Test that the flag disables colored output."""
+        """Test that the --no-color flag disables colored output."""
         with Session(self.engine) as session:
             snippet_add(session, "snippet2", "MOV EBX, 2")
             s1 = Snippet.get_by_name(session, "test_snippet")

@@ -30,6 +30,26 @@ def _post_json(port: int, path: str, payload: dict, timeout: int = 10) -> dict:
         return json.loads(response.read())
 
 
+def _capturing_create() -> tuple[object, dict]:
+    """Return ``(create_fn, created)`` for the engine-disposal tests.
+
+    ``create_fn`` is a drop-in ``resembl.database.create_db_engine`` that
+    records every engine it builds in *created* (key ``"engine"``), so a
+    test can assert on the pool state after serve raises.
+    """
+    import resembl.database as db_mod
+
+    real_create = db_mod.create_db_engine
+    created: dict = {}
+
+    def capturing_create(url, **kwargs):
+        engine = real_create(url, **kwargs)
+        created["engine"] = engine
+        return engine
+
+    return capturing_create, created
+
+
 class TestServerMode(unittest.TestCase):
     """The server serves find queries equivalent to the in-process path."""
 
@@ -234,13 +254,7 @@ class TestServerMode(unittest.TestCase):
         import resembl.database as db_mod
         from resembl.server import serve as serve_start
 
-        real_create = db_mod.create_db_engine
-        created: dict = {}
-
-        def capturing_create(url, **kwargs):
-            engine = real_create(url, **kwargs)
-            created["engine"] = engine
-            return engine
+        capturing_create, created = _capturing_create()
 
         blocker = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
         blocker.bind(("127.0.0.1", 0))
@@ -268,13 +282,7 @@ class TestServerMode(unittest.TestCase):
         import resembl.database as db_mod
         from resembl.server import serve as serve_start
 
-        real_create = db_mod.create_db_engine
-        created: dict = {}
-
-        def capturing_create(url, **kwargs):
-            engine = real_create(url, **kwargs)
-            created["engine"] = engine
-            return engine
+        capturing_create, created = _capturing_create()
 
         with patch.object(db_mod, "create_db_engine", capturing_create):
             # fingerprints_need_reindex is imported inside serve(), so the

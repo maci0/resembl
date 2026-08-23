@@ -246,6 +246,33 @@ class TestBatchConsistency(BaseScalingTest):
         for checksum in checksums:
             self.assertEqual(par_blobs[checksum], seq_blobs[checksum])
 
+    def _seed_stale_fingerprints(self) -> dict[str, bytes]:
+        """Insert snippets with deliberately WRONG fingerprints.
+
+        Simulates a legacy / stale-format database that reindex must heal.
+        Returns checksum -> the expected healed blob.
+        """
+        codes = [f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET" for i in range(30)]
+        prepared = [p for p in (snippet_prepare(f"fn_{i}", c, 3) for i, c in enumerate(codes)) if p]
+        rows = [
+            {
+                "checksum": cs,
+                "names": json.dumps([name]),
+                "code": code,
+                "minhash": minhash_pack(code_create_minhash(code + "\nNOP")),
+                "tags": "[]",
+                "collection": None,
+            }
+            for cs, name, code, _mh in prepared
+        ]
+        insert_sql = (
+            "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
+            "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
+        )
+        self.session.execute(text(insert_sql), rows)
+        self.session.commit()
+        return {cs: minhash_pack(code_create_minhash(code)) for cs, _name, code, _mh in prepared}
+
     def test_parallel_reindex_persists_every_batch(self):
         """db_reindex(jobs=N) must persist fingerprint updates for ALL batches.
 
@@ -258,30 +285,7 @@ class TestBatchConsistency(BaseScalingTest):
         no-op), so the test seeds stale blobs and requires all of them to
         be healed.
         """
-        codes = [f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET" for i in range(30)]
-        prepared = [p for p in (snippet_prepare(f"fn_{i}", c, 3) for i, c in enumerate(codes)) if p]
-        # Insert with deliberately WRONG fingerprints (simulating a legacy /
-        # stale-format database that reindex must heal).
-        rows = [
-            {
-                "checksum": cs,
-                "names": json.dumps([name]),
-                "code": code,
-                "minhash": minhash_pack(code_create_minhash(code + "\nNOP", 3)),
-                "tags": "[]",
-                "collection": None,
-            }
-            for cs, name, code, _mh in prepared
-        ]
-        insert_sql = (
-            "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
-            "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
-        )
-        self.session.execute(text(insert_sql), rows)
-        self.session.commit()
-        expected = {
-            row["checksum"]: minhash_pack(code_create_minhash(row["code"], 3)) for row in rows
-        }
+        expected = self._seed_stale_fingerprints()
 
         result = db_reindex(self.session, ngram_size=3, batch_size=10, jobs=2)
         self.assertEqual(result["num_reindexed"], len(expected))
@@ -302,28 +306,7 @@ class TestBatchConsistency(BaseScalingTest):
         script).  ``db_reindex`` must log a warning and redo every batch
         sequentially instead of failing or leaving stale fingerprints.
         """
-        codes = [f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET" for i in range(30)]
-        prepared = [p for p in (snippet_prepare(f"fn_{i}", c, 3) for i, c in enumerate(codes)) if p]
-        rows = [
-            {
-                "checksum": cs,
-                "names": json.dumps([name]),
-                "code": code,
-                "minhash": minhash_pack(code_create_minhash(code + "\nNOP", 3)),
-                "tags": "[]",
-                "collection": None,
-            }
-            for cs, name, code, _mh in prepared
-        ]
-        insert_sql = (
-            "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
-            "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
-        )
-        self.session.execute(text(insert_sql), rows)
-        self.session.commit()
-        expected = {
-            row["checksum"]: minhash_pack(code_create_minhash(row["code"], 3)) for row in rows
-        }
+        expected = self._seed_stale_fingerprints()
 
         with (
             patch(
