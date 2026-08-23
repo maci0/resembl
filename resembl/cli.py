@@ -203,12 +203,18 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read())
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, TimeoutError):
-            return None
-        try:
-            os.remove(port_file)
-        except OSError:
-            pass
+        # Only a verifiably dead server (connection refused: nothing is
+        # listening on the advertised port) loses its port file.  Resets,
+        # read timeouts, and malformed responses all occur against a
+        # *healthy* server under load (connection churn surfaces as RST);
+        # removing the advertisement there would orphan the warm process
+        # for every other find client until it restarts.
+        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+        if isinstance(reason, ConnectionRefusedError):
+            try:
+                os.remove(port_file)
+            except OSError:
+                pass
         return None
     if "error" in payload:
         return None

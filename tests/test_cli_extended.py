@@ -557,6 +557,48 @@ class TestServerFallback(unittest.TestCase):
         self.assertIsNone(result)
         self.assertTrue(os.path.exists(self.port_file), "port file must survive a timeout")
 
+    def test_reset_keeps_port_file(self):
+        """A connection reset against a live server keeps it discoverable.
+
+        Concurrent load surfaces connection churn as RST; deleting the port
+        file on a reset would orphan the healthy warm server for every other
+        find client until it restarts.
+        """
+        import urllib.error
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError(ConnectionResetError("connection reset")),
+        ):
+            result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
+        self.assertIsNone(result)
+        self.assertTrue(os.path.exists(self.port_file), "port file must survive a reset")
+
+    def test_malformed_response_keeps_port_file(self):
+        """A malformed JSON reply does not delete a live server's advertisement."""
+        import resembl.cli as cli
+
+        class _BadResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"<html>not json</html>"
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=lambda request, timeout=None: _BadResponse(),
+        ):
+            result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
+        self.assertIsNone(result)
+        self.assertTrue(os.path.exists(self.port_file), "port file must survive a bad reply")
+
     def test_connection_refused_removes_stale_port_file(self):
         """A dead server's stale port file is cleaned up."""
         import urllib.error

@@ -145,6 +145,83 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("too high", payload["error"])
 
+    def test_server_rejects_out_of_range_num_permutations(self):
+        """An out-of-range num_permutations is refused with an error payload.
+
+        Fingerprint construction and LSH banding allocate memory proportional
+        to the permutation count, and ``minhash_new`` caches one MinHash
+        template per distinct count for the life of the warm server.  An
+        unbounded request value would let any client grow (or OOM) the
+        long-lived process.
+        """
+        from resembl.scoring import _MINHASH_TEMPLATES
+
+        port = self._start_server()
+        absurd = 1 << 20
+        body = json.dumps(
+            {
+                "query": "push ebx\nmov eax, 5\npop ebx\nret",
+                "num_permutations": absurd,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read())
+        self.assertIn("error", payload)
+        self.assertIn("num_permutations", payload["error"])
+        # The rejected value must not leave a cached fingerprint template.
+        self.assertNotIn(absurd, _MINHASH_TEMPLATES)
+
+        # The lower bound is enforced by the same check.
+        low_body = json.dumps({"query": "mov eax, 5", "num_permutations": 1}).encode("utf-8")
+        low_request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=low_body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(low_request, timeout=10) as response:
+            low_payload = json.loads(response.read())
+        self.assertIn("error", low_payload)
+
+    def test_serve_bind_failure_disposes_engine(self):
+        """A failed bind releases the startup engine instead of leaking it.
+
+        ``serve`` builds its engine (pool_size + max_overflow SQLite handles
+        once warmed) before binding the HTTP port; when the bind fails the
+        caller keeps running (embedded use, test harnesses), so the pool
+        must be released rather than left pinned until interpreter exit.
+        """
+        import socket as socket_mod
+        from unittest.mock import patch
+
+        import resembl.database as db_mod
+        from resembl.server import serve as serve_start
+
+        real_create = db_mod.create_db_engine
+        created: dict = {}
+
+        def capturing_create(url, **kwargs):
+            engine = real_create(url, **kwargs)
+            created["engine"] = engine
+            return engine
+
+        blocker = socket_mod.socket(socket_mod.AF_INET, socket_mod.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        occupied = blocker.getsockname()[1]
+        try:
+            with patch.object(db_mod, "create_db_engine", capturing_create):
+                with self.assertRaises(OSError):
+                    serve_start(f"sqlite:///{self._db}", port=occupied)
+        finally:
+            blocker.close()
+        self.assertIn("engine", created)
+        self.assertEqual(created["engine"].pool.checkedin(), 0)
+
     def test_server_rejects_oversized_body(self):
         """A Content-Length above the cap is refused without reading the body.
 
@@ -664,9 +741,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
                 )
                 self.fail(f"serve did not start; cache dir: {entries}; port_file: {port_file}")
 
-            query_file = os.path.join(
-                "tests", "test_data", min(os.listdir("tests/test_data"))
-            )
+            query_file = os.path.join("tests", "test_data", min(os.listdir("tests/test_data")))
             result = subprocess.run(
                 [
                     sys.executable,

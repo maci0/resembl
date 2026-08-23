@@ -71,6 +71,18 @@ def _find_one(session: Session, body: dict, query: str) -> dict:
     ngram_size = int(body.get("ngram_size", _SERVER_NGRAM))
     num_permutations = int(body.get("num_permutations", _SERVER_NUM_PERM))
     jaccard_weight = float(body.get("jaccard_weight", _SERVER_JACCARD_WEIGHT))
+    # Bound the request-supplied permutation count before anything derives
+    # state from it: fingerprint construction and banding allocate memory
+    # proportional to *num_permutations*, and ``minhash_new`` caches one
+    # MinHash template per distinct count for the life of the process.
+    # Unbounded, a script cycling values grows the warm server without
+    # limit (and a single absurd value tries a multi-GB allocation).
+    # The cap is the same one used to validate stored blobs
+    # (``scoring._MAX_NUM_PERM``, "real configurations use 64-128").
+    from .scoring import _MAX_NUM_PERM
+
+    if not 2 <= num_permutations <= _MAX_NUM_PERM:
+        return {"error": f"num_permutations must be between 2 and {_MAX_NUM_PERM}"}
     key = (
         query,
         top_n,
@@ -358,7 +370,15 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
         if not lsh_meta_matches(meta, _SERVER_THRESHOLD, _SERVER_NUM_PERM):
             lsh_index_build(session, _SERVER_THRESHOLD, _SERVER_NUM_PERM)
 
-    httpd = _FindServer((host, port), _FindHandler)
+    # A failed bind (port already in use) must not leak the engine: it holds
+    # up to pool_size + max_overflow SQLite handles once warmed, and this
+    # process keeps running (embedded callers, test harnesses) after serve
+    # raises.
+    try:
+        httpd = _FindServer((host, port), _FindHandler)
+    except BaseException:
+        engine.dispose()
+        raise
     # Per-instance shared state (see _FindHandler.engine): each server
     # generation carries its own engine.
     httpd.engine = engine
