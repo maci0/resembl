@@ -329,9 +329,7 @@ class TestCollectionErrorPaths(BaseDBTest):
         """Adding to a nonexistent collection with quiet=False should log (line 835)."""
         snippet = snippet_add(self.session, "func", "NOP")
         with self.assertLogs("resembl.core", level="ERROR"):
-            result = collection_add_snippet(
-                self.session, "bad_col", snippet.checksum, quiet=False
-            )
+            result = collection_add_snippet(self.session, "bad_col", snippet.checksum, quiet=False)
         self.assertIsNone(result)
 
     def test_collection_add_snippet_nonexistent_snippet_not_quiet(self):

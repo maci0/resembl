@@ -6,6 +6,8 @@ from sqlmodel import Session
 from resembl.core import snippet_add
 from tests.test_cli import BaseCLITest
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 
 class TestYaraExport(BaseCLITest):
     def test_export_yara(self):

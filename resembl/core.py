@@ -748,8 +748,7 @@ def snippet_matches_payload(num_candidates: int, matches: list[tuple[Snippet, fl
     return {
         "lsh_candidates": num_candidates,
         "matches": [
-            {"checksum": s.checksum, "names": s.name_list, "score": score}
-            for s, score in matches
+            {"checksum": s.checksum, "names": s.name_list, "score": score} for s, score in matches
         ],
     }
 

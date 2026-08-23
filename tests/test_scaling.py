@@ -1398,7 +1398,7 @@ class TestFingerprintPermStamp(BaseScalingTest):
 
         # The next find heals once instead of silently missing old rows...
         with patch("resembl.core.db_reindex", wraps=db_reindex) as mock:
-            n, matches = snippet_find_matches(
+            n, _ = snippet_find_matches(
                 self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3, ngram_size=3
             )
             mock.assert_called_once()
