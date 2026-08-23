@@ -956,5 +956,19 @@ class TestLazyPackageInit(unittest.TestCase):
     def test_submodule_access(self):
         import resembl
 
-        self.assertIsNotNone(resembl.core)
-        self.assertIsNotNone(resembl.server)
+        # Every package submodule must resolve as an attribute after a bare
+        # `import resembl`; resolution stays lazy (PEP 562) but must exist.
+        for name in (
+            "cache",
+            "cli",
+            "config",
+            "core",
+            "database",
+            "find_client",
+            "lsh",
+            "models",
+            "scoring",
+            "server",
+        ):
+            with self.subTest(submodule=name):
+                self.assertIsNotNone(getattr(resembl, name))
