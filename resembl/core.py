@@ -738,6 +738,22 @@ def snippet_find_matches(
     return len(candidate_keys), top_matches
 
 
+def snippet_matches_payload(num_candidates: int, matches: list[tuple[Snippet, float]]) -> dict:
+    """Serialize find results into the shared payload/wire shape.
+
+    ``find``, ``find-batch``, and the ``serve`` endpoints must emit exactly
+    this structure (the thin client and CLI renderers read these keys), so
+    it is built in one place rather than re-typed per caller.
+    """
+    return {
+        "lsh_candidates": num_candidates,
+        "matches": [
+            {"checksum": s.checksum, "names": s.name_list, "score": score}
+            for s, score in matches
+        ],
+    }
+
+
 def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool:
     """Delete a snippet by its checksum."""
     snippet = Snippet.get_by_checksum(session, checksum)
@@ -1371,6 +1387,7 @@ def db_verify(session: Session) -> dict:
         threshold, num_perm = meta
         b, _r = banding_params(threshold, num_perm)
         expected_buckets = num_snippets * b
+        table_missing = False
         try:
             # Count only band 0: every snippet contributes exactly one row
             # per band, and staleness (missing or extra rows) affects all
@@ -1386,10 +1403,14 @@ def db_verify(session: Session) -> dict:
         except OperationalError:
             # lsh_bucket missing while its meta row says an index exists —
             # e.g. a crash inside the drop/recreate window, or a manual drop.
-            # The next `find` rebuilds, so this is a warning, not an issue.
+            # The next `find` rebuilds, so this is a warning, not an issue;
+            # the bucket-count comparison below must not run either (a zero
+            # count against a nonzero expectation would raise exactly the
+            # stale-index issue this state never produces).
             warnings.append("lsh_bucket table is missing — the next `find` rebuilds the index")
             num_buckets = 0
-        if num_snippets > 0 and num_buckets != expected_buckets:
+            table_missing = True
+        if not table_missing and num_snippets > 0 and num_buckets != expected_buckets:
             issues.append(
                 f"index may be stale ({num_buckets} bucket rows, expected "
                 f"{expected_buckets}) — run `resembl reindex --force`"
@@ -1686,20 +1707,23 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     continue
                 changed = False
 
-                # Merge names
-                existing_names = set(existing.name_list)
-                source_names = set(src_snippet.name_list)
-                merged_names = existing_names | source_names
+                # Merge names and tags order-preservingly: existing entries
+                # keep their positions (name_list[0] is the primary name — it
+                # drives display, export filenames, and YARA rule names) and
+                # source-only entries are appended.  Same convention as
+                # ``snippet_add_batch``'s alias merge; a sorted union would
+                # silently reassign the primary name on every merge.
+                existing_names = existing.name_list
+                merged_names = list(dict.fromkeys(existing_names + src_snippet.name_list))
                 if merged_names != existing_names:
-                    existing.names = json.dumps(sorted(merged_names))
+                    existing.names = json.dumps(merged_names)
                     changed = True
 
                 # Merge tags (independent of names)
-                existing_tags = set(existing.tag_list)
-                source_tags = set(src_snippet.tag_list)
-                merged_tags = existing_tags | source_tags
+                existing_tags = existing.tag_list
+                merged_tags = list(dict.fromkeys(existing_tags + src_snippet.tag_list))
                 if merged_tags != existing_tags:
-                    existing.tags = json.dumps(sorted(merged_tags))
+                    existing.tags = json.dumps(merged_tags)
                     changed = True
 
                 if changed:

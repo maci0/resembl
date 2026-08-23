@@ -36,6 +36,22 @@ class TestConfig(unittest.TestCase):
                 config = load_config()
         self.assertEqual(config.to_dict(), DEFAULTS)
 
+    def test_load_unknown_format_falls_back_to_default(self):
+        """A hand-edited out-of-enum ``format`` is ignored, keeping the default.
+
+        Every renderer switches on exactly table/json/csv; an unknown stored
+        value must not put commands into an undefined render branch.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write('format = "yaml"\ntop_n = 9\n')
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertLogs("resembl.config", level="WARNING"):
+                    config = load_config()
+        self.assertEqual(config.format, "table")
+        self.assertEqual(config.top_n, 9)  # unrelated keys still apply
+
     def test_load_unreadable_config(self):
         """An unreadable config file runs on defaults instead of crashing."""
         import stat

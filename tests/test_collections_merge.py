@@ -328,6 +328,31 @@ class TestDBMerge(BaseDBTest):
         finally:
             os.unlink(source_path)
 
+    def test_merge_preserves_primary_name(self):
+        """A merge must not reassign the snippet's primary name.
+
+        ``name_list[0]`` is the primary name: it drives display, export
+        filenames, and YARA rule names.  New aliases are appended after the
+        existing names (same convention as ``snippet_add_batch``), so the
+        original primary name keeps its slot instead of being reordered by a
+        sorted union.
+        """
+        snippet_add(self.session, "zeta_primary", "MOV EAX, 2")
+        source_path = self._create_source_db(
+            [
+                ("alpha_alias", "MOV EAX, 2", [], None),
+                ("beta_alias", "MOV EAX, 2", [], None),
+            ]
+        )
+        try:
+            result = db_merge(self.session, source_path)
+            self.assertEqual(result["updated"], 1)
+            s = snippet_get(self.session, string_checksum("MOV EAX, 2"))
+            self.assertEqual(s.name_list[0], "zeta_primary")
+            self.assertEqual(s.name_list[1:], ["alpha_alias", "beta_alias"])
+        finally:
+            os.unlink(source_path)
+
     def test_merge_adds_new_tags_independently(self):
         """Merging should add tags even if names didn't change (bug fix verification)."""
         snippet = snippet_add(self.session, "func", "MOV EAX, 1")

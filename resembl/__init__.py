@@ -60,6 +60,7 @@ _SUBMODULES = frozenset(
         "database",
         "find_client",
         "lsh",
+        "minhash",
         "models",
         "scoring",
         "server",

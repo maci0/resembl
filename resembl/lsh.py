@@ -28,7 +28,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, text
 
 from .models import FINGERPRINT_VERSION
-from .scoring import minhash_num_perm, minhash_pack
+from .scoring import MINHASH_MAGIC, minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
     from .minhash import MinHash
@@ -109,6 +109,11 @@ def dialect_name(session: Session) -> str:
 #: the one-time index build on DuckDB (cold find at 15k snippets: 65s vs
 #: ~5s on SQLite).  Statements of 1000 rows keep the SQL string small.
 _DUCKDB_VALUES_CHUNK = 1000
+
+#: Rows per executemany batch on the incremental-sync insert path
+#: (:meth:`ResemblLSH.insert_batch`), bounding statement size like
+#: ``_DUCKDB_VALUES_CHUNK`` does for DuckDB.
+_INSERT_CHUNK = 10_000
 
 
 def _sql_text_literal(value: object) -> str:
@@ -483,7 +488,7 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:
     Malformed blobs (bad header, wrong permutation count) raise
     ``ValueError`` rather than low-level ``struct`` errors.
     """
-    if len(packed) < 8 or not packed.startswith(b"RMLH"):
+    if len(packed) < 8 or not packed.startswith(MINHASH_MAGIC):
         raise ValueError("Corrupt MinHash payload: missing RMLH magic.")
     if minhash_num_perm(packed) != num_perm:
         raise ValueError(
@@ -553,8 +558,8 @@ class ResemblLSH:
                 {"band": band, "bucket": bucket, "checksum": key}
                 for band, bucket in enumerate(self._buckets(packed))
             )
-        for i in range(0, len(rows), 10_000):
-            chunk = rows[i : i + 10_000]
+        for i in range(0, len(rows), _INSERT_CHUNK):
+            chunk = rows[i : i + _INSERT_CHUNK]
             # Insert band-major sorted by bucket (see ``lsh_index_build``):
             # the (band, bucket, checksum) primary key then grows by
             # sequential append instead of random probe, which keeps large

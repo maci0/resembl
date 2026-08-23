@@ -362,6 +362,13 @@ class TestCLIConfig(BaseCLITest):
         self.assertIn("Invalid value", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_config_set_invalid_format(self):
+        """`config set format` should reject values outside the render enum."""
+        result = self.run_command("config set format yaml")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid value for 'format'", result.stderr)
+        self.assertIn("table, json, csv", result.stderr)
+
     def test_config_get(self):
         """`config get` should retrieve a specific value."""
         with tempfile.TemporaryDirectory() as home:

@@ -1226,6 +1226,9 @@ class TestFingerprintVersion(BaseScalingTest):
         self.assertEqual(report["num_buckets"], 0)
         self.assertGreater(len(report["warnings"]), 0)
         self.assertIn("missing", " ".join(report["warnings"]).lower())
+        # The missing table self-heals via the next `find`, so it must not
+        # also surface as a stale-index issue (which exits `verify` non-zero).
+        self.assertEqual(report["issues"], [])
 
     def test_merge_clears_stamp(self):
         """Merge copies source blobs verbatim — the stamp must be cleared."""

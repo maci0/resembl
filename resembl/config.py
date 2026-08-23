@@ -13,6 +13,11 @@ import tomli_w
 
 DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
+#: Output formats every renderer switches on (``--format`` / config ``format``).
+#: Anything else cannot be rendered: reject it where it enters instead of
+#: letting commands silently fall back to one branch or another.
+FORMATS = ("table", "json", "csv")
+
 _T = TypeVar("_T")
 
 
@@ -71,11 +76,24 @@ class ResemblConfig:
         return [(f.name, getattr(self, f.name)) for f in dataclasses.fields(self)]
 
     def update(self, other: dict | ResemblConfig) -> None:
-        """Merge values from *other* into this config."""
+        """Merge values from *other* into this config.
+
+        An out-of-enum ``format`` is rejected here (warn and keep the current
+        value) so a hand-edited or stale config file cannot put every command
+        into an undefined render branch.
+        """
         source = other if isinstance(other, dict) else dataclasses.asdict(other)
         for key, value in source.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
+            if not hasattr(self, key):
+                continue
+            if key == "format" and value not in FORMATS:
+                logger.warning(
+                    "Ignoring unknown output format %r (expected one of: %s).",
+                    value,
+                    ", ".join(FORMATS),
+                )
+                continue
+            setattr(self, key, value)
 
     def clear(self) -> None:
         """Reset all fields to their defaults."""

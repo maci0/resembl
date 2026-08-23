@@ -355,8 +355,11 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
 
     def test_snippet_collection_names_stream(self):
         """snippet_collection_names_stream yields only that collection's rows."""
-        from resembl.core import collection_add_snippet, collection_create
-        from resembl.core import snippet_collection_names_stream
+        from resembl.core import (
+            collection_add_snippet,
+            collection_create,
+            snippet_collection_names_stream,
+        )
 
         collection_create(self.session, "col")
         for i in range(50):

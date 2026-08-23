@@ -45,6 +45,7 @@ from sqlmodel import Session
 
 from .config import (
     DEFAULTS,
+    FORMATS,
     ResemblConfig,
     config_path_get,
     load_config,
@@ -73,6 +74,7 @@ from .core import (
     snippet_find_matches,
     snippet_get,
     snippet_list,
+    snippet_matches_payload,
     snippet_name_add,
     snippet_name_remove,
     snippet_prepare,
@@ -179,6 +181,37 @@ def _echo_format(data: object) -> None:
     else:
         # JSON is the default structured format
         console.print_json(json.dumps(data, indent=2))
+
+
+def _echo_kv_table(title: str, rows: list[tuple[str, str]]) -> None:
+    """Render ``(key, value)`` rows as the shared two-column result table.
+
+    The summary tables of the report commands (add/import/export/stats/...)
+    differ only in title and rows; routing them through here keeps the
+    geometry identical by construction.
+    """
+    table = Table(title=title, show_header=False, title_style="bold cyan")
+    table.add_column("Key", style="dim")
+    table.add_column("Value")
+    for key, value in rows:
+        table.add_row(key, value)
+    _echo(table)
+
+
+def _write_json_stream(items: Iterator[dict]) -> None:
+    """Write *items* to stdout as a single streamed JSON array.
+
+    Shared by the unbounded ``list`` and ``collection show`` renders: both
+    must emit the same array shape without materializing every row first.
+    """
+    sys.stdout.write("[")
+    written = False
+    for item in items:
+        if written:
+            sys.stdout.write(",")
+        written = True
+        sys.stdout.write("\n  " + json.dumps(item))
+    sys.stdout.write("\n]\n" if written else "]\n")
 
 
 def _build_progress_printer() -> Callable[[int, int], None]:
@@ -321,6 +354,19 @@ def _find_batch_via_server(
     if payload is None:
         return None
     return payload["results"]
+
+
+def _query_inline_statements(query_string: str) -> str:
+    """Treat ``;`` as a statement separator in single-line query strings.
+
+    Inline ``--query`` strings use ';' as a statement separator (the
+    documented convenience format): splitting on ';' stops the lexer from
+    silently treating the rest of the query as a comment.  Multi-line
+    input keeps normal NASM semantics, where ';' starts a comment.
+    """
+    if ";" in query_string and "\n" not in query_string:
+        return query_string.replace(";", "\n")
+    return query_string
 
 
 def _render_find_payload(payload: dict) -> None:
@@ -608,14 +654,13 @@ def export_cmd(
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(title="Export Complete", show_header=False, title_style="bold cyan")
-        table.add_column("Key", style="dim")
-        table.add_column("Value")
-        table.add_row("Snippets exported", str(result["num_exported"]))
-        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+        rows = [
+            ("Snippets exported", str(result["num_exported"])),
+            ("Time elapsed", f"{result['time_elapsed']:.4f}s"),
+        ]
         if result["num_exported"] > 0:
-            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
-        _echo(table)
+            rows.append(("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"))
+        _echo_kv_table("Export Complete", rows)
 
 
 @app.command("export-yara")
@@ -640,14 +685,13 @@ def export_yara_cmd(
         _echo_format(result)
         return
 
-    table = Table(title="YARA Export Complete", show_header=False, title_style="bold cyan")
-    table.add_column("Key", style="dim")
-    table.add_column("Value")
-    table.add_row("Rules exported", str(result["num_exported"]))
-    table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+    rows = [
+        ("Rules exported", str(result["num_exported"])),
+        ("Time elapsed", f"{result['time_elapsed']:.4f}s"),
+    ]
     if result["num_exported"] > 0:
-        table.add_row("Avg per rule", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
-    _echo(table)
+        rows.append(("Avg per rule", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"))
+    _echo_kv_table("YARA Export Complete", rows)
 
 
 def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] | None:
@@ -826,18 +870,15 @@ def import_cmd(
     if state.format in ("json", "csv"):
         _echo_format(stats)
     else:
-        table = Table(title="Import Complete", show_header=False, title_style="bold cyan")
-        table.add_column("Key", style="dim")
-        table.add_column("Value")
-        table.add_row("Snippets imported", str(stats["num_imported"]))
+        rows = [("Snippets imported", str(stats["num_imported"]))]
         if stats["aliased"]:
-            table.add_row("Aliases updated", str(stats["aliased"]))
+            rows.append(("Aliases updated", str(stats["aliased"])))
         if rejects:
-            table.add_row("Files skipped", f"{rejects} (empty or unreadable)")
-        table.add_row("Time elapsed", f"{stats['time_elapsed']:.4f}s")
+            rows.append(("Files skipped", f"{rejects} (empty or unreadable)"))
+        rows.append(("Time elapsed", f"{stats['time_elapsed']:.4f}s"))
         if stats["num_imported"] > 0:
-            table.add_row("Avg per snippet", f"{stats['avg_time_per_snippet'] * 1000:.4f}ms")
-        _echo(table)
+            rows.append(("Avg per snippet", f"{stats['avg_time_per_snippet'] * 1000:.4f}ms"))
+        _echo_kv_table("Import Complete", rows)
 
 
 @app.command("list")
@@ -897,17 +938,11 @@ def _stream_list(session: Session) -> None:
         return
 
     if state.format == "json":
-        sys.stdout.write("[")
-        first = True
-        for batch in snippet_names_stream(session):
-            for checksum, raw in batch:
-                if not first:
-                    sys.stdout.write(",")
-                first = False
-                sys.stdout.write(
-                    "\n  " + json.dumps({"checksum": checksum, "names": json.loads(raw)})
-                )
-        sys.stdout.write("\n]\n" if not first else "]\n")
+        _write_json_stream(
+            {"checksum": checksum, "names": json.loads(raw)}
+            for batch in snippet_names_stream(session)
+            for checksum, raw in batch
+        )
     elif state.format == "csv":
         writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names"])
         writer.writeheader()
@@ -994,14 +1029,15 @@ def stats() -> None:
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(title="Database Statistics", show_header=False, title_style="bold cyan")
-        table.add_column("Metric", style="dim")
-        table.add_column("Value", justify="right")
-        table.add_row("Number of snippets", str(result["num_snippets"]))
-        table.add_row("Avg snippet size", f"{result['avg_snippet_size']:.2f} chars")
-        table.add_row("Vocabulary size", f"{result['vocabulary_size']} tokens")
-        table.add_row("Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}")
-        _echo(table)
+        _echo_kv_table(
+            "Database Statistics",
+            [
+                ("Number of snippets", str(result["num_snippets"])),
+                ("Avg snippet size", f"{result['avg_snippet_size']:.2f} chars"),
+                ("Vocabulary size", f"{result['vocabulary_size']} tokens"),
+                ("Avg Jaccard similarity", f"{result['avg_jaccard_similarity']:.2f}"),
+            ],
+        )
 
 
 @app.command()
@@ -1075,14 +1111,13 @@ def reindex(
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(title="Re-indexing Complete", show_header=False, title_style="bold cyan")
-        table.add_column("Key", style="dim")
-        table.add_column("Value")
-        table.add_row("Snippets re-indexed", str(result["num_reindexed"]))
-        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
+        rows = [
+            ("Snippets re-indexed", str(result["num_reindexed"])),
+            ("Time elapsed", f"{result['time_elapsed']:.4f}s"),
+        ]
         if result["num_reindexed"] > 0:
-            table.add_row("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms")
-        _echo(table)
+            rows.append(("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"))
+        _echo_kv_table("Re-indexing Complete", rows)
 
 
 @app.command()
@@ -1114,14 +1149,9 @@ def find(
 
     query_string: str | None = None
     if query:
-        query_string = query
-        # Inline ``--query`` strings use ';' as a statement separator (the
-        # documented convenience format).  For single-line input, split on ';'
-        # so the lexer does not silently treat the rest of the query as a
-        # comment.  Multi-line input (and ``--file``) keep normal NASM
-        # semantics, where ';' starts a comment.
-        if ";" in query_string and "\n" not in query_string:
-            query_string = query_string.replace(";", "\n")
+        # Single-line ';' separates statements (see
+        # ``_query_inline_statements``); multi-line input keeps NASM comments.
+        query_string = _query_inline_statements(query)
     elif file:
         query_string = file.read()
 
@@ -1173,15 +1203,7 @@ def find(
         err_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
 
-    _render_find_payload(
-        {
-            "lsh_candidates": num_candidates,
-            "matches": [
-                {"checksum": s.checksum, "names": s.name_list, "score": score}
-                for s, score in matches
-            ],
-        }
-    )
+    _render_find_payload(snippet_matches_payload(num_candidates, matches))
 
 
 @app.command()
@@ -1218,12 +1240,9 @@ def find_batch(
         raise typer.Exit(code=1)
 
     results: list[dict] = []
-    converted = [
-        # Same convenience as `find --query`: single-line ';' separates
-        # statements (in a multi-line batch entry ';' stays a comment).
-        raw_query.replace(";", "\n") if ";" in raw_query and "\n" not in raw_query else raw_query
-        for raw_query in queries
-    ]
+    # Same convenience as `find --query`: single-line ';' separates
+    # statements (in a multi-line batch entry ';' stays a comment).
+    converted = [_query_inline_statements(raw_query) for raw_query in queries]
 
     # Fast path: a running `serve` process answers the whole batch in one
     # round trip with a warm index (fall back to in-process otherwise).
@@ -1251,11 +1270,7 @@ def find_batch(
                 results.append(
                     {
                         "query": query_string,
-                        "lsh_candidates": num_candidates,
-                        "matches": [
-                            {"checksum": s.checksum, "names": s.name_list, "score": score}
-                            for s, score in matches
-                        ],
+                        **snippet_matches_payload(num_candidates, matches),
                     }
                 )
         except IndexBuildError as e:
@@ -1383,18 +1398,12 @@ def clean() -> None:
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(
-            title="Database and Cache Cleaned",
-            show_header=False,
-            title_style="bold cyan",
-        )
-        table.add_column("Key", style="dim")
-        table.add_column("Value")
+        rows = []
         if result.get("vacuum_success"):
-            table.add_row("Database", "[green]Vacuumed successfully[/green]")
-        table.add_row("Cache", "[green]Invalidated[/green]")
-        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
-        _echo(table)
+            rows.append(("Database", "[green]Vacuumed successfully[/green]"))
+        rows.append(("Cache", "[green]Invalidated[/green]"))
+        rows.append(("Time elapsed", f"{result['time_elapsed']:.4f}s"))
+        _echo_kv_table("Database and Cache Cleaned", rows)
 
 
 @app.command()
@@ -1423,18 +1432,19 @@ def merge(
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(title="Merge Complete", show_header=False, title_style="bold cyan")
-        table.add_column("Key", style="dim")
-        table.add_column("Value")
-        table.add_row("Added", f"[green]{result['added']}[/green] new snippets")
-        table.add_row(
-            "Updated",
-            f"[yellow]{result['updated']}[/yellow] snippets (merged names/tags)",
+        _echo_kv_table(
+            "Merge Complete",
+            [
+                ("Added", f"[green]{result['added']}[/green] new snippets"),
+                (
+                    "Updated",
+                    f"[yellow]{result['updated']}[/yellow] snippets (merged names/tags)",
+                ),
+                ("Skipped", f"[dim]{result['skipped']}[/dim] already present"),
+                ("Total in source", str(result["total_source"])),
+                ("Time elapsed", f"{result['time_elapsed']:.4f}s"),
+            ],
         )
-        table.add_row("Skipped", f"[dim]{result['skipped']}[/dim] already present")
-        table.add_row("Total in source", str(result["total_source"]))
-        table.add_row("Time elapsed", f"{result['time_elapsed']:.4f}s")
-        _echo(table)
 
 
 # --- Name sub-commands ---
@@ -1596,17 +1606,10 @@ def collection_show_cmd(
             yield from batch
 
     if state.format == "json":
-        sys.stdout.write("[")
-        written = False
-        for checksum, raw in rows():
-            if written:
-                sys.stdout.write(",")
-            written = True
-            sys.stdout.write(
-                "\n  "
-                + json.dumps({"checksum": checksum, "names": json.loads(raw), "collection": name})
-            )
-        sys.stdout.write("\n]\n" if written else "]\n")
+        _write_json_stream(
+            {"checksum": checksum, "names": json.loads(raw), "collection": name}
+            for checksum, raw in rows()
+        )
     elif state.format == "csv":
         writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names", "collection"])
         writer.writeheader()
@@ -1742,13 +1745,19 @@ def config_set_cmd(
         raise typer.Exit(code=1)
     default_value = DEFAULTS[key]
     try:
-        typed_value: int | float = type(default_value)(value)
+        typed_value: int | float | str = type(default_value)(value)
     except (TypeError, ValueError) as exc:
         err_console.print(
             f"[red]Error:[/red] Invalid value for '{key}': expected "
             f"{type(default_value).__name__}, got '{value}'."
         )
         raise typer.Exit(code=1) from exc
+    if key == "format" and typed_value not in FORMATS:
+        err_console.print(
+            f"[red]Error:[/red] Invalid value for 'format': expected one of "
+            f"{', '.join(FORMATS)}, got '{value}'."
+        )
+        raise typer.Exit(code=1)
     try:
         new_config = update_config(key, typed_value)
     except OSError as e:

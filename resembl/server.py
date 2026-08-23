@@ -33,7 +33,12 @@ from sqlmodel import Session
 
 from .cache import cache_dir_get, lsh_index_build
 from .config import ResemblConfig
-from .core import LSH_THRESHOLD, db_reindex, snippet_find_matches
+from .core import (
+    LSH_THRESHOLD,
+    db_reindex,
+    snippet_find_matches,
+    snippet_matches_payload,
+)
 
 #: Version-guarded result cache: key -> (db_version, payload).  SQLite's
 #: ``PRAGMA data_version`` increments on every commit, so a cached result is
@@ -157,12 +162,7 @@ def _find_one(
         num_permutations=num_permutations,
         jaccard_weight=jaccard_weight,
     )
-    payload = {
-        "lsh_candidates": num_candidates,
-        "matches": [
-            {"checksum": s.checksum, "names": s.name_list, "score": score} for s, score in matches
-        ],
-    }
+    payload = snippet_matches_payload(num_candidates, matches)
     if version is not None:
         with _RESULT_CACHE_LOCK:
             _RESULT_CACHE[key] = (version, payload)

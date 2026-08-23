@@ -729,17 +729,21 @@ def _code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool =
             lower = value.lower()
             if lower in ALL_REGISTERS:
                 append("REG")
-            elif ttype in Number:
+                continue
+            if ttype in Number:
                 append("IMM")
-            elif token_is_label(ttype, value):
+                continue
+            if token_is_label(ttype, value):
                 append("LABEL")
-            elif lower in _MEM_SIZE_WORDS:
+                continue
+            if lower in _MEM_SIZE_WORDS:
                 append("MEM_SIZE")
-            elif ttype not in Punctuation and value.strip():
-                append(value if value.isupper() else value.upper())
-        else:
-            if ttype not in Punctuation and value.strip():
-                append(value if value.isupper() else value.upper())
+                continue
+
+        # Shared tail for both modes: normalization only rewrites the token
+        # classes above; everything else passes through upper-cased.
+        if ttype not in Punctuation and value.strip():
+            append(value if value.isupper() else value.upper())
 
     return output_tokens
 
@@ -981,7 +985,7 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
 # ---------------------------------------------------------------------------
 
 
-def minhash_new(num_perm: int = 128) -> MinHash:
+def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
     """Return a fresh all-max MinHash without regenerating permutations.
 
     Constructing a MinHash draws the permutation arrays from a numpy random
