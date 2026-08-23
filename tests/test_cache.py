@@ -34,6 +34,20 @@ class TestCache(unittest.TestCase):
         path = lsh_cache_path_get(0.75)
         self.assertTrue(path.endswith("lsh_0.75.pkl"))
 
+    def test_cache_dir_respects_xdg(self):
+        """$XDG_CACHE_HOME/resembl is used when no RESEMBL_CACHE_DIR is set."""
+        with tempfile.TemporaryDirectory() as xdg:
+            # Empty string means "unset" for this resolution.
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": xdg, "RESEMBL_CACHE_DIR": ""}):
+                self.assertEqual(cache_dir_get(), os.path.join(xdg, "resembl"))
+
+    def test_cache_dir_override_beats_xdg(self):
+        """RESEMBL_CACHE_DIR takes precedence over $XDG_CACHE_HOME."""
+        with tempfile.TemporaryDirectory() as override, tempfile.TemporaryDirectory() as xdg:
+            env = {"RESEMBL_CACHE_DIR": override, "XDG_CACHE_HOME": xdg}
+            with patch.dict(os.environ, env):
+                self.assertEqual(cache_dir_get(), override)
+
     def test_load_nonexistent_cache(self):
         """Test loading a nonexistent cache file."""
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -37,7 +37,17 @@ def _load_config() -> dict:
     The thin client must produce the same results as `resembl find`, which
     honors these settings — ignoring them would silently change matches.
     """
-    config_dir = os.environ.get("RESEMBL_CONFIG_DIR") or os.path.expanduser("~/.config/resembl")
+    # Mirrors resembl.config.config_dir_get: RESEMBL_CONFIG_DIR wins, then
+    # $XDG_CONFIG_HOME (freedesktop base-dir spec), then the historical
+    # ~/.config/resembl default.
+    override = os.environ.get("RESEMBL_CONFIG_DIR")
+    if override:
+        config_dir = os.path.expanduser(override)
+    else:
+        xdg = os.environ.get("XDG_CONFIG_HOME")
+        config_dir = (
+            os.path.join(xdg, "resembl") if xdg else os.path.expanduser("~/.config/resembl")
+        )
     path = os.path.join(config_dir, "config.toml")
     try:
         import tomllib
@@ -75,7 +85,19 @@ def _main(argv: list[str] | None = None) -> int:
         return 2
 
     db_url = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
-    cache_dir = os.path.expanduser(os.environ.get("RESEMBL_CACHE_DIR", _DEFAULT_CACHE_DIR))
+    # Mirrors resembl.cache.cache_dir_get: RESEMBL_CACHE_DIR wins, then
+    # $XDG_CACHE_HOME, then the historical ~/.cache/resembl default.  The
+    # port file must resolve to the exact path `resembl serve` wrote.
+    cache_override = os.environ.get("RESEMBL_CACHE_DIR")
+    if cache_override:
+        cache_dir = os.path.expanduser(cache_override)
+    else:
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        cache_dir = (
+            os.path.join(xdg_cache, "resembl")
+            if xdg_cache
+            else os.path.expanduser(_DEFAULT_CACHE_DIR)
+        )
     port_file = server_port_path(db_url, cache_dir)
     try:
         with open(port_file, encoding="utf-8") as f:

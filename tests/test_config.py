@@ -123,3 +123,17 @@ class TestConfig(unittest.TestCase):
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 self.assertEqual(config_dir_get(), temp_dir)
                 self.assertTrue(config_path_get().startswith(temp_dir))
+
+    def test_config_dir_respects_xdg(self):
+        """$XDG_CONFIG_HOME/resembl is used when no RESEMBL_CONFIG_DIR is set."""
+        with tempfile.TemporaryDirectory() as xdg:
+            # Empty string means "unset" for this resolution.
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": xdg, "RESEMBL_CONFIG_DIR": ""}):
+                self.assertEqual(config_dir_get(), os.path.join(xdg, "resembl"))
+
+    def test_config_dir_override_beats_xdg(self):
+        """RESEMBL_CONFIG_DIR takes precedence over $XDG_CONFIG_HOME."""
+        with tempfile.TemporaryDirectory() as override, tempfile.TemporaryDirectory() as xdg:
+            env = {"RESEMBL_CONFIG_DIR": override, "XDG_CONFIG_HOME": xdg}
+            with patch.dict(os.environ, env):
+                self.assertEqual(config_dir_get(), override)

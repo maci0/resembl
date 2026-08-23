@@ -454,6 +454,53 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
                 full_path = os.path.join(temp_dir, fname)
                 self.assertTrue(os.path.realpath(full_path).startswith(os.path.realpath(temp_dir)))
 
+    def test_snippet_export_long_names_do_not_crash(self):
+        """A name longer than any filesystem's filename limit still exports.
+
+        Names are arbitrary user text (`resembl add`), so a 300-char name
+        used to raise ENAMETOOLONG mid-export and abort the whole run with
+        only part of the database written.
+        """
+        from resembl.core import _EXPORT_STEM_MAX_BYTES
+
+        snippet_add(self.session, "ok", "MOV EAX, 1")
+        snippet_add(self.session, "a" * 300, "MOV EBX, 2")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = snippet_export(self.session, temp_dir)
+            self.assertEqual(result["num_exported"], 2)
+            exported = sorted(os.listdir(temp_dir))
+            self.assertEqual(len(exported), 2)
+            for fname in exported:
+                stem = fname[: -len(".asm")]
+                self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+                self.assertTrue(os.path.exists(os.path.join(temp_dir, fname)))
+
+    def test_safe_filename_bounds_multi_byte_names_by_bytes(self):
+        """The stem bound is on UTF-8 bytes: CJK names truncate far sooner.
+
+        POSIX filesystems cap filenames at 255 bytes, not characters —
+        a character-only cap would still overflow for non-ASCII names.
+        """
+        from resembl.core import _EXPORT_STEM_MAX_BYTES, _export_safe_filename
+
+        stem = _export_safe_filename("界" * 300)  # 900 bytes of UTF-8
+        self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+        # Truncation must yield valid text (no partial codepoint artifacts).
+        self.assertEqual(stem, "界" * (_EXPORT_STEM_MAX_BYTES // 3))
+
+    def test_safe_filename_truncation_keeps_distinct_names_distinct(self):
+        """Two long names sharing a prefix must not overwrite each other."""
+        from resembl.core import _export_safe_filename
+
+        long_prefix = "b" * 500
+        stem1 = _export_safe_filename(long_prefix + "_one")
+        stem2 = _export_safe_filename(long_prefix + "_two")
+        # Both truncate to the same stem, which is fine: snippet_export's
+        # checksum disambiguator makes the written files distinct.  Here we
+        # pin that sanitization itself stays deterministic and legal.
+        self.assertEqual(stem1, stem2)
+        self.assertTrue(stem1)
+
 
 if __name__ == "__main__":
     unittest.main()

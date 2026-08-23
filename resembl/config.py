@@ -17,8 +17,19 @@ _T = TypeVar("_T")
 
 
 def config_dir_get() -> str:
-    """Return the config directory, respecting the RESEMBL_CONFIG_DIR env var."""
-    return os.path.expanduser(os.environ.get("RESEMBL_CONFIG_DIR", DEFAULT_CONFIG_DIR))
+    """Return the config directory, respecting override environment variables.
+
+    ``RESEMBL_CONFIG_DIR`` wins outright.  Otherwise ``$XDG_CONFIG_HOME`` is
+    honored when set (freedesktop base-directory spec), falling back to the
+    historical ``~/.config/resembl`` default.
+    """
+    override = os.environ.get("RESEMBL_CONFIG_DIR")
+    if override:
+        return os.path.expanduser(override)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return os.path.join(xdg, "resembl")
+    return os.path.expanduser(DEFAULT_CONFIG_DIR)
 
 
 def config_path_get() -> str:

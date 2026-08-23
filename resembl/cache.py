@@ -60,8 +60,19 @@ _BUILD_RETRY_BACKOFF = 3
 
 
 def cache_dir_get() -> str:
-    """Return the cache directory, respecting the RESEMBL_CACHE_DIR env var."""
-    return os.path.expanduser(os.environ.get("RESEMBL_CACHE_DIR", DEFAULT_CACHE_DIR))
+    """Return the cache directory, respecting override environment variables.
+
+    ``RESEMBL_CACHE_DIR`` wins outright.  Otherwise ``$XDG_CACHE_HOME`` is
+    honored when set (freedesktop base-directory spec), falling back to the
+    historical ``~/.cache/resembl`` default.
+    """
+    override = os.environ.get("RESEMBL_CACHE_DIR")
+    if override:
+        return os.path.expanduser(override)
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return os.path.join(xdg, "resembl")
+    return os.path.expanduser(DEFAULT_CACHE_DIR)
 
 
 def db_checksum_path_get() -> str:

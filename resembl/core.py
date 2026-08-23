@@ -1214,17 +1214,30 @@ _WINDOWS_RESERVED_STEMS = frozenset(
     + [f"LPT{i}" for i in range(1, 10)]
 )
 
+#: Maximum encoded length of an exported filename stem, in bytes.  Name
+#: limits are per-*byte* on POSIX filesystems (ext4: 255), and the ``.asm``
+#: suffix plus the checksum disambiguator add up to 17 more — so the stem is
+#: truncated here to stay inside every supported filesystem (and a Windows
+#: MAX_PATH budget) regardless of how long the snippet's name is.
+_EXPORT_STEM_MAX_BYTES = 230
+
 
 def _export_safe_filename(name: str) -> str:
     """Sanitize a snippet name into a portable filename stem.
 
     Replaces characters that are illegal on Windows (and problematic
-    elsewhere), blocks directory traversal, strips trailing dots/spaces
-    (Windows silently drops them), and prefixes Windows reserved device
-    names so ``con`` cannot target a device.
+    elsewhere), blocks directory traversal, bounds the UTF-8 encoded length
+    (filesystems cap filenames at 255 *bytes*; Windows MAX_PATH much lower),
+    strips trailing dots/spaces (Windows silently drops them), and prefixes
+    Windows reserved device names so ``con`` cannot target a device.
     """
     cleaned = _INVALID_FILENAME_CHARS.sub("_", name.replace("..", "_"))
-    cleaned = os.path.basename(cleaned).rstrip(" .")
+    cleaned = os.path.basename(cleaned)
+    if len(cleaned.encode("utf-8")) > _EXPORT_STEM_MAX_BYTES:
+        # Cut by bytes, then drop any partial multi-byte character left at
+        # the end ("ignore") so the stem stays a valid string.
+        cleaned = cleaned.encode("utf-8")[:_EXPORT_STEM_MAX_BYTES].decode("utf-8", errors="ignore")
+    cleaned = cleaned.rstrip(" .")
     if not cleaned:
         return ""
     if cleaned.split(".", 1)[0].upper() in _WINDOWS_RESERVED_STEMS:

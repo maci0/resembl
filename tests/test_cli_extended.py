@@ -166,7 +166,10 @@ class TestCLIMerge(BaseCLITest):
 
     def test_merge_nonexistent_file(self):
         """Merging a nonexistent file should fail."""
-        result = self.run_command("merge /tmp/nonexistent_db.db")
+        # Built from the platform temp dir so the path is nonexistent
+        # everywhere (a literal /tmp/... is meaningless on Windows).
+        missing = os.path.join(tempfile.gettempdir(), "resembl_nonexistent_db.db")
+        result = self.run_command(f"merge {missing}")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error", result.stderr)
 

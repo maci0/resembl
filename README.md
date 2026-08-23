@@ -207,7 +207,10 @@ uv run pre-commit install
 ### 2. Configuration
 
 You can create a configuration file at `~/.config/resembl/config.toml` to set
-default values. Set `RESEMBL_CONFIG_DIR` to override this location.
+default values. Set `RESEMBL_CONFIG_DIR` to override this location; when it is
+unset, `$XDG_CONFIG_HOME/resembl` is used if `XDG_CONFIG_HOME` is defined (the
+same fallback applies to the cache directory via `RESEMBL_CACHE_DIR` /
+`XDG_CACHE_HOME`).
 
 | Key               | Default | Description |
 |-------------------|--------:|-------------|

@@ -299,7 +299,9 @@ class TestCLIConfig(BaseCLITest):
     def test_config_set_preserves_existing_settings(self):
         """`config set` should update a single key without losing others."""
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home}
+            # Empty XDG_CONFIG_HOME pins the documented ~/.config default
+            # branch even on hosts exporting an XDG base dir.
+            env = {"HOME": home, "XDG_CONFIG_HOME": ""}
             self.run_command("config set lsh_threshold 0.7", extra_env=env)
             self.run_command("config set top_n 10", extra_env=env)
 
@@ -340,7 +342,9 @@ class TestCLIConfig(BaseCLITest):
     def test_config_set_and_list(self):
         """`config list` should show values set via `config set`."""
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home}
+            # Empty XDG_CONFIG_HOME pins the documented ~/.config default
+            # branch even on hosts exporting an XDG base dir.
+            env = {"HOME": home, "XDG_CONFIG_HOME": ""}
             self.run_command("config set lsh_threshold 0.6", extra_env=env)
             list_result = self.run_command("config list", extra_env=env)
             self.assertIn("0.6", list_result.stdout)
@@ -363,7 +367,9 @@ class TestCLIConfig(BaseCLITest):
     def test_config_get(self):
         """`config get` should retrieve a specific value."""
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home}
+            # Empty XDG_CONFIG_HOME pins the documented ~/.config default
+            # branch even on hosts exporting an XDG base dir.
+            env = {"HOME": home, "XDG_CONFIG_HOME": ""}
             self.run_command("config set top_n 15", extra_env=env)
             result = self.run_command("config get top_n", extra_env=env)
             self.assertEqual(result.returncode, 0)
@@ -372,7 +378,9 @@ class TestCLIConfig(BaseCLITest):
     def test_config_get_nonexistent_key(self):
         """`config get` on a nonexistent key should show the default."""
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home}
+            # Empty XDG_CONFIG_HOME pins the documented ~/.config default
+            # branch even on hosts exporting an XDG base dir.
+            env = {"HOME": home, "XDG_CONFIG_HOME": ""}
             result = self.run_command("config get top_n", extra_env=env)
             self.assertEqual(result.returncode, 0)
             self.assertIn("5", result.stdout)  # Default value
@@ -380,7 +388,9 @@ class TestCLIConfig(BaseCLITest):
     def test_config_unset(self):
         """`config unset` should remove a key from the config file."""
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home}
+            # Empty XDG_CONFIG_HOME pins the documented ~/.config default
+            # branch even on hosts exporting an XDG base dir.
+            env = {"HOME": home, "XDG_CONFIG_HOME": ""}
             self.run_command("config set top_n 20", extra_env=env)
             result = self.run_command("config unset top_n", extra_env=env)
             self.assertEqual(result.returncode, 0)
