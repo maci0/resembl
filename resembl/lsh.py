@@ -388,9 +388,12 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:
     ~3.6x faster, which matters because the index build calls this once per
     band per snippet (12.5M+ times at 500k snippets).
 
-    Keys are returned as fixed-width lowercase hex strings (20 bytes ->
-    40 chars).  Every supported database can index a string column, whereas
-    a raw ``BLOB`` column cannot be part of a primary key on MySQL/MariaDB.
+    Keys are returned as lowercase hex strings (``8 * r`` chars — e.g.
+    40 chars at the default 128 permutations / threshold 0.5, growing with
+    ``r`` for higher thresholds or permutation counts).  Every supported
+    database can index a string column, whereas a raw ``BLOB`` column
+    cannot be part of a primary key on MySQL/MariaDB; the ``lsh_bucket``
+    column is sized for the widest realistic key (see ``LSHBucket``).
 
     Malformed blobs (bad header, wrong permutation count) raise
     ``ValueError`` rather than low-level ``struct`` errors.

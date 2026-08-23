@@ -113,9 +113,14 @@ class State:
     """Shared state for all commands."""
 
     session: Session
-    config: ResemblConfig
     quiet: bool = False
     format: str = "table"
+
+    def __init__(self) -> None:
+        # Config defaults until the CLI callback loads the user's file;
+        # helpers that read ``config`` (e.g. ``_find_via_server``) then
+        # also work when called directly without the callback having run.
+        self.config = ResemblConfig()
 
 
 state = State()
@@ -237,6 +242,11 @@ def _find_via_server(
             "threshold": threshold,
             "normalize": normalize,
             "ngram_size": ngram_size,
+            # Sent explicitly (like the thin client does) so a server that
+            # was started under a different config still answers exactly
+            # what the in-process path would have.
+            "num_permutations": state.config.num_permutations,
+            "jaccard_weight": state.config.jaccard_weight,
         },
         timeout=5,
     )
@@ -258,6 +268,8 @@ def _find_batch_via_server(
             "threshold": threshold,
             "normalize": normalize,
             "ngram_size": ngram_size,
+            "num_permutations": state.config.num_permutations,
+            "jaccard_weight": state.config.jaccard_weight,
         },
         timeout=60,
     )
@@ -969,7 +981,7 @@ def find(
     ),
     top_n: int | None = typer.Option(None, "--top-n", help="Number of top matches to return."),
     threshold: float | None = typer.Option(
-        None, "--threshold", help="LSH threshold override (0.0-1.0)."
+        None, "--threshold", help="LSH threshold override (0.0-0.99)."
     ),
     no_normalization: bool = typer.Option(
         False, "--no-normalization", help="Disable token normalization for this query."
@@ -1068,7 +1080,7 @@ def find_batch(
         None, "--top-n", help="Number of top matches to return per query."
     ),
     threshold: float | None = typer.Option(
-        None, "--threshold", help="LSH threshold override (0.0-1.0)."
+        None, "--threshold", help="LSH threshold override (0.0-0.99)."
     ),
 ) -> None:
     """Find matches for many queries in one process.

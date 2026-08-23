@@ -129,8 +129,13 @@ class TestSchemaPortability(unittest.TestCase):
 
     def test_mysql_lsh_bucket_has_indexable_string_pk(self):
         bucket_ddl, _ = self._ddl("mysql")
-        # No BLOB in the primary key: bucket/checksum are VARCHAR(40)/VARCHAR(64).
-        self.assertIn("VARCHAR(40)", bucket_ddl)
+        # No BLOB in the primary key: bucket/checksum are sized VARCHARs.
+        # The bucket column is wider than the default band-key size (40
+        # chars): higher thresholds / permutation counts grow the key
+        # (`8 * r` chars), and PostgreSQL/MySQL reject overlong inserts.
+        # 640 keeps the composite PK inside InnoDB's 3072-byte key limit
+        # (utf8mb4: 640*4 + checksum 64*4 + int).
+        self.assertRegex(bucket_ddl, r"bucket VARCHAR\(\d+\)")
         self.assertIn("VARCHAR(64)", bucket_ddl)
         self.assertNotIn("BLOB", bucket_ddl)
 

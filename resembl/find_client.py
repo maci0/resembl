@@ -54,7 +54,7 @@ def _main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--query", help="Query string (single-line ';' = separator).")
     parser.add_argument("--file", help="Path to a file containing the query.")
-    parser.add_argument("--top-n", type=int, default=5)
+    parser.add_argument("--top-n", type=int, default=None)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--no-normalization", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
@@ -90,6 +90,7 @@ def _main(argv: list[str] | None = None) -> int:
     # The literal fallbacks below must mirror ``ResemblConfig``'s defaults
     # (resembl.config); this client stays stdlib-only and cannot import it.
     cfg = _load_config()
+    effective_top_n = args.top_n if args.top_n is not None else int(cfg.get("top_n", 5))
     effective_threshold = args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
     effective_ngram = int(cfg.get("ngram_size", 3))
     effective_perm = int(cfg.get("num_permutations", 128))
@@ -98,7 +99,7 @@ def _main(argv: list[str] | None = None) -> int:
     body = json.dumps(
         {
             "query": query,
-            "top_n": args.top_n,
+            "top_n": effective_top_n,
             "threshold": effective_threshold,
             "normalize": not args.no_normalization,
             "ngram_size": effective_ngram,

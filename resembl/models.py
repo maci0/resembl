@@ -185,15 +185,22 @@ class LSHBucket(SQLModel, table=True):
     many snippets are indexed, and no full in-memory index needs to be
     pickled to disk.
 
-    ``bucket`` is a fixed-width lowercase hex encoding of the band (20 bytes
-    -> 40 chars), which every supported database can index — a raw ``BLOB``
-    column cannot be part of a primary key on MySQL/MariaDB.
+    ``bucket`` is a lowercase hex encoding of the band (``8 * r`` chars,
+    where ``r`` is the band row size derived from ``threshold`` /
+    ``num_perm``), which every supported database can index — a raw
+    ``BLOB`` column cannot be part of a primary key on MySQL/MariaDB.
+    The width is bounded by the column rather than fixed: higher
+    thresholds / permutation counts grow ``r``, and enforcing backends
+    (PostgreSQL, MySQL) reject overlong inserts into a narrow column.
+    640 chars covers any realistic configuration while keeping the
+    composite primary key inside MySQL InnoDB's 3072-byte index-key
+    limit (utf8mb4: 640*4 + checksum 64*4 + int).
     """
 
     __tablename__ = "lsh_bucket"  # noqa: N815
 
     band: int = Field(primary_key=True)
-    bucket: str = Field(primary_key=True, max_length=40)
+    bucket: str = Field(primary_key=True, max_length=640)
     checksum: str = Field(primary_key=True, max_length=64, index=True)
 
 

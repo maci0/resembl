@@ -839,10 +839,15 @@ def db_reindex(
         reindexed += len(batch)
         if progress is not None:
             progress(reindexed, num_snippets)
-        # Flush the batch's writes, then drop the objects so the identity
-        # map stays bounded.
+        # Flush the batch's writes, then drop exactly these objects so the
+        # identity map stays bounded.  (Not ``expunge_all``: in the parallel
+        # path later batches are already loaded and still queued in flight —
+        # detaching them here made their subsequent ``minhash`` writes
+        # invisible to ``flush``, so every batch but the first was silently
+        # left with its old fingerprint while the run reported full success.)
         session.flush()
-        session.expunge_all()
+        for snippet in batch:
+            session.expunge(snippet)
         batches_since_commit += 1
         if commit_interval and batches_since_commit >= commit_interval:
             session.commit()
@@ -1146,16 +1151,19 @@ def snippet_names_stream(
 def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:
     """Search for snippets where any name matches the pattern (case-insensitive).
 
-    The JSON structure means names are embedded in the string, so a standard
-    LIKE '%pattern%' matches anywhere in the names list.  *limit* bounds the
-    result (and the fetch) so a broad pattern on a large database returns a
-    useful page instead of everything.
+    The JSON structure means names are embedded in the string, so a
+    ``ILIKE '%pattern%'`` matches anywhere in the names list.  Case-
+    insensitivity comes from ``ilike`` rather than plain ``LIKE``: SQLite
+    happens to fold case in ``LIKE``, but PostgreSQL and DuckDB do not,
+    which made the same search behave differently across backends.
+    *limit* bounds the result (and the fetch) so a broad pattern on a
+    large database returns a useful page instead of everything.
     """
     query_pattern = f"%{pattern}%"
     return list(
         session.exec(
             select(Snippet)
-            .where(Snippet.names.like(query_pattern))  # type: ignore[attr-defined]
+            .where(Snippet.names.ilike(query_pattern))  # type: ignore[attr-defined]
             .limit(limit)
         ).all()
     )

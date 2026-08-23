@@ -244,6 +244,55 @@ class TestBatchConsistency(BaseScalingTest):
         for checksum in checksums:
             self.assertEqual(par_blobs[checksum], seq_blobs[checksum])
 
+    def test_parallel_reindex_persists_every_batch(self):
+        """db_reindex(jobs=N) must persist fingerprint updates for ALL batches.
+
+        Regression: ``apply_batch`` used to call ``session.expunge_all()``,
+        which detached batches that were already fetched but still queued
+        in flight — their subsequent ``minhash`` writes became invisible to
+        ``flush`` and every batch but the first kept its stale fingerprint
+        while the run reported full success.  Re-running on an already
+        current database cannot detect this (identical fingerprints are a
+        no-op), so the test seeds stale blobs and requires all of them to
+        be healed.
+        """
+        codes = [f"PUSH EBP\nMOV EBP, ESP\nMOV EAX, {i}\nPOP EBP\nRET" for i in range(30)]
+        prepared = [p for p in (snippet_prepare(f"fn_{i}", c, 3) for i, c in enumerate(codes)) if p]
+        # Insert with deliberately WRONG fingerprints (simulating a legacy /
+        # stale-format database that reindex must heal).
+        rows = [
+            {
+                "checksum": cs,
+                "names": json.dumps([name]),
+                "code": code,
+                "minhash": minhash_pack(code_create_minhash(code + "\nNOP", 3)),
+                "tags": "[]",
+                "collection": None,
+            }
+            for cs, name, code, _mh in prepared
+        ]
+        insert_sql = (
+            "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
+            "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
+        )
+        self.session.execute(text(insert_sql), rows)
+        self.session.commit()
+        expected = {
+            row["checksum"]: minhash_pack(code_create_minhash(row["code"], 3)) for row in rows
+        }
+
+        result = db_reindex(self.session, ngram_size=3, batch_size=10, jobs=2)
+        self.assertEqual(result["num_reindexed"], len(expected))
+
+        self.session.expire_all()
+        stored = dict(self.session.exec(select(Snippet.checksum, Snippet.minhash)).all())
+        for checksum, blob in expected.items():
+            self.assertEqual(
+                stored[checksum],
+                blob,
+                f"fingerprint for {checksum} was not persisted by the parallel reindex",
+            )
+
 
 class TestSnippetAddBatch(BaseScalingTest):
     """Bulk import semantics."""
