@@ -66,6 +66,7 @@ from .core import (
     db_verify,
     snippet_add,
     snippet_add_batch,
+    snippet_collection_names_stream,
     snippet_compare,
     snippet_delete,
     snippet_export,
@@ -76,6 +77,7 @@ from .core import (
     snippet_matches_payload,
     snippet_name_add,
     snippet_name_remove,
+    snippet_names_stream,
     snippet_prepare,
     snippet_search_by_name,
     snippet_tag_add,
@@ -83,7 +85,8 @@ from .core import (
     snippet_version_list,
 )
 from .database import db_create, db_url_mask, get_engine
-from .lsh import lsh_meta_get, lsh_meta_matches
+from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
+from .scoring import MAX_NUM_PERM
 
 if TYPE_CHECKING:
     from .models import Snippet
@@ -464,8 +467,6 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
     if not 0.0 <= threshold < 0.99:
         err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
         raise typer.Exit(code=1)
-    from .scoring import MAX_NUM_PERM
-
     if not 2 <= num_perm <= MAX_NUM_PERM:
         err_console.print(
             f"[red]Error:[/red] num_permutations must be between 2 and {MAX_NUM_PERM} "
@@ -475,8 +476,6 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
     if ngram_size < 1:
         err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
         raise typer.Exit(code=1)
-    from .lsh import banding_params
-
     try:
         bands, _ = banding_params(threshold, num_perm)
     except ValueError:
@@ -949,8 +948,6 @@ def _stream_list(session: Session) -> None:
     the in-memory render — and table output is printed per batch so a huge
     listing never builds one giant table.
     """
-    from .core import snippet_names_stream
-
     if state.quiet:
         return
 
@@ -1619,8 +1616,6 @@ def collection_show_cmd(
     its members' full rows (including the ``code`` column, which dominates
     the table) into memory at once.  Output shape is unchanged.
     """
-    from .core import snippet_collection_names_stream
-
     if state.quiet:
         return
 

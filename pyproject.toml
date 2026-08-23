@@ -60,6 +60,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+# Ship the application package only: without this, find_packages also picks
+# up the `tests` package (it has __init__.py) and every install puts a
+# top-level `tests` module into site-packages.
+include = ["resembl*"]
 
 [tool.black]
 line-length = 100

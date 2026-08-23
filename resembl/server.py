@@ -126,9 +126,9 @@ def _find_one(
     # outside [0.0, 1.0] anyway, so without this every out-of-range request
     # surfaced as a 500 leaking that internal error instead of a clean one.
     # (NaN fails both comparisons and is rejected too.)
-    effective_threshold_now = threshold if threshold is not None else LSH_THRESHOLD
-    if not 0.0 <= effective_threshold_now <= 1.0:
-        return {"error": f"threshold {effective_threshold_now} is not in [0.0, 1.0]"}
+    effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
+    if not 0.0 <= effective_threshold <= 1.0:
+        return {"error": f"threshold {effective_threshold} is not in [0.0, 1.0]"}
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one
@@ -172,7 +172,6 @@ def _find_one(
     # losing its ~50 ms startup, so the server is the right place.)
     from .lsh import banding_params
 
-    effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
     try:
         bands, _ = banding_params(effective_threshold, num_permutations)
     except ValueError:
