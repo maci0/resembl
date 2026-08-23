@@ -134,7 +134,7 @@ fingerprint primitives below are defined in `resembl.scoring` and re-exported
 by `resembl.models`.
 
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
-A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `datasketch.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the underlying scipy optimization would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.
+A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `resembl.minhash.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the numpy banding search would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.
 
 ### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[str]`
 Compute the canonical bucket key for each band of a packed fingerprint
@@ -151,7 +151,15 @@ Drop the bucket table and metadata (the next find rebuilds), and read the `(thre
 Packed uint32 fingerprint serialization (520 bytes at 128 permutations, `RMLH`-prefixed, self-describing) and a fast Jaccard computed directly from packed blobs. Blobs without the `RMLH` magic (including legacy pickled fingerprints) are rejected with `ValueError` — they are never deserialized, so a hostile `merge` source or corrupted database cannot execute code; such rows self-heal by recomputing fingerprints from their code (the version-stamp reindex). `minhash_jaccard_batch` scores one query against many blobs in a single numpy (SIMD) pass, bit-identical to repeated `minhash_jaccard` calls, with chunked memory. Malformed blobs raise `ValueError` (never low-level `struct` errors), so hostile or corrupted data cannot crash the query path.
 
 ### `minhash_new(num_perm: int = 128) → MinHash`
-Return a fresh all-max `MinHash` by cloning a cached template instead of calling datasketch's constructor, which regenerates the permutation arrays with numpy random on every call (~260 µs — the dominant cost of building a fingerprint). The permutations depend only on `(num_perm, seed)`, so cloned fingerprints are byte-identical to directly constructed ones — this is what makes bulk import and `reindex` fast (~80 µs/snippet end to end).
+Return a fresh all-max `MinHash` by cloning a cached template instead of constructing one, which regenerates the permutation arrays with numpy random on every call (~260 µs — the dominant cost of building a fingerprint). The permutations depend only on `(num_perm, seed)`, so cloned fingerprints are byte-identical to directly constructed ones — this is what makes bulk import and `reindex` fast (~80 µs/snippet end to end).
+
+### `resembl.minhash`
+First-party MinHash implementation (see ADR 005): bit-compatible with
+`datasketch.MinHash` (same seed-1 permutations, SHA1 element hashes, uint64
+permutation arithmetic), plus the Gauss-Legendre banding search that replaces
+datasketch's scipy-based `_optimal_param`. `tests/test_minhash_equivalence.py`
+pins fingerprints, Jaccard values and `(b, r)` parameters against the real
+library, which remains a dev-only test oracle.
 
 ### `Snippet.iter_minhash_batches(session, batch_size=1000)`
 Keyset-paginated iterator over `(checksum, minhash)` pairs only — the projected read the index build uses, so building never loads the (much larger) code bodies.

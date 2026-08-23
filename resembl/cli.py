@@ -252,8 +252,17 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         # for every other find client until it restarts.
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
         if isinstance(reason, ConnectionRefusedError):
+            # Retire the stale advertisement only while it still names the
+            # dead *port* this request failed on.  Between reading the file
+            # and the refused connect, another ``serve`` may have bound and
+            # rewritten it; deleting unconditionally then would orphan the
+            # healthy newcomer for every find client until it restarts —
+            # the same rule :func:`resembl.server._port_file_cleanup`
+            # applies on the server's exit path.
             try:
-                os.remove(port_file)
+                with open(port_file, encoding="utf-8") as f:
+                    if f.read().strip() == str(port):
+                        os.remove(port_file)
             except OSError:
                 pass
         return None
@@ -401,7 +410,7 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
     an unbuildable threshold made the index build fail and ``find`` return
     zero results silently.
 
-    The permutation count must be datasketch-buildable (>= 2) and bounded
+    The permutation count must be MinHash-buildable (>= 2) and bounded
     like the server's request validation: unvalidated, a bad config value
     reached :func:`snippet_find_matches`, which runs the full auto-reindex
     side effect first and only then crashes inside fingerprint construction

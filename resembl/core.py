@@ -26,7 +26,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
 if TYPE_CHECKING:
-    from datasketch import MinHash
+    from .minhash import MinHash
 from .cache import (
     lsh_cache_load,
     lsh_cache_save,
@@ -520,7 +520,9 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     # Count rows before inserting: the stamp reconciliation below may only
     # publish stamp values that hold for the whole database, so it must know
     # whether pre-existing rows (possibly foreign-format) are present.
-    preexisting_rows = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    preexisting_rows = session.exec(
+        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+    ).one()
 
     new_snippet = Snippet(
         checksum=checksum,

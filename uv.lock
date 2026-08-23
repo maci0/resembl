@@ -1103,7 +1103,6 @@ name = "resembl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "datasketch" },
     { name = "numpy" },
     { name = "pygments" },
     { name = "rapidfuzz" },
@@ -1117,6 +1116,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "black" },
+    { name = "datasketch" },
     { name = "duckdb" },
     { name = "duckdb-engine" },
     { name = "hypothesis" },
@@ -1139,7 +1139,7 @@ fuzz = [
 requires-dist = [
     { name = "atheris", marker = "python_full_version >= '3.12' and extra == 'fuzz'", specifier = ">=2.3.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.1.0" },
-    { name = "datasketch", specifier = ">=1.6.5" },
+    { name = "datasketch", marker = "extra == 'dev'", specifier = ">=1.6.5" },
     { name = "duckdb", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "duckdb-engine", marker = "extra == 'dev'", specifier = ">=0.13.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },

@@ -279,3 +279,11 @@ Once your pull request is submitted, it will go through a review process. Here i
 - **Approval and Merge:** Once all automated checks are passing and a maintainer has approved the changes, your pull request will be merged.
 
 Congratulations, and thank you! Your contribution is now part of the `resembl` project. We deeply appreciate your time and effort.
+
+## Docs: PRD / RFC / ADR
+
+- **PRD** — product requirements: what to build and why (problem → requirements → acceptance).
+- **RFC** — request for comments: the technical proposal (the "how"), circulated for review before the decision is locked.
+- **ADR** — records a decision that has been made (Context → Decision → Consequences); statuses Accepted / Superseded / Deprecated — a reversal supersedes, never edits. A decision still being made is an RFC, not a proposed ADR.
+
+Decisions live in `docs/adr/`. Keep the ADR format; never edit a decided record in place.

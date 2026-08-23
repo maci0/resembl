@@ -2,7 +2,6 @@
 
 import unittest
 
-from datasketch import MinHash
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -12,6 +11,7 @@ from resembl.core import (
     string_checksum,
     string_normalize,
 )
+from resembl.minhash import MinHash
 
 # Strategy for generating random assembly-like strings.
 asm_text = st.text(

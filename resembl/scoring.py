@@ -9,9 +9,9 @@ deliberately free of the database stack so that it can be imported without
 It imports only:
 - the standard library (``hashlib``, ``struct``, ``operator``, ``copy``)
 - ``pygments`` (the ``NasmLexer`` + token types)
-- ``numpy`` and ``datasketch`` are imported *lazily* inside the function
-  bodies that need them — so merely importing this module never pulls
-  them in.
+- ``numpy`` is imported *lazily* inside the function bodies that need it,
+  and :class:`~resembl.minhash.MinHash` is imported lazily too (it needs
+  numpy) — so merely importing this module never pulls them in.
 
 The names used by ``resembl.core`` / ``resembl.models`` are re-exported from
 those modules for backward compatibility; ``from resembl.core import
@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import operator
 import struct
+import threading
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -30,7 +31,7 @@ from pygments.lexers.asm import NasmLexer
 from pygments.token import Comment, Name, Number, Punctuation, Text
 
 if TYPE_CHECKING:
-    from datasketch import MinHash
+    from .minhash import MinHash
 
 #: Number of permutation functions for MinHash (higher = more accurate, slower).
 NUM_PERMUTATIONS = 128
@@ -49,11 +50,20 @@ MINHASH_MAGIC = b"RMLH"
 #: ``MinHash`` allocations sane on malformed input.
 MAX_NUM_PERM = 1 << 12
 
-#: Cached MinHash templates keyed by num_perm, used to skip datasketch's
-#: per-construction permutation regeneration (~260 µs — the dominant cost of
+#: Cached MinHash templates keyed by num_perm, used to skip permutation
+#: regeneration on every construction (~260 µs — the dominant cost of
 #: building a fingerprint).  Permutations depend only on (num_perm, seed),
 #: so cloning a template produces identical fingerprints.
-_MINHASH_TEMPLATES: dict[int, object] = {}
+_MINHASH_TEMPLATES: dict[int, MinHash] = {}
+
+#: Serializes first-time template construction for *minhash_new*: the serve
+#: process runs one handler thread per request, and the first concurrent
+#: finds at a new permutation count all miss the cache and race this
+#: check-then-insert on a plain dict.  Templates are identical either way
+#: (seeded construction), so the old code never corrupted data, but every
+#: racer paid the full permutation build.  The steady-state fast path (the
+#: entry exists) stays lock-free, like ``lsh._ensure_tables_once``.
+_MINHASH_TEMPLATES_LOCK = threading.Lock()
 
 # Reuse a single Pygments lexer instance across all calls.
 lexer = NasmLexer()
@@ -974,20 +984,25 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
 def minhash_new(num_perm: int = 128) -> MinHash:
     """Return a fresh all-max MinHash without regenerating permutations.
 
-    datasketch's constructor draws the permutation arrays from a numpy
-    random stream on every call (~260 µs at 128 perms — most of the import
+    Constructing a MinHash draws the permutation arrays from a numpy random
+    stream on every call (~260 µs at 128 perms — most of the import
     worker's CPU).  Cloning a cached template (deepcopy of two small numpy
     arrays) is ~15x faster and yields identical permutations (seed 1), so
     fingerprints are byte-for-byte the same.
     """
     import copy
 
-    from datasketch import MinHash
+    from .minhash import MinHash
 
     template = _MINHASH_TEMPLATES.get(num_perm)
     if template is None:
-        template = MinHash(num_perm=num_perm)
-        _MINHASH_TEMPLATES[num_perm] = template
+        # Double-checked: re-probe inside the lock so exactly one racer
+        # constructs and publishes the template (see the lock's comment).
+        with _MINHASH_TEMPLATES_LOCK:
+            template = _MINHASH_TEMPLATES.get(num_perm)
+            if template is None:
+                template = MinHash(num_perm=num_perm)
+                _MINHASH_TEMPLATES[num_perm] = template
     return copy.deepcopy(template)
 
 
@@ -1036,7 +1051,7 @@ def minhash_unpack(data: bytes) -> MinHash:
     """
     if not data.startswith(MINHASH_MAGIC):
         raise ValueError("Corrupt MinHash payload: missing RMLH magic (unsupported format).")
-    from datasketch import MinHash
+    from .minhash import MinHash
 
     num_perm = minhash_num_perm(data)
     values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])

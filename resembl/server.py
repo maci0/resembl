@@ -337,6 +337,14 @@ class _FindServer(ThreadingHTTPServer):
     #: global).
     find_defaults: ResemblConfig = _DEFAULT_FIND_PARAMS
 
+    def set_atexit_cleanup(self, cleanup: functools.partial[None]) -> None:
+        """Attach this generation's exit hook (called by :func:`serve`).
+
+        Kept as a method so callers never poke the protected attribute from
+        outside the class.
+        """
+        self._atexit_cleanup = cleanup
+
     def server_close(self) -> None:
         super().server_close()
         engine = getattr(self, "engine", None)
@@ -462,14 +470,28 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # generation carries its own engine and find defaults.
     httpd.engine = engine
     httpd.find_defaults = find_defaults
+    tmp_port_path = f"{port_file}.{os.getpid()}.tmp"
     try:
         os.makedirs(os.path.dirname(port_file), exist_ok=True)
-        with open(port_file, "w", encoding="utf-8") as f:
+        # Publish via write-temp-then-rename: ``open(port_file, "w")``
+        # truncates in place, so a find client racing this write could read
+        # an empty or half-written port number and wrongly conclude no
+        # server is running.  ``os.replace`` flips the whole advertisement
+        # atomically (POSIX rename semantics; also atomic on Windows), and
+        # a same-directory temp keeps the rename on one filesystem.
+        with open(tmp_port_path, "w", encoding="utf-8") as f:
             f.write(str(httpd.server_address[1]))
+        os.replace(tmp_port_path, port_file)
     except BaseException:
         # A failed advertisement must not leak the bound server and its
         # warm engine pool (same reasoning as the bind-failure dispose
-        # above): ``server_close`` disposes the engine.
+        # above): ``server_close`` disposes the engine.  The temp is
+        # removed only here — after a successful replace it no longer
+        # exists, and deleting it then would unlink the live port file.
+        try:
+            os.remove(tmp_port_path)
+        except OSError:
+            pass
         httpd.server_close()
         raise
 
@@ -479,6 +501,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # handlers.  The hook remains only as a backstop for callers that never
     # close the returned server.
     port = int(httpd.server_address[1])
-    httpd._atexit_cleanup = functools.partial(_port_file_cleanup, port_file, port)
-    atexit.register(httpd._atexit_cleanup)
+    cleanup = functools.partial(_port_file_cleanup, port_file, port)
+    httpd.set_atexit_cleanup(cleanup)
+    atexit.register(cleanup)
     return httpd

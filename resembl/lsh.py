@@ -9,8 +9,9 @@ Why SQLite instead of datasketch's in-memory :class:`~datasketch.MinHashLSH`?
   streams rows in batches, queries hit a handful of indexed lookups, and
   single snippet additions/deletions update only that snippet's rows.
 
-The banding math is identical to datasketch (same ``_optimal_param``), so
-recall behavior at a given threshold is equivalent.  Bucket keys are derived
+The banding math is identical to datasketch's ``_optimal_param`` (same
+error integrals, see ``resembl.minhash.optimal_param``), so recall
+behavior at a given threshold is equivalent.  Bucket keys are derived
 directly from the packed uint32 fingerprints (see ``scoring.minhash_pack``),
 which avoids constructing MinHash objects during index builds.
 """
@@ -19,7 +20,7 @@ from __future__ import annotations
 
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -30,26 +31,26 @@ from .models import FINGERPRINT_VERSION
 from .scoring import minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
-    from datasketch import MinHash
+    from .minhash import MinHash
 
 
 @lru_cache(maxsize=64)
 def banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     """Return the ``(b, r)`` banding for a ``(threshold, num_perm)`` pair.
 
-    The banding is a pure function of its inputs, but datasketch's
-    ``_optimal_param`` evaluates false-positive/false-negative probabilities
-    via a scipy numerical integration (~13 ms) — and it was being recomputed
-    on every :class:`ResemblLSH` construction, i.e. every query.  Caching the
-    result turns a ~13 ms per-query cost into a dict lookup.  The scipy
-    dependency is imported lazily so commands that never touch the index
-    (list, stats, export, ...) skip the ~200 ms datasketch/scipy startup.
+    The banding is a pure function of its inputs, but the search evaluates
+    false-positive/false-negative probability integrals for every ``(b, r)``
+    split (~13 ms) — and it was being recomputed on every :class:`ResemblLSH`
+    construction, i.e. every query.  Caching the result turns a ~13 ms
+    per-query cost into a dict lookup.  numpy is imported lazily inside
+    :func:`resembl.minhash.optimal_param` so commands that never touch the
+    index (list, stats, export, ...) skip the numpy startup cost.
     The 64-entry cache keeps varied-threshold workflows (a script cycling
     many thresholds) from thrashing and re-paying the integral on evictions.
     """
-    from datasketch.lsh import _optimal_param
+    from .minhash import optimal_param
 
-    return _optimal_param(threshold, num_perm, 0.5, 0.5)
+    return optimal_param(threshold, num_perm, 0.5, 0.5)
 
 
 #: SQL for reading the single LSH metadata row (see ``LSHMeta``).
@@ -524,7 +525,7 @@ class ResemblLSH:
     @staticmethod
     def _as_packed(value: bytes | MinHash) -> bytes:
         """Normalize a MinHash object or packed blob to packed bytes."""
-        if hasattr(value, "digest"):
+        if not isinstance(value, bytes):
             return minhash_pack(value)
         return value
 
@@ -543,7 +544,7 @@ class ResemblLSH:
         self.session.execute(text(_insert_sql(self.session)), params=params)
         self.session.commit()
 
-    def insert_batch(self, items: list[tuple[str, bytes | MinHash]]) -> int:
+    def insert_batch(self, items: Sequence[tuple[str, bytes | MinHash]]) -> int:
         """Insert many ``(key, fingerprint)`` pairs; returns the row count."""
         rows: list[dict[str, object]] = []
         for key, value in items:

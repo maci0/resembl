@@ -23,6 +23,6 @@ We chose **MinHash + LSH** via the `datasketch` library.
 MinHash with n-gram shingling preserves local token ordering, which is critical for assembly code where instruction sequences carry structural meaning. LSH provides sub-linear query time as the database grows.
 
 ## Consequences
-- The `datasketch` library is a runtime dependency.
+- ~~The `datasketch` library is a runtime dependency.~~ Superseded by ADR 005: MinHash and the banding search are vendored bit-compatibly in `resembl.minhash`; `datasketch` remains only as a dev-only test oracle.
 - ~~The LSH index must be cached to disk for fast startup (see `cache.py`).~~ Superseded by ADR 004: the index lives in the database, not in a disk cache.
 - Threshold is user-configurable via `lsh_threshold` in config.

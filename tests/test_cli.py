@@ -274,9 +274,7 @@ class TestCLICommands(BaseCLITest):
         for command in cases:
             for flag in ("--quiet", "--format json", "--format csv"):
                 result = self.run_command(f"{flag} {command}")
-                self.assertNotEqual(
-                    result.returncode, 0, f"'{flag} {command}' reported success"
-                )
+                self.assertNotEqual(result.returncode, 0, f"'{flag} {command}' reported success")
 
     def test_rm_with_force_flag(self):
         """Removing with --force should skip confirmation."""

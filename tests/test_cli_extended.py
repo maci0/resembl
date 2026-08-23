@@ -622,6 +622,33 @@ class TestServerFallback(unittest.TestCase):
         self.assertIsNone(result)
         self.assertFalse(os.path.exists(self.port_file), "stale file should be removed")
 
+    def test_connection_refused_after_retarget_keeps_new_advertisement(self):
+        """A refused connect must not delete a newer serve's advertisement.
+
+        Between this client reading the port file and its refused connect,
+        another ``serve`` may have bound and rewritten the file.  The old
+        unconditional delete orphaned that healthy newcomer: every later
+        find client missed the warm server until it restarted.  Only a file
+        still naming the dead *port* may be retired.
+        """
+        import urllib.error
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        def refused_after_retarget(request, timeout=None):
+            # Simulate the newcomer winning the advertisement race between
+            # this client's read of the port file and its connect attempt.
+            with open(self.port_file, "w", encoding="utf-8") as f:
+                f.write("6789")
+            raise urllib.error.URLError(ConnectionRefusedError("no server"))
+
+        with patch("urllib.request.urlopen", side_effect=refused_after_retarget):
+            result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
+        self.assertIsNone(result)
+        with open(self.port_file, encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "6789", "newer server's file was deleted")
+
     def test_find_batch_timeout_keeps_port_file(self):
         """The find-batch client has the same timeout-vs-refused behavior."""
         import urllib.error

@@ -357,7 +357,7 @@ Key properties that keep these numbers flat as the database grows:
 - **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup; the query
   itself is ~1.4 ms in-process) — queries hit a handful of indexed LSH bucket lookups (all in a
   single round trip) plus a chunked candidate fetch, independent of size.  The banding parameters
-  are computed once and cached (the underlying scipy optimization would otherwise run per query).
+  are computed once and cached (the numpy banding search would otherwise run per query).
 - **Bulk import is linear and parallel** (~4,000–5,500 files/s with `--jobs`, ~5,560/s at 20k) with
   bounded memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the
   snippet is lexed once (the checksum string and the MinHash tokens are derived from the same token
@@ -376,7 +376,7 @@ Key properties that keep these numbers flat as the database grows:
   cache for the build.  A 500k cold build takes ~1.8 min versus ~27 min before this optimization.
 - `reindex --jobs N` recomputes fingerprints in parallel (≈5× faster with 8 workers) and commits
   periodically on SQLite so the WAL stays bounded.
-- **CLI startup is lean**: datasketch/scipy and the database engine are imported lazily, so commands
+- **CLI startup is lean**: numpy and the database engine are imported lazily, so commands
   that never touch fingerprints (`list`, `stats`, `export`, …) skip ~200 ms of startup.
 - **Instant warm finds with `serve`**: start `resembl serve` once and `find` (or the stdlib-only
   `resembl-find` client) answers in ~40 ms instead of ~450 ms — the interpreter and libraries stay

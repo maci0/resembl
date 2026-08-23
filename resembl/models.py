@@ -24,7 +24,7 @@ from .scoring import (  # noqa: F401
 )
 
 if TYPE_CHECKING:
-    from datasketch import MinHash
+    from .minhash import MinHash
 
 
 def timestamp_normalize(value: str) -> str:
@@ -129,7 +129,9 @@ class Snippet(SQLModel, table=True):
         # (the column that dominates the table) through the ORM for nothing.
         # The winner's full row is fetched via the identity map afterwards.
         candidates = session.exec(
-            select(cls.checksum, cls.names).where(cls.names.like(f'%"{name}"%'))  # type: ignore[attr-defined]
+            select(cls.checksum, cls.names).where(
+                cls.names.like(f'%"{name}"%')  # type: ignore[attr-defined]
+            )
         ).all()
         for checksum, names in candidates:
             if name in json.loads(names):

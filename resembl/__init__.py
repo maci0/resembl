@@ -5,7 +5,7 @@ resembl can be used both as a CLI tool (``resembl``) and as a Python library::
     from resembl import snippet_add, snippet_find_matches, code_tokenize
 
 The package is import-light: ``import resembl`` does not eagerly import the
-heavy dependencies (pygments, sqlmodel, datasketch).  Exports are resolved
+heavy dependencies (pygments, sqlmodel, numpy).  Exports are resolved
 lazily via ``__getattr__`` (PEP 562), which keeps the thin ``resembl-find``
 client and any import-time-sensitive consumer fast.
 """

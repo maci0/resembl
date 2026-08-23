@@ -303,6 +303,25 @@ class TestServerMode(unittest.TestCase):
         with open(port_file, encoding="utf-8") as f:
             self.assertEqual(int(f.read()), port)
 
+    def test_port_file_publish_leaves_no_temp_files(self):
+        """The write-temp-rename advertisement publish leaves no temp files.
+
+        ``serve`` publishes the port file via a same-directory temp plus
+        ``os.replace`` so concurrent find clients never read an empty or
+        half-written port number; a failed publish (or a leaked temp) must
+        leave nothing behind next to the real advertisement.
+        """
+        import glob
+
+        from resembl.server import server_port_path
+
+        self._start_server()
+        port_file = server_port_path(f"sqlite:///{self._db}")
+        with open(port_file, encoding="utf-8") as f:
+            self.assertTrue(f.read().strip().isdigit())
+        leftovers = glob.glob(os.path.join(os.path.dirname(port_file), "*.tmp"))
+        self.assertEqual(leftovers, [])
+
     def test_thin_client_queries_server(self):
         """resembl.find_client._main returns the matches via the server."""
         from resembl.find_client import _main
@@ -842,6 +861,70 @@ class TestServerMode(unittest.TestCase):
         with Session(engine2) as session:
             lsh = lsh_mod.ResemblLSH(session, 0.5, 128)
             self.assertGreaterEqual(lsh.b, 2)
+
+    def test_minhash_template_cache_survives_concurrent_construction(self):
+        """Concurrent first finds at one permutation count build one template.
+
+        Serve runs one handler thread per request and every find builds its
+        query fingerprint via ``minhash_new``.  The template cache's
+        check-then-insert used to be unlocked: N threads missing at once
+        each paid the full permutation regeneration (~260 µs apiece).  With
+        the lock, construction happens exactly once while every caller still
+        receives identical fingerprints (same seeded permutations).
+        """
+        import time as time_mod
+        from unittest.mock import patch as mock_patch
+
+        import resembl.minhash as minhash_mod
+        from resembl.scoring import _MINHASH_TEMPLATES, minhash_new
+
+        num_perm = 97  # unused elsewhere in the suite
+        _MINHASH_TEMPLATES.pop(num_perm, None)
+        self.addCleanup(_MINHASH_TEMPLATES.pop, num_perm, None)
+
+        constructions: list[int] = []
+
+        class CountingMinHash(minhash_mod.MinHash):
+            def __init__(self, *args, **kwargs):
+                constructions.append(1)
+                # Widen the race window so an unlocked check-then-insert is
+                # caught deterministically by the count assertion below.
+                time_mod.sleep(0.05)
+                super().__init__(*args, **kwargs)
+
+        barrier = threading.Barrier(8)
+        fingerprints: list = []
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                barrier.wait(timeout=10)
+                m = minhash_new(num_perm)
+                m.update(b"push ebx; ret")
+                fingerprints.append(m.hashvalues.copy())
+            except Exception as exc:
+                errors.append(exc)
+
+        with mock_patch.object(minhash_mod, "MinHash", CountingMinHash):
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(fingerprints), 8)
+        # Exactly one construction despite eight simultaneous first callers:
+        # the losers must re-probe under the lock and hit the winner's entry.
+        self.assertEqual(
+            len(constructions),
+            1,
+            "template constructed more than once under concurrent first use",
+        )
+        self.assertIn(num_perm, _MINHASH_TEMPLATES)
+        reference = fingerprints[0]
+        for fingerprint in fingerprints[1:]:
+            self.assertTrue((fingerprint == reference).all())
 
     def test_port_file_cleanup_keeps_foreign_advertisement(self):
         """An exiting serve must not delete another server's port file.
