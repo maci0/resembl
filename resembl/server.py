@@ -24,9 +24,8 @@ import sys
 import threading
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import Connection
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
@@ -61,11 +60,8 @@ _DEFAULT_FIND_PARAMS = ResemblConfig()
 
 
 def _session_engine(session: Session) -> Engine:
-    """Return the engine behind *session* (``get_bind`` may return a Connection)."""
-    bind = session.get_bind()
-    if isinstance(bind, Connection):
-        return bind.engine
-    return bind
+    """Return the engine behind *session* (every caller binds an ``Engine``)."""
+    return cast(Engine, session.get_bind())
 
 
 def _db_version(session: Session) -> int | None:

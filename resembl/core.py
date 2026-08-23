@@ -263,13 +263,13 @@ def snippet_prepare(
     return checksum, name, code, minhash_bytes
 
 
-def _checksum_chunks(checksums: list[str], batch_size: int = 900) -> list[list[str]]:
+def _checksum_chunks(checksums: list[str]) -> list[list[str]]:
     """Split checksums into chunks small enough for one SQL ``IN`` clause.
 
     900 stays comfortably under SQLite's variable limit (999 by default,
     32766 on modern builds), halving the round trips of the old 500.
     """
-    return [checksums[i : i + batch_size] for i in range(0, len(checksums), batch_size)]
+    return [checksums[i : i + 900] for i in range(0, len(checksums), 900)]
 
 
 def _snippets_by_checksums(session: Session, checksums: list[str]) -> dict[str, Snippet]:
