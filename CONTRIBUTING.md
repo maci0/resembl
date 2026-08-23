@@ -220,7 +220,7 @@ This includes:
 - **Docstrings:** All new modules, classes, and functions must have clear, concise docstrings explaining their purpose, arguments, and return values.
 - **README.md:** Update this file if your change affects installation, core concepts, or basic usage.
 - **Project Documentation:** Update the relevant files in the `docs/` directory, such as `user_stories.md` or `flowcharts.md`, to reflect any changes to features or workflows.
-- **Changelog:** While the `CHANGELOG.md` file is updated automatically during a release, your pull request description should be clear and comprehensive, as it will be used to generate the changelog entry.
+- **Changelog:** Release notes are generated automatically by Release Drafter during a release, so your pull request title and description should be clear and comprehensive: they become the changelog entry.
 
 ### Managing Dependencies
 Dependencies represent a long-term maintenance cost and security liability. Therefore, they should be added sparingly and only when they provide significant value that cannot be reasonably achieved otherwise.

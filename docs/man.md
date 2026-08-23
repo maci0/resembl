@@ -190,6 +190,11 @@ The `compare` command also reports control-flow graph similarity.
 **RESEMBL_CONFIG_DIR**
 :   Override the default config directory (`~/.config/resembl`).
 
+**XDG_CONFIG_HOME / XDG_CACHE_HOME**
+:   Honored when the `RESEMBL_*` overrides above are unset: the config
+    directory becomes `$XDG_CONFIG_HOME/resembl`, the cache directory
+    `$XDG_CACHE_HOME/resembl`.
+
 **RESEMBL_CACHE_DIR**
 :   Override the default cache directory (`~/.cache/resembl`).
     The LSH index itself lives in the database; this directory holds only

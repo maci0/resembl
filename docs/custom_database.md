@@ -60,11 +60,14 @@ SQLModel.metadata.create_all(my_custom_engine)
 with Session(my_custom_engine) as session:
     print("Adding a snippet using our custom engine...")
 
-    # Call a core resembl function with our session
+    # Call a core resembl function with our session.
+    # Each statement goes on its own line: ';' starts a comment in NASM
+    # source, so code like "mov eax, 1; ret" would silently drop "; ret"
+    # from the normalized snippet (and thus from its checksum).
     new_snippet = snippet_add(
         session=session,
         name="my_first_func",
-        code="mov eax, 1; ret"
+        code="mov eax, 1\nret",
     )
 
     print(f"Snippet added! Checksum: {new_snippet.checksum}")

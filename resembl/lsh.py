@@ -522,7 +522,8 @@ class ResemblLSH:
         self.session = session
         self.num_perm = num_perm
         # Same banding optimization as datasketch's MinHashLSH (cached — see
-        # ``banding_params``; the raw computation is a ~13 ms scipy integral).
+        # ``banding_params``; the raw computation is a ~13 ms numerical
+        # integration).
         self.b, self.r = banding_params(threshold, num_perm)
         if self.b < 2:
             raise ValueError("The number of bands are too small (b < 2)")
