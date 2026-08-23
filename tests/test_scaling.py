@@ -1007,7 +1007,12 @@ class TestIndexBuild(BaseScalingTest):
         self.assertEqual(result["num_reindexed"], 20)
 
     def test_reindex_clear_gives_up_after_repeated_locks(self):
-        """Exhausting the clear retries degrades to a zero report, never raises."""
+        """Exhausting the clear retries degrades to a zero report, never raises.
+
+        The report must carry an ``error`` key so callers (the CLI) can
+        distinguish "nothing to do" from "failed" — a success-shaped zero
+        report made ``resembl reindex`` exit 0 after doing nothing.
+        """
         import sqlite3
         from unittest.mock import patch
 
@@ -1030,6 +1035,8 @@ class TestIndexBuild(BaseScalingTest):
             result = db_reindex(self.session, jobs=1)
 
         self.assertEqual(result["num_reindexed"], 0)
+        self.assertIn("error", result)
+        self.assertIn("clear the index", result["error"])
 
 
 class TestFingerprintVersion(BaseScalingTest):

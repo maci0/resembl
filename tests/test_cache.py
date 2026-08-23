@@ -74,6 +74,32 @@ class TestCache(unittest.TestCase):
                 lsh_cache_save(self.session, 0.5)
                 self.assertFalse(os.path.exists(lsh_cache_path_get(0.5)))
 
+    def test_remove_pickle_cache_failure_is_best_effort(self):
+        """An undeletable legacy cache file is skipped, never raised.
+
+        Callers run the removal after their database writes are already
+        committed; a read-only cache directory must not crash an operation
+        that actually succeeded.
+        """
+        import stat
+
+        from resembl.cache import _remove_pickle_cache
+
+        if os.geteuid() == 0:  # root ignores directory write bits
+            self.skipTest("running as root")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
+                cache_file = lsh_cache_path_get(0.5)
+                with open(cache_file, "wb") as f:
+                    f.write(b"stale")
+                os.chmod(tmpdir, stat.S_IRUSR | stat.S_IXUSR)
+                try:
+                    with self.assertLogs("resembl.cache", level="WARNING"):
+                        _remove_pickle_cache(0.5)  # must not raise
+                finally:
+                    os.chmod(tmpdir, stat.S_IRWXU)
+                self.assertTrue(os.path.exists(cache_file))
+
     def test_lsh_index_build_invalid_params(self):
         """Test that building LSH with invalid params returns None."""
         with self.assertLogs("resembl", level="ERROR"):

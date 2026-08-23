@@ -113,6 +113,31 @@ class TestCLICommands(BaseCLITest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("threshold", result.stderr)
 
+    def test_find_rejects_invalid_config_num_permutations(self):
+        """An unbuildable num_permutations from config fails before any work.
+
+        Unvalidated, the value reached snippet_find_matches, which runs the
+        full auto-reindex side effect first and only then crashed with a raw
+        datasketch ValueError traceback.
+        """
+        with tempfile.TemporaryDirectory() as cfgdir:
+            config_path = os.path.join(cfgdir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("num_permutations = 1\n")
+            env = {"RESEMBL_CONFIG_DIR": cfgdir}
+            result = self.run_command("find --query 'MOV EAX, 1'", extra_env=env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("num_permutations", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+            queries_file = os.path.join(cfgdir, "queries.txt")
+            with open(queries_file, "w", encoding="utf-8") as f:
+                f.write("MOV EAX, 1\n")
+            batch = self.run_command(f"find-batch --file {queries_file}", extra_env=env)
+            self.assertNotEqual(batch.returncode, 0)
+            self.assertIn("num_permutations", batch.stderr)
+            self.assertNotIn("Traceback", batch.stderr)
+
     def test_compare_missing_snippet(self):
         """Comparing unknown checksums should fail."""
         result = self.run_command("compare deadbeef cafebabe")

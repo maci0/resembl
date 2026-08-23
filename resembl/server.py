@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import socket
+import sys
 import threading
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -107,6 +108,11 @@ def _find_one(
 
     if not 2 <= num_permutations <= _MAX_NUM_PERM:
         return {"error": f"num_permutations must be between 2 and {_MAX_NUM_PERM}"}
+    # Same degenerate-fingerprint guard as the CLI's find validation: an
+    # ``ngram_size`` below 1 does not crash, it silently makes every snippet
+    # match every other one (all shingles collapse to the empty token tuple).
+    if ngram_size < 1:
+        return {"error": "ngram_size must be at least 1"}
     # The masked URL identifies the served database without retaining
     # credentials in the long-lived cache keys.
     db_id = str(_session_engine(session).url)
@@ -226,7 +232,7 @@ class _FindHandler(BaseHTTPRequestHandler):
     @property
     def find_defaults(self) -> ResemblConfig:
         """This server's configured find defaults (see :func:`serve`)."""
-        # type: ignore[attr-defined] as for ``engine`` above
+        # Lives on the server instance, like ``engine`` above.
         return self.server.find_defaults  # type: ignore[attr-defined]
 
     def _read_body(self) -> dict | None:
@@ -334,6 +340,19 @@ class _FindServer(ThreadingHTTPServer):
             # closed on return; idle pooled connections close now.
             engine.dispose()
 
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        """Swallow routine client-disconnection failures; delegate the rest.
+
+        A client that hangs up mid-response (or mid-keep-alive read) surfaces
+        as ``ConnectionError`` from ``_respond`` — routine under connection
+        churn, and the default handler would print a full traceback per
+        disconnect.  Anything unexpected still reaches the default handler
+        so real bugs stay visible.
+        """
+        if isinstance(sys.exc_info()[1], ConnectionError | TimeoutError):
+            return
+        super().handle_error(request, client_address)
+
 
 def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     """Start the find server for *db_url* and return the bound HTTP server.
@@ -430,9 +449,16 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # generation carries its own engine and find defaults.
     httpd.engine = engine
     httpd.find_defaults = find_defaults
-    os.makedirs(os.path.dirname(port_file), exist_ok=True)
-    with open(port_file, "w", encoding="utf-8") as f:
-        f.write(str(httpd.server_address[1]))
+    try:
+        os.makedirs(os.path.dirname(port_file), exist_ok=True)
+        with open(port_file, "w", encoding="utf-8") as f:
+            f.write(str(httpd.server_address[1]))
+    except BaseException:
+        # A failed advertisement must not leak the bound server and its
+        # warm engine pool (same reasoning as the bind-failure dispose
+        # above): ``server_close`` disposes the engine.
+        httpd.server_close()
+        raise
 
     import atexit
 

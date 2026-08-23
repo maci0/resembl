@@ -552,6 +552,18 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("bad request", json.loads(payload)["error"])
 
+    def test_find_rejects_degenerate_ngram_size(self):
+        """An ngram_size below 1 answers a clean error, never garbage results.
+
+        An n-gram of 0 does not crash: every shingle collapses to the empty
+        token tuple and every snippet matches every other one — silently
+        wrong results instead of a failure.
+        """
+        port = self._start_server()
+        payload = _post_json(port, "/find", {"query": "push ebx\nret", "top_n": 5, "ngram_size": 0})
+        self.assertIn("error", payload)
+        self.assertIn("ngram_size", payload["error"])
+
     def test_result_cache_evicts_oldest_beyond_max(self):
         """The version-guarded result cache evicts its oldest entry past the cap."""
         from resembl.server import _RESULT_CACHE, _RESULT_CACHE_MAX, _find_one

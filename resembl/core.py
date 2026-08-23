@@ -896,7 +896,14 @@ def db_reindex(
             "Could not clear the index (another process may be writing to "
             "this database); retry once it is idle."
         )
+        # Signal the failure explicitly: a success-shaped zero report made
+        # ``resembl reindex`` print "Re-indexing Complete" and exit 0 after
+        # doing nothing at all.
         return {
+            "error": (
+                "could not clear the index (another process may be writing "
+                "to this database); retry once it is idle"
+            ),
             "num_reindexed": 0,
             "time_elapsed": 0,
             "avg_time_per_snippet": 0,

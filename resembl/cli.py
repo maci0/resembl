@@ -389,16 +389,35 @@ def serve(
         httpd.server_close()
 
 
-def _validate_find_threshold(threshold: float, num_perm: int) -> None:
-    """Exit with a clean error if *threshold* cannot build an index.
+def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> None:
+    """Exit with a clean error if *threshold* / *num_perm* / *ngram* are unusable.
 
     The banding needs b >= 2 bands; at 128 permutations that caps the
     buildable threshold near 0.98 (0.981 gives b=1).  Without this check,
     an unbuildable threshold made the index build fail and ``find`` return
     zero results silently.
+
+    The permutation count must be datasketch-buildable (>= 2) and bounded
+    like the server's request validation: unvalidated, a bad config value
+    reached :func:`snippet_find_matches`, which runs the full auto-reindex
+    side effect first and only then crashes inside fingerprint construction
+    with a raw ValueError.  An ``ngram_size`` below 1 does not crash but
+    silently produces degenerate fingerprints (every shingle is empty), so
+    every snippet would match every other one.
     """
     if not 0.0 <= threshold < 0.99:
         err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
+        raise typer.Exit(code=1)
+    from .scoring import _MAX_NUM_PERM
+
+    if not 2 <= num_perm <= _MAX_NUM_PERM:
+        err_console.print(
+            f"[red]Error:[/red] num_permutations must be between 2 and {_MAX_NUM_PERM} "
+            f"(got {num_perm})."
+        )
+        raise typer.Exit(code=1)
+    if ngram_size < 1:
+        err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
         raise typer.Exit(code=1)
     from .lsh import _banding_params
 
@@ -913,7 +932,14 @@ def rm(
 @app.command()
 def stats() -> None:
     """Show database statistics."""
-    result = db_stats(state.session)
+    try:
+        result = db_stats(state.session)
+    except ValueError as e:
+        # e.g. fingerprints written at mixed permutation counts (a merge
+        # clears the stamps; the healing reindex runs on `find`, not here).
+        # Report cleanly instead of a traceback — same contract as compare.
+        err_console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
@@ -992,6 +1018,9 @@ def reindex(
             _build_progress_printer() if state.format == "table" and not state.quiet else None
         ),
     )
+    if "error" in result:
+        err_console.print(f"[red]Error:[/red] {result['error']}")
+        raise typer.Exit(code=1)
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
@@ -1026,9 +1055,10 @@ def find(
     # The banding requires b >= 2 bands; at 128 permutations that caps the
     # buildable threshold near 0.98 (0.981 gives b=1).  Reject unbuildable
     # values up front instead of a silent zero-result build failure.
-    _validate_find_threshold(
+    _validate_find_params(
         effective_threshold,
         state.config.num_permutations,
+        state.config.ngram_size,
     )
 
     query_string: str | None = None
@@ -1125,9 +1155,10 @@ def find_batch(
     effective_top_n = top_n if top_n is not None else state.config.top_n
     effective_threshold = threshold if threshold is not None else state.config.lsh_threshold
     ngram_size = state.config.ngram_size
-    _validate_find_threshold(
+    _validate_find_params(
         effective_threshold,
         state.config.num_permutations,
+        ngram_size,
     )
 
     queries = [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]
@@ -1680,7 +1711,11 @@ def config_set_cmd(
             f"{type(default_value).__name__}, got '{value}'."
         )
         raise typer.Exit(code=1) from exc
-    new_config = update_config(key, typed_value)
+    try:
+        new_config = update_config(key, typed_value)
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
+        raise typer.Exit(code=1)
     _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
     state.config.update(new_config)
 
@@ -1690,7 +1725,11 @@ def config_unset_cmd(
     key: str = typer.Argument(help="The configuration key to unset."),
 ) -> None:
     """Unset a configuration value."""
-    new_config = remove_config_key(key)
+    try:
+        new_config = remove_config_key(key)
+    except OSError as e:
+        err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
+        raise typer.Exit(code=1)
     _echo(f"[green]✓[/green] Unset [bold]{key}[/bold], returning to default.")
     state.config.clear()
     state.config.update(new_config)

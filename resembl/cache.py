@@ -280,13 +280,22 @@ def lsh_index_remove(session: Session, checksum: str) -> bool:
 
 
 def _remove_pickle_cache(threshold: float) -> None:
-    """Delete the legacy pickle cache file for *threshold* (if any)."""
+    """Delete the legacy pickle cache file for *threshold* (if any).
+
+    Best-effort: callers run this after their database writes are already
+    committed, so a failure here (e.g. a read-only file left by another
+    user) must be logged and skipped instead of crashing an operation that
+    actually succeeded.
+    """
     cache_dir = cache_dir_get()
     if not os.path.exists(cache_dir):
         return
     for name in (lsh_cache_path_get(threshold), db_checksum_path_get()):
-        if os.path.isfile(name):
-            os.remove(name)
+        try:
+            if os.path.isfile(name):
+                os.remove(name)
+        except OSError as e:
+            logger.warning("Could not remove legacy cache file %s: %s", name, e)
 
 
 def lsh_cache_save(
