@@ -1,7 +1,8 @@
 # ADR 003: SHA256 Checksum as Primary Key
 
 ## Status
-Accepted
+
+Accepted (2026-08-11)
 
 ## Context
 Each snippet needs a unique identifier. Traditional approaches use auto-incrementing integers. We considered content-addressing using a cryptographic hash instead.
@@ -16,6 +17,9 @@ Each snippet is identified by the **SHA256 hash** of its normalized code content
 - **No collision risk:** SHA256's 256-bit output makes accidental collisions astronomically unlikely.
 
 ## Consequences
-- If code changes, the checksum (and thus primary key) changes. The `SnippetVersion` model tracks history.
+- If code changes, the checksum (and thus primary key) changes. In practice
+  snippets are immutable once added: no code-update path exists yet. The
+  `SnippetVersion` model is scaffolded for history tracking but has no
+  production writer so far.
 - Checksums are long (64 hex chars). The CLI supports prefix matching for convenience.
 - Renaming (adding/removing alias names) does not change the checksum since names are metadata, not content.

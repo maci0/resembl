@@ -1,7 +1,8 @@
 # ADR 001: MinHash + LSH Over SimHash
 
 ## Status
-Accepted
+
+Accepted (2026-08-11)
 
 ## Context
 We needed a fast, scalable similarity search mechanism for assembly code snippets. The two main contenders were **SimHash** (single-hash fingerprint with Hamming distance) and **MinHash + LSH** (set-based Jaccard estimation with locality-sensitive hashing).

@@ -200,7 +200,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **Acceptance Criteria:**
 - `resembl stats` displays the total number of snippets, average snippet size, vocabulary size, and average in-dataset similarity.
-- The output can be formatted as JSON with `--json`.
+- The output can be formatted as JSON with `--format json`.
 
 ---
 

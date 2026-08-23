@@ -1,7 +1,8 @@
 # ADR 004: Database-Backed LSH Index
 
 ## Status
-Accepted
+
+Accepted (2026-08-11)
 
 ## Context
 ADR 001 chose MinHash + LSH via `datasketch` and noted "the LSH index must be
@@ -25,7 +26,8 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
 
 - A `lsh_bucket` table holds one row per (band, bucket, checksum) triple —
   the bucket key being the canonical big-endian uint32 encoding of each band
-  of hash values, computed directly from the packed fingerprint bytes.
+  of hash values, computed directly from the packed fingerprint bytes and
+  stored as fixed-width lowercase hex (20 bytes -> 40 chars).
 - A single-row `lsh_meta` table records the `(threshold, num_perm)` the index
   was built with; a mismatch (or absence) triggers a rebuild.
 - Banding parameters are still derived with datasketch's `_optimal_param`,
@@ -67,10 +69,15 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
 ## Consequences
 - The `lsh_bucket` / `lsh_meta` tables are created automatically via the
   ORM metadata (`db_create`, `table_ensure`).
-- Legacy pickle cache files (pre-ADR-004) still load transparently and
-  migrate to the database-backed index on the next write operation.
-- The index SQL is dialect-aware: SQLite uses `INSERT OR IGNORE`, PostgreSQL
-  uses `ON CONFLICT DO NOTHING`.
+- Legacy pickle cache files (pre-ADR-004) are no longer loaded: unpickling a
+  planted cache file is arbitrary code execution and the cache directory is
+  not a trust boundary.  Stale files are ignored and removed on the next
+  write operation instead; the index rebuilds from the database (see
+  `cache.py`).  This revokes this ADR's original "load transparently and
+  migrate" behavior.
+- The index SQL is dialect-aware: SQLite uses `INSERT OR IGNORE`,
+  PostgreSQL/DuckDB use `ON CONFLICT DO NOTHING`, and MySQL/MariaDB use
+  `INSERT IGNORE`.
 - `reindex --jobs N` recomputes fingerprints in a process pool (~5× faster
   with 8 workers), since the CPU-bound tokenization was the last sequential
   bottleneck.  On SQLite it commits periodically (bounded WAL) and clears

@@ -1,7 +1,8 @@
 # ADR 002: SQLite as Default Storage Backend
 
 ## Status
-Accepted
+
+Accepted (2026-08-11)
 
 ## Context
 resembl needs a persistent store for snippets and their MinHash fingerprints. Options considered: flat JSON files, SQLite, PostgreSQL.
