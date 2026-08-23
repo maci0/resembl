@@ -1,8 +1,10 @@
 """Tests for collections, versioning, merge, tags, search, and config dict-compat."""
 
+import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -662,6 +664,138 @@ class TestModelMethods(BaseDBTest):
         self.assertEqual(len(versions), 2)
         # Newest first
         self.assertEqual(versions[0].code, "v2")
+
+
+class TestDBMergeFailure(unittest.TestCase):
+    """Error paths of ``db_merge``: partial state stays usable and healable."""
+
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:")
+        SQLModel.metadata.create_all(self.engine)
+        self.session = Session(self.engine)
+
+    def tearDown(self):
+        self.session.close()
+        SQLModel.metadata.drop_all(self.engine)
+
+    def _raw_row(self, i: int) -> dict:
+        """Build one raw source row dict (no lexing — cheap at 5000+ rows)."""
+        from resembl.minhash import MinHash
+        from resembl.scoring import minhash_pack
+
+        return {
+            "checksum": f"{i:064x}",
+            "names": json.dumps([f"snippet_{i}"]),
+            "code": f"MOV EAX, {i}",
+            "minhash": minhash_pack(MinHash(num_perm=128)),
+        }
+
+    def _create_raw_source_db(self, rows) -> str:
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        engine = create_engine(f"sqlite:///{tmp.name}")
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as src_session:
+            for kwargs in rows:
+                src_session.add(Snippet(**kwargs))
+            src_session.commit()
+        engine.dispose()
+        return tmp.name
+
+    def test_merge_failure_rolls_back_and_clears_stamps(self):
+        """A crash between committed chunks leaves a usable, healable database.
+
+        ``flush_new_rows`` commits each filled chunk, so a failure midway
+        strands earlier chunks in the destination.  The error handler must
+        roll back the aborted transaction (the caller's session keeps
+        working) and clear the fingerprint stamps whenever rows landed:
+        the copied blobs may be foreign-format, and an unchanged stamp
+        would vouch for them — every later find would skip those snippets
+        as stale instead of healing them with one reindex.
+        """
+        from sqlmodel import func
+
+        from resembl.lsh import (
+            fingerprint_ngram_get,
+            fingerprint_ngram_set,
+            fingerprint_perm_set,
+            fingerprint_version_get,
+            fingerprint_version_set,
+        )
+        from resembl.models import FINGERPRINT_VERSION
+
+        rows = [self._raw_row(i) for i in range(5001)]
+        source_path = self._create_raw_source_db(rows)
+        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
+        fingerprint_ngram_set(self.session, 3)
+        fingerprint_perm_set(self.session, 128)
+
+        import resembl.core as core_mod
+
+        real_insert = core_mod._insert_snippet_rows
+        calls = {"n": 0}
+
+        def flaky_insert(session, insert_rows, batch_size=500):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("simulated disk full")
+            real_insert(session, insert_rows, batch_size)
+
+        try:
+            with patch.object(core_mod, "_insert_snippet_rows", side_effect=flaky_insert):
+                result = db_merge(self.session, source_path)
+            self.assertIn("error", result)
+            # The first chunk (merge_flush_size rows) was committed before
+            # the failure; it must still be readable through this session.
+            count = self.session.exec(select(func.count(Snippet.checksum))).one()
+            self.assertEqual(count, 5000)
+            # Rows landed, so the stamps must have been cleared: the next
+            # find reindexes once over the partial merge.
+            self.assertIsNone(fingerprint_version_get(self.session))
+            self.assertIsNone(fingerprint_ngram_get(self.session))
+        finally:
+            os.unlink(source_path)
+
+    def test_merge_skips_corrupt_metadata_rows(self):
+        """Source rows whose names/tags are not JSON arrays are skipped.
+
+        The columns are copied verbatim into the destination; one poisoned
+        row would otherwise crash every later read of the merged snippet
+        (and abort future merges touching it) with a raw JSONDecodeError.
+        """
+        good = self._raw_row(1)
+        bad_names = self._raw_row(2)
+        bad_names["names"] = "not json"
+        bad_tags = self._raw_row(3)
+        bad_tags["tags"] = "{nope"
+        source_path = self._create_raw_source_db([good, bad_names, bad_tags])
+
+        # A local row sharing the corrupt-names checksum exercises the
+        # existing-row branch of the merge as well as the new-row one.
+        self.session.add(
+            Snippet(
+                checksum=f"{2:064x}",
+                names=json.dumps(["local_2"]),
+                code="MOV EAX, 999",
+                minhash=self._raw_row(2)["minhash"],
+            )
+        )
+        self.session.commit()
+        try:
+            result = db_merge(self.session, source_path)
+            self.assertEqual(result["added"], 1)
+            self.assertEqual(result["skipped"], 2)
+            # Every stored names column still parses: reads cannot crash
+            # on metadata, and the pre-existing row kept its own names.
+            stored = {
+                checksum: json.loads(names)
+                for checksum, names in self.session.exec(
+                    select(Snippet.checksum, Snippet.names)
+                ).all()
+            }
+            self.assertIn("local_2", stored[f"{2:064x}"])
+        finally:
+            os.unlink(source_path)
 
 
 if __name__ == "__main__":

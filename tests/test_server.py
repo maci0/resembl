@@ -298,6 +298,33 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("engine", created)
         self.assertEqual(created["engine"].pool.checkedin(), 0)
 
+    def test_serve_failed_migration_reindex_raises_and_disposes(self):
+        """A migration reindex that reports failure fails the serve startup.
+
+        ``db_reindex`` signals "could not run" through its result dict;
+        ignoring it let serve start anyway, and the index build below then
+        stamped the unmigrated fingerprints as current — serving silently
+        wrong (empty) results forever.  The startup must raise instead,
+        releasing the engine like any other warm-up failure.
+        """
+        import resembl.database as db_mod
+        from resembl.core import IndexBuildError
+        from resembl.server import serve as serve_start
+
+        capturing_create, created = _capturing_create()
+
+        with patch.object(db_mod, "create_db_engine", capturing_create):
+            with patch("resembl.core.fingerprints_need_reindex", return_value=True):
+                with patch(
+                    "resembl.server.db_reindex",
+                    return_value={"error": "could not clear the index (locked)"},
+                ):
+                    with self.assertRaises(IndexBuildError) as ctx:
+                        serve_start(f"sqlite:///{self._db}", port=0)
+        self.assertIn("could not clear the index (locked)", str(ctx.exception))
+        self.assertIn("engine", created)
+        self.assertEqual(created["engine"].pool.checkedin(), 0)
+
     def test_server_rejects_oversized_body(self):
         """A Content-Length above the cap is refused without reading the body.
 

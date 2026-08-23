@@ -153,6 +153,30 @@ class TestFindMatchesEmpty(BaseDBTest):
             with self.assertRaises(IndexBuildError):
                 snippet_find_matches(self.session, "MOV EAX, 1", top_n=5)
 
+    def test_find_failed_migration_reindex_raises(self):
+        """A failed migration reindex raises instead of indexing stale blobs.
+
+        ``db_reindex`` signals failure through its result dict (e.g. its
+        index clear lost the race for the database lock).  Ignoring the
+        signal let ``find`` continue: the subsequent build indexed the
+        stale fingerprints and stamped them current, permanently masking
+        the pending migration.
+        """
+        from unittest.mock import patch
+
+        from resembl.core import IndexBuildError
+
+        # Fresh in-memory database: no version stamp, so a migration
+        # reindex is always required on the first find.
+        with patch(
+            "resembl.core.db_reindex",
+            return_value={"error": "could not clear the index (locked)"},
+        ) as mock:
+            with self.assertRaises(IndexBuildError) as ctx:
+                snippet_find_matches(self.session, "MOV EAX, 1", top_n=5)
+        mock.assert_called_once()
+        self.assertIn("could not clear the index (locked)", str(ctx.exception))
+
 
 # ---------------------------------------------------------------------------
 # snippet_export_yara — covers lines 544-580

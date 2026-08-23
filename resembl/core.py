@@ -282,6 +282,23 @@ def _snippets_by_checksums(session: Session, checksums: list[str]) -> dict[str, 
     return result
 
 
+def _string_list_or_none(raw: str | None) -> list[str] | None:
+    """Parse a stored JSON string-list column (names/tags).
+
+    Returns ``None`` for anything that is not a JSON array: merge sources
+    are untrusted, and one row with corrupt metadata must neither abort the
+    whole merge nor poison the destination (a bad ``names`` value would
+    crash every later read of the snippet).
+    """
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    return value if isinstance(value, list) else None
+
+
 def _snippet_minhashes_by_checksums(session: Session, checksums: list[str]) -> dict[str, bytes]:
     """Fetch only ``(checksum, minhash)`` pairs for many checksums.
 
@@ -610,13 +627,19 @@ def snippet_find_matches(
         num_snippets = session.exec(
             select(func.count(Snippet.checksum))  # type: ignore[arg-type]
         ).one()
-        db_reindex(
+        reindex_result = db_reindex(
             session,
             ngram_size=ngram_size,
             jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
             num_perm=num_permutations,
             progress=progress,
         )
+        if "error" in reindex_result:
+            # The migration could not run (e.g. another process holds the
+            # index lock).  Proceeding would index the *stale* fingerprints
+            # and stamp them as current, silently hiding the pending
+            # migration forever; report it like the failed build it is.
+            raise IndexBuildError(reindex_result["error"])
 
     lsh = lsh_cache_load(session, threshold, num_permutations)
     if not lsh:
@@ -992,6 +1015,10 @@ def db_reindex(
                 exc,
                 exc_info=True,
             )
+            # Abort the transaction a failed flush/commit left behind, or
+            # every statement of the sequential retry dies with
+            # PendingRollbackError instead of the original work redoing.
+            session.rollback()
             reindexed = 0
             batches_since_commit = 0
             for batch in Snippet.iter_batches(session, batch_size):
@@ -1619,6 +1646,8 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     - New snippets (unique checksum) are inserted.
     - Existing snippets gain any new names and tags from the source.
     - Collections from the source are created if they don't exist.
+    - Source rows with corrupt names/tags metadata (not a JSON array) are
+      skipped with a warning, like rows with unusable fingerprints.
 
     Returns a dict with counts of added, updated, and skipped snippets.
     """
@@ -1685,6 +1714,19 @@ def db_merge(session: Session, source_db_path: str) -> dict:
 
         def record_new(src_snippet: Snippet) -> None:
             nonlocal added, skipped
+            # The names/tags columns are copied verbatim, so unreadable
+            # metadata must be rejected before it poisons the destination
+            # (every later read of the row would crash parsing it).
+            if (
+                _string_list_or_none(src_snippet.names) is None
+                or _string_list_or_none(src_snippet.tags) is None
+            ):
+                logger.warning(
+                    "Skipping source snippet %s: corrupt names/tags metadata.",
+                    src_snippet.checksum,
+                )
+                skipped += 1
+                return
             try:
                 packed = minhash_ensure_packed(src_snippet.minhash)
             except ValueError:
@@ -1734,6 +1776,18 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     # treat as new, matching the old fallback.
                     record_new(src_snippet)
                     continue
+                src_names = _string_list_or_none(src_snippet.names)
+                src_tags = _string_list_or_none(src_snippet.tags)
+                if src_names is None or src_tags is None:
+                    # Same corrupt-metadata rule as ``record_new``: skip the
+                    # source row (with a warning) instead of letting one bad
+                    # JSON column abort the whole merge.
+                    logger.warning(
+                        "Skipping source snippet %s: corrupt names/tags metadata.",
+                        src_snippet.checksum,
+                    )
+                    skipped += 1
+                    continue
                 changed = False
 
                 # Merge names and tags order-preservingly: existing entries
@@ -1743,14 +1797,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 # ``snippet_add_batch``'s alias merge; a sorted union would
                 # silently reassign the primary name on every merge.
                 existing_names = existing.name_list
-                merged_names = list(dict.fromkeys(existing_names + src_snippet.name_list))
+                merged_names = list(dict.fromkeys(existing_names + src_names))
                 if merged_names != existing_names:
                     existing.names = json.dumps(merged_names)
                     changed = True
 
                 # Merge tags (independent of names)
                 existing_tags = existing.tag_list
-                merged_tags = list(dict.fromkeys(existing_tags + src_snippet.tag_list))
+                merged_tags = list(dict.fromkeys(existing_tags + src_tags))
                 if merged_tags != existing_tags:
                     existing.tags = json.dumps(merged_tags)
                     changed = True
@@ -1792,6 +1846,18 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             fingerprint_perm_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e, exc_info=True)
+        # Chunks already through ``flush_new_rows`` are committed (it commits
+        # as each chunk fills), so a failure can leave a partial merge behind.
+        # End the aborted transaction so the caller's session stays usable,
+        # and when any source rows landed, clear the fingerprint stamps: the
+        # copied blobs may be foreign-format, and an unchanged stamp would
+        # vouch for them — every later find would skip those snippets as
+        # stale instead of healing them with one reindex.
+        session.rollback()
+        if added:
+            fingerprint_version_clear(session)
+            fingerprint_ngram_clear(session)
+            fingerprint_perm_clear(session)
         return {"error": str(e)}
     finally:
         source_session.close()

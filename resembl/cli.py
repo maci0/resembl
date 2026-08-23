@@ -415,7 +415,9 @@ def serve(
     _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
     try:
         httpd = serve_start(db_url, host=host, port=port)
-    except ValueError as e:
+    except (ValueError, IndexBuildError) as e:
+        # ValueError: another serve process already owns this database;
+        # IndexBuildError: the warm-up migration/index build failed.
         err_console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
     except OSError as e:
@@ -842,6 +844,10 @@ def import_cmd(
                 exc,
                 exc_info=True,
             )
+            # A failed flush aborts the session's transaction; roll it back
+            # or every write of the sequential redo fails with
+            # PendingRollbackError instead of redoing the work.
+            state.session.rollback()
             # Redo every file sequentially, exactly as the pool run would
             # have (inserts dedupe on checksum): reset the flushed counters
             # too, or already-flushed chunks are counted twice.

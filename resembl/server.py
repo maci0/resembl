@@ -36,6 +36,7 @@ from .cache import cache_dir_get, lsh_index_build
 from .config import ResemblConfig
 from .core import (
     LSH_THRESHOLD,
+    IndexBuildError,
     db_reindex,
     snippet_find_matches,
     snippet_matches_payload,
@@ -465,12 +466,18 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
                 num_snippets = session.exec(
                     select(func.count(Snippet.checksum))  # type: ignore[arg-type]
                 ).one()
-                db_reindex(
+                reindex_result = db_reindex(
                     session,
                     jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
                     ngram_size=cfg.ngram_size,
                     num_perm=cfg.num_permutations,
                 )
+                if "error" in reindex_result:
+                    # Serving over the unmigrated fingerprints would let the
+                    # index build below restamp them as current, silently
+                    # masking the migration; fail the startup instead (the
+                    # BaseException handler above disposes the engine).
+                    raise IndexBuildError(reindex_result["error"])
             # Build the index only if it is missing or was built with different
             # parameters — rebuilding an already-current index on every restart
             # would make serve startup pay the full build (~2 min at 500k) each
