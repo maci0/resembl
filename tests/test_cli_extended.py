@@ -56,6 +56,50 @@ class TestCLIFindBatch(BaseCLITest):
             if os.path.exists(queries_file):
                 os.remove(queries_file)
 
+    def test_find_batch_renders_per_query_server_errors(self):
+        """A per-query server error entry renders instead of crashing the batch.
+
+        The server isolates one failing query as ``{"query": ..., "error":
+        ...}``; table mode used to crash with KeyError('lsh_candidates') on
+        such entries and csv mode with a DictWriter field mismatch, turning
+        one isolated failure into a lost whole-batch result.
+        """
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        import resembl.cli as cli
+
+        results = [
+            {
+                "query": "MOV EAX, 1\n RET",
+                "lsh_candidates": 3,
+                "matches": [{"checksum": "a" * 64, "names": ["f1"], "score": 91.0}],
+            },
+            {"query": "bad query", "error": "boom: internal failure"},
+        ]
+        for fmt in ("table", "csv", "json"):
+            with self.subTest(format=fmt):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                saved = (cli.state.format, cli.state.quiet)
+                cli.state.format, cli.state.quiet = fmt, False
+                try:
+                    with patch.object(cli, "_find_batch_via_server", return_value=results):
+                        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                            cli.find_batch(
+                                file=io.StringIO("MOV EAX, 1; RET\n"), top_n=None, threshold=None
+                            )
+                finally:
+                    cli.state.format, cli.state.quiet = saved
+                self.assertIn("bad query", stdout.getvalue())
+                self.assertIn("f1", stdout.getvalue())
+                if fmt == "table":
+                    # The isolated failure surfaces on stderr, visibly.
+                    self.assertIn("boom: internal failure", stderr.getvalue())
+                if fmt == "csv":
+                    # The heterogeneous rows render under a union header.
+                    self.assertTrue(stdout.getvalue().splitlines()[0].endswith(",error"))
+
 
 class TestCLICollections(BaseCLITest):
     """Integration tests for the collection command group."""

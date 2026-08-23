@@ -255,6 +255,41 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("engine", created)
         self.assertEqual(created["engine"].pool.checkedin(), 0)
 
+    def test_serve_warmup_failure_disposes_engine(self):
+        """A failed startup warm-up releases the engine instead of leaking it.
+
+        ``serve`` reindexes and builds the index between creating the engine
+        and binding the HTTP port; a failure there must not pin the pool's
+        SQLite handles in a process that keeps running after serve raises
+        (embedded callers, test harnesses).
+        """
+        from unittest.mock import patch
+
+        import resembl.database as db_mod
+        from resembl.server import serve as serve_start
+
+        real_create = db_mod.create_db_engine
+        created: dict = {}
+
+        def capturing_create(url, **kwargs):
+            engine = real_create(url, **kwargs)
+            created["engine"] = engine
+            return engine
+
+        with patch.object(db_mod, "create_db_engine", capturing_create):
+            # fingerprints_need_reindex is imported inside serve(), so the
+            # patch must target resembl.core; db_reindex is a module-level
+            # import in server.py.
+            with patch("resembl.core.fingerprints_need_reindex", return_value=True):
+                with patch(
+                    "resembl.server.db_reindex",
+                    side_effect=RuntimeError("warm-up blew up"),
+                ):
+                    with self.assertRaises(RuntimeError):
+                        serve_start(f"sqlite:///{self._db}", port=0)
+        self.assertIn("engine", created)
+        self.assertEqual(created["engine"].pool.checkedin(), 0)
+
     def test_server_rejects_oversized_body(self):
         """A Content-Length above the cap is refused without reading the body.
 

@@ -789,23 +789,34 @@ def _yara_string_escape(text: str) -> str:
 
 def snippet_export_yara(session: Session, output_file: str) -> dict:
     """Export snippets as YARA string matching rules."""
+    import tempfile
+
     start_time = time.monotonic()
     num_exported = 0
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        for snippet in Snippet.stream_all(session):
-            primary_name = _snippet_primary_name(snippet)
-            rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
-            # A name may be empty (e.g. added with an empty alias) — index
-            # would crash; prefix instead, as for names starting with a digit.
-            if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
-                rule_name = "r_" + rule_name
-            rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
+    # Stream into a same-directory temp and publish with one atomic rename
+    # (same pattern as ``config.save_config``): a failure mid-export (disk
+    # full, permissions) must not leave a truncated, uncompilable rule file
+    # at the requested path looking like a complete artifact.  A previously
+    # exported file there also stays intact instead of being truncated.
+    fd, tmp_path = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(output_file)), suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for snippet in Snippet.stream_all(session):
+                primary_name = _snippet_primary_name(snippet)
+                rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
+                # A name may be empty (e.g. added with an empty alias) — index
+                # would crash; prefix instead, as for names starting with a digit.
+                if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
+                    rule_name = "r_" + rule_name
+                rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
 
-            name_escaped = _yara_string_escape(primary_name)
-            code_escaped = _yara_string_escape(snippet.code)
+                name_escaped = _yara_string_escape(primary_name)
+                code_escaped = _yara_string_escape(snippet.code)
 
-            yara_rule = f"""rule {rule_name} {{
+                yara_rule = f"""rule {rule_name} {{
     meta:
         description = "Resembl exported snippet: {name_escaped}"
         checksum = "{snippet.checksum}"
@@ -816,8 +827,16 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
 }}
 
 """
-            f.write(yara_rule)
-            num_exported += 1
+                f.write(yara_rule)
+                num_exported += 1
+        os.replace(tmp_path, output_file)
+    except BaseException:
+        # The half-written temp must not outlive a failed export.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     end_time = time.monotonic()
     time_elapsed = end_time - start_time
@@ -959,12 +978,18 @@ def db_reindex(
                 while in_flight:
                     pending_batch, future = in_flight.popleft()
                     apply_batch(pending_batch, future.result())
-        except Exception:
+        except Exception as exc:
             # Pool unavailable (e.g. spawned from a stdin script) — redo the
             # work sequentially; correctness must never depend on the pool.
             # Re-applying identical fingerprints is idempotent, so reset the
-            # counter and process every batch again.
-            logger.warning("Process pool unavailable; reindexing sequentially.")
+            # counter and process every batch again.  The triggering failure
+            # (pool startup or a mid-run worker/DB error) is logged with its
+            # traceback instead of being swallowed by the fixed message.
+            logger.warning(
+                "Parallel reindex failed (%s); retrying sequentially.",
+                exc,
+                exc_info=True,
+            )
             reindexed = 0
             batches_since_commit = 0
             for batch in Snippet.iter_batches(session, batch_size):

@@ -20,6 +20,7 @@ import atexit
 import functools
 import hashlib
 import json
+import logging
 import os
 import socket
 import sys
@@ -39,6 +40,8 @@ from .core import (
     snippet_find_matches,
     snippet_matches_payload,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Version-guarded result cache: key -> (db_version, payload).  SQLite's
 #: ``PRAGMA data_version`` increments on every commit, so a cached result is
@@ -269,6 +272,10 @@ class _FindHandler(BaseHTTPRequestHandler):
             with Session(self.engine) as session:
                 payload = _find_one(session, body, query, self.find_defaults)
         except Exception as exc:  # pragma: no cover - defensive
+            # A long-lived serve process prints nothing per request (see
+            # ``log_message``): without this record, 500s are completely
+            # unobserved and an on-call operator has no trace to debug.
+            logger.exception("POST %s failed", self.path)
             self._respond(500, {"error": str(exc)})
             return
         self._respond(200, payload)
@@ -291,10 +298,12 @@ class _FindHandler(BaseHTTPRequestHandler):
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
                         )
                     except Exception as exc:  # isolate per-query failures
+                        logger.warning("find-batch query %.200r failed: %s", query, exc)
                         results.append({"query": query, "error": str(exc)})
         except Exception as exc:
             # Malformed container or session/pool failure — answer 500 rather
             # than dropping the connection with a handler-thread traceback.
+            logger.exception("POST %s failed", self.path)
             self._respond(500, {"error": str(exc)})
             return
         self._respond(200, {"results": results})
@@ -308,7 +317,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def log_message(
-        self, format: str, *args: Any  # noqa: A002  # pylint: disable=redefined-builtin
+        self,
+        format: str,  # noqa: A002  # pylint: disable=redefined-builtin
+        *args: Any,
     ) -> None:
         # Quiet by default; the CLI prints its own status line.
         return
@@ -410,52 +421,61 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # timing requests out after 30s.  SQLite in WAL mode handles many
     # concurrent readers fine.
     engine = create_db_engine(db_url, pool_size=32, max_overflow=64)
-    with Session(engine) as session:
-        # Honor the CLI config: the server answers with the same threshold /
-        # permutation count as in-process find, so clients using the same
-        # config get warm cache hits instead of per-request rebuilds.  The
-        # values are carried on the server *instance* (like ``engine``):
-        # module globals would leak into any older server still serving
-        # another database in this process.
-        from .config import load_config
+    try:
+        with Session(engine) as session:
+            # Honor the CLI config: the server answers with the same threshold /
+            # permutation count as in-process find, so clients using the same
+            # config get warm cache hits instead of per-request rebuilds.  The
+            # values are carried on the server *instance* (like ``engine``):
+            # module globals would leak into any older server still serving
+            # another database in this process.
+            from .config import load_config
 
-        cfg = load_config()
-        find_defaults = ResemblConfig(
-            lsh_threshold=cfg.lsh_threshold,
-            top_n=cfg.top_n,
-            num_permutations=cfg.num_permutations,
-            ngram_size=cfg.ngram_size,
-            jaccard_weight=cfg.jaccard_weight,
-        )
-
-        # One-time migration + index build, before any request is served.
-        # The migration worker count scales with the database (spawning a
-        # worker per CPU for a small database costs more than the work).
-        from .core import adaptive_worker_count, fingerprints_need_reindex
-
-        if fingerprints_need_reindex(session, cfg.ngram_size, cfg.num_permutations):
-            from sqlmodel import func, select
-
-            from .models import Snippet
-
-            num_snippets = session.exec(
-                select(func.count(Snippet.checksum))  # type: ignore[arg-type]
-            ).one()
-            db_reindex(
-                session,
-                jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+            cfg = load_config()
+            find_defaults = ResemblConfig(
+                lsh_threshold=cfg.lsh_threshold,
+                top_n=cfg.top_n,
+                num_permutations=cfg.num_permutations,
                 ngram_size=cfg.ngram_size,
-                num_perm=cfg.num_permutations,
+                jaccard_weight=cfg.jaccard_weight,
             )
-        # Build the index only if it is missing or was built with different
-        # parameters — rebuilding an already-current index on every restart
-        # would make serve startup pay the full build (~2 min at 500k) each
-        # time, which bites under process managers that restart often.
-        from .lsh import lsh_meta_get, lsh_meta_matches
 
-        meta = lsh_meta_get(session)
-        if not lsh_meta_matches(meta, cfg.lsh_threshold, cfg.num_permutations):
-            lsh_index_build(session, cfg.lsh_threshold, cfg.num_permutations)
+            # One-time migration + index build, before any request is served.
+            # The migration worker count scales with the database (spawning a
+            # worker per CPU for a small database costs more than the work).
+            from .core import adaptive_worker_count, fingerprints_need_reindex
+
+            if fingerprints_need_reindex(session, cfg.ngram_size, cfg.num_permutations):
+                from sqlmodel import func, select
+
+                from .models import Snippet
+
+                num_snippets = session.exec(
+                    select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+                ).one()
+                db_reindex(
+                    session,
+                    jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
+                    ngram_size=cfg.ngram_size,
+                    num_perm=cfg.num_permutations,
+                )
+            # Build the index only if it is missing or was built with different
+            # parameters — rebuilding an already-current index on every restart
+            # would make serve startup pay the full build (~2 min at 500k) each
+            # time, which bites under process managers that restart often.
+            from .lsh import lsh_meta_get, lsh_meta_matches
+
+            meta = lsh_meta_get(session)
+            if not lsh_meta_matches(meta, cfg.lsh_threshold, cfg.num_permutations):
+                lsh_index_build(session, cfg.lsh_threshold, cfg.num_permutations)
+    except BaseException:
+        # A warm-up failure (e.g. a database error during the migration
+        # reindex or index build) must not leak the engine either: it holds
+        # up to pool_size + max_overflow SQLite handles once warmed, and this
+        # process keeps running (embedded callers, test harnesses) after
+        # serve raises.  Same contract as the bind-failure dispose below.
+        engine.dispose()
+        raise
 
     # A failed bind (port already in use) must not leak the engine: it holds
     # up to pool_size + max_overflow SQLite handles once warmed, and this

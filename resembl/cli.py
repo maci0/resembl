@@ -168,7 +168,11 @@ def _echo_format(data: object) -> None:
             for row in data:
                 if "names" in row and isinstance(row["names"], list):
                     row["names"] = ", ".join(row["names"])
-            writer = csv.DictWriter(sys.stdout, fieldnames=data[0].keys())
+            # Rows may carry heterogeneous keys (e.g. one failed query in a
+            # server-side find-batch gains an "error" column): a first-row-
+            # only header made DictWriter raise on the differing rows.
+            fieldnames = list(dict.fromkeys(k for row in data for k in row))
+            writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(data)
         elif isinstance(data, dict):
@@ -836,8 +840,17 @@ def import_cmd(
                         console=err_console,
                     ):
                         handle_prepared(future.result())
-        except Exception:
-            logger.warning("Process pool unavailable; falling back to in-process import.")
+        except Exception as exc:
+            # The pool may be unavailable (e.g. spawned from a stdin script)
+            # or a worker/flush may have failed mid-run; either way the
+            # original failure must reach the log, not vanish behind a
+            # generic fallback message.
+            logger.warning(
+                "Parallel import preparation failed (%s); "
+                "falling back to in-process preparation.",
+                exc,
+                exc_info=True,
+            )
             # Redo every file sequentially, exactly as the pool run would
             # have (inserts dedupe on checksum): reset the flushed counters
             # too, or already-flushed chunks are counted twice.
@@ -1282,7 +1295,13 @@ def find_batch(
     else:
         for i, result in enumerate(results, 1):
             _echo(f"[bold]{i}. {result['query']}[/bold]")
-            _render_find_payload(result)
+            if "error" in result:
+                # A per-query server-side failure (isolated by /find-batch)
+                # must render as that query's error, not crash the whole
+                # batch on the missing payload keys.
+                err_console.print(f"[red]Error:[/red] {result['error']}")
+            else:
+                _render_find_payload(result)
             _echo("")
 
 
