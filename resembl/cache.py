@@ -43,7 +43,13 @@ logger = logging.getLogger(__name__)
 DEFAULT_CACHE_DIR = "~/.cache/resembl"
 
 #: Rows buffered per band before a sorted bulk insert during index builds.
-_BAND_CHUNK = 100_000
+#: Every snippet contributes one row to *every* band, so all bands fill
+#: uniformly and peak buffering is ``b * _BAND_CHUNK`` pairs — ~150 MiB at
+#: the default threshold / 128 permutations (b = 25), vs ~600 MiB at the
+#: previous 100k.  Throughput is unaffected: each flush still issues one
+#: large executemany per band, and sorting more, smaller runs costs no
+#: more comparisons overall than fewer big ones.
+_BAND_CHUNK = 25_000
 
 #: Number of snippets fetched per keyset query during an index build.  Kept
 #: modest so the buffered row dicts stay bounded regardless of band count.

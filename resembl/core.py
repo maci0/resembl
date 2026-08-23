@@ -660,8 +660,15 @@ def snippet_find_matches(
     normalized: list[bytes] = []
     valid_keys: list[str] = []
     for k in keys:
+        # A stale bucket row may reference a snippet deleted between the
+        # index query and this fetch (same race the full-row pass below
+        # tolerates); skipping it keeps the query alive until the index
+        # catches up.
+        blob_or_none = minhashes.get(k)
+        if blob_or_none is None:
+            continue
         try:
-            blob = minhash_ensure_packed(minhashes[k])
+            blob = minhash_ensure_packed(blob_or_none)
             if minhash_num_perm(blob) != num_permutations:
                 logger.warning("Skipping candidate %s: stale fingerprint permutation count.", k)
                 continue
@@ -1102,7 +1109,7 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
 
     import numpy as np
 
-    values = np.frombuffer(b"".join(blob[8:] for blob in blobs), dtype=">u4").reshape(
+    values = np.frombuffer(b"".join([blob[8:] for blob in blobs]), dtype=">u4").reshape(
         num_snippets, num_perm
     )
     total_similarity = 0.0
