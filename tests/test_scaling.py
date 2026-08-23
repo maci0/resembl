@@ -668,9 +668,9 @@ class TestResemblLSH(BaseScalingTest):
 
         from datasketch.lsh import _optimal_param as _real_optimal_param
 
-        from resembl.lsh import ResemblLSH, _banding_params
+        from resembl.lsh import ResemblLSH, banding_params
 
-        _banding_params.cache_clear()  # deterministic: cache may be warm from other tests
+        banding_params.cache_clear()  # deterministic: cache may be warm from other tests
         # The lazy import resolves the name from datasketch.lsh at call time,
         # so patch there.
         with patch("datasketch.lsh._optimal_param", side_effect=_real_optimal_param) as mock:
@@ -679,7 +679,7 @@ class TestResemblLSH(BaseScalingTest):
             self.assertEqual((r1.b, r1.r), (r2.b, r2.r))
             self.assertEqual(mock.call_count, 1)  # second construction is a cache hit
         # Different parameters compute a different banding.
-        b3, r3 = _banding_params(0.8, NUM_PERMUTATIONS)
+        b3, r3 = banding_params(0.8, NUM_PERMUTATIONS)
         self.assertNotEqual((b3, r3), (r1.b, r1.r))
 
     def test_insert_query_with_minhash_object(self):

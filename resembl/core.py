@@ -37,7 +37,7 @@ from .cache import (
     lsh_index_remove,
 )
 from .lsh import (
-    _banding_params,
+    banding_params,
     fingerprint_ngram_clear,
     fingerprint_ngram_get,
     fingerprint_ngram_set,
@@ -1367,7 +1367,7 @@ def db_verify(session: Session) -> dict:
         warnings.append("no LSH index — the next `find` builds it")
     else:
         threshold, num_perm = meta
-        b, _r = _banding_params(threshold, num_perm)
+        b, _r = banding_params(threshold, num_perm)
         expected_buckets = num_snippets * b
         try:
             # Count only band 0: every snippet contributes exactly one row

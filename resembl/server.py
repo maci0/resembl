@@ -103,11 +103,11 @@ def _find_one(
     # Unbounded, a script cycling values grows the warm server without
     # limit (and a single absurd value tries a multi-GB allocation).
     # The cap is the same one used to validate stored blobs
-    # (``scoring._MAX_NUM_PERM``, "real configurations use 64-128").
-    from .scoring import _MAX_NUM_PERM
+    # (``scoring.MAX_NUM_PERM``, "real configurations use 64-128").
+    from .scoring import MAX_NUM_PERM
 
-    if not 2 <= num_permutations <= _MAX_NUM_PERM:
-        return {"error": f"num_permutations must be between 2 and {_MAX_NUM_PERM}"}
+    if not 2 <= num_permutations <= MAX_NUM_PERM:
+        return {"error": f"num_permutations must be between 2 and {MAX_NUM_PERM}"}
     # Same degenerate-fingerprint guard as the CLI's find validation: an
     # ``ngram_size`` below 1 does not crash, it silently makes every snippet
     # match every other one (all shingles collapse to the empty token tuple).
@@ -137,11 +137,11 @@ def _find_one(
     # bands, and an unbuildable one would make the find return zero matches
     # silently.  (The thin client cannot run the scipy banding check without
     # losing its ~50 ms startup, so the server is the right place.)
-    from .lsh import _banding_params
+    from .lsh import banding_params
 
     effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
     try:
-        bands, _ = _banding_params(effective_threshold, num_permutations)
+        bands, _ = banding_params(effective_threshold, num_permutations)
     except ValueError:
         bands = 1
     if bands < 2:

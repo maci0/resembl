@@ -412,21 +412,21 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
     if not 0.0 <= threshold < 0.99:
         err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
         raise typer.Exit(code=1)
-    from .scoring import _MAX_NUM_PERM
+    from .scoring import MAX_NUM_PERM
 
-    if not 2 <= num_perm <= _MAX_NUM_PERM:
+    if not 2 <= num_perm <= MAX_NUM_PERM:
         err_console.print(
-            f"[red]Error:[/red] num_permutations must be between 2 and {_MAX_NUM_PERM} "
+            f"[red]Error:[/red] num_permutations must be between 2 and {MAX_NUM_PERM} "
             f"(got {num_perm})."
         )
         raise typer.Exit(code=1)
     if ngram_size < 1:
         err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
         raise typer.Exit(code=1)
-    from .lsh import _banding_params
+    from .lsh import banding_params
 
     try:
-        bands, _ = _banding_params(threshold, num_perm)
+        bands, _ = banding_params(threshold, num_perm)
     except ValueError:
         bands = 1
     if bands < 2:

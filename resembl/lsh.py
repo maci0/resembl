@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=64)
-def _banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
+def banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     """Return the ``(b, r)`` banding for a ``(threshold, num_perm)`` pair.
 
     The banding is a pure function of its inputs, but datasketch's
@@ -513,8 +513,8 @@ class ResemblLSH:
         self.session = session
         self.num_perm = num_perm
         # Same banding optimization as datasketch's MinHashLSH (cached — see
-        # ``_banding_params``; the raw computation is a ~13 ms scipy integral).
-        self.b, self.r = _banding_params(threshold, num_perm)
+        # ``banding_params``; the raw computation is a ~13 ms scipy integral).
+        self.b, self.r = banding_params(threshold, num_perm)
         if self.b < 2:
             raise ValueError("The number of bands are too small (b < 2)")
         _ensure_tables_once(session)

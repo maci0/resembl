@@ -47,7 +47,7 @@ MINHASH_MAGIC = b"RMLH"
 #: fingerprint.  Real configurations use 64–128; anything near this limit is
 #: corrupt or hostile.  The bound also keeps ``struct`` format strings and
 #: ``MinHash`` allocations sane on malformed input.
-_MAX_NUM_PERM = 1 << 12
+MAX_NUM_PERM = 1 << 12
 
 #: Cached MinHash templates keyed by num_perm, used to skip datasketch's
 #: per-construction permutation regeneration (~260 µs — the dominant cost of
@@ -1002,7 +1002,7 @@ def minhash_num_perm(data: bytes) -> int:
     if len(data) < 8:
         raise ValueError("Corrupt MinHash payload: shorter than the 8-byte header.")
     num_perm = struct.unpack(">I", data[4:8])[0]
-    if num_perm < 2 or num_perm > _MAX_NUM_PERM:
+    if num_perm < 2 or num_perm > MAX_NUM_PERM:
         raise ValueError(f"Corrupt MinHash payload: implausible permutation count {num_perm}.")
     expected = 8 + 4 * num_perm
     if len(data) != expected:
