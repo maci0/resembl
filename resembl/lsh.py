@@ -110,6 +110,21 @@ def dialect_name(session: Session) -> str:
 _DUCKDB_VALUES_CHUNK = 1000
 
 
+def _sql_text_literal(value: object) -> str:
+    """Render *value* as a quoted DuckDB SQL string literal.
+
+    Single quotes are doubled — standard SQL escaping, and complete for
+    DuckDB because it treats backslash literally inside string literals
+    (no ``\\`` escape sequences).  This is the injection boundary of the
+    multi-row ``VALUES`` fast path: bucket keys are hex by construction,
+    but checksums are primary keys copied verbatim from snippet rows, and
+    a hostile ``merge`` source database may carry arbitrary strings there
+    (a bare ``'{checksum}'`` would let ``x'), ... --`` break out of the
+    statement).  Mirrors :func:`resembl.core._duckdb_sql_literal`.
+    """
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> None:
     """Insert *rows* with the dialect's fastest strategy.
 
@@ -119,11 +134,11 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
     executemany path.  ``ON CONFLICT`` suffixes present in *sql* (the
     incremental-sync variant) are preserved.
 
-    The row values are ``(band: int, bucket: hex, checksum: hex)`` — band
-    is a small integer and bucket/checksum are lowercase-hex strings by
-    construction (``bytes.hex()`` / ``sha256`` digests), so interpolating
-    them into the SQL is safe: a hex string cannot contain quotes or other
-    SQL metacharacters.
+    The row values are ``(band: int, bucket: str, checksum: str)`` — band
+    is a small integer; bucket and checksum pass through
+    :func:`_sql_text_literal` before interpolation (checksums are hex
+    digests for locally written snippets, but merge sources supply their
+    own keys, so they are escaped rather than trusted).
     """
     if not rows:
         return
@@ -134,7 +149,9 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
     for start in range(0, len(rows), _DUCKDB_VALUES_CHUNK):
         chunk = rows[start : start + _DUCKDB_VALUES_CHUNK]
         values = ",".join(
-            f"({row['band']}, '{row['bucket']}', '{row['checksum']}')" for row in chunk
+            f"({row['band']}, {_sql_text_literal(row['bucket'])}, "
+            f"{_sql_text_literal(row['checksum'])})"
+            for row in chunk
         )
         # exec_driver_sql, not text(): the statement has no bind parameters,
         # and text()'s marker scan would misread literal ``$n`` / ``:name``
