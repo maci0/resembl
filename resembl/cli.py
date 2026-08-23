@@ -453,23 +453,29 @@ def _resolve_checksum(prefix: str) -> str | None:
     if exact:
         return exact.checksum
 
-    # Prefix search.  Only the checksum column is fetched: a short prefix can
-    # match thousands of rows, and pulling each match's full row (including
-    # the ``code`` column, which dominates the table) through the ORM just to
-    # count candidates would move megabytes of text for nothing.
+    # Prefix search.  Only the checksum column is fetched, and the fetch is
+    # capped at two rows: a short prefix can match thousands of checksums,
+    # and the resolver only distinguishes zero, one, and "many".  The
+    # ambiguous path runs one indexed COUNT so the error message reports the
+    # real number without pulling every match through the ORM (a 1-char
+    # prefix used to materialize the whole matching set in memory just to
+    # print its size).
+    from sqlmodel import func
+
+    like_expr = SnippetModel.checksum.like(f"{prefix}%")  # type: ignore[attr-defined]
     candidate_checksums: Sequence[str] = state.session.exec(
-        select(SnippetModel.checksum).where(
-            SnippetModel.checksum.like(f"{prefix}%")  # type: ignore[attr-defined]
-        )
+        select(SnippetModel.checksum).where(like_expr).limit(2)
     ).all()
 
     if len(candidate_checksums) == 0:
         err_console.print(f"[red]Error:[/red] No snippet found matching '{prefix}'.")
         return None
     if len(candidate_checksums) > 1:
+        total = state.session.exec(
+            select(func.count(SnippetModel.checksum)).where(like_expr)  # type: ignore[arg-type]
+        ).one()
         err_console.print(
-            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches "
-            f"{len(candidate_checksums)} snippets."
+            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches {total} snippets."
         )
         return None
     return candidate_checksums[0]
@@ -1558,33 +1564,56 @@ def collection_list_cmd() -> None:
 def collection_show_cmd(
     name: str = typer.Argument(help="Name of the collection to show."),
 ) -> None:
-    """Show all snippets in a collection."""
-    from .models import Snippet as SnippetModel
+    """Show all snippets in a collection.
 
-    snippets = SnippetModel.get_by_collection(state.session, name)
-    if not snippets:
+    Streams ``(checksum, names)`` batches so a large collection never loads
+    its members' full rows (including the ``code`` column, which dominates
+    the table) into memory at once.  Output shape is unchanged.
+    """
+    from .core import snippet_collection_names_stream
+
+    if state.quiet:
+        return
+
+    batches = snippet_collection_names_stream(state.session, name)
+    first_batch = next(batches, None)
+    if first_batch is None:
         _echo(f"[dim]No snippets in collection '{name}'.[/dim]")
         return
 
-    if state.format != "table":
-        _echo_format(
-            [
-                {
-                    "checksum": s.checksum,
-                    "names": s.name_list,
-                    "collection": s.collection,
-                }
-                for s in snippets
-            ]
-        )
-        return
+    def rows() -> Iterator[tuple[str, str]]:
+        yield from first_batch
+        for batch in batches:
+            yield from batch
 
-    table = Table(title=f"Collection: {name}", title_style="bold cyan")
-    table.add_column("Checksum", style="dim")
-    table.add_column("Names", style="bold")
-    for s in snippets:
-        table.add_row(s.checksum[:12] + "…", ", ".join(s.name_list))
-    _echo(table)
+    if state.format == "json":
+        sys.stdout.write("[")
+        written = False
+        for checksum, raw in rows():
+            if written:
+                sys.stdout.write(",")
+            written = True
+            sys.stdout.write(
+                "\n  "
+                + json.dumps({"checksum": checksum, "names": json.loads(raw), "collection": name})
+            )
+        sys.stdout.write("\n]\n" if written else "]\n")
+    elif state.format == "csv":
+        writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names", "collection"])
+        writer.writeheader()
+        for checksum, raw in rows():
+            writer.writerow(
+                {"checksum": checksum, "names": ", ".join(json.loads(raw)), "collection": name}
+            )
+    else:
+        # One table as before, built from lightweight rows: the ORM objects
+        # and their ``code`` strings never enter memory in the first place.
+        table = Table(title=f"Collection: {name}", title_style="bold cyan")
+        table.add_column("Checksum", style="dim")
+        table.add_column("Names", style="bold")
+        for checksum, raw in rows():
+            table.add_row(checksum[:12] + "…", ", ".join(json.loads(raw)))
+        _echo(table)
 
 
 @collection_app.command("add")

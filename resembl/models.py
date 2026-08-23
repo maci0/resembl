@@ -123,13 +123,17 @@ class Snippet(SQLModel, table=True):
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> Snippet | None:
         """Return the snippet containing the given name, if any."""
-        # Use SQL LIKE to narrow candidates, then verify in Python
+        # Use SQL LIKE to narrow candidates, then verify in Python.  Only the
+        # two decision columns are fetched: the LIKE can match many rows
+        # before one verifies, and full rows would pull each match's ``code``
+        # (the column that dominates the table) through the ORM for nothing.
+        # The winner's full row is fetched via the identity map afterwards.
         candidates = session.exec(
-            select(cls).where(cls.names.like(f'%"{name}"%'))  # type: ignore[attr-defined]
+            select(cls.checksum, cls.names).where(cls.names.like(f'%"{name}"%'))  # type: ignore[attr-defined]
         ).all()
-        for snippet in candidates:
-            if name in snippet.name_list:
-                return snippet
+        for checksum, names in candidates:
+            if name in json.loads(names):
+                return session.get(cls, checksum)
         return None
 
     @classmethod

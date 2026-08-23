@@ -1180,6 +1180,36 @@ def snippet_names_stream(
         last = rows[-1][0]
 
 
+def snippet_collection_names_stream(
+    session: Session, collection_name: str, batch_size: int = 2000
+) -> Iterator[list[tuple[str, str]]]:
+    """Yield ``(checksum, names)`` pairs for one collection's snippets in batches.
+
+    Keyset pagination on the checksum PK keeps every query bounded, and only
+    the two rendered columns are read: ``collection show`` used to load every
+    member's full row through :meth:`Snippet.get_by_collection` — the ``code``
+    column dominates the table, so showing a large collection pulled its whole
+    corpus through the ORM just to render names.  Each batch is fully consumed
+    before the next is fetched (same keyset semantics as
+    :func:`snippet_names_stream`).
+    """
+    last: str | None = None
+    while True:
+        stmt = (
+            select(Snippet.checksum, Snippet.names)
+            .where(Snippet.collection == collection_name)
+            .order_by(Snippet.checksum)
+            .limit(batch_size)
+        )
+        if last is not None:
+            stmt = stmt.where(Snippet.checksum > last)
+        rows = session.exec(stmt).all()
+        if not rows:
+            return
+        yield [(row[0], row[1]) for row in rows]
+        last = rows[-1][0]
+
+
 def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:
     """Search for snippets where any name matches the pattern (case-insensitive).
 
@@ -1554,17 +1584,20 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     new_rows: list[dict[str, object]] = []
 
     try:
-        # Import collections first
-        source_collections = source_session.exec(select(Collection)).all()
-        for col in source_collections:
-            existing_collection = Collection.get_by_name(session, col.name)
-            if not existing_collection:
+        # Import collections first.  Local collections are snapshotted once
+        # (a per-source ``get_by_name`` was one destination round trip per
+        # imported collection); new names are added to the snapshot as they
+        # are created so duplicates stay impossible without re-querying.
+        local_collections = {col.name: col for col in Collection.get_all(session)}
+        for col in source_session.exec(select(Collection)).all():
+            if col.name not in local_collections:
                 new_col = Collection(
                     name=col.name,
                     description=col.description,
                     created_at=timestamp_normalize(col.created_at),
                 )
                 session.add(new_col)
+                local_collections[col.name] = new_col
 
         # Source snippets that already exist locally are merged; new ones are
         # bulk-inserted.  Existence is decided by one chunked IN query per
