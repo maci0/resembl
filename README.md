@@ -165,6 +165,7 @@ resembl/
 │   ├── database.py
 │   ├── find_client.py
 │   ├── lsh.py
+│   ├── minhash.py
 │   ├── models.py
 │   ├── scoring.py
 │   └── server.py
