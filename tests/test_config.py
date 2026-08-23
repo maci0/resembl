@@ -1,6 +1,7 @@
 """Unit tests for the resembl config module."""
 
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -151,6 +152,49 @@ class TestConfig(unittest.TestCase):
                     with self.assertRaises(OSError):
                         save_config({"top_n": 10})
             self.assertEqual(os.listdir(temp_dir), [])
+
+    def test_concurrent_update_config_keeps_every_change(self):
+        """Concurrent read-modify-write cycles must not drop each other's key.
+
+        ``update_config`` reads the whole file, mutates the dict, and writes
+        it back.  Without the cross-process file lock, two overlapping
+        writers both read the same starting state and the second write
+        silently discarded the first one's change; every writer's key must
+        survive when all of them run at once.  (flock conflicts are between
+        open file descriptions, so same-process threads on separate fds
+        exercise the same serialization real concurrent processes hit.)
+        """
+        import threading
+
+        if sys.platform == "win32":
+            self.skipTest("msvcrt region locks do not serialize same-process fds")
+
+        writers = 16
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                barrier = threading.Barrier(writers)
+                failures: list[Exception] = []
+
+                def writer(i: int) -> None:
+                    try:
+                        barrier.wait(timeout=10)
+                        update_config(f"key_{i}", i)
+                    except Exception as exc:  # pragma: no cover - surfaced below
+                        failures.append(exc)
+
+                threads = [threading.Thread(target=writer, args=(i,)) for i in range(writers)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=30)
+                self.assertEqual(failures, [])
+                with open(os.path.join(temp_dir, "config.toml"), "rb") as f:
+                    import tomllib
+
+                    stored = tomllib.load(f)
+        for i in range(writers):
+            self.assertEqual(stored.get(f"key_{i}"), i, f"key_{i} was lost to a racing writer")
 
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""

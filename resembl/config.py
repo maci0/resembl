@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import os
 import tempfile
 import tomllib
+from collections.abc import Iterator
 from typing import TypeVar, overload
 
 import tomli_w
@@ -113,6 +115,38 @@ DEFAULTS = ResemblConfig().to_dict()
 logger = logging.getLogger(__name__)
 
 
+@contextlib.contextmanager
+def _config_file_lock() -> Iterator[None]:
+    """Hold an exclusive cross-process lock around a config-file update.
+
+    ``update_config`` and ``remove_config_key`` are read-modify-write cycles
+    (read the whole file, mutate the dict, write it back): two concurrent
+    CLI processes would each read the same starting state, and the second
+    writer would silently drop the first one's change.  The lock is taken on
+    a sidecar file that is never replaced (``save_config`` publishes via
+    ``os.replace``, which swaps the inode out from under any lock held on
+    ``config.toml`` itself).  The OS releases the lock when the holder dies,
+    so a crashed process cannot leave a stale lock behind; platforms with
+    neither locking API fall back to the historical unlocked behavior.
+    """
+    os.makedirs(config_dir_get(), exist_ok=True)
+    fd = os.open(config_path_get() + ".lock", os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except ImportError:
+            import msvcrt
+
+            # typeshed provides these attributes for Windows only.
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
+        yield
+    finally:
+        # Closing the descriptor releases both the flock and the msvcrt lock.
+        os.close(fd)
+
+
 def save_config(config: dict | ResemblConfig) -> None:
     """Write ``config`` to the config file atomically."""
     cfg_dir = config_dir_get()
@@ -156,22 +190,23 @@ def _read_config_dict() -> dict:
 
 def update_config(key: str, value: int | float | str) -> dict:
     """Update ``key`` in the config file with ``value`` and return the new config."""
-    config = _read_config_dict()
-    config[key] = value
-    # The file stores user overrides only (like ``remove_config_key``):
-    # baking every default into the file would pin users to this release's
-    # default values forever.  Callers get the effective merged view.
-    save_config(config)
+    with _config_file_lock():
+        config = _read_config_dict()
+        config[key] = value
+        # The file stores user overrides only (like ``remove_config_key``):
+        # baking every default into the file would pin users to this release's
+        # default values forever.  Callers get the effective merged view.
+        save_config(config)
     return {**DEFAULTS, **config}
 
 
 def remove_config_key(key: str) -> dict:
     """Remove ``key`` from the config file and return the new config."""
-    config = _read_config_dict()
-    if key in config:
-        del config[key]
-        save_config(config)
-
+    with _config_file_lock():
+        config = _read_config_dict()
+        if key in config:
+            del config[key]
+            save_config(config)
     return {**DEFAULTS, **config}
 
 
