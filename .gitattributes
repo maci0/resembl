@@ -1,0 +1,9 @@
+# Line-ending policy: every platform checks out and commits LF, so Windows
+# contributors (core.autocrlf) cannot inject CRLF into source files or test
+# fixtures. The pre-commit hooks (end-of-file-fixer, trailing-whitespace,
+# black) and the byte-stable tests/test_data/*.asm imports all assume it.
+* text=auto eol=lf
+
+# Images must never be line-ending-normalized.
+*.png binary
+*.ico binary
