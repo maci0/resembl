@@ -136,7 +136,7 @@ with Session(get_engine()) as session:
 For shared databases, set the `DATABASE_URL` environment variable:
 
 ```bash
-export DATABASE_URL="postgresql://user:password@db-host:5432/resembl"
+export DATABASE_URL="postgresql+pg8000://user:password@db-host:5432/resembl"
 resembl import ./shared_samples/
 ```
 

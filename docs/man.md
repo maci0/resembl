@@ -197,7 +197,7 @@ The `compare` command also reports control-flow graph similarity.
 
 **DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
-    Set to a PostgreSQL URL (e.g., `postgresql://user:pass@host/db`)
+    Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)
     for team use.
 
 ## CONFIGURATION
@@ -234,7 +234,7 @@ resembl collection create "crypto" -d "Cryptographic routines"
 resembl collection add crypto abc123
 
 # Use with PostgreSQL
-DATABASE_URL=postgresql://user:pass@host/db resembl list
+DATABASE_URL=postgresql+pg8000://user:pass@host/db resembl list
 ```
 
 ## SEE ALSO

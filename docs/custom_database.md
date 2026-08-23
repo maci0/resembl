@@ -93,7 +93,7 @@ The architecture is designed to keep the **query path constant-time** regardless
 
 What the code already supports:
 
-- **PostgreSQL out of the box:** set `DATABASE_URL=postgresql://user:pass@host/db`; the LSH index SQL is dialect-aware (`INSERT OR IGNORE` on SQLite, `ON CONFLICT DO NOTHING` on PostgreSQL) and the build keeps a single final commit there.
+- **PostgreSQL out of the box:** set `DATABASE_URL=postgresql+pg8000://user:pass@host/db`; the LSH index SQL is dialect-aware (`INSERT OR IGNORE` on SQLite, `ON CONFLICT DO NOTHING` on PostgreSQL) and the build keeps a single final commit there.
 - **Bounded-memory bulk import:** `import --jobs N` prepares files in a process pool and flushes in chunks, expunging the session identity map after each chunk.
 - **Parallel, crash-safe reindex** (`reindex --jobs`), with the old index cleared up front so an interrupted run can never serve stale results.
 - **Incremental index maintenance:** `add` / `import` / `merge` / `rm` update only the affected bucket rows — no full rebuild after single changes.

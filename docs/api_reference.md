@@ -4,9 +4,10 @@ Public API for using `resembl` as a Python library.
 
 ```python
 from resembl import (
-    snippet_add, snippet_find_matches, snippet_compare,
-    snippet_delete, snippet_get, snippet_list,
-    code_tokenize, code_create_minhash, string_checksum, string_normalize,
+    snippet_add, snippet_add_batch, snippet_find_matches, snippet_compare,
+    snippet_delete, snippet_get, snippet_list, snippet_prepare,
+    code_tokenize, code_create_minhash, code_create_minhash_batch,
+    string_checksum, string_normalize,
     Collection, Snippet, SnippetVersion,
 )
 ```
@@ -16,10 +17,10 @@ from resembl import (
 ### `code_tokenize(code_snippet: str, normalize: bool = True) → list[str]`
 Tokenize assembly code using the Pygments NASM lexer. When `normalize=True`, registers become `REG`, immediates become `IMM`, labels become `LABEL`, and memory sizes become `MEM_SIZE`. Supports x86, ARM, MIPS, and RISC-V register sets.
 
-### `code_create_minhash(code_snippet: str, normalize: bool = True, ngram_size: int = 3) → MinHash`
+### `code_create_minhash(code_snippet: str, normalize: bool = True, ngram_size: int = 3, num_perm: int = 128) → MinHash`
 Create a MinHash fingerprint for a code snippet using weighted n-gram shingling. Rare instruction shingles get 3× insertion weight, common instruction shingles get 1×.
 
-### `code_create_minhash_batch(snippets: list[str], normalize: bool = True, ngram_size: int = 3) → list[MinHash]`
+### `code_create_minhash_batch(snippets: list[str], normalize: bool = True, ngram_size: int = 3, num_perm: int = 128) → list[MinHash]`
 Batch version of `code_create_minhash` for multiple snippets.
 
 ### `string_checksum(code_snippet: str) → str`
@@ -119,8 +120,8 @@ Create a SQLAlchemy engine. SQLite pragmas applied automatically (WAL, `synchron
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
 Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard — all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
 
-### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1) → dict`
-Recompute every snippet's MinHash. With `jobs > 1` the CPU-bound tokenization runs in a process pool. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded.
+### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1, num_perm: int = 128, progress=None) → dict`
+Recompute every snippet's MinHash. With `jobs > 1` the CPU-bound tokenization runs in a process pool. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded. `progress(done, total)` is called with snippets processed so far.
 
 ## LSH Index (`resembl.lsh`)
 

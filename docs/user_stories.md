@@ -175,7 +175,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **Acceptance Criteria:**
 - `resembl clean` removes the LSH index (buckets and metadata) and any legacy cache files.
-- `resembl clean` vacuums the database to reclaim unused space.
+- `resembl clean` vacuums the database to reclaim unused space (SQLite only).
 - The LSH index is rebuilt automatically on the next `find`.
 
 ---

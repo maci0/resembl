@@ -70,7 +70,7 @@ To avoid the slow process of comparing a query against every single entry in the
 
     **After Normalization:**
     ```
-    LABEL PUSH REG MOV REG MEM_SIZE [ REG + IMM ] PUSH REG MOV REG MEM_SIZE [ REG + IMM ]
+    LABEL PUSH REG MOV REG MEM_SIZE REG + IMM PUSH REG MOV REG MEM_SIZE REG + IMM
     ```
 
 - **MinHash:** Each normalized snippet is converted into a **MinHash**. A MinHash is a compact "fingerprint" of the code. Snippets with similar structures will produce similar MinHash fingerprints.
@@ -259,6 +259,7 @@ Global options:
 --quiet      Suppress informational output
 --verbose    Increase output verbosity
 --no-color   Disable colored output
+--format     Output format: table, json, or csv (overrides config)
 ```
 
 For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
