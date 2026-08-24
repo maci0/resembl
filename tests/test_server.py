@@ -753,6 +753,41 @@ class TestServerMode(unittest.TestCase):
             self.assertIn("error", payload)
             self.assertIn("threshold", payload["error"])
 
+    def test_find_rejects_non_finite_jaccard_weight_cleanly(self):
+        """A NaN/Infinity/out-of-range jaccard_weight answers a clean error.
+
+        Python's JSON decoder accepts bare ``NaN`` / ``Infinity`` literals,
+        so an unvalidated weight let a hostile or broken client plant a
+        non-finite value: every hybrid score became NaN, which silently
+        broke the top-n ranking comparisons and serialized as a bare
+        ``NaN`` token that no external JSON parser accepts.
+        """
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        for bad_weight in (float("nan"), float("inf"), -0.5, 1.5):
+            payload = _post_json(port, "/find", {"query": query, "jaccard_weight": bad_weight})
+            self.assertIn("error", payload)
+            self.assertIn("jaccard_weight", payload["error"])
+
+    def test_find_rejects_infinite_integer_params_cleanly(self):
+        """``"top_n": Infinity`` answers a clean bad-request payload, not a 500.
+
+        json.loads maps ``Infinity`` (and ``1e400``) to float infinity;
+        ``int()`` on it raises OverflowError, which the numeric-coercion
+        guard did not catch — the request surfaced as a 500 echoing internal
+        error text instead of the clean error payload.
+        """
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        for bad in (
+            {"top_n": float("inf")},
+            {"ngram_size": float("inf")},
+            {"num_permutations": float("inf")},
+        ):
+            payload = _post_json(port, "/find", {"query": query, **bad})
+            self.assertIn("error", payload)
+            self.assertIn("bad request", payload["error"])
+
     def test_find_treats_explicit_null_params_as_absent(self):
         """An explicit JSON null for a find parameter uses the configured default.
 

@@ -364,6 +364,22 @@ class TestCLIConfig(BaseCLITest):
         self.assertIn("Invalid value", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
+    def test_config_set_rejects_non_finite_float(self):
+        """`config set` must reject nan/inf instead of persisting them.
+
+        "nan" coerces to a float cleanly; persisted, it made every find
+        score NaN (and emit invalid JSON) until the value was removed by
+        hand.
+        """
+        with tempfile.TemporaryDirectory() as cfgdir:
+            env = {"RESEMBL_CONFIG_DIR": cfgdir}
+            for bad in ("nan", "inf"):
+                result = self.run_command(f"config set jaccard_weight {bad}", extra_env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("finite", result.stderr)
+            config_path = os.path.join(cfgdir, "config.toml")
+            self.assertFalse(os.path.exists(config_path))
+
     def test_config_set_invalid_format(self):
         """`config set format` should reject values outside the render enum."""
         result = self.run_command("config set format yaml")

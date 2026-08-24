@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import logging
+import math
 import os
 import tempfile
 import tomllib
@@ -88,7 +89,10 @@ class ResemblConfig:
         the legal cross-type spellings (``0`` for a float field,
         ``128.0`` for an int field); anything the constructor rejects is
         warned about and skipped, like the malformed-TOML path in
-        :func:`load_config`.  An out-of-enum ``format`` is likewise rejected
+        :func:`load_config`.  Non-finite floats (TOML's ``nan`` / ``inf``)
+        are likewise rejected: an int field coerced from infinity raises
+        OverflowError, and a NaN weight reaching scoring would make every
+        similarity score NaN.  An out-of-enum ``format`` is also rejected
         (warn and keep the current value) so the file cannot put every
         command into an undefined render branch.
         """
@@ -99,9 +103,17 @@ class ResemblConfig:
             default = DEFAULTS[key]
             try:
                 value = type(default)(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 logger.warning(
                     "Ignoring %s: expected %s, got %r.",
+                    key,
+                    type(default).__name__,
+                    value,
+                )
+                continue
+            if isinstance(default, float) and not math.isfinite(value):
+                logger.warning(
+                    "Ignoring %s: expected a finite %s, got %r.",
                     key,
                     type(default).__name__,
                     value,

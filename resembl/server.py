@@ -114,10 +114,13 @@ def _find_one(
         ngram_size = int(provided.get("ngram_size", params.ngram_size))
         num_permutations = int(provided.get("num_permutations", params.num_permutations))
         jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         # A non-numeric parameter is a bad request: answer with a clean error
         # payload instead of letting int()/float() raise inside the handler,
-        # which would surface as a 500 echoing the exception text.
+        # which would surface as a 500 echoing the exception text.  JSON's
+        # ``Infinity`` / ``1e400`` parse to float infinity and ``int()`` on
+        # those raises OverflowError (not TypeError/ValueError) — without it
+        # in this tuple such a request leaked a 500 with internal error text.
         return {
             "error": "bad request: top_n, ngram_size, num_permutations must be "
             "integers; threshold and jaccard_weight must be numbers"
@@ -129,6 +132,13 @@ def _find_one(
     effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
     if not 0.0 <= effective_threshold <= 1.0:
         return {"error": f"threshold {effective_threshold} is not in [0.0, 1.0]"}
+    # Same range rule as the threshold: score_hybrid documents the weight as a
+    # 0-1 balance, and an unvalidated NaN/Infinity weight made every hybrid
+    # score NaN — corrupting the top-n ranking comparisons (NaN never
+    # compares) and serializing as a bare ``NaN`` token, which no external
+    # JSON parser accepts.  (NaN fails both comparisons and is rejected too.)
+    if not 0.0 <= jaccard_weight <= 1.0:
+        return {"error": f"jaccard_weight {jaccard_weight} is not in [0.0, 1.0]"}
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one

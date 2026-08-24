@@ -22,6 +22,7 @@ import csv
 import difflib
 import json
 import logging
+import math
 import multiprocessing
 import operator
 import os
@@ -861,8 +862,7 @@ def import_cmd(
             # original failure must reach the log, not vanish behind a
             # generic fallback message.
             logger.warning(
-                "Parallel import preparation failed (%s); "
-                "falling back to in-process preparation.",
+                "Parallel import preparation failed (%s); falling back to in-process preparation.",
                 exc,
                 exc_info=True,
             )
@@ -1770,12 +1770,21 @@ def config_set_cmd(
     default_value = DEFAULTS[key]
     try:
         typed_value: int | float | str = type(default_value)(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         err_console.print(
             f"[red]Error:[/red] Invalid value for '{key}': expected "
             f"{type(default_value).__name__}, got '{value}'."
         )
         raise typer.Exit(code=1) from exc
+    if isinstance(typed_value, float) and not math.isfinite(typed_value):
+        # "nan"/"inf" coerce to a float cleanly but would poison every
+        # downstream calculation (a NaN jaccard_weight makes every similarity
+        # score NaN) — reject them like any other unparseable spelling.
+        err_console.print(
+            f"[red]Error:[/red] Invalid value for '{key}': expected a finite "
+            f"{type(default_value).__name__}, got '{value}'."
+        )
+        raise typer.Exit(code=1)
     if key == "format" and typed_value not in FORMATS:
         err_console.print(
             f"[red]Error:[/red] Invalid value for 'format': expected one of "

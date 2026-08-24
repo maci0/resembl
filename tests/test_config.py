@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from resembl.config import (
     DEFAULTS,
+    ResemblConfig,
     config_dir_get,
     config_path_get,
     load_config,
@@ -72,6 +73,35 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.lsh_threshold, 0.9)
         self.assertEqual(config.top_n, 7)
         self.assertEqual(config.ngram_size, DEFAULTS["ngram_size"])
+
+    def test_load_non_finite_values_are_rejected(self):
+        """TOML's ``nan`` / ``inf`` spellings must not poison numeric fields.
+
+        An int field coerced from ``inf`` raised OverflowError, which the
+        coercion guard did not catch — every command crashed with a
+        traceback until the file was hand-fixed.  A NaN weight reaching
+        scoring would make every similarity score NaN.  Both are warned
+        about and skipped, so the field keeps its default.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("top_n = inf\njaccard_weight = nan\nlsh_threshold = 0.8\n")
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertLogs("resembl.config", level="WARNING"):
+                    config = load_config()
+        self.assertEqual(config.top_n, DEFAULTS["top_n"])
+        self.assertEqual(config.jaccard_weight, DEFAULTS["jaccard_weight"])
+        self.assertEqual(config.lsh_threshold, 0.8)  # unrelated keys still apply
+
+    def test_update_rejects_non_finite_floats(self):
+        """update() skips non-finite float values instead of applying them."""
+        cfg = ResemblConfig()
+        with self.assertLogs("resembl.config", level="WARNING"):
+            cfg.update({"jaccard_weight": float("nan"), "lsh_threshold": float("inf"), "top_n": 9})
+        self.assertEqual(cfg.jaccard_weight, DEFAULTS["jaccard_weight"])
+        self.assertEqual(cfg.lsh_threshold, DEFAULTS["lsh_threshold"])
+        self.assertEqual(cfg.top_n, 9)
 
     def test_load_unreadable_config(self):
         """An unreadable config file runs on defaults instead of crashing."""
