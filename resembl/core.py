@@ -48,6 +48,7 @@ from .lsh import (
     fingerprint_version_get,
     fingerprint_version_set,
     lsh_meta_get,
+    sql_text_literal,
 )
 from .models import (
     FINGERPRINT_VERSION,
@@ -59,22 +60,22 @@ from .models import (
 )
 from .scoring import (
     NUM_PERMUTATIONS,
-    _code_tokenize_lexed,
-    _minhash_from_tokens,
-    _require_same_num_perm,
-    _string_normalize_lexed,
     cfg_extract,
     cfg_similarity,
     code_create_minhash,
     code_create_minhash_batch,
     code_tokenize,
+    code_tokenize_lexed,
     get_lexer,
     minhash_ensure_packed,
+    minhash_from_tokens,
     minhash_jaccard_batch,
     minhash_num_perm,
     minhash_pack,
+    require_same_num_perm,
     score_hybrid,
     string_checksum,
+    string_normalize_lexed,
 )
 
 # Re-exported for external backward compatibility only; not used in this
@@ -256,9 +257,9 @@ def snippet_prepare(
     # Materialize the token stream: it is consumed twice (once for the
     # normalized checksum string, once for the MinHash tokens).
     tokens = list(get_lexer().get_tokens(code))
-    normalized = _string_normalize_lexed(tokens)
+    normalized = string_normalize_lexed(tokens)
     checksum = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
-    minhash_bytes = minhash_pack(_minhash_from_tokens(_code_tokenize_lexed(tokens), ngram_size))
+    minhash_bytes = minhash_pack(minhash_from_tokens(code_tokenize_lexed(tokens), ngram_size))
     return checksum, name, code, minhash_bytes
 
 
@@ -329,20 +330,19 @@ _SNIPPET_INSERT_SQL = (
 def _duckdb_sql_literal(value: object) -> str:
     """Render one snippet-column value as a safe DuckDB SQL literal.
 
-    Text is single-quoted with quote doubling — standard SQL escaping, and
-    complete for DuckDB because it treats backslash literally inside string
-    literals (no ``\\`` escape sequences).  Bytes use ``FROM_HEX``,
-    DuckDB's blob-from-hex function (the ``X'...'`` hex literal is not
-    supported).  ``None`` becomes ``NULL``.  This is the correctness and
-    injection boundary of the DuckDB multi-VALUES fast path: snippet code
-    and names are arbitrary user text, so every value must pass through
-    here before being interpolated into SQL.
+    Text quoting is delegated to :func:`resembl.lsh.sql_text_literal`, the
+    package's single DuckDB string-escaping invariant.  Bytes use
+    ``FROM_HEX``, DuckDB's blob-from-hex function (the ``X'...'`` hex
+    literal is not supported).  ``None`` becomes ``NULL``.  This is the
+    correctness and injection boundary of the DuckDB multi-VALUES fast
+    path: snippet code and names are arbitrary user text, so every value
+    must pass through here before being interpolated into SQL.
     """
     if value is None:
         return "NULL"
     if isinstance(value, bytes):
         return f"FROM_HEX('{value.hex()}')"
-    return "'" + str(value).replace("'", "''") + "'"
+    return sql_text_literal(value)
 
 
 def _insert_snippet_rows(
@@ -1179,7 +1179,7 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     # (boolean mean == equal-count / num_perm in float64).
     num_perm = minhash_num_perm(blobs[0])
     for blob in blobs[1:]:
-        _require_same_num_perm(num_perm, minhash_num_perm(blob))
+        require_same_num_perm(num_perm, minhash_num_perm(blob))
 
     import numpy as np
 

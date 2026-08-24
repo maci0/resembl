@@ -119,22 +119,24 @@ _DUCKDB_VALUES_CHUNK = 1000
 _INSERT_CHUNK = 10_000
 
 
-def _sql_text_literal(value: object) -> str:
+def sql_text_literal(value: object) -> str:
     """Render *value* as a quoted DuckDB SQL string literal.
 
     Single quotes are doubled — standard SQL escaping, and complete for
     DuckDB because it treats backslash literally inside string literals
-    (no ``\\`` escape sequences).  This is the injection boundary of the
-    multi-row ``VALUES`` fast path: bucket keys are hex by construction,
-    but checksums are primary keys copied verbatim from snippet rows, and
-    a hostile ``merge`` source database may carry arbitrary strings there
-    (a bare ``'{checksum}'`` would let ``x'), ... --`` break out of the
-    statement).  Mirrors :func:`resembl.core._duckdb_sql_literal`.
+    (no ``\\`` escape sequences).  This is the single escaping invariant for
+    every DuckDB multi-row ``VALUES`` fast path in the package:
+    :func:`insert_rows` interpolates bucket keys (hex by construction) and
+    checksums (primary keys copied verbatim from snippet rows — a hostile
+    ``merge`` source database may carry arbitrary strings there, where a
+    bare ``'{checksum}'`` would let ``x'), ... --`` break out of the
+    statement), and ``resembl.core`` builds its snippet-column literals on
+    this function.
     """
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> None:
+def insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> None:
     """Insert *rows* with the dialect's fastest strategy.
 
     Non-DuckDB dialects use the executemany template *sql* unchanged
@@ -145,7 +147,7 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
 
     The row values are ``(band: int, bucket: str, checksum: str)`` — band
     is a small integer; bucket and checksum pass through
-    :func:`_sql_text_literal` before interpolation (checksums are hex
+    :func:`sql_text_literal` before interpolation (checksums are hex
     digests for locally written snippets, but merge sources supply their
     own keys, so they are escaped rather than trusted).
     """
@@ -158,8 +160,8 @@ def _insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> N
     for start in range(0, len(rows), _DUCKDB_VALUES_CHUNK):
         chunk = rows[start : start + _DUCKDB_VALUES_CHUNK]
         values = ",".join(
-            f"({row['band']}, {_sql_text_literal(row['bucket'])}, "
-            f"{_sql_text_literal(row['checksum'])})"
+            f"({row['band']}, {sql_text_literal(row['bucket'])}, "
+            f"{sql_text_literal(row['checksum'])})"
             for row in chunk
         )
         # exec_driver_sql, not text(): the statement has no bind parameters,
@@ -184,7 +186,7 @@ def _insert_sql(session: Session) -> str:
     return _INSERT_SQLITE
 
 
-def _build_insert_sql(session: Session) -> str:
+def build_insert_sql(session: Session) -> str:
     """Return the insert used by one-time index builds.
 
     Build rows are unique by construction (one row per band per snippet,
@@ -607,7 +609,7 @@ class ResemblLSH:
             # sequential append instead of random probe, which keeps large
             # incremental syncs (importing into an indexed database) fast.
             chunk.sort(key=lambda row: (row["band"], row["bucket"]))
-            _insert_rows(self.session, _insert_sql(self.session), chunk)
+            insert_rows(self.session, _insert_sql(self.session), chunk)
             self.session.commit()
         return len(rows)
 

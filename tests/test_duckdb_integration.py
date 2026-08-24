@@ -77,7 +77,7 @@ class TestDuckDBIntegration(unittest.TestCase):
     def test_insert_rows_multi_values(self):
         """The DuckDB fast path (multi-row VALUES) inserts rows correctly.
 
-        The index build writes through ``_insert_rows``, which uses
+        The index build writes through ``insert_rows``, which uses
         multi-row VALUES statements on DuckDB (13x faster than executemany)
         instead of the parameterized template.  Verify both the plain build
         variant and the ``ON CONFLICT DO NOTHING`` incremental variant,
@@ -85,7 +85,7 @@ class TestDuckDBIntegration(unittest.TestCase):
         """
         from sqlmodel import func, select
 
-        from resembl.lsh import _insert_rows, lsh_index_clear
+        from resembl.lsh import insert_rows, lsh_index_clear
         from resembl.models import LSHBucket
 
         # The index build in the sibling test leaves rows in lsh_bucket;
@@ -101,7 +101,7 @@ class TestDuckDBIntegration(unittest.TestCase):
             for i in range(2500)
         ]
         # Plain variant (one-time index build).
-        _insert_rows(
+        insert_rows(
             self.session,
             "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES (:band, :bucket, :checksum)",
             rows,
@@ -111,7 +111,7 @@ class TestDuckDBIntegration(unittest.TestCase):
         self.assertEqual(count, 2500)
 
         # Incremental variant with conflict handling: duplicates are no-ops.
-        _insert_rows(
+        insert_rows(
             self.session,
             "INSERT INTO lsh_bucket (band, bucket, checksum) VALUES "
             "(:band, :bucket, :checksum) ON CONFLICT DO NOTHING",

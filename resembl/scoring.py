@@ -716,7 +716,7 @@ BRANCH_INSTRUCTIONS = {
 # ---------------------------------------------------------------------------
 
 
-def _string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
+def string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
     """Normalize a lexer token stream to a canonical string (no lexing).
 
     Shares the normalization logic between :func:`string_normalize` and the
@@ -730,7 +730,7 @@ def _string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
 
 def string_normalize(code_snippet: str) -> str:
     """Normalize an assembly snippet and return a canonical string."""
-    return _string_normalize_lexed(get_lexer().get_tokens(code_snippet))
+    return string_normalize_lexed(get_lexer().get_tokens(code_snippet))
 
 
 def string_checksum(code_snippet: str) -> str:
@@ -744,7 +744,7 @@ def token_is_label(token_type: object, value: str) -> bool:
     return token_type in Name.Label or (token_type in Name and value.endswith(":"))
 
 
-def _code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool = True) -> list[str]:
+def code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool = True) -> list[str]:
     """Tokenize an already-lexed token stream (no re-lexing)."""
     output_tokens: list[str] = []
     append = output_tokens.append
@@ -783,7 +783,7 @@ def _code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool =
 
 def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     """Return a list of tokens from a code snippet."""
-    return _code_tokenize_lexed(get_lexer().get_tokens(code_snippet), normalize)
+    return code_tokenize_lexed(get_lexer().get_tokens(code_snippet), normalize)
 
 
 # ---------------------------------------------------------------------------
@@ -1095,7 +1095,7 @@ def minhash_unpack(data: bytes) -> MinHash:
     return MinHash(num_perm=num_perm, hashvalues=list(values))
 
 
-def _require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:
+def require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:
     """Raise the shared mismatch error when two blobs disagree on num_perm.
 
     datasketch's ``MinHash.jaccard`` rejects differently-sized fingerprints;
@@ -1134,7 +1134,7 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     # The two blobs may encode different permutation counts; reject the
     # mismatch the same way datasketch's MinHash.jaccard does.
     num_perm_a = minhash_num_perm(packed_a)
-    _require_same_num_perm(num_perm_a, minhash_num_perm(packed_b))
+    require_same_num_perm(num_perm_a, minhash_num_perm(packed_b))
     a = struct.unpack(f">{num_perm_a}I", packed_a[8 : 8 + 4 * num_perm_a])
     b = struct.unpack(f">{num_perm_a}I", packed_b[8 : 8 + 4 * num_perm_a])
     # ``map(operator.eq, ...)`` iterates with C-level callbacks instead of a
@@ -1186,7 +1186,7 @@ def minhash_jaccard_batch(
         # the reshape below; rejecting it here also closes that path.)
         for p in chunk:
             if len(p) != expected_len:
-                _require_same_num_perm(num_perm, minhash_num_perm(p))
+                require_same_num_perm(num_perm, minhash_num_perm(p))
         # The list comprehension lets ``bytes.join`` take its pre-sized
         # fast path; over a generator the same join measured ~2x slower
         # (this copy dominates a 10k-candidate find's scoring pass).
@@ -1214,7 +1214,7 @@ def minhash_ensure_packed(data: bytes) -> bytes:
     return minhash_pack(minhash_unpack(data))
 
 
-def _minhash_from_tokens(
+def minhash_from_tokens(
     tokens: list[str], ngram_size: int = 3, num_perm: int = NUM_PERMUTATIONS
 ) -> MinHash:
     """Build a MinHash from an already-tokenized snippet.
@@ -1262,7 +1262,7 @@ def code_create_minhash(
     Uses configurable n-gram shingling to preserve token ordering so that
     structurally different snippets produce distinct fingerprints.
     """
-    return _minhash_from_tokens(code_tokenize(code_snippet, normalize), ngram_size, num_perm)
+    return minhash_from_tokens(code_tokenize(code_snippet, normalize), ngram_size, num_perm)
 
 
 def code_create_minhash_batch(
@@ -1281,5 +1281,5 @@ def code_create_minhash_batch(
     results: list[MinHash] = []
     for code_snippet in snippets:
         tokens = code_tokenize(code_snippet, normalize)
-        results.append(_minhash_from_tokens(tokens, ngram_size, num_perm))
+        results.append(minhash_from_tokens(tokens, ngram_size, num_perm))
     return results

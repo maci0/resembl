@@ -1063,7 +1063,7 @@ class TestIndexBuild(BaseScalingTest):
 
         self._add(20, "lock")
         raised = {"n": 0}
-        real_insert = cache._insert_rows
+        real_insert = cache.insert_rows
 
         def flaky_insert(session, sql, rows):
             if raised["n"] == 0:  # fail only the very first insert call
@@ -1074,7 +1074,7 @@ class TestIndexBuild(BaseScalingTest):
             real_insert(session, sql, rows)
 
         with (
-            patch("resembl.cache._insert_rows", side_effect=flaky_insert),
+            patch("resembl.cache.insert_rows", side_effect=flaky_insert),
             patch("resembl.cache.time.sleep"),
             patch("resembl.cache._BUILD_RETRIES", 3),
             patch("resembl.cache._BUILD_RETRY_BACKOFF", 0),
