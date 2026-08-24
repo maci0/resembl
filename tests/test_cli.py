@@ -1,5 +1,7 @@
 """Integration tests for the resembl CLI."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import os
 import shlex
 import subprocess

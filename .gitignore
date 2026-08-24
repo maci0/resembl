@@ -34,3 +34,6 @@ benchmark.db*
 # Type hinting
 .mypy_cache/
 .hypothesis/
+
+# Scratch space for experiments and probes
+.scratch/

@@ -1,5 +1,7 @@
 """Tests for collections, versioning, merge, tags, search, and config dict-compat."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import os
 import tempfile
