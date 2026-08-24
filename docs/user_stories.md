@@ -78,6 +78,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **Acceptance Criteria:**
 - `resembl serve` binds to loopback (127.0.0.1) by default; the port is auto-assigned when not given.
 - `resembl find` transparently talks to the running server and falls back to the in-process path when no server is reachable.
+- The standalone `resembl-find` client queries the running server directly; it imports only the standard library so each call skips the full CLI startup cost.
 - Binding a non-loopback interface prints a warning that the service is unauthenticated.
 
 ---
