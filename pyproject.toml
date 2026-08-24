@@ -9,7 +9,9 @@ requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0.24",
     "sqlmodel>=0.0.24",
-    "pygments>=2.19.2",
+    # Floor at 2.20.0: earlier releases are flagged by CVE-2026-4539
+    # (ReDoS in an unused lexer); keep the floor above it so scanners pass.
+    "pygments>=2.20.0",
     "rapidfuzz>=3.13.0",
     "rich>=13.0.0",
     "tomli_w>=1.2.0",

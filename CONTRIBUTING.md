@@ -53,9 +53,9 @@ Follow these steps to create a local development environment. This workflow uses
     ```
 
 5.  **Install Dependencies**
-    This command reads the `pyproject.toml` file and installs all necessary development and runtime dependencies into the virtual environment.
+    This command creates `.venv`, then installs the exact versions recorded in `uv.lock`. Every locked artifact is hash-pinned, so the install is reproducible and verified, matching what CI runs.
     ```bash
-    uv pip install -e .[dev]
+    uv sync --locked --extra dev
     ```
 6.  **Install Pre-Commit Hooks**
     This is a critical step for automating quality checks. This command sets up Git hooks that will automatically run formatters and linters on your code before each commit.
@@ -109,7 +109,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
 
     Atheris is an optional dependency. Install it with the `fuzz` extra first:
     ```bash
-    uv pip install -e .[dev,fuzz]
+    uv sync --locked --extra dev --extra fuzz
     ```
     To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `code_tokenize` function:
     ```bash
