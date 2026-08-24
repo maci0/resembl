@@ -23,12 +23,12 @@ import threading
 import weakref
 from collections.abc import Callable, Sequence
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from sqlalchemy.exc import OperationalError
-from sqlmodel import Session, SQLModel, text
+from sqlmodel import Session, SQLModel, select, text
 
-from .models import FINGERPRINT_VERSION, LSH_BUCKET_KEY_MAX
+from .models import FINGERPRINT_VERSION, LSH_BUCKET_KEY_MAX, AppMeta
 from .scoring import MINHASH_MAGIC, minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
@@ -314,6 +314,9 @@ _VERSION_STAMP_KEY = "fingerprint_version"
 _NGRAM_STAMP_KEY = "fingerprint_ngram"
 _PERM_STAMP_KEY = "fingerprint_num_perm"
 
+#: All stamp keys in one tuple (the combined reader's ``IN`` clause).
+_STAMP_KEYS = (_VERSION_STAMP_KEY, _NGRAM_STAMP_KEY, _PERM_STAMP_KEY)
+
 
 def _stamp_get(session: Session, key: str) -> int | None:
     """Return one integer ``app_meta`` stamp, or ``None`` if unset or corrupt."""
@@ -405,6 +408,44 @@ def fingerprint_perm_set(session: Session, num_perm: int) -> None:
 def fingerprint_perm_clear(session: Session) -> None:
     """Remove the perm-count stamp (blobs may be from unknown counts)."""
     _stamp_clear(session, _PERM_STAMP_KEY)
+
+
+class FingerprintStamps(NamedTuple):
+    """The three ``app_meta`` stamps describing stored fingerprints.
+
+    ``None`` means the stamp is absent or corrupt, exactly as the
+    single-key reads (:func:`fingerprint_version_get`, ...) report it.
+    """
+
+    version: int | None
+    ngram: int | None
+    perm: int | None
+
+
+def fingerprint_stamps_get(session: Session) -> FingerprintStamps:
+    """Read all three fingerprint stamps in one round trip.
+
+    ``fingerprints_need_reindex`` runs on *every* find; three separate
+    keyed selects cost three round trips per query where one indexed
+    ``IN`` lookup over the ``app_meta`` primary key suffices.  Missing or
+    corrupt values map to ``None`` exactly like :func:`_stamp_get`.
+    """
+    rows = session.exec(
+        select(AppMeta.key, AppMeta.value).where(
+            AppMeta.key.in_(_STAMP_KEYS)  # type: ignore[attr-defined]
+        )
+    ).all()
+    values: dict[str, int | None] = dict.fromkeys(_STAMP_KEYS)
+    for key, value in rows:
+        try:
+            values[key] = int(value)
+        except (TypeError, ValueError):
+            values[key] = None
+    return FingerprintStamps(
+        version=values[_VERSION_STAMP_KEY],
+        ngram=values[_NGRAM_STAMP_KEY],
+        perm=values[_PERM_STAMP_KEY],
+    )
 
 
 def fingerprint_stamps_reconcile(

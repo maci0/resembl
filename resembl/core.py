@@ -38,11 +38,10 @@ from .cache import (
 from .lsh import (
     banding_params,
     fingerprint_ngram_clear,
-    fingerprint_ngram_get,
     fingerprint_ngram_set,
     fingerprint_perm_clear,
-    fingerprint_perm_get,
     fingerprint_perm_set,
+    fingerprint_stamps_get,
     fingerprint_stamps_reconcile,
     fingerprint_version_clear,
     fingerprint_version_get,
@@ -468,13 +467,12 @@ def snippet_add_batch(
     # write-path bottleneck — while alias name merges flush through the ORM.
     # DuckDB swaps in multi-row VALUES statements (its executemany is ~7x
     # slower; see ``_insert_snippet_rows``).  One commit persists everything.
-    # Count rows before inserting: the stamp reconciliation below may only
-    # publish values that hold for the whole database, so it must know
+    # Detect an empty database with an O(1) ``LIMIT 1`` probe instead of a
+    # full-table COUNT: the stamp reconciliation below needs to know only
     # whether pre-existing (possibly foreign-format) rows exist alongside
-    # this batch's new ones.
-    preexisting_rows = session.exec(
-        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
-    ).one()
+    # this batch's new ones, and the COUNT scanned the whole table on every
+    # import chunk.
+    fresh_database = session.exec(select(Snippet.checksum).limit(1)).first() is None
     if new_snippets:
         rows: list[dict[str, object]] = [
             {
@@ -495,7 +493,7 @@ def snippet_add_batch(
                 session,
                 ngram_size=ngram_size,
                 num_perm=NUM_PERMUTATIONS,
-                fresh_database=preexisting_rows == 0,
+                fresh_database=fresh_database,
             )
 
     # Keep the DB-backed LSH index in sync if one is already built.
@@ -533,12 +531,12 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     minhash_obj = code_create_minhash(code, ngram_size=ngram_size)
     minhash_bytes = minhash_pack(minhash_obj)
 
-    # Count rows before inserting: the stamp reconciliation below may only
-    # publish stamp values that hold for the whole database, so it must know
-    # whether pre-existing rows (possibly foreign-format) are present.
-    preexisting_rows = session.exec(
-        select(func.count(Snippet.checksum))  # type: ignore[arg-type]
-    ).one()
+    # Detect an empty database with an O(1) ``LIMIT 1`` probe instead of a
+    # full-table COUNT (same reason as ``snippet_add_batch``): the stamp
+    # reconciliation below may only publish stamp values that hold for the
+    # whole database, so it must know whether pre-existing rows (possibly
+    # foreign-format) are present.
+    fresh_database = session.exec(select(Snippet.checksum).limit(1)).first() is None
 
     new_snippet = Snippet(
         checksum=checksum,
@@ -553,7 +551,7 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
         session,
         ngram_size=ngram_size,
         num_perm=NUM_PERMUTATIONS,
-        fresh_database=preexisting_rows == 0,
+        fresh_database=fresh_database,
     )
     # Keep the DB-backed LSH index in sync if one is already built.
     lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
@@ -573,16 +571,19 @@ def fingerprints_need_reindex(session: Session, ngram_size: int, num_permutation
     instead of healing itself).  Reindexing current-format blobs is
     idempotent (identical fingerprints).  Shared by ``find`` and ``serve``
     startup.
+
+    This runs on every find, so all three stamps are read in a single round
+    trip (:func:`resembl.lsh.fingerprint_stamps_get`).
     """
-    if fingerprint_version_get(session) != FINGERPRINT_VERSION:
+    stamps = fingerprint_stamps_get(session)
+    if stamps.version != FINGERPRINT_VERSION:
         return True
-    if fingerprint_ngram_get(session) != ngram_size:
+    if stamps.ngram != ngram_size:
         # Stored fingerprints encode their n-gram; a config ngram change
         # silently zeroes matches (measured: 40 candidates at ngram 3, 0 at
         # ngram 5) — reindex once at the new n-gram.
         return True
-    stamped_perm = fingerprint_perm_get(session)
-    if stamped_perm is not None and stamped_perm != num_permutations:
+    if stamps.perm is not None and stamps.perm != num_permutations:
         # Every fingerprint writer stamps its count, so this is exact — no
         # reliance on which single blob the legacy probe below samples.
         return True
