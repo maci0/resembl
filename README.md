@@ -46,7 +46,7 @@ The search process is a two-step pipeline designed for both speed and accuracy:
 
 To avoid the slow process of comparing a query against every single entry in the database, we first perform a fast filtering step to find a small number of likely candidates.
 
-- **Normalization:** The assembly code is first "normalized" by a lexer. This process simplifies the code to its core structure, for example by replacing all register names (e.g., `EAX`, `EBX`) with a generic `REG` token and all immediate values with `IMM`. This makes the comparison robust against simple register or value changes. This behavior can be disabled with the `--no-normalization` flag on the `find` command.
+- **Normalization:** The assembly code is first "normalized" by a lexer. This process simplifies the code to its core structure, making the comparison robust against simple register or value changes. This behavior can be disabled with the `--no-normalization` flag on the `find` command.
 
 - **Normalization Details:** The normalization process is designed to create a canonical representation of the assembly code, focusing on the structural logic rather than specific register choices or immediate values. Here’s what it does:
     - **Generalizes Registers:** All general-purpose registers (e.g., `EAX`, `RBX`, `RDI`) are replaced with the generic token `REG`.
@@ -202,8 +202,6 @@ uv pip install -e .[dev]
 # 3. (Recommended for developers) Install pre-commit hooks
 uv run pre-commit install
 ```
-
-
 
 ### 2. Configuration
 
