@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from unittest.mock import patch
 
@@ -28,6 +29,20 @@ def _post_json(port: int, path: str, payload: dict, timeout: int = 10) -> dict:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read())
+
+
+def _post_json_status(port: int, path: str, payload: dict, timeout: int = 10) -> tuple[int, dict]:
+    """Like :func:`_post_json`, but returns ``(status, reply)`` for 4xx/5xx."""
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
 
 
 def _capturing_create() -> tuple[object, dict]:
@@ -620,25 +635,11 @@ class TestServerMode(unittest.TestCase):
 
     def test_find_batch_rejects_non_list_queries(self):
         """A non-list 'queries' value answers 400 JSON, not per-char finds."""
-        import urllib.error
-
         port = self._start_server()
         # An integer is not iterable; a bare string would otherwise iterate
         # one single-character find per letter.
         for bad in (12345, "push ebx\nret"):
-            body = json.dumps({"queries": bad}).encode("utf-8")
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/find-batch",
-                data=body,
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=10) as response:
-                    status = response.status
-                    payload = json.loads(response.read())
-            except urllib.error.HTTPError as exc:
-                status = exc.code
-                payload = json.loads(exc.read())
+            status, payload = _post_json_status(port, "/find-batch", {"queries": bad})
             self.assertEqual(status, 400)
             self.assertIn("queries must be a list", payload["error"])
 
@@ -711,23 +712,9 @@ class TestServerMode(unittest.TestCase):
         dict or number would otherwise crash the lexer downstream and leak
         the exception message through a 500 payload.
         """
-        import urllib.error
-
         port = self._start_server()
         for bad_query in ({"query": "push ebx"}, 12345, ["push ebx"]):
-            body = json.dumps({"query": bad_query}).encode("utf-8")
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{port}/find",
-                data=body,
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=10) as response:
-                    status = response.status
-                    payload = json.loads(response.read())
-            except urllib.error.HTTPError as exc:
-                status = exc.code
-                payload = json.loads(exc.read())
+            status, payload = _post_json_status(port, "/find", {"query": bad_query})
             self.assertEqual(status, 400)
             self.assertIn("query must be a string", payload["error"])
 

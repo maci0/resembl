@@ -42,6 +42,25 @@ class BaseDBTest(unittest.TestCase):
         SQLModel.metadata.drop_all(self.engine)
 
 
+def _seed_current_stamps(session: Session) -> None:
+    """Stamp *session*'s database as current-format, ngram 3, 128 perms.
+
+    Pre-merge state for the stamp-clearing tests: ``db_merge`` must leave
+    these alone when it only merges aliases/tags, and clear them when new
+    rows land.
+    """
+    from resembl.lsh import (
+        fingerprint_ngram_set,
+        fingerprint_perm_set,
+        fingerprint_version_set,
+    )
+    from resembl.models import FINGERPRINT_VERSION
+
+    fingerprint_version_set(session, FINGERPRINT_VERSION)
+    fingerprint_ngram_set(session, 3)
+    fingerprint_perm_set(session, 128)
+
+
 # ---------------------------------------------------------------------------
 # Collection tests
 # ---------------------------------------------------------------------------
@@ -323,17 +342,12 @@ class TestDBMerge(BaseDBTest):
         """
         from resembl.lsh import (
             fingerprint_ngram_get,
-            fingerprint_ngram_set,
             fingerprint_perm_get,
-            fingerprint_perm_set,
             fingerprint_version_get,
-            fingerprint_version_set,
         )
         from resembl.models import FINGERPRINT_VERSION
 
-        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
-        fingerprint_ngram_set(self.session, 3)
-        fingerprint_perm_set(self.session, 128)
+        _seed_current_stamps(self.session)
         snippet_add(self.session, "original", "MOV EAX, 1")
         source_path = self._create_source_db([("alias", "MOV EAX, 1", [], None)])
         try:
@@ -355,17 +369,11 @@ class TestDBMerge(BaseDBTest):
         """
         from resembl.lsh import (
             fingerprint_ngram_get,
-            fingerprint_ngram_set,
             fingerprint_perm_get,
-            fingerprint_perm_set,
             fingerprint_version_get,
-            fingerprint_version_set,
         )
-        from resembl.models import FINGERPRINT_VERSION
 
-        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
-        fingerprint_ngram_set(self.session, 3)
-        fingerprint_perm_set(self.session, 128)
+        _seed_current_stamps(self.session)
         source_path = self._create_source_db([("new_func", "MOV ECX, 9", [], None)])
         try:
             result = db_merge(self.session, source_path)
@@ -717,20 +725,11 @@ class TestDBMergeFailure(unittest.TestCase):
         """
         from sqlmodel import func
 
-        from resembl.lsh import (
-            fingerprint_ngram_get,
-            fingerprint_ngram_set,
-            fingerprint_perm_set,
-            fingerprint_version_get,
-            fingerprint_version_set,
-        )
-        from resembl.models import FINGERPRINT_VERSION
+        from resembl.lsh import fingerprint_ngram_get, fingerprint_version_get
 
         rows = [self._raw_row(i) for i in range(5001)]
         source_path = self._create_raw_source_db(rows)
-        fingerprint_version_set(self.session, FINGERPRINT_VERSION)
-        fingerprint_ngram_set(self.session, 3)
-        fingerprint_perm_set(self.session, 128)
+        _seed_current_stamps(self.session)
 
         import resembl.core as core_mod
 

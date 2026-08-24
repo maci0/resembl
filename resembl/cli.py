@@ -28,7 +28,7 @@ import os
 import signal
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING, Any, cast
@@ -202,6 +202,22 @@ def _echo_kv_table(title: str, rows: list[tuple[str, str]]) -> None:
     for key, value in rows:
         table.add_row(key, value)
     _echo(table)
+
+
+def _snippet_table(rows: Iterable[tuple[str, Sequence[str]]], title: str, start: int = 1) -> Table:
+    """Render ``(checksum, names)`` rows as the shared three-column listing.
+
+    The ``list`` and ``search`` tables (and each streamed ``list`` batch)
+    differ only in their row source and title; routing them through here
+    keeps the geometry identical by construction.
+    """
+    table = Table(title=title, title_style="bold cyan")
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Checksum", style="bold")
+    table.add_column("Names")
+    for i, (checksum, names) in enumerate(rows, start):
+        table.add_row(str(i), checksum[:12] + "…", ", ".join(names))
+    return table
 
 
 def _write_json_stream(items: Iterator[dict]) -> None:
@@ -930,13 +946,7 @@ def list_cmd(
     if state.format in ("json", "csv"):
         _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
-        table = Table(title="Snippets", title_style="bold cyan")
-        table.add_column("#", style="dim", justify="right")
-        table.add_column("Checksum", style="bold")
-        table.add_column("Names")
-        for i, snippet in enumerate(snippets, 1):
-            table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
-        _echo(table)
+        _echo(_snippet_table(((s.checksum, s.name_list) for s in snippets), "Snippets"))
 
 
 def _stream_list(session: Session) -> None:
@@ -966,13 +976,8 @@ def _stream_list(session: Session) -> None:
     else:
         offset = 0
         for batch in snippet_names_stream(session):
-            table = Table(title="Snippets", title_style="bold cyan")
-            table.add_column("#", style="dim", justify="right")
-            table.add_column("Checksum", style="bold")
-            table.add_column("Names")
-            for i, (checksum, raw) in enumerate(batch, offset + 1):
-                table.add_row(str(i), checksum[:12] + "…", ", ".join(json.loads(raw)))
-            _echo(table)
+            rows = [(checksum, json.loads(raw)) for checksum, raw in batch]
+            _echo(_snippet_table(rows, "Snippets", offset + 1))
             offset += len(batch)
 
 
@@ -1326,13 +1331,7 @@ def search(
         found = f"{len(snippets)}+" if len(snippets) >= limit else str(len(snippets))
         _echo(f"[dim]Found {found} snippets matching '{pattern}'.[/dim]")
         if snippets:
-            table = Table(title="Search Results", title_style="bold cyan")
-            table.add_column("#", style="dim", justify="right")
-            table.add_column("Checksum", style="bold")
-            table.add_column("Names")
-            for i, snippet in enumerate(snippets, 1):
-                table.add_row(str(i), snippet.checksum[:12] + "…", ", ".join(snippet.name_list))
-            _echo(table)
+            _echo(_snippet_table(((s.checksum, s.name_list) for s in snippets), "Search Results"))
 
 
 @app.command()
