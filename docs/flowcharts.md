@@ -124,8 +124,8 @@ graph LR
 The worker count defaults to one per ~100 files (capped at the CPU count),
 so small directories never pay the per-worker interpreter spawn cost.  The
 chunked writes use parameterized `executemany` on SQLite/PostgreSQL/MySQL
-and multi-row `VALUES` statements on DuckDB (whose executemany is ~10x
-slower).
+and multi-row `VALUES` statements on DuckDB (whose `executemany` path is
+several times slower, measured ~7–13x depending on the table).
 
 ## Export Snippets Flow
 
@@ -148,7 +148,7 @@ graph LR
 
     subgraph "Export Processing"
         F --> G[Create Export Directory]
-        G --> H[Load All Snippets from DB]
+        G --> H["Stream All Snippets from DB (bounded memory)"]
     end
 
     subgraph "Per-Snippet Processing"

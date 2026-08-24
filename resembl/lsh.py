@@ -553,8 +553,8 @@ class ResemblLSH:
     over them.  It is cheap to construct (no data loaded) — it only needs the
     banding parameters derived from ``(threshold, num_perm)``.
 
-    Mutation and query methods accept either a :class:`~datasketch.MinHash`
-    object or a ``minhash_pack`` byte blob.
+    Mutation and query methods accept either a
+    :class:`~resembl.minhash.MinHash` object or a ``minhash_pack`` byte blob.
     """
 
     def __init__(self, session: Session, threshold: float, num_perm: int) -> None:
