@@ -101,6 +101,62 @@ class TestCLIFindBatch(BaseCLITest):
                     self.assertTrue(stdout.getvalue().splitlines()[0].endswith(",error"))
 
 
+class TestCSVFormulaGuard(unittest.TestCase):
+    """CSV cells that spreadsheets would evaluate as formulas are neutralized."""
+
+    def test_csv_safe_prefixes_formula_characters(self):
+        """Every formula-triggering leading character gets a text-forcing quote."""
+        from resembl.cli import _csv_safe
+
+        for payload in ("=1+1", "+2", "-x", "@SUM(A1)", "\tTAB", "\r\nCRLF"):
+            self.assertEqual(_csv_safe(payload), "'" + payload)
+        # Safe values pass through unchanged (including non-strings).
+        self.assertEqual(_csv_safe("plain name"), "plain name")
+        self.assertEqual(_csv_safe(""), "")
+        self.assertEqual(_csv_safe(91.0), 91.0)
+
+    def test_find_csv_output_neutralizes_formula_names(self):
+        """A merge-sourced name like '=HYPERLINK(...)' is not a live CSV formula.
+
+        Snippet names are arbitrary text from merge sources; without the
+        guard the CSV cell opens as a spreadsheet formula (data exfiltration
+        via WEBSERVICE, command execution via DDE).
+        """
+        import contextlib
+        import io
+
+        import resembl.cli as cli
+
+        results = [
+            {
+                "query": "MOV EAX, 1\n RET",
+                "lsh_candidates": 1,
+                "matches": [
+                    {
+                        "checksum": "a" * 64,
+                        "names": ['=HYPERLINK("http://evil")'],
+                        "score": 91.0,
+                    }
+                ],
+            }
+        ]
+        stdout, stderr = io.StringIO(), io.StringIO()
+        saved = (cli.state.format, cli.state.quiet)
+        cli.state.format, cli.state.quiet = "csv", False
+        try:
+            with patch.object(cli, "_find_batch_via_server", return_value=results):
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    cli.find_batch(
+                        file=io.StringIO("MOV EAX, 1; RET\n"), top_n=None, threshold=None
+                    )
+        finally:
+            cli.state.format, cli.state.quiet = saved
+        out = stdout.getvalue()
+        self.assertIn("'=HYPERLINK", out)
+        # No unguarded formula cell remains anywhere in the output.
+        self.assertNotIn("=HYPERLINK", out.replace("'=HYPERLINK", ""))
+
+
 class TestCLICollections(BaseCLITest):
     """Integration tests for the collection command group."""
 

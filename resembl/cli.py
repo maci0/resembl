@@ -160,6 +160,26 @@ def _format_created_at(value: str, fmt: str, tz: tzinfo | None = None) -> str:
     return moment.astimezone(tz).strftime(fmt)
 
 
+#: Leading characters spreadsheet applications interpret as formulas when a
+#: CSV cell is opened (= starts a formula, +/-/@ insert one, tab/CR continue
+#: one).  Snippet names and tags are arbitrary text from merge sources, so
+#: exported cells must be neutralized before they reach such an application.
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> object:
+    """Return *value* made safe for one CSV cell.
+
+    A string whose first character would make a spreadsheet application
+    evaluate the cell as a formula gets a text-forcing apostrophe prefix
+    (the standard mitigation; the apostrophe is not part of the value's
+    meaning).  Non-strings and safe strings pass through unchanged.
+    """
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _echo_format(data: object) -> None:
     """Print data in the requested format (JSON/CSV) unless ``--quiet``."""
     if state.quiet:
@@ -177,12 +197,12 @@ def _echo_format(data: object) -> None:
             fieldnames = list(dict.fromkeys(k for row in data for k in row))
             writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(data)
+            writer.writerows([{k: _csv_safe(v) for k, v in row.items()} for row in data])
         elif isinstance(data, dict):
             data = {k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}
             writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
             writer.writeheader()
-            writer.writerow(data)
+            writer.writerow({k: _csv_safe(v) for k, v in data.items()})
         else:
             console.print(json.dumps(data, indent=2))
     else:
@@ -972,7 +992,12 @@ def _stream_list(session: Session) -> None:
         writer.writeheader()
         for batch in snippet_names_stream(session):
             for checksum, raw in batch:
-                writer.writerow({"checksum": checksum, "names": ", ".join(json.loads(raw))})
+                writer.writerow(
+                    {
+                        "checksum": _csv_safe(checksum),
+                        "names": _csv_safe(", ".join(json.loads(raw))),
+                    }
+                )
     else:
         offset = 0
         for batch in snippet_names_stream(session):
@@ -1639,7 +1664,11 @@ def collection_show_cmd(
         writer.writeheader()
         for checksum, raw in rows():
             writer.writerow(
-                {"checksum": checksum, "names": ", ".join(json.loads(raw)), "collection": name}
+                {
+                    "checksum": _csv_safe(checksum),
+                    "names": _csv_safe(", ".join(json.loads(raw))),
+                    "collection": _csv_safe(name),
+                }
             )
     else:
         # One table as before, built from lightweight rows: the ORM objects

@@ -643,6 +643,51 @@ class TestServerMode(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("queries must be a list", payload["error"])
 
+    def test_error_payloads_do_not_leak_internal_text(self):
+        """500s and per-query failures answer generic errors, never exception text.
+
+        Driver/ORM exception messages carry SQL fragments, bind parameters,
+        and file paths; those belong in the server log (``logger.exception``
+        / ``logger.warning``), not in HTTP payloads any client can read.
+        """
+        marker = "secret-internal: SELECT password FROM app_users"
+        port = self._start_server()
+        with patch("resembl.server._find_one", side_effect=RuntimeError(marker)):
+            status, payload = _post_json_status(port, "/find", {"query": "push ebx\nret"})
+            self.assertEqual(status, 500)
+            self.assertNotIn(marker, json.dumps(payload))
+
+            batch_status, batch = _post_json_status(port, "/find-batch", {"queries": ["q1"]})
+            self.assertEqual(batch_status, 200)
+            entry = batch["results"][0]
+            self.assertIn("error", entry)
+            self.assertNotIn(marker, json.dumps(batch))
+
+    def test_response_security_headers(self):
+        """Every JSON response carries anti-sniffing, framing, and cache headers."""
+        import http.client
+
+        port = self._start_server()
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request(
+                "POST",
+                "/find",
+                body=json.dumps({"query": "push ebx\nret"}),
+                headers={"Content-Type": "application/json"},
+            )
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
+            self.assertEqual(response.getheader("X-Frame-Options"), "DENY")
+            self.assertEqual(response.getheader("Cache-Control"), "no-store")
+            csp = response.getheader("Content-Security-Policy") or ""
+            self.assertIn("default-src 'none'", csp)
+            self.assertIn("frame-ancestors 'none'", csp)
+        finally:
+            conn.close()
+
     def test_server_rejects_malformed_requests(self):
         """Malformed requests answer 4xx errors instead of crashing handlers.
 

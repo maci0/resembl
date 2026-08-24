@@ -315,12 +315,15 @@ class _FindHandler(BaseHTTPRequestHandler):
         try:
             with Session(self.engine) as session:
                 payload = _find_one(session, body, query, self.find_defaults)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive
             # A long-lived serve process prints nothing per request (see
             # ``log_message``): without this record, 500s are completely
             # unobserved and an on-call operator has no trace to debug.
             logger.exception("POST %s failed", self.path)
-            self._respond(500, {"error": str(exc)})
+            # The full exception text stays in the log only: driver and ORM
+            # messages carry SQL fragments, bind parameters, and file paths,
+            # which must not reach the client.
+            self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, payload)
 
@@ -340,20 +343,28 @@ class _FindHandler(BaseHTTPRequestHandler):
         try:
             with Session(self.engine) as session:
                 for query in queries:
+                    # Same type rule as /find's boundary check, answered
+                    # without raising so the controlled message reaches the
+                    # client while unexpected failures cannot.
+                    if not isinstance(query, str):
+                        results.append({"query": query, "error": "query must be a string"})
+                        continue
                     try:
-                        if not isinstance(query, str):
-                            raise ValueError("query must be a string")
                         results.append(
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
                         )
                     except Exception as exc:  # isolate per-query failures
                         logger.warning("find-batch query %.200r failed: %s", query, exc)
-                        results.append({"query": query, "error": str(exc)})
-        except Exception as exc:
+                        # Like the 500 path below: the exception text (SQL,
+                        # paths) is for the log, not the wire.
+                        results.append(
+                            {"query": query, "error": "internal error while processing this query"}
+                        )
+        except Exception:
             # Malformed container or session/pool failure — answer 500 rather
             # than dropping the connection with a handler-thread traceback.
             logger.exception("POST %s failed", self.path)
-            self._respond(500, {"error": str(exc)})
+            self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, {"results": results})
 
@@ -365,6 +376,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         # response can never be reinterpreted as HTML/script by a browser
         # pointed at the endpoint.
         self.send_header("X-Content-Type-Options", "nosniff")
+        # Defense in depth for a browser pointed at the endpoint: deny
+        # framing and script/style/object sources outright, and keep cached
+        # copies of snippet-derived responses out of intermediary caches.
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
