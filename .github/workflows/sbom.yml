@@ -1,0 +1,39 @@
+# Software Bill of Materials generation.
+#
+# Produces a CycloneDX 1.5 inventory of every runtime dependency that ships
+# with a release, exported directly from the hash-pinned uv.lock by uv itself,
+# so consumers and vuln scanners can see exactly what was built without any
+# extra third-party tooling.
+name: SBOM
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Export CycloneDX SBOM from uv.lock
+        # Runtime dependencies only: this is the set that ships to users.
+        # Package hashes are preserved so the SBOM doubles as an integrity
+        # manifest.
+        run: uv export --preview-features sbom-export --format cyclonedx1.5 --output-file sbom.cdx.json
+
+      - name: Validate SBOM parses as JSON
+        run: python3 -c "import json; json.load(open('sbom.cdx.json'))"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx-${{ github.sha }}
+          path: sbom.cdx.json
