@@ -645,9 +645,12 @@ class TestIncrementalIndexSync(BaseScalingTest):
         """Changing the threshold invalidates the built index (rebuild)."""
         self._add_batch(20, "pre")
         snippet_find_matches(self.session, "MOV EAX, 1", top_n=1)
-        # Find with a different threshold rebuilds and still works.
-        _, matches = snippet_find_matches(self.session, "MOV EAX, 1", top_n=1, threshold=0.8)
-        self.assertGreaterEqual(len(matches), 0)
+        self.assertEqual(lsh_meta_get(self.session), (0.5, NUM_PERMUTATIONS))
+        # Find with a different threshold rebuilds the index at the new
+        # threshold and still returns a match.
+        _n, matches = snippet_find_matches(self.session, "MOV EAX, 1", top_n=1, threshold=0.8)
+        self.assertEqual(lsh_meta_get(self.session), (0.8, NUM_PERMUTATIONS))
+        self.assertEqual(len(matches), 1)
 
     def test_reindex_clears_built_index_upfront(self):
         """Reindex must drop any built index before rewriting fingerprints.
@@ -662,9 +665,12 @@ class TestIncrementalIndexSync(BaseScalingTest):
         self.assertIsNotNone(lsh_meta_get(self.session))
         db_reindex(self.session, jobs=1, batch_size=10)
         self.assertIsNone(lsh_meta_get(self.session))
-        # And a find afterwards still works (rebuilds lazily).
-        _, matches = snippet_find_matches(self.session, "MOV EAX, 5", top_n=3)
-        self.assertGreaterEqual(len(matches), 0)
+        # And a find afterwards still works (rebuilds lazily): the stored
+        # snippets share one normalized token stream, so every one of them
+        # is admitted as a candidate again.
+        num_candidates, matches = snippet_find_matches(self.session, "MOV EAX, 5", top_n=3)
+        self.assertEqual(num_candidates, 30)
+        self.assertGreaterEqual(len(matches), 1)
 
     def test_reindex_reports_progress(self):
         """db_reindex invokes the progress callback with (done, total)."""
@@ -887,11 +893,15 @@ class TestIndexBuild(BaseScalingTest):
         self.assertIsNotNone(lsh)
         rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
         self.assertEqual(rows, 19 * 25)
+        # The find's legacy-blob probe samples the corrupt row first, so it
+        # triggers the healing reindex; afterwards every snippet (including
+        # the healed one) is admitted again, and the query's exact code
+        # ranks first.
         num_candidates, matches = snippet_find_matches(
             self.session, "MOV EAX, 5; ADD EBX, 5; RET", top_n=3
         )
-        self.assertGreaterEqual(num_candidates, 0)
-        self.assertIsInstance(matches, list)
+        self.assertEqual(num_candidates, 20)
+        self.assertEqual(matches[0][0].name_list, ["good_5"])
 
         # A reindex heals it (fingerprints are recomputed from the code).
         db_reindex(self.session, jobs=1)
@@ -950,13 +960,17 @@ class TestIndexBuild(BaseScalingTest):
         config — so a non-default setting rebuilt the index on every find.
         """
         self._add(20, "perm")
-        n, _m = snippet_find_matches(
+        n, m = snippet_find_matches(
             self.session,
             "MOV EAX, 5; ADD EBX, 5; RET",
             top_n=3,
             num_permutations=64,
         )
-        self.assertGreaterEqual(n, 0)
+        # The query's exact code is a guaranteed candidate and the unique
+        # Levenshtein-100 winner (its fingerprint is byte-identical to the
+        # stored perm_5 blob).
+        self.assertEqual(n, 20)
+        self.assertEqual(m[0][0].name_list, ["perm_5"])
         self.assertEqual(lsh_meta_get(self.session)[1], 64)
         # Stored blobs were reindexed at 64 (the migration reindexes on a
         # perm-count change), so the second find does not rebuild.

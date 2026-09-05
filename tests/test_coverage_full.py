@@ -512,6 +512,8 @@ class TestDatabaseModule(unittest.TestCase):
         """db_create should create all tables in the configured engine (line 49)."""
         from unittest.mock import patch
 
+        from sqlalchemy import inspect
+
         with tempfile.TemporaryDirectory() as temp_dir:
             engine = create_engine(f"sqlite:///{os.path.join(temp_dir, 'test.db')}")
             try:
@@ -519,6 +521,12 @@ class TestDatabaseModule(unittest.TestCase):
                 # default `sqlite:///assembly.db` is never created in CWD.
                 with patch("resembl.database._engine", engine):
                     db_create()
+                tables = set(inspect(engine).get_table_names())
+                self.assertGreater(len(tables), 0)
+                # The tables every command depends on must exist.
+                self.assertIn("snippet", tables)
+                self.assertIn("lsh_bucket", tables)
+                self.assertIn("lsh_meta", tables)
             finally:
                 engine.dispose()
 
