@@ -90,15 +90,26 @@ _META_UPSERT_DUCKDB = (
 )
 
 _VERSION_UPSERT_SQLITE_PG = (
-    "INSERT INTO app_meta (key, value) VALUES (:k, :v) ON CONFLICT(key) DO UPDATE SET value = :v"
+    "INSERT INTO app_meta ({k}, {v}) VALUES (:k, :v) ON CONFLICT({k}) DO UPDATE SET {v} = :v"
 )
 _VERSION_UPSERT_MYSQL = (
-    "INSERT INTO app_meta (key, value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE value = :v"
+    "INSERT INTO app_meta ({k}, {v}) VALUES (:k, :v) ON DUPLICATE KEY UPDATE {v} = :v"
 )
 _VERSION_UPSERT_DUCKDB = (
-    "INSERT INTO app_meta (key, value) VALUES (:k, :v) "
-    "ON CONFLICT (key) DO UPDATE SET value = :v"
+    "INSERT INTO app_meta ({k}, {v}) VALUES (:k, :v) ON CONFLICT ({k}) DO UPDATE SET {v} = :v"
 )
+
+
+def _app_meta_cols(session: Session) -> tuple[str, str]:
+    """``app_meta``'s ``key`` and ``value`` columns, quoted for the session's dialect.
+
+    ``key`` is a reserved word in MySQL, so an unquoted reference is a syntax
+    error there (``near 'key = ...'``) even though SQLite, PostgreSQL and
+    DuckDB accept it.  The dialect's identifier preparer knows which quoting
+    character to emit.
+    """
+    preparer = session.get_bind().dialect.identifier_preparer
+    return preparer.quote("key"), preparer.quote("value")
 
 
 def dialect_name(session: Session) -> str:
@@ -211,13 +222,20 @@ def _meta_upsert_sql(session: Session) -> str:
 
 
 def _version_upsert_sql(session: Session) -> str:
-    """Return the dialect-appropriate upsert for an ``app_meta`` key/value."""
+    """Return the dialect-appropriate upsert for an ``app_meta`` key/value.
+
+    The statements are templates because ``key`` is reserved in MySQL: the
+    column names go in through :func:`_app_meta_cols`, quoted for the dialect.
+    """
     dialect = dialect_name(session)
     if dialect == "mysql":
-        return _VERSION_UPSERT_MYSQL
-    if dialect == "duckdb":
-        return _VERSION_UPSERT_DUCKDB
-    return _VERSION_UPSERT_SQLITE_PG
+        sql = _VERSION_UPSERT_MYSQL
+    elif dialect == "duckdb":
+        sql = _VERSION_UPSERT_DUCKDB
+    else:
+        sql = _VERSION_UPSERT_SQLITE_PG
+    key_col, value_col = _app_meta_cols(session)
+    return sql.format(k=key_col, v=value_col)
 
 
 def table_ensure(session: Session) -> None:
@@ -320,8 +338,9 @@ _STAMP_KEYS = (_VERSION_STAMP_KEY, _NGRAM_STAMP_KEY, _PERM_STAMP_KEY)
 
 def _stamp_get(session: Session, key: str) -> int | None:
     """Return one integer ``app_meta`` stamp, or ``None`` if unset or corrupt."""
+    key_col, value_col = _app_meta_cols(session)
     row = session.execute(
-        text("SELECT value FROM app_meta WHERE key = :key"), {"key": key}
+        text(f"SELECT {value_col} FROM app_meta WHERE {key_col} = :key"), {"key": key}
     ).one_or_none()
     if row is None:
         return None
@@ -344,7 +363,8 @@ def _stamp_set(session: Session, key: str, value: int) -> None:
 
 def _stamp_clear(session: Session, key: str) -> None:
     """Delete one ``app_meta`` stamp row."""
-    session.execute(text("DELETE FROM app_meta WHERE key = :key"), {"key": key})
+    key_col, _value_col = _app_meta_cols(session)
+    session.execute(text(f"DELETE FROM app_meta WHERE {key_col} = :key"), {"key": key})
     session.commit()
 
 

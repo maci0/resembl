@@ -11,9 +11,22 @@ server when ``RESEMBL_TEST_PG_URL`` is set.
 import unittest
 
 
+class _FakePreparer:
+    """Minimal stand-in for a dialect's identifier preparer."""
+
+    def __init__(self, quote_char: str):
+        self._quote_char = quote_char
+
+    def quote(self, name: str) -> str:
+        return f"{self._quote_char}{name}{self._quote_char}"
+
+
 class _FakeDialect:
     def __init__(self, name: str):
         self.name = name
+        # MySQL quotes identifiers with backticks, every other dialect here
+        # with double quotes.
+        self.identifier_preparer = _FakePreparer("`" if name == "mysql" else '"')
 
 
 class _FakeBind:
@@ -85,6 +98,16 @@ class TestDialectDispatch(unittest.TestCase):
             self.assertIn("ON CONFLICT", fn(_FakeSession("sqlite")))
             self.assertIn("ON CONFLICT", fn(_FakeSession("postgresql")))
             self.assertIn("ON CONFLICT", fn(_FakeSession("duckdb")))
+
+    def test_version_upsert_quotes_the_reserved_key_column(self):
+        """``key`` is reserved in MySQL: an unquoted reference is a syntax error."""
+        from resembl.lsh import _version_upsert_sql
+
+        mysql = _version_upsert_sql(_FakeSession("mysql"))
+        self.assertIn("`key`", mysql)
+        self.assertIn("`value`", mysql)
+        self.assertIn('"key"', _version_upsert_sql(_FakeSession("postgresql")))
+        self.assertIn('"key"', _version_upsert_sql(_FakeSession("sqlite")))
 
     def test_bucket_keys_are_indexable_hex(self):
         """band_buckets returns 40-char hex keys (indexable on MySQL)."""

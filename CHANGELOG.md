@@ -11,6 +11,9 @@ project follows [Semantic Versioning](https://semver.org/).
 - `--no-color` now also suppresses the ANSI codes typer paints into `--help`.
   typer forces color whenever `GITHUB_ACTIONS`, `FORCE_COLOR` or `PY_COLORS` is
   set, even into a pipe, so the flag previously left the help panel colored.
+- MySQL/MariaDB: the `app_meta` statements quote their `key` column.  `key` is
+  reserved in MySQL, so every insert, select and delete on that table was a
+  syntax error there; SQLite, PostgreSQL and DuckDB accept the unquoted name.
 
 ## [1.0.0] - 2026-09-12
 
