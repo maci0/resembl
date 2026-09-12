@@ -1846,6 +1846,16 @@ def config_unset_cmd(
 
 def main() -> None:
     """Entry point for the resembl command line interface."""
+    if "--no-color" in sys.argv:
+        # --no-color has to reach typer's own renderer, not just this module's
+        # consoles: the --help panel is painted before the callback runs, and
+        # typer forces color whenever GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS
+        # is set, even into a pipe.  Reading argv here is the one point that
+        # runs before the help is built.
+        from typer import rich_utils
+
+        rich_utils.FORCE_TERMINAL = False
+        rich_utils.COLOR_SYSTEM = None
     app()
 
 

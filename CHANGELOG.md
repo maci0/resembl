@@ -4,6 +4,14 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `--no-color` now also suppresses the ANSI codes typer paints into `--help`.
+  typer forces color whenever `GITHUB_ACTIONS`, `FORCE_COLOR` or `PY_COLORS` is
+  set, even into a pipe, so the flag previously left the help panel colored.
+
 ## [1.0.0] - 2026-09-12
 
 First stable release.  The 0.x line was developed without a changelog; this
