@@ -1,6 +1,6 @@
 [project]
 name = "resembl"
-version = "0.1.0"
+version = "1.0.0"
 description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
 license = { text = "GPLv3" }
