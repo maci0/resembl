@@ -3,10 +3,14 @@
 ``resembl.minhash`` vendors a minimal MinHash and LSH banding search so the
 runtime tree does not need ``datasketch`` (and its heavy ``scipy``
 dependency).  These tests are the contract that keeps the vendored code
-byte-for-byte compatible with datasketch 1.x: fingerprints, permutation
-tables, Jaccard values and chosen ``(b, r)`` banding parameters must all
-match exactly.  If a datasketch upgrade ever changes any of these, this
-suite fails and forces a deliberate compatibility decision (and a
+byte-for-byte compatible with datasketch's ``legacy`` scheme (the 1.x
+behavior our ``FINGERPRINT_VERSION`` was computed under): fingerprints,
+permutation tables, Jaccard values and chosen ``(b, r)`` banding parameters
+must all match exactly.  The oracle side always passes
+``scheme="legacy"`` — datasketch 2.0's default (``affine32``) is a
+different hash family by design, and matching it here would mean rewriting
+every stored fingerprint.  If the legacy scheme ever changes, this suite
+fails and forces a deliberate compatibility decision (and a
 ``FINGERPRINT_VERSION`` bump if fingerprints change).
 """
 
@@ -16,6 +20,10 @@ import unittest
 import numpy as np
 
 from resembl.minhash import MinHash, optimal_param, sha1_hash32
+
+#: The permutation scheme resembl implements; kept in one place so every
+#: oracle construction below pins the same family datasketch 1.x used.
+LEGACY_SCHEME = "legacy"
 
 
 class TestSha1Hash32(unittest.TestCase):
@@ -42,7 +50,7 @@ class TestPermutationsMatchDatasketch(unittest.TestCase):
 
         for num_perm in (2, 16, 64, 128, 256):
             ours = MinHash(num_perm=num_perm)
-            theirs = DSMinHash(num_perm=num_perm)
+            theirs = DSMinHash(num_perm=num_perm, scheme=LEGACY_SCHEME)
             np.testing.assert_array_equal(ours.permutations[0], theirs.permutations[0])
             np.testing.assert_array_equal(ours.permutations[1], theirs.permutations[1])
 
@@ -57,7 +65,7 @@ class TestDigestsMatchDatasketch(unittest.TestCase):
         for _ in range(25):
             num_perm = rng.choice([2, 16, 64, 128])
             ours = MinHash(num_perm=num_perm)
-            theirs = DSMinHash(num_perm=num_perm)
+            theirs = DSMinHash(num_perm=num_perm, scheme=LEGACY_SCHEME)
             for _ in range(rng.randint(0, 6)):
                 batch = [
                     bytes(rng.getrandbits(8) for _ in range(rng.randint(0, 30)))
@@ -97,7 +105,9 @@ class TestJaccardMatchesDatasketch(unittest.TestCase):
         shared = [f"common_{i}".encode() for i in range(30)]
         extra = [f"x_{i}".encode() for i in range(10)]
         ours_a, ours_b = MinHash(128), MinHash(128)
-        theirs_a, theirs_b = DSMinHash(128), DSMinHash(128)
+        theirs_a, theirs_b = DSMinHash(128, scheme=LEGACY_SCHEME), DSMinHash(
+            128, scheme=LEGACY_SCHEME
+        )
         # Feed set A through batch updates and set B through per-item updates,
         # exercising both code paths against the oracle on identical inputs.
         ours_a.update_batch(shared)
@@ -131,13 +141,13 @@ class TestConstructorFromHashvalues(unittest.TestCase):
         from datasketch import MinHash as DSMinHash
 
         source = MinHash(128)
-        oracle_source = DSMinHash(128)
+        oracle_source = DSMinHash(128, scheme=LEGACY_SCHEME)
         items = [f"v{i}".encode() for i in range(20)]
         source.update_batch(items)
         oracle_source.update_batch(items)
         values = [int(v) for v in source.digest()]
         ours = MinHash(hashvalues=values)
-        theirs = DSMinHash(num_perm=len(values), hashvalues=values)
+        theirs = DSMinHash(num_perm=len(values), hashvalues=values, scheme=LEGACY_SCHEME)
         np.testing.assert_array_equal(ours.digest(), theirs.digest())
         self.assertEqual(ours.jaccard(source), theirs.jaccard(oracle_source))
 

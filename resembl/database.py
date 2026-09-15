@@ -85,7 +85,9 @@ def create_db_engine(
     return eng
 
 
-_engine: Engine | None = None
+# Mutable lazy singleton, not a constant: pylint's const-rgx would have it
+# UPPER_CASE because the initializer is a literal.
+_engine: Engine | None = None  # pylint: disable=invalid-name
 
 
 def get_engine() -> Engine:

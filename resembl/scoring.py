@@ -70,8 +70,9 @@ _MINHASH_TEMPLATES: dict[int, MinHash] = {}
 _MINHASH_TEMPLATES_LOCK = threading.Lock()
 
 #: Shared Pygments lexer instance, created on first tokenize/normalize (see
-#: :func:`get_lexer`).
-_lexer: NasmLexer | None = None
+#: :func:`get_lexer`).  Mutable lazy singleton, not a constant: pylint's
+#: const-rgx would have it UPPER_CASE because the initializer is a literal.
+_lexer: NasmLexer | None = None  # pylint: disable=invalid-name
 
 #: Serializes first-time lexer construction: the serve process runs one
 #: handler thread per request, and the first concurrent tokenizations race

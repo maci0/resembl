@@ -30,10 +30,10 @@ dev = [
     "ruff>=0.12.2",
     "black>=25.1.0",
     "pre-commit>=4.2.0",
-    # Cap at <4: pylint 4.x adds checks the tree has not been adapted to,
-    # which would turn the Pylint CI gate red for everyone on next resolve.
-    # Lift the cap in a pass that fixes the new findings, not before.
-    "pylint>=3.3.7,<4",
+    # Floor at 4: the tree is adapted to pylint 4's checks (its invalid-name
+    # rule flags the two mutable module-level singletons, scoped-disabled
+    # inline in resembl.database / resembl.scoring).  Do not lower.
+    "pylint>=4",
     "hypothesis>=6.0.0",
     "pg8000>=1.31.0",
     "duckdb>=1.0.0",
@@ -43,8 +43,10 @@ dev = [
     "pytest-cov>=5.0.0",
     # Test oracle only: resembl.minhash vendors a bit-compatible MinHash, and
     # these tests cross-check fingerprints and banding against the real
-    # library.  Never import it from package code.
-    "datasketch>=1.6.5",
+    # library.  Never import it from package code.  Floor at 2: the oracle
+    # tests pin datasketch's `scheme="legacy"` family explicitly, a 2.0-only
+    # keyword, so resolving 1.x fails the suite at collection.
+    "datasketch>=2",
 ]
 # atheris publishes wheels only for Python >= 3.12 (no sdist since 2.x);
 # gate the extra so `.[dev,fuzz]` stays installable on every supported Python.
@@ -192,6 +194,24 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_globals = true
 disallow_untyped_decorators = true
+
+# numpy >= 2.5 ships stubs written in 3.12+ syntax (PEP 695 `type` aliases),
+# which this project's 3.11 target cannot parse — yet the package itself
+# runs fine against numpy 2.5 on every supported runtime, which is also what
+# the test suite validates.  `follow_imports = "skip"` alone does not help:
+# mypy's resolver forces stubs back to `"normal"` regardless
+# (`"Stubs are always normal"`, `mypy/build.py`), so the files are still
+# parsed.  The working combination is skip *plus* `follow_imports_for_stubs`
+# (its documented pair — "except when they aren't"), which skips even stub
+# modules; `resembl.minhash` then sees `np` names as `Any`.  Options were:
+# pin users to numpy < 2.5 (wrong — 2.5 is what ships and what the suite
+# validates), or raise the check target to 3.12 (that would weaken the 3.11
+# compatibility the tree promises).  The tree's *own* annotations stay
+# fully checked.  Revisit if mypy ever gains version-gated parsing.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable"
