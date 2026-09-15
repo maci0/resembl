@@ -572,13 +572,9 @@ class TestVersioning(BaseDBTest):
 class TestResemblConfig(unittest.TestCase):
     """Tests for ResemblConfig dict-like interface."""
 
-    def test_get_existing_key(self):
+    def test_defaults(self):
         cfg = ResemblConfig()
-        self.assertEqual(cfg.get("top_n"), 5)
-
-    def test_get_missing_key_returns_default(self):
-        cfg = ResemblConfig()
-        self.assertEqual(cfg.get("nonexistent", 42), 42)
+        self.assertEqual(cfg.top_n, 5)
 
     def test_items(self):
         cfg = ResemblConfig()
@@ -590,20 +586,14 @@ class TestResemblConfig(unittest.TestCase):
     def test_update_from_dict(self):
         cfg = ResemblConfig()
         cfg.update({"top_n": 15, "format": "json"})
-        self.assertEqual(cfg.get("top_n"), 15)
-        self.assertEqual(cfg.get("format"), "json")
+        self.assertEqual(cfg.top_n, 15)
+        self.assertEqual(cfg.format, "json")
 
     def test_update_from_config(self):
         cfg1 = ResemblConfig(top_n=100)
         cfg2 = ResemblConfig()
         cfg2.update(cfg1)
-        self.assertEqual(cfg2.get("top_n"), 100)
-
-    def test_clear(self):
-        cfg = ResemblConfig(top_n=99, lsh_threshold=0.9)
-        cfg.clear()
-        self.assertEqual(cfg.get("top_n"), 5)
-        self.assertEqual(cfg.get("lsh_threshold"), 0.5)
+        self.assertEqual(cfg2.top_n, 100)
 
     def test_to_dict(self):
         cfg = ResemblConfig()

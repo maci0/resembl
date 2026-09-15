@@ -128,9 +128,9 @@ class TestConfig(unittest.TestCase):
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 update_config("top_n", 10)
                 config = load_config()
-        self.assertEqual(config.get("top_n"), 10)
+        self.assertEqual(config.top_n, 10)
         # Ensure other defaults are preserved
-        self.assertEqual(config.get("lsh_threshold"), DEFAULTS.get("lsh_threshold"))
+        self.assertEqual(config.lsh_threshold, DEFAULTS.get("lsh_threshold"))
 
     def test_remove_config_key(self):
         """Test that remove_config_key correctly removes a key."""
@@ -139,7 +139,7 @@ class TestConfig(unittest.TestCase):
                 update_config("top_n", 10)
                 remove_config_key("top_n")
                 config = load_config()
-        self.assertEqual(config.get("top_n"), DEFAULTS.get("top_n"))
+        self.assertEqual(config.top_n, DEFAULTS.get("top_n"))
 
     def test_update_with_malformed_config(self):
         """Test that update_config works with a malformed config file."""
@@ -149,8 +149,8 @@ class TestConfig(unittest.TestCase):
                 f.write("this is not valid toml")
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 config = update_config("top_n", 10)
-        self.assertEqual(config.get("top_n"), 10)
-        self.assertEqual(config.get("lsh_threshold"), DEFAULTS.get("lsh_threshold"))
+        self.assertEqual(config["top_n"], 10)
+        self.assertEqual(config["lsh_threshold"], DEFAULTS.get("lsh_threshold"))
 
     def test_remove_with_malformed_config(self):
         """Test that remove_config_key works with a malformed config file."""
@@ -172,8 +172,8 @@ class TestConfig(unittest.TestCase):
                 remove_config_key("lsh_threshold")
                 config = load_config()
         # The original config should be unchanged
-        self.assertEqual(config.get("top_n"), 10)
-        self.assertEqual(config.get("lsh_threshold"), DEFAULTS.get("lsh_threshold"))
+        self.assertEqual(config.top_n, 10)
+        self.assertEqual(config.lsh_threshold, DEFAULTS.get("lsh_threshold"))
 
     def test_update_without_locking_api_falls_back_to_unlocked(self):
         """A platform with neither fcntl nor msvcrt must still update config.
@@ -188,8 +188,8 @@ class TestConfig(unittest.TestCase):
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                 with patch.dict(sys.modules, {"fcntl": None, "msvcrt": None}):
                     config = update_config("top_n", 11)
-                    self.assertEqual(load_config().get("top_n"), 11)
-        self.assertEqual(config.get("top_n"), 11)
+                    self.assertEqual(load_config().top_n, 11)
+        self.assertEqual(config["top_n"], 11)
 
     def test_save_config_creates_directory(self):
         """save_config should create the config directory if it doesn't exist."""

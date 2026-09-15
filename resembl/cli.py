@@ -1780,7 +1780,8 @@ def config_get_cmd(
     key: str = typer.Argument(help="The configuration key to get."),
 ) -> None:
     """Get a configuration value."""
-    value = load_config().get(key)
+    cfg = load_config()
+    value = getattr(cfg, key, None)
     if state.format in ("json", "csv"):
         _echo_format({key: value})
     else:
@@ -1840,7 +1841,6 @@ def config_unset_cmd(
         err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
         raise typer.Exit(code=1)
     _echo(f"[green]✓[/green] Unset [bold]{key}[/bold], returning to default.")
-    state.config.clear()
     state.config.update(new_config)
 
 

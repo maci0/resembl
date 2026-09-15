@@ -10,7 +10,6 @@ import os
 import tempfile
 import tomllib
 from collections.abc import Iterator
-from typing import TypeVar, overload
 
 import tomli_w
 
@@ -20,8 +19,6 @@ DEFAULT_CONFIG_DIR = "~/.config/resembl"
 #: Anything else cannot be rendered: reject it where it enters instead of
 #: letting commands silently fall back to one branch or another.
 FORMATS = ("table", "json", "csv")
-
-_T = TypeVar("_T")
 
 
 def config_dir_get() -> str:
@@ -49,8 +46,8 @@ def config_path_get() -> str:
 class ResemblConfig:
     """Typed configuration for resembl with defaults.
 
-    Provides dict-like access (``get``, ``items``, ``update``, ``clear``)
-    so that callers can migrate incrementally.
+    Callers read attributes directly; :func:`update_config` and
+    :func:`remove_config_key` return plain dicts for the values they write.
     """
 
     lsh_threshold: float = 0.5
@@ -59,20 +56,6 @@ class ResemblConfig:
     ngram_size: int = 3
     jaccard_weight: float = 0.4
     format: str = "table"
-
-    # ---- dict-compatible helpers ----
-
-    @overload
-    def get(self, key: str, default: _T) -> _T: ...
-
-    @overload
-    def get(self, key: str, default: None = None) -> object: ...
-
-    def get(self, key: str, default: object = None) -> object:
-        """Return the value for *key* if it exists, else *default*."""
-        if hasattr(self, key):
-            return getattr(self, key)
-        return default
 
     def items(self) -> list[tuple[str, object]]:
         """Return all configuration key-value pairs."""
@@ -127,12 +110,6 @@ class ResemblConfig:
                 )
                 continue
             setattr(self, key, value)
-
-    def clear(self) -> None:
-        """Reset all fields to their defaults."""
-        defaults = ResemblConfig()
-        for f in dataclasses.fields(self):
-            setattr(self, f.name, getattr(defaults, f.name))
 
     def to_dict(self) -> dict:
         """Return a plain dict representation for serialization."""

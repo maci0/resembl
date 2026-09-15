@@ -5,7 +5,7 @@ description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
 license = { text = "GPLv3" }
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "sqlalchemy>=2.0.24",
     "sqlmodel>=0.0.24",
@@ -48,10 +48,8 @@ dev = [
     # keyword, so resolving 1.x fails the suite at collection.
     "datasketch>=2",
 ]
-# atheris publishes wheels only for Python >= 3.12 (no sdist since 2.x);
-# gate the extra so `.[dev,fuzz]` stays installable on every supported Python.
 fuzz = [
-    "atheris>=2.3.0; python_version >= '3.12'",
+    "atheris>=2.3.0",
 ]
 
 [project.scripts]
@@ -170,7 +168,7 @@ select = [
 known-first-party = ["resembl"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 files = ["resembl", "tests", "fuzzers"]
 ignore_missing_imports = true
 # Strict flags the whole tree (package + tests) already passes.
