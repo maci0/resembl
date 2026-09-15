@@ -95,6 +95,26 @@ class TestMinHashStorage(BaseScalingTest):
         self.assertEqual(num_perm, NUM_PERMUTATIONS)
         self.assertEqual(len(raw), 8 + 4 * num_perm)
 
+    def test_minhash_new_reuses_materialized_template(self):
+        """``minhash_new`` must not re-draw permutations per fingerprint.
+
+        The template cache only pays off if the cached template's lazy
+        permutation table is materialized: a clone that inherits
+        ``_permutations = None`` re-draws it (~290 us) on first update,
+        making the cache a no-op.  Patch the RNG out to prove a warm
+        ``minhash_new`` neither constructs nor updates through it.
+        """
+        from resembl.scoring import minhash_new
+
+        minhash_new(NUM_PERMUTATIONS)  # warm the template cache
+        with patch(
+            "resembl.minhash.np.random.RandomState",
+            side_effect=AssertionError("permutation table was regenerated"),
+        ):
+            m = minhash_new(NUM_PERMUTATIONS)
+            m.update_batch([b"shingle-a", b"shingle-b"])
+        self.assertEqual(len(m), NUM_PERMUTATIONS)
+
     def test_packed_jaccard_matches_object_jaccard(self):
         m1 = code_create_minhash("push ebx; mov eax, dword [esp+0x10]; pop ebx; ret")
         m2 = code_create_minhash("push ebx; mov ecx, dword [esp+0x10]; pop ebx; ret")

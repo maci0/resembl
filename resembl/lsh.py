@@ -150,9 +150,12 @@ def sql_text_literal(value: object) -> str:
 def insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> None:
     """Insert *rows* with the dialect's fastest strategy.
 
-    Non-DuckDB dialects use the executemany template *sql* unchanged
-    (SQLAlchemy's executemany is C-accelerated there).  DuckDB falls back
-    to multi-row ``VALUES`` statements, which measured 13x faster than its
+    SQLite hands the DBAPI cursor the ``executemany`` directly: SQLAlchemy's
+    per-row parameter construction (``construct_params``) plus statement
+    initialisation measured ~35% of a large index build, and bypassing them
+    is 1.73x faster (525k -> 906k rows/s on a 200k-row build).  Other
+    dialects keep SQLAlchemy's C-accelerated executemany, and DuckDB uses
+    multi-row ``VALUES`` statements, which measured 13x faster than its
     executemany path.  ``ON CONFLICT`` suffixes present in *sql* (the
     incremental-sync variant) are preserved.
 
@@ -164,7 +167,19 @@ def insert_rows(session: Session, sql: str, rows: list[dict[str, object]]) -> No
     """
     if not rows:
         return
-    if dialect_name(session) != "duckdb":
+    dialect = dialect_name(session)
+    if dialect == "sqlite" and ":band" in sql:
+        # Rewrite the named placeholders to sqlite3's qmark style.  The
+        # explicit ``flush`` preserves the autoflush ``session.execute``
+        # would have performed before the insert (``session.connection()``
+        # does not autoflush); it is a no-op when nothing is pending.
+        session.flush()
+        session.connection().exec_driver_sql(
+            sql.replace(":band", "?").replace(":bucket", "?").replace(":checksum", "?"),
+            [(row["band"], row["bucket"], row["checksum"]) for row in rows],
+        )
+        return
+    if dialect != "duckdb":
         session.execute(text(sql), params=rows)
         return
     conflict = " ON CONFLICT DO NOTHING" if "ON CONFLICT" in sql else ""
