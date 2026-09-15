@@ -4,6 +4,18 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.0] - 2026-09-15
+
+### Changed
+
+- **Breaking:** Python 3.11 and 3.12 are no longer supported; the minimum
+  is now Python 3.13, matching what the locked dependencies (notably
+  `numpy` 2.5) already require.
+- Dependencies refreshed to their latest releases: `pylint` 4, `datasketch`
+  2, `mypy` 2, plus the rest of the locked tree.
+- Removed two dead names (`code_tokenize_lexed`, `string_normalize_lexed`)
+  from the `resembl.core` re-export block.
+
 ## [1.2.0] - 2026-09-15
 
 ### Changed

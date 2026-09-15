@@ -82,12 +82,9 @@ from .scoring import (  # noqa: F401
     BRANCH_INSTRUCTIONS,
     COMMON_INSTRUCTIONS,
     RARE_INSTRUCTIONS,
-    code_tokenize_lexed,
-    minhash_jaccard,
     shingle_weight,
     string_checksum,
     string_normalize,
-    string_normalize_lexed,
 )
 
 logger = logging.getLogger(__name__)
