@@ -4,6 +4,21 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-09-15
+
+### Changed
+
+- Performance: fingerprinting — the work behind `import`, `reindex`, `find`
+  and `stats` — is roughly twice as fast.  The NASM lexer's rule order was
+  corrected so a space no longer fails fourteen regexes before matching
+  (~39% fewer regex attempts, 1.55x faster lexing); the cached MinHash
+  template no longer regenerates its permutation table on every clone; and
+  a snippet is lexed once per `add` instead of twice.
+- Performance: SQLite bulk writes go straight to the DBAPI cursor instead
+  of through SQLAlchemy's per-row parameter construction, so `import`,
+  `reindex` and `merge` write faster (LSH index rows 1.73x, snippet rows
+  1.9x).  Stored fingerprints are unchanged, so no reindex is required.
+
 ## [1.1.0] - 2026-09-13
 
 ### Fixed
