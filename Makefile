@@ -150,11 +150,14 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 		rm -rf "$$unpack"; \
 	done
 
-# Proves the claim above instead of asserting it: build twice, compare.
+# Proves the claim above instead of asserting it: build twice, compare.  The
+# second build gets no help from the first: `uv build` keeps no artifact cache
+# and `dist` removes the output directory, so nothing but the source tree
+# carries over, which is exactly what the comparison has to measure.  The
+# scratch sums file is removed on failure too, so a red run leaves the tree as
+# clean as a green one.
 dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-identical
 	@$(MAKE) --no-print-directory dist
 	@sha256sum dist/* > .dist-first.sha256
-	@touch pyproject.toml
-	@$(MAKE) --no-print-directory dist
-	@sha256sum --check .dist-first.sha256
-	@rm -f .dist-first.sha256
+	@trap 'rm -f .dist-first.sha256' EXIT; \
+	$(MAKE) --no-print-directory dist && sha256sum --check .dist-first.sha256

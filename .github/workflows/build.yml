@@ -1,0 +1,71 @@
+# Build the release artifacts.
+#
+# Nothing else in CI produces the sdist or the wheel, so a packaging change
+# (a new data file, a `[tool.setuptools]` edit, a `MANIFEST.in`) could pass
+# every other gate and still ship an artifact that is missing a file or differs
+# between two builds of the same commit.  This workflow runs `make dist-verify`,
+# which builds twice and fails unless the two builds are byte-identical, and
+# then installs the wheel into a throwaway environment and runs the entry
+# point, which is the check CONTRIBUTING.md asks a maintainer to do by hand
+# before tagging.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The build clock is the commit time of HEAD (see `dist` in the
+          # Makefile), so a tag build and a branch build of the same commit
+          # agree on SOURCE_DATE_EPOCH.  Fetching one tag of history is enough.
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-uv
+        with:
+          python-version: '3.13'
+
+      - name: Build the sdist and the wheel, twice, and compare
+        run: make dist-verify
+
+      - name: Install the wheel and run the entry point
+        run: |
+          set -euo pipefail
+          uv venv --python 3.13 dist/wheel-venv
+          # --no-deps is not an option here: the wheel declares its runtime
+          # dependencies, and an install that skipped them would pass a
+          # smoke test the real installation would fail.
+          uv pip install --python dist/wheel-venv/bin/python dist/*.whl
+          dist/wheel-venv/bin/resembl --help
+          dist/wheel-venv/bin/resembl-find --help
+
+      - name: Install the sdist and run the entry point
+        run: |
+          set -euo pipefail
+          uv venv --python 3.13 dist/sdist-venv
+          uv pip install --python dist/sdist-venv/bin/python dist/*.tar.gz
+          dist/sdist-venv/bin/resembl --help
+
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: resembl-dist-${{ github.sha }}
+          # Only the archives, not the throwaway environments built above.
+          path: |
+            dist/*.whl
+            dist/*.tar.gz

@@ -50,6 +50,14 @@ Coverage may rise, never fall. mypy's incremental cache is not safe against
 concurrent writers, which is why the mypy hook is `require_serial`; run these
 commands one at a time.
 
+`make check` covers the source tree, not the artifacts. The `Build` workflow
+(`.github/workflows/build.yml`) is what covers those: it runs
+`make dist-verify`, so the sdist and the wheel are built twice and must be
+byte-identical, then installs each into a throwaway environment and runs
+`resembl --help`. Run `make dist-verify` locally when a change touches
+`pyproject.toml`'s packaging, the package's data files, or anything the
+wheel's contents depend on; no other gate would notice.
+
 `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip
 themselves unless `RESEMBL_TEST_PG_URL` / `RESEMBL_TEST_MYSQL_URL` are set, so
 the commands above cover less than CI does. A change touching either dialect
@@ -192,7 +200,8 @@ authority that overrides it. The same commit turns `[Unreleased]` into
 `uv lock` (the lockfile records the project's own version) and the
 supported-versions table in `SECURITY.md`; `tests/test_changelog.py` holds the
 manifest, the sections, the break markers and that table to each other. Verify
-`uv run pytest` green and a wheel that answers `resembl --help` before tagging.
+`uv run pytest` green and a wheel that answers `resembl --help` before tagging;
+the `Build` workflow runs both halves of that on the tag before it is cut.
 The artifacts come from `make dist`, never a bare `uv build`: it pins the build
 clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
 metadata, so the same commit always produces the same bytes. `make

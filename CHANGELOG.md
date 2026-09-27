@@ -113,7 +113,9 @@ project follows [Semantic Versioning](https://semver.org/).
 - The sdist and wheel are now built by `make dist`, which pins the build clock
   to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
   metadata. Two builds of one commit produce identical bytes; `make dist-verify`
-  builds twice and fails if they differ. Building from the sdist needs
+  builds twice and fails if they differ, and CI runs it on every push, so an
+  artifact that cannot be reproduced or installed no longer reaches a release
+  on the strength of the test suite alone. Building from the sdist needs
   `setuptools==80.9.0`, the now-pinned build backend.
 - **Breaking:** `resembl.database.db_url_get`, `resembl.database.db_url_mask`,
   `resembl.database.DEFAULT_DB_URL`, `resembl.cache.cache_dir_get`,
