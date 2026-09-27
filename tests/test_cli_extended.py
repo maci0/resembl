@@ -568,6 +568,13 @@ class TestCLIServeWarnings(BaseCLITest):
     ``serve`` blocks in ``serve_forever`` once it is listening, so each
     command is pointed at a port this process already holds: the bind
     fails, the command exits 1, and the warning is on stdout by then.
+
+    The port is held on the same address the command is given, not always
+    on 127.0.0.1.  A wildcard bind shares a port a specific-address
+    listener holds on macOS, so ``--host 0.0.0.0`` used to bind, enter
+    ``serve_forever`` and leave the harness waiting on a server that never
+    exits.  An exact address-and-port conflict is refused on macOS, Linux
+    and Windows alike.
     """
 
     def run_serve(self, host):
@@ -575,7 +582,7 @@ class TestCLIServeWarnings(BaseCLITest):
         import socket
 
         with socket.socket() as taken:
-            taken.bind(("127.0.0.1", 0))
+            taken.bind((host, 0))
             port = taken.getsockname()[1]
             taken.listen(1)
             result = self.run_command(f"serve --host {host} --port {port}")
