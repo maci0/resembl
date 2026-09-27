@@ -1,16 +1,29 @@
 # Security policy
 
-Last reviewed: 2026-09-27, against the code at version 2.0.0.
+Last reviewed: 2026-09-27, against the tree at version 2.0.0
+(`pyproject.toml:3`).
+
+This describes the current tree, not the published 2.0.0 release. The `serve`
+controls below (the loopback `Host` check, `serve -v` request logging, the
+`0700` cache directory, the `0600` port file, and the 1000-row `top_n` cap)
+are `[Unreleased]` work in `CHANGELOG.md`; a consumer running the published
+2.0.0 has none of them, and an unauthenticated `POST /find` there returns as
+many rows as it is asked for.
 
 ## Reporting a vulnerability
 
-Report suspected vulnerabilities through GitHub's private vulnerability
-reporting: open the repository's **Security** tab and choose **Report a
-vulnerability**. That opens a private advisory visible only to the reporter
-and the maintainers, which is the right channel for a working exploit or a
-proof-of-concept.
+The intended channel is GitHub's private vulnerability reporting: open the
+repository's **Security** tab and choose **Report a vulnerability**. That
+opens a private advisory visible only to the reporter and the maintainers,
+which is the right channel for a working exploit or a proof-of-concept.
 
-Do not open a public issue for an unfixed vulnerability.
+That option is not currently available. Private vulnerability reporting is
+not enabled on this repository, so the Security tab does not offer it. Until
+it is enabled, the only channel that reaches a maintainer is the public issue
+tracker, which is the wrong channel for an unfixed vulnerability: an issue
+there is visible to everyone from the moment it is opened. A reporter who
+has a working exploit should therefore hold it until a maintainer contact
+address is published here, and not open the issue in the meantime.
 
 The repository is <https://github.com/maci0/resembl>.
 

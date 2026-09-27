@@ -267,6 +267,12 @@ The `compare` command also reports control-flow graph similarity.
     small auxiliary files: legacy pickle cache files written by older
     versions (removed on write) and the `serve` port file used by `find`
     and `resembl-find` to locate a running server.
+    `serve` creates the directory `0700` and the port file `0600`, but only
+    when it creates them: an existing directory keeps whatever mode it was
+    made with, and nothing reads the mode back.  The port file's contents
+    are trusted by both clients, so a directory another local user can
+    write is a way to redirect queries to a listener of their own.  Keep it
+    private to the user.
 
 **RESEMBL_DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.

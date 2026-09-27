@@ -63,6 +63,19 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The threat model and the security policy were re-checked line by line
+  against the tree.  Corrected citations that had drifted, and recorded the
+  release path honestly: a `v*` tag is not statically analyzed and not
+  dependency-reviewed when it is cut, since neither CodeQL nor dependency
+  review has a tag trigger, so `docs/THREAT_MODEL.md` now names that as an
+  open risk rather than as a control.
+- `SECURITY.md` no longer reports GitHub private vulnerability reporting as
+  the reporting channel.  The feature is not enabled on this repository, so
+  the Security tab does not offer it; the document now says so, and says
+  that the published 2.0.0 release predates the `serve` controls described
+  in it.
+- `docs/man.md` states the mode `serve` gives the cache directory and the
+  port file, and that neither is re-checked once created.
 - The portability CI job runs on macOS and Windows only.  The Linux job
   already runs the same suite, so a third leg bought no platform while
   lengthening every push and pull request.
