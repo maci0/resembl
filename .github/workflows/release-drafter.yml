@@ -8,9 +8,16 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+# The drafter edits the draft release on main and comments the changelog
+# preview on the PR, so it needs exactly these two write scopes.
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   update_release_draft:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: release-drafter/release-drafter@v6
         with:
