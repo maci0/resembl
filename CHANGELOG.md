@@ -49,6 +49,17 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The `Test Suite` and `Pylint` workflows run on pull requests to `main` and
+  on pushes to `main`, not on every push to every branch.  The two events carry
+  different refs and so are different concurrency groups, which meant every
+  push to a feature branch ran the full suite twice, each run standing up its
+  own PostgreSQL and MySQL containers.  Every other workflow here was already
+  scoped to `main`.
+- No workflow leaves the GitHub token in `.git/config` after checkout
+  (`persist-credentials: false`); none of them pushes, so the credential was
+  only readable by a later step.
+- `Build` and `SBOM` artifacts are kept for 30 days rather than the 90-day
+  default, so superseded builds of every push do not accumulate.
 - `make lint` is green again.  `tests/test_asmatch.py` reached into
   `resembl.core._FIND_CANDIDATE_CHUNK` without the module-level
   `protected-access` disable the other private-internals test modules carry,

@@ -53,6 +53,10 @@ jobs:
       RESEMBL_TEST_MYSQL_URL: mysql+pymysql://resembl:resembl@localhost:3306/resembl
     steps:
     - uses: actions/checkout@v5
+      with:
+        # No job here pushes, so the token is not left in .git/config for a
+        # later step, or a test that shells out, to read and leak.
+        persist-credentials: false
     # No actions/setup-python step: uv manages the interpreter, so a second
     # copy of CPython on the runner is downloaded and then never used.
     - uses: ./.github/actions/setup-uv

@@ -1,6 +1,13 @@
 name: Pylint
 
-on: [push, pull_request]
+# Scoped to main like every other workflow here, so a push to a feature branch
+# and its pull request do not both pay for the two-leg matrix (see
+# tests.yml for the same change and its reason).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: pylint-${{ github.ref }}
@@ -23,6 +30,10 @@ jobs:
     # setup-uv action from its python-version input.
     steps:
     - uses: actions/checkout@v5
+      with:
+        # No job here pushes, so the token is not left in .git/config for a
+        # later step, or a test that shells out, to read and leak.
+        persist-credentials: false
     - uses: ./.github/actions/setup-uv
       with:
         python-version: ${{ matrix.python-version }}

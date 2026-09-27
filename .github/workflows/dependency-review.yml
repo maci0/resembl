@@ -34,6 +34,10 @@ jobs:
     steps:
       - name: 'Checkout repository'
         uses: actions/checkout@v5
+        with:
+          # The review only reads the tree, so the token is not left in
+          # .git/config for a later step to read and leak.
+          persist-credentials: false
       - name: 'Dependency Review'
         uses: actions/dependency-review-action@v4
         # Commonly enabled options, see https://github.com/actions/dependency-review-action#configuration-options for all available options.

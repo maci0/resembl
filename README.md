@@ -465,7 +465,7 @@ the optimization.
 - **Backends** — `RESEMBL_DATABASE_URL` (falling back to `DATABASE_URL`) selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
   the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
   [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
-  in CI on every push; DuckDB runs locally in the suite.
+  in CI on every pull request to `main` and every push to it; DuckDB runs locally in the suite.
 - **DuckDB fast bulk inserts** — DuckDB's Python `executemany` path is pathologically slow
   (~7k rows/s measured), so the index build and the snippet import swap in multi-row `VALUES`
   statements there (values are rendered through a quote-doubling / `FROM_HEX` literal builder — the

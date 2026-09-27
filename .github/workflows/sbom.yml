@@ -24,6 +24,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          # No job here pushes, so the token is not left in .git/config for a
+          # later step to read and leak.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-uv
 
@@ -40,4 +44,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sbom-cyclonedx-${{ github.sha }}
+          # A release SBOM is consumed while a release is being assessed, not
+          # kept; a tag run regenerates the same bytes from the same lockfile.
+          retention-days: 30
           path: sbom.cdx.json

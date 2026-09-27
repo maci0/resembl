@@ -35,6 +35,9 @@ jobs:
           # Makefile), so a tag build and a branch build of the same commit
           # agree on SOURCE_DATE_EPOCH.  Fetching one tag of history is enough.
           fetch-depth: 1
+          # Nothing here pushes, so the token is not left in .git/config for a
+          # later step to read and leak.
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-uv
         with:
@@ -65,6 +68,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: resembl-dist-${{ github.sha }}
+          # The published sdist and wheel are the tag's own artifact; this copy
+          # exists so a run can be inspected after the fact.  A month is longer
+          # than any investigation into a release takes, and the default 90
+          # days only accumulates superseded builds of every push.
+          retention-days: 30
           # Only the archives, not the throwaway environments built above.
           path: |
             dist/*.whl

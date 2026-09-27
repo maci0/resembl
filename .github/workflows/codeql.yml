@@ -31,6 +31,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
+      with:
+        # The analysis only reads the tree, so the token is not left in
+        # .git/config for a later step to read and leak.
+        persist-credentials: false
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
