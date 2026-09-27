@@ -95,6 +95,34 @@ project follows [Semantic Versioning](https://semver.org/).
   the thin find client resolve these through the shared module instead of
   keeping copies, so a change to the override rules can no longer leave the
   client looking for a port file the server never wrote.
+- **Breaking:** `resembl.database.DATABASE_URL` is gone.  It was read once at
+  import and only from the unprefixed `DATABASE_URL`, so a process that set
+  the variable after importing resembl kept querying the first URL it saw,
+  and a caller could not reach the namespaced `RESEMBL_DATABASE_URL` at all.
+  Use `resembl.paths.db_url_get()`, which reads the namespaced name first
+  and the unprefixed one next, at call time;
+  `resembl.database.create_db_engine(None)` already resolves through it.
+- **Breaking:** `resembl.cache.lsh_index_remove` (and its `resembl.core`
+  re-export) is renamed `resembl.cache.lsh_index_purge`, and its contract
+  changes with the name: it returns the built index's threshold, or `None`
+  when no index is built, where the old function returned `bool`; and it
+  leaves the delete uncommitted, so the caller commits the bucket rows
+  together with the row they belong to.  A caller that committed inside the
+  old function now owns the transaction: read the threshold and commit, then
+  call `resembl.cache.lsh_pickle_cache_remove(threshold)` to drop the legacy
+  pickle cache, as `snippet_delete` does.
+- **Breaking:** `resembl.scoring.token_is_label` is removed.  It had no caller
+  left, in this package or out of it, and was never documented, so there is
+  no replacement: the label filter it duplicated lives inside the lexing
+  pipeline behind `code_tokenize_normalize_lexed`.  A consumer that
+  classified a token itself has to keep its own copy of the check.
+- **Breaking:** `resembl.models.timestamp_normalize` (also reachable as
+  `resembl.core.timestamp_normalize`) takes `str | None` and returns
+  `str | None`, where it took and returned `str`.  A NULL `created_at` is
+  now passed through instead of raising, which is what lets `db_merge`
+  accept a source row with no readable timestamp.  A caller that assigned
+  the result to a `str` has to handle `None`; the only input that now
+  returns `None` is one the old call raised `TypeError` on.
 - **Breaking:** `resembl serve` now answers `400` to a request whose
   `threshold`, `ngram_size` or `num_permutations` is not the value the
   running server's index was built for.  Before, the request rebuilt the

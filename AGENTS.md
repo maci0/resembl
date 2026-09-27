@@ -179,9 +179,15 @@ what the published version is taken from. SemVer decides the
 number: a removed or renamed public export, a changed signature, default,
 stored format (fingerprint, database, cache) or `serve` response, or a raised
 minimum Python version, is major; a new command, flag or config field is
-minor; anything else is a patch. The same commit turns `[Unreleased]` into
+minor; anything else is a patch. Any `**Breaking:**` bullet in `[Unreleased]`
+makes the release a major whatever the commit subjects say: the drafter's
+autolabeler reads subjects only, so a break committed without a `!` labels as
+`fix` and the draft proposes a patch, and the changelog notes are the
+authority that overrides it. The same commit turns `[Unreleased]` into
 `## [X.Y.Z] - YYYY-MM-DD` and bumps `version` in `pyproject.toml`, then
-`uv lock` (the lockfile records the project's own version). Verify
+`uv lock` (the lockfile records the project's own version) and the
+supported-versions table in `SECURITY.md`; `tests/test_changelog.py` holds the
+manifest, the sections, the break markers and that table to each other. Verify
 `uv run pytest` green and a wheel that answers `resembl --help` before tagging.
 The artifacts come from `make dist`, never a bare `uv build`: it pins the build
 clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive

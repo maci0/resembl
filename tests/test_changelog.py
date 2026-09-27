@@ -1,13 +1,13 @@
 """Release-contract tests: the manifest version, the tag links and the
-changelog sections have to agree, and a `**Breaking:**` note may only ship in
-a major release.
+changelog sections have to agree, a `**Breaking:**` note may only ship in a
+major release, and the supported-versions table has to name the release the
+manifest carries.
 
-These are the three ways this repository's release contract can go wrong
-without any test noticing: the manifest bumped for a release whose changelog
-section was never written, a section renamed or added without its
-`[X.Y.Z]:` link reference, and a breaking change cut as a minor or a patch.
-The release procedure (CONTRIBUTING.md, Part 6) is a manual sequence of
-steps, so these are the parts of it a test can hold.
+These are the ways this repository's release contract can go wrong without
+any test noticing: the manifest bumped for a release whose changelog section
+was never written, a section renamed or added without its `[X.Y.Z]:` link
+reference, a breaking change cut as a minor or a patch, and a release whose
+number no policy document acknowledges.
 """
 
 import re
@@ -27,6 +27,12 @@ _LINK_RE = re.compile(r"^\[(?P<version>[^\]]+)\]:\s+\S+", re.MULTILINE)
 
 #: A Keep a Changelog impact heading, e.g. ``### Changed``.
 _CATEGORY_RE = re.compile(r"^### (Added|Changed|Deprecated|Removed|Fixed|Security)\s*$")
+
+#: The sentence in SECURITY.md that names the release the project supports.
+_CURRENT_RELEASE_RE = re.compile(r"The current release is (?P<version>\d+\.\d+\.\d+)\.")
+
+#: One row of the SECURITY.md supported-versions table, e.g. ``| 2.x (...) | yes |``.
+_SUPPORTED_ROW_RE = re.compile(r"^\| (?P<major>\d+)\.x[^|]*\| yes \|\s*$", re.MULTILINE)
 
 
 def project_root() -> Path:
@@ -81,6 +87,7 @@ class TestChangelog(unittest.TestCase):
     def setUpClass(cls):
         cls.root = project_root()
         cls.text = (cls.root / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.security = (cls.root / "SECURITY.md").read_text(encoding="utf-8")
         cls.sections = parse_sections(cls.text)
         with (cls.root / "pyproject.toml").open("rb") as handle:
             cls.manifest_version = tomllib.load(handle)["project"]["version"]
@@ -143,6 +150,31 @@ class TestChangelog(unittest.TestCase):
             + "## [2.0.0] - 2026-09-15\n\n### Added\n\n- A.\n"
         )
         self.assertEqual(breaking_major_violations(major), [])
+
+    def test_supported_versions_name_the_released_line(self):
+        """SECURITY.md has to acknowledge the version the manifest carries.
+
+        The release commit bumps the manifest and the changelog in one change;
+        the supported-versions table is prose next to them, so a major bump
+        lands without it and leaves the project telling reporters that the
+        line it just abandoned is the supported one.  Both the sentence and
+        the table are checked against the manifest, so the omission fails the
+        suite instead of a bug report.
+        """
+        match = _CURRENT_RELEASE_RE.search(self.security)
+        self.assertIsNotNone(match, "SECURITY.md does not name the current release")
+        assert match is not None  # narrows for the type checker
+        self.assertEqual(
+            match["version"],
+            self.manifest_version,
+            "SECURITY.md names a different release than pyproject.toml carries",
+        )
+        supported = [row["major"] for row in _SUPPORTED_ROW_RE.finditer(self.security)]
+        self.assertEqual(
+            supported,
+            [self.manifest_version.split(".")[0]],
+            "the supported-versions table does not mark the released line as supported",
+        )
 
     def test_unreleased_section_is_grouped_by_impact(self):
         """``[Unreleased]`` is the source the next release inherits from.

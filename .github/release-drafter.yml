@@ -6,6 +6,14 @@
 # matches commit subjects, which is also all `change-template` prints, so the
 # `!` has to be in the subject; a `BREAKING CHANGE:` footer in the body
 # reaches neither and does not move the version.
+#
+# One gap that outlives any config here: a break committed before its subject
+# carried the `!` labels as `fix` or `refactor`, so `$RESOLVED_VERSION` reads
+# below the real compatibility and the draft offers a patch for a release that
+# removes public names.  The `**Breaking:**` bullets in CHANGELOG.md are the
+# authority in that case, and tests/test_changelog.py fails a release whose
+# written section contradicts them.  Read the draft's number against the
+# `[Unreleased]` notes before publishing it.
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
 version-resolver:
