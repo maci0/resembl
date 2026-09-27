@@ -227,6 +227,15 @@ class TestConfig(unittest.TestCase):
                     save_config({"top_n": object()})
             self.assertEqual(os.listdir(temp_dir), [])
 
+    def test_save_config_interrupt_cleans_temp_file(self):
+        """A Ctrl-C mid-save must not leave the half-written temp file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with patch("tomli_w.dump", side_effect=KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        save_config({"top_n": 10})
+            self.assertEqual(os.listdir(temp_dir), [])
+
     def test_save_config_replace_failure_cleans_temp_file(self):
         """A failed atomic rename must not leave the temp file behind either."""
         with tempfile.TemporaryDirectory() as temp_dir:

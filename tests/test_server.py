@@ -435,6 +435,29 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(cfg["lsh_threshold"], 0.7)
         self.assertEqual(cfg["ngram_size"], 2)
 
+    def test_load_config_reports_unreadable_file(self):
+        """A malformed config.toml is reported, not mistaken for no file.
+
+        The client falls back to defaults on a read error, so a swallowed
+        failure would silently drop every setting the user wrote and answer
+        with a different result set than `resembl find` on the same database.
+        """
+        import io
+        import tempfile
+        from contextlib import redirect_stderr
+
+        from resembl.find_client import _load_config
+
+        cfg_dir = tempfile.mkdtemp()
+        with open(os.path.join(cfg_dir, "config.toml"), "w", encoding="utf-8") as f:
+            f.write("lsh_threshold = = 0.7\n")
+        stderr = io.StringIO()
+        with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": cfg_dir}):
+            with redirect_stderr(stderr):
+                cfg = _load_config()
+        self.assertEqual(cfg, {})
+        self.assertIn("config.toml", stderr.getvalue())
+
     def test_thin_client_sends_config_values(self):
         """The thin client's request honors the CLI config (same results)."""
         from unittest.mock import patch as _patch

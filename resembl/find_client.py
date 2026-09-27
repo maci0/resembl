@@ -45,10 +45,19 @@ def _load_config() -> dict:
     ``lsh_threshold``, ``ngram_size``, ``num_permutations``,
     ``jaccard_weight``).
     """
+    path = config_path_get()
     try:
-        with open(config_path_get(), "rb") as f:
+        with open(path, "rb") as f:
             return tomllib.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return {}  # no config file: the documented default run
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        # A malformed or unreadable file must not be mistaken for an absent
+        # one: the client answers on defaults, so a `top_n` the user set would
+        # silently stop applying and the query would return a different result
+        # set than `resembl find` on the same database.  Report it the way
+        # ``resembl.config.load_config`` does and keep going.
+        print(f"error: cannot read {path}: {exc}", file=sys.stderr)
         return {}
 
 

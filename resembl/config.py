@@ -230,10 +230,15 @@ def save_config(config: dict | ResemblConfig) -> None:
         tmp_path = tmp.name
         try:
             tomli_w.dump(data, tmp)
-        except Exception:
-            # The half-written temp file must not outlive a failed save.
+        except BaseException:
+            # The half-written temp file must not outlive a failed save, and
+            # a Ctrl-C lands here as often as a serialization error: the
+            # ``with`` closes the handle, then the name goes.
             tmp.close()
-            os.unlink(tmp_path)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
             raise
 
     try:
