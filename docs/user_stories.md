@@ -80,6 +80,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 - `resembl find` transparently talks to the running server and falls back to the in-process path when no server is reachable.
 - The standalone `resembl-find` client queries the running server directly; it imports only the standard library so each call skips the full CLI startup cost.
 - Binding a non-loopback interface prints a warning that the service is unauthenticated.
+- The HTTP endpoints (`POST /find`, `POST /find-batch`) are documented in [http_api.md](http_api.md): every response, success or error, is JSON, and a rejected parameter answers `400` with `{"error": ...}` naming the field.
 
 ---
 

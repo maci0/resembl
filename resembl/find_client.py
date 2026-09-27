@@ -147,6 +147,16 @@ def _main(argv: list[str] | None = None) -> int:
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             payload = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        # A 4xx answer carries the server's own JSON error envelope: report
+        # it verbatim rather than the transport-level "HTTP Error 400", which
+        # tells the caller nothing about which parameter was refused.
+        try:
+            detail = json.loads(exc.read()).get("error", "")
+        except (ValueError, OSError, AttributeError):
+            detail = ""
+        print(f"error: {detail or exc.reason}", file=sys.stderr)
+        return 1
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print(f"error: server unreachable: {exc}", file=sys.stderr)
         return 1

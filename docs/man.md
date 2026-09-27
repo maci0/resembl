@@ -102,6 +102,9 @@ The `compare` command also reports control-flow graph similarity.
     restart skips rebuilding an index that is already current.  Starting a
     second server for the same database is refused (as is an occupied
     `--port`), with a clean error rather than a traceback.
+    The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, JSON
+    requests, `{"error": ...}` bodies) are documented in
+    [http_api.md](http_api.md).
 
 **reindex** [--jobs N] [--force]
 :   Recalculate MinHash fingerprints for all snippets.

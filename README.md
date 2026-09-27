@@ -174,6 +174,7 @@ resembl/
 │   ├── api_reference.md
 │   ├── custom_database.md
 │   ├── flowcharts.md
+│   ├── http_api.md
 │   ├── man.md
 │   ├── tutorial.md
 │   └── user_stories.md
@@ -415,7 +416,7 @@ the optimization.
   DuckDB's columnar engine.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
 - **Warm server** — `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
   route through it when running (with automatic in-process fallback), answering concurrent requests
-  in milliseconds.
+  in milliseconds.  Its two endpoints are documented in the [HTTP API](./docs/http_api.md).
 - **Batch workflows** — `find-batch` processes a file of queries in one process (or one round trip
   through the server), amortizing startup across the batch.
 - **Bounded memory** — import prepares files with a bounded in-flight window (flat memory at a

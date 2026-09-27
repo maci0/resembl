@@ -26,6 +26,7 @@ import socket
 import sys
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
@@ -84,19 +85,38 @@ def _db_version(session: Session) -> int | None:
     return int(session.execute(text("PRAGMA data_version")).scalar() or 0)
 
 
-def _find_one(
-    session: Session,
-    body: dict,
-    query: str,
-    params: ResemblConfig | None = None,
-) -> dict:
-    """Run one find, served from the version-guarded cache when possible.
+class BadRequestError(ValueError):
+    """A caller-supplied parameter is unusable; answered as 400 by handlers.
+
+    Raised by :func:`_parse_find_request` so one code path owns the
+    validation messages: every bad request answers the same JSON envelope
+    (``{"error": ...}``) with a 400 status, whichever endpoint raised it.
+    """
+
+
+@dataclass(frozen=True)
+class _FindRequest:
+    """Validated find parameters for one request (see :func:`_parse_find_request`)."""
+
+    top_n: int
+    threshold: float | None
+    normalize: bool
+    ngram_size: int
+    num_permutations: int
+    jaccard_weight: float
+    #: ``threshold`` when the caller sent one, else the configured LSH
+    #: threshold.  Range-checked and passed to the banding feasibility test;
+    #: ``threshold`` itself stays ``None`` so scoring keeps its own default.
+    effective_threshold: float
+
+
+def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
+    """Validate *body*'s find parameters, or raise :class:`BadRequestError`.
 
     *params* supplies the serving server's configured defaults for values
     absent from *body*; direct callers without a server get plain
     :class:`ResemblConfig` defaults.
     """
-    params = params if params is not None else _DEFAULT_FIND_PARAMS
     # An explicit JSON ``null`` means "not provided", exactly like an absent
     # key: dict.get's default only fires on missing keys, so a null would
     # crash int()/float() (and flip ``normalize`` to False) instead of using
@@ -114,31 +134,31 @@ def _find_one(
         ngram_size = int(provided.get("ngram_size", params.ngram_size))
         num_permutations = int(provided.get("num_permutations", params.num_permutations))
         jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
-    except (TypeError, ValueError, OverflowError):
-        # A non-numeric parameter is a bad request: answer with a clean error
-        # payload instead of letting int()/float() raise inside the handler,
-        # which would surface as a 500 echoing the exception text.  JSON's
+    except (TypeError, ValueError, OverflowError) as exc:
+        # A non-numeric parameter is a bad request, answered with a clean 400
+        # instead of letting int()/float() raise inside the handler, which
+        # would surface as a 500 echoing the exception text.  JSON's
         # ``Infinity`` / ``1e400`` parse to float infinity and ``int()`` on
         # those raises OverflowError (not TypeError/ValueError) — without it
         # in this tuple such a request leaked a 500 with internal error text.
-        return {
-            "error": "bad request: top_n, ngram_size, num_permutations must be "
-            "integers; threshold and jaccard_weight must be numbers"
-        }
+        raise BadRequestError(
+            "top_n, ngram_size, num_permutations must be integers; "
+            "threshold and jaccard_weight must be numbers"
+        ) from exc
     # Range-check the threshold up front: :class:`ResemblLSH` rejects values
     # outside [0.0, 1.0] anyway, so without this every out-of-range request
     # surfaced as a 500 leaking that internal error instead of a clean one.
     # (NaN fails both comparisons and is rejected too.)
     effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
     if not 0.0 <= effective_threshold <= 1.0:
-        return {"error": f"threshold {effective_threshold} is not in [0.0, 1.0]"}
+        raise BadRequestError(f"threshold {effective_threshold} is not in [0.0, 1.0]")
     # Same range rule as the threshold: score_hybrid documents the weight as a
     # 0-1 balance, and an unvalidated NaN/Infinity weight made every hybrid
     # score NaN — corrupting the top-n ranking comparisons (NaN never
     # compares) and serializing as a bare ``NaN`` token, which no external
     # JSON parser accepts.  (NaN fails both comparisons and is rejected too.)
     if not 0.0 <= jaccard_weight <= 1.0:
-        return {"error": f"jaccard_weight {jaccard_weight} is not in [0.0, 1.0]"}
+        raise BadRequestError(f"jaccard_weight {jaccard_weight} is not in [0.0, 1.0]")
     # Bound the request-supplied permutation count before anything derives
     # state from it: fingerprint construction and banding allocate memory
     # proportional to *num_permutations*, and ``minhash_new`` caches one
@@ -150,12 +170,43 @@ def _find_one(
     from .scoring import MAX_NUM_PERM
 
     if not 2 <= num_permutations <= MAX_NUM_PERM:
-        return {"error": f"num_permutations must be between 2 and {MAX_NUM_PERM}"}
+        raise BadRequestError(f"num_permutations must be between 2 and {MAX_NUM_PERM}")
     # Same degenerate-fingerprint guard as the CLI's find validation: an
     # ``ngram_size`` below 1 does not crash, it silently makes every snippet
     # match every other one (all shingles collapse to the empty token tuple).
     if ngram_size < 1:
-        return {"error": "ngram_size must be at least 1"}
+        raise BadRequestError("ngram_size must be at least 1")
+    return _FindRequest(
+        top_n=top_n,
+        threshold=threshold,
+        normalize=normalize,
+        ngram_size=ngram_size,
+        num_permutations=num_permutations,
+        jaccard_weight=jaccard_weight,
+        effective_threshold=effective_threshold,
+    )
+
+
+def _find_one(
+    session: Session,
+    body: dict,
+    query: str,
+    params: ResemblConfig | None = None,
+) -> dict:
+    """Run one find, served from the version-guarded cache when possible.
+
+    Raises :class:`BadRequestError` for unusable parameters; handlers turn
+    that into the 400 error envelope.
+    """
+    params = params if params is not None else _DEFAULT_FIND_PARAMS
+    request = _parse_find_request(body, params)
+    top_n = request.top_n
+    threshold = request.threshold
+    normalize = request.normalize
+    ngram_size = request.ngram_size
+    num_permutations = request.num_permutations
+    jaccard_weight = request.jaccard_weight
+    effective_threshold = request.effective_threshold
     # The masked URL identifies the served database without retaining
     # credentials in the long-lived cache keys.
     db_id = str(_session_engine(session).url)
@@ -187,10 +238,10 @@ def _find_one(
     except ValueError:
         bands = 1
     if bands < 2:
-        return {
-            "error": f"threshold {effective_threshold} is too high for "
+        raise BadRequestError(
+            f"threshold {effective_threshold} is too high for "
             f"{num_permutations} permutations (fewer than 2 bands)"
-        }
+        )
     num_candidates, matches = snippet_find_matches(
         session,
         query,
@@ -223,6 +274,12 @@ def server_port_path(db_url: str) -> str:
 #: Content-Length values are rejected instead of hanging the handler thread
 #: reading until EOF.
 _MAX_BODY_BYTES = 8 * 1024 * 1024
+
+#: Maximum number of queries one ``/find-batch`` request may carry.  The
+#: endpoint runs one find per entry on a single connection, so an unbounded
+#: list turns one request into unbounded work; callers with more split the
+#: input (the CLI's ``find-batch`` reads a file of any size, in chunks).
+_MAX_BATCH_QUERIES = 1000
 
 
 def port_file_cleanup(port_file: str, port: int) -> None:
@@ -275,7 +332,13 @@ class _FindHandler(BaseHTTPRequestHandler):
         return self.server.find_defaults  # type: ignore[attr-defined]
 
     def _read_body(self) -> dict | None:
-        """Read and parse the JSON request body; None if malformed."""
+        """Read and parse the JSON request body; None if malformed.
+
+        A well-formed JSON document that is not an object (``[]``, ``5``,
+        ``"x"``) is malformed for this API: the handlers index it by
+        ``body["query"]`` / ``body["queries"]``, which a list or a number
+        answers with a ``TypeError`` that would surface as a 500.
+        """
         try:
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
@@ -283,11 +346,28 @@ class _FindHandler(BaseHTTPRequestHandler):
         if length < 0 or length > _MAX_BODY_BYTES:
             return None
         try:
-            return json.loads(self.rfile.read(length) or b"{}")
+            body = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, KeyError):
             return None
+        return body if isinstance(body, dict) else None
+
+    def _content_type_ok(self) -> bool:
+        """Whether the request declares a JSON body.
+
+        A missing ``Content-Type`` is accepted (the body is parsed as JSON
+        either way); an explicit non-JSON media type is refused rather than
+        silently parsed.
+        """
+        declared = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        return declared in ("", "application/json")
 
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
+        if self.path not in ("/find", "/find-batch"):
+            self._respond(404, {"error": f"unknown path: {self.path}"})
+            return
+        if not self._content_type_ok():
+            self._respond(415, {"error": "content type must be application/json"})
+            return
         body = self._read_body()
         if body is None:
             self._respond(400, {"error": "bad request body"})
@@ -295,16 +375,33 @@ class _FindHandler(BaseHTTPRequestHandler):
         if self.path == "/find":
             self._handle_find(body)
             return
-        if self.path == "/find-batch":
-            self._handle_find_batch(body)
-            return
-        self.send_error(404, "Not Found")
+        self._handle_find_batch(body)
+
+    def _method_not_allowed(self) -> None:
+        """Answer a non-POST request with the same JSON error envelope."""
+        self._respond(
+            405,
+            {"error": f"method not allowed: {self.command} (use POST)"},
+            extra_headers={"Allow": "POST"},
+        )
+
+    def do_GET(self) -> None:  # pylint: disable=invalid-name; http.server API
+        self._method_not_allowed()
+
+    def do_PUT(self) -> None:  # pylint: disable=invalid-name; http.server API
+        self._method_not_allowed()
+
+    def do_DELETE(self) -> None:  # pylint: disable=invalid-name; http.server API
+        self._method_not_allowed()
+
+    def do_PATCH(self) -> None:  # pylint: disable=invalid-name; http.server API
+        self._method_not_allowed()
 
     def _handle_find(self, body: dict) -> None:
         try:
             query = body["query"]
-        except KeyError as exc:
-            self._respond(400, {"error": f"bad request: {exc}"})
+        except KeyError:
+            self._respond(400, {"error": "bad request: 'query' is required"})
             return
         # Same type rule as /find-batch's per-query check: a non-string query
         # (dict, number, list) would otherwise crash the lexer downstream and
@@ -315,6 +412,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         try:
             with Session(self.engine) as session:
                 payload = _find_one(session, body, query, self.find_defaults)
+        except BadRequestError as exc:
+            # Parameter validation: the caller's request, not the server.
+            self._respond(400, {"error": str(exc)})
+            return
         except Exception:  # pragma: no cover - defensive
             # A long-lived serve process prints nothing per request (see
             # ``log_message``): without this record, 500s are completely
@@ -331,13 +432,27 @@ class _FindHandler(BaseHTTPRequestHandler):
         """Process many queries in one request (results keyed by query)."""
         try:
             queries = body["queries"]
-        except KeyError as exc:
-            self._respond(400, {"error": f"bad request: {exc}"})
+        except KeyError:
+            self._respond(400, {"error": "bad request: 'queries' is required"})
             return
         # A bare string would iterate per character below, silently turning
         # one malformed request into one single-character find per letter.
         if not isinstance(queries, list):
             self._respond(400, {"error": "bad request: queries must be a list"})
+            return
+        if len(queries) > _MAX_BATCH_QUERIES:
+            self._respond(
+                400,
+                {"error": f"queries must hold at most {_MAX_BATCH_QUERIES} entries"},
+            )
+            return
+        # Validated once for the whole batch: a parameter error concerns the
+        # request, not any one query, so repeating it in every entry (as the
+        # per-query path did) told the caller nothing extra and cost N finds.
+        try:
+            _parse_find_request(body, self.find_defaults)
+        except BadRequestError as exc:
+            self._respond(400, {"error": str(exc)})
             return
         results: list[dict] = []
         try:
@@ -353,6 +468,11 @@ class _FindHandler(BaseHTTPRequestHandler):
                         results.append(
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
                         )
+                    except BadRequestError as exc:
+                        # A query the caller controls (empty string, say) is a
+                        # bad request, not a server fault: answered per query
+                        # so the rest of the batch still completes.
+                        results.append({"query": query, "error": str(exc)})
                     except Exception as exc:  # isolate per-query failures
                         logger.warning("find-batch query %.200r failed: %s", query, exc)
                         # Like the 500 path below: the exception text (SQL,
@@ -368,7 +488,12 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         self._respond(200, {"results": results})
 
-    def _respond(self, status: int, payload: dict[str, Any]) -> None:
+    def _respond(
+        self,
+        status: int,
+        payload: dict[str, Any],
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -382,6 +507,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
         self.send_header("Cache-Control", "no-store")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

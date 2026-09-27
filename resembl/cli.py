@@ -319,6 +319,12 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read())
+    except urllib.error.HTTPError:
+        # A 4xx/5xx answer is a decision, not an outage: the server is
+        # healthy and deliberately refused this request.  Fall back to the
+        # in-process path, which validates the same parameters and reports
+        # the same errors on the caller's terms.
+        return None
     except (urllib.error.URLError, OSError, ValueError) as exc:
         # Only a verifiably dead server (connection refused: nothing is
         # listening on the advertised port) loses its port file.  Resets,
@@ -372,23 +378,34 @@ def _find_batch_via_server(
     normalize: bool,
     ngram_size: int,
 ) -> list[dict] | None:
-    """Query a running ``serve`` process with a batch (one round trip)."""
-    payload = _server_request(
-        "/find-batch",
-        {
-            "queries": queries,
-            "top_n": top_n,
-            "threshold": threshold,
-            "normalize": normalize,
-            "ngram_size": ngram_size,
-            "num_permutations": state.config.num_permutations,
-            "jaccard_weight": state.config.jaccard_weight,
-        },
-        timeout=60,
-    )
-    if payload is None:
-        return None
-    return payload["results"]
+    """Query a running ``serve`` process with a batch (one round trip per chunk).
+
+    The endpoint caps ``queries`` per request (see
+    ``resembl.server._MAX_BATCH_QUERIES``), so a longer file is sent in
+    chunks; results keep the input order.
+    """
+    from .server import _MAX_BATCH_QUERIES
+
+    results: list[dict] = []
+    for start in range(0, len(queries), _MAX_BATCH_QUERIES):
+        chunk = queries[start : start + _MAX_BATCH_QUERIES]
+        payload = _server_request(
+            "/find-batch",
+            {
+                "queries": chunk,
+                "top_n": top_n,
+                "threshold": threshold,
+                "normalize": normalize,
+                "ngram_size": ngram_size,
+                "num_permutations": state.config.num_permutations,
+                "jaccard_weight": state.config.jaccard_weight,
+            },
+            timeout=60,
+        )
+        if payload is None:
+            return None
+        results.extend(payload["results"])
+    return results
 
 
 def _query_inline_statements(query_string: str) -> str:

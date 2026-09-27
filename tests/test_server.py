@@ -218,13 +218,14 @@ class TestServerMode(unittest.TestCase):
         )
 
     def test_server_rejects_unbuildable_threshold(self):
-        """The server answers an unbuildable threshold with an error payload."""
+        """The server answers an unbuildable threshold with a 400 error payload."""
         port = self._start_server()
-        payload = _post_json(
+        status, payload = _post_json_status(
             port,
             "/find",
             {"query": "push ebx\nmov eax, 5\npop ebx\nret", "threshold": 0.985},
         )
+        self.assertEqual(status, 400)
         self.assertIn("error", payload)
         self.assertIn("too high", payload["error"])
 
@@ -241,18 +242,22 @@ class TestServerMode(unittest.TestCase):
 
         port = self._start_server()
         absurd = 1 << 20
-        payload = _post_json(
+        status, payload = _post_json_status(
             port,
             "/find",
             {"query": "push ebx\nmov eax, 5\npop ebx\nret", "num_permutations": absurd},
         )
+        self.assertEqual(status, 400)
         self.assertIn("error", payload)
         self.assertIn("num_permutations", payload["error"])
         # The rejected value must not leave a cached fingerprint template.
         self.assertNotIn(absurd, _MINHASH_TEMPLATES)
 
         # The lower bound is enforced by the same check.
-        low_payload = _post_json(port, "/find", {"query": "mov eax, 5", "num_permutations": 1})
+        low_status, low_payload = _post_json_status(
+            port, "/find", {"query": "mov eax, 5", "num_permutations": 1}
+        )
+        self.assertEqual(low_status, 400)
         self.assertIn("error", low_payload)
 
     def test_serve_bind_failure_disposes_engine(self):
@@ -561,6 +566,37 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("too high", stderr.getvalue())
 
+    def test_thin_client_reports_error_status_body(self):
+        """A 400 answer prints the server's error message, not "HTTP Error 400".
+
+        ``urllib`` raises ``HTTPError`` for a 4xx; treated as a transport
+        failure the client printed "server unreachable", naming neither the
+        offending parameter nor the server's reason.
+        """
+        import contextlib
+        import io
+        import urllib.error
+
+        from resembl.find_client import _main
+
+        self._start_server()  # writes a valid port file
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.HTTPError(
+                    "http://127.0.0.1/find",
+                    400,
+                    "Bad Request",
+                    {},
+                    io.BytesIO(b'{"error": "threshold 5.0 is not in [0.0, 1.0]"}'),
+                ),
+            ):
+                rc = _main(["--query", "mov eax, 5", "--threshold", "5"])
+        self.assertEqual(rc, 1)
+        self.assertIn("threshold 5.0 is not in", stderr.getvalue())
+        self.assertNotIn("unreachable", stderr.getvalue())
+
     def test_thin_client_table_output(self):
         """Without --json, the client prints a ranked table and exits 0."""
         import contextlib
@@ -738,6 +774,109 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("bad request", json.loads(payload)["error"])
 
+    def test_errors_share_one_json_envelope(self):
+        """Every error status answers ``{"error": ...}`` as JSON, never HTML.
+
+        ``BaseHTTPRequestHandler.send_error`` (the path-not-found and
+        method-not-allowed answers the stdlib provides) emits an HTML page:
+        a client parsing responses as JSON got a decode error instead of the
+        status, and a browser pointed at the port got a page.
+        """
+        import http.client
+
+        port = self._start_server()
+
+        def request(method: str, path: str, body: bytes | None = None):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                conn.request(
+                    method,
+                    path,
+                    body=body,
+                    headers={"Content-Type": "application/json"} if body is not None else {},
+                )
+                response = conn.getresponse()
+                return response.status, dict(response.getheaders()), response.read()
+            finally:
+                conn.close()
+
+        # Unknown path: 404 with the JSON error envelope.
+        status, _headers, body = request("POST", "/nope", b"{}")
+        self.assertEqual(status, 404)
+        self.assertEqual(json.loads(body), {"error": "unknown path: /nope"})
+
+        # Wrong method: 405 with the same envelope and an Allow header.
+        status, headers, body = request("GET", "/find")
+        self.assertEqual(status, 405)
+        self.assertEqual(headers.get("Allow"), "POST")
+        self.assertIn("method not allowed", json.loads(body)["error"])
+
+        # Explicit non-JSON content type: 415, not a silently parsed body.
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            conn.request(
+                "POST",
+                "/find",
+                body=json.dumps({"query": "push ebx\nret"}),
+                headers={"Content-Type": "text/plain"},
+            )
+            response = conn.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 415)
+            self.assertIn("application/json", payload["error"])
+        finally:
+            conn.close()
+
+    def test_non_object_body_is_a_bad_request(self):
+        """A JSON body that is not an object answers 400, never a 500.
+
+        The handlers index the body by ``query`` / ``queries``; a list,
+        number, or string body raised ``TypeError`` there, which surfaced as
+        a 500 echoing the exception text.
+        """
+        import http.client
+
+        port = self._start_server()
+        for body in (b"[]", b"5", b'"push ebx"'):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                conn.putrequest("POST", "/find")
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Content-Length", str(len(body)))
+                conn.endheaders()
+                conn.send(body)
+                response = conn.getresponse()
+                payload = json.loads(response.read())
+                self.assertEqual(response.status, 400)
+                self.assertEqual(payload, {"error": "bad request body"})
+            finally:
+                conn.close()
+
+    def test_find_batch_rejects_bad_parameters_once(self):
+        """A parameter error answers one 400 for the whole batch.
+
+        Validated per entry, the same parameter error was repeated in every
+        result and the request ran N finds before answering.
+        """
+        port = self._start_server()
+        status, payload = _post_json_status(
+            port,
+            "/find-batch",
+            {"queries": ["push ebx\nret", "mov eax, 5"], "threshold": 5.0},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("threshold", payload["error"])
+
+    def test_find_batch_caps_query_count(self):
+        """A batch larger than the documented cap answers 400."""
+        from resembl.server import _MAX_BATCH_QUERIES
+
+        port = self._start_server()
+        queries = ["mov eax, 5"] * (_MAX_BATCH_QUERIES + 1)
+        status, payload = _post_json_status(port, "/find-batch", {"queries": queries})
+        self.assertEqual(status, 400)
+        self.assertIn(str(_MAX_BATCH_QUERIES), payload["error"])
+
     def test_find_rejects_degenerate_ngram_size(self):
         """An ngram_size below 1 answers a clean error, never garbage results.
 
@@ -746,7 +885,10 @@ class TestServerMode(unittest.TestCase):
         wrong results instead of a failure.
         """
         port = self._start_server()
-        payload = _post_json(port, "/find", {"query": "push ebx\nret", "top_n": 5, "ngram_size": 0})
+        status, payload = _post_json_status(
+            port, "/find", {"query": "push ebx\nret", "top_n": 5, "ngram_size": 0}
+        )
+        self.assertEqual(status, 400)
         self.assertIn("error", payload)
         self.assertIn("ngram_size", payload["error"])
 
@@ -780,9 +922,10 @@ class TestServerMode(unittest.TestCase):
             {"jaccard_weight": {}},
             {"threshold": "high"},
         ):
-            payload = _post_json(port, "/find", {"query": query, **bad})
+            status, payload = _post_json_status(port, "/find", {"query": query, **bad})
+            self.assertEqual(status, 400)
             self.assertIn("error", payload)
-            self.assertIn("bad request", payload["error"])
+            self.assertIn("must be", payload["error"])
 
     def test_find_rejects_out_of_range_threshold_cleanly(self):
         """A threshold outside [0, 1] answers a clean error, never a 500.
@@ -794,7 +937,10 @@ class TestServerMode(unittest.TestCase):
         port = self._start_server()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
         for bad_threshold in (-0.5, 1.5):
-            payload = _post_json(port, "/find", {"query": query, "threshold": bad_threshold})
+            status, payload = _post_json_status(
+                port, "/find", {"query": query, "threshold": bad_threshold}
+            )
+            self.assertEqual(status, 400)
             self.assertIn("error", payload)
             self.assertIn("threshold", payload["error"])
 
@@ -810,7 +956,10 @@ class TestServerMode(unittest.TestCase):
         port = self._start_server()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
         for bad_weight in (float("nan"), float("inf"), -0.5, 1.5):
-            payload = _post_json(port, "/find", {"query": query, "jaccard_weight": bad_weight})
+            status, payload = _post_json_status(
+                port, "/find", {"query": query, "jaccard_weight": bad_weight}
+            )
+            self.assertEqual(status, 400)
             self.assertIn("error", payload)
             self.assertIn("jaccard_weight", payload["error"])
 
@@ -829,9 +978,10 @@ class TestServerMode(unittest.TestCase):
             {"ngram_size": float("inf")},
             {"num_permutations": float("inf")},
         ):
-            payload = _post_json(port, "/find", {"query": query, **bad})
+            status, payload = _post_json_status(port, "/find", {"query": query, **bad})
+            self.assertEqual(status, 400)
             self.assertIn("error", payload)
-            self.assertIn("bad request", payload["error"])
+            self.assertIn("must be", payload["error"])
 
     def test_find_treats_explicit_null_params_as_absent(self):
         """An explicit JSON null for a find parameter uses the configured default.
