@@ -1,6 +1,8 @@
 # Thin wrapper over the commands the project already uses.  Every target
 # runs a command documented in README.md / CONTRIBUTING.md and the same
-# command CI runs, so `make check` reproduces the pipeline locally.
+# command CI runs, so `make check` reproduces the pipeline locally.  It also
+# runs the two file-hygiene checks the commit gate runs and CI does not (see
+# `hygiene`), so a green `make check` is a green commit.
 #
 # `make help` lists the targets.
 
@@ -13,7 +15,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types test db-test fuzz check dist dist-verify
+.PHONY: help install format lint types hygiene test db-test fuzz check dist dist-verify
 
 PYTEST_ARGS ?=
 
@@ -51,6 +53,39 @@ lint:  ## Run ruff and pylint
 types:  ## Run mypy over resembl/, tests/ and fuzzers/
 	uv run mypy
 
+# The tracked text files the pre-commit hygiene hooks rewrite.  The pathspecs
+# mirror what the hooks see (files git tracks), which is why they are listed
+# here instead of globbing the working tree: a build artifact in the tree must
+# not fail a check the commit would not have run.
+HYGIENE_FILES = $(shell git ls-files '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.cfg' '*.txt' '*.asm' '*.json' Makefile .pre-commit-config.yaml .gitattributes .gitignore)
+
+# The pre-commit config runs trailing-whitespace and end-of-file-fixer over
+# every commit; no CI workflow runs them.  That leaves the commit gate and
+# `make check` disagreeing: a contributor who installed the hooks has a commit
+# refused for trailing whitespace that `make check` just called green, and one
+# who skipped `make install`'s hook step has the same damage reach the branch
+# unchecked.  These two checks are the whole of that gap, run here so the
+# single documented verification step covers the commit as well as CI.
+# check-yaml stays hook-only: it needs the mirror env pre-commit builds, and
+# the workflows it would validate are parsed by every CI run anyway.
+hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing whitespace, final newline)
+	@if [ -z "$(HYGIENE_FILES)" ]; then \
+		echo "make hygiene needs git: 'git ls-files' returned nothing, so there is"; \
+		echo "nothing to check and the target would pass vacuously."; exit 1; \
+	fi; \
+	whitespace=$$(rg -n ' +$$' $(HYGIENE_FILES) || true); \
+	if [ -n "$$whitespace" ]; then \
+		echo "trailing whitespace, which the pre-commit trailing-whitespace hook refuses to commit:"; \
+		echo "$$whitespace"; exit 1; \
+	fi; \
+	unterminated=$$(for f in $(HYGIENE_FILES); do \
+		if [ -s "$$f" ] && [ -n "$$(tail -c1 "$$f")" ]; then echo "$$f"; fi; \
+	done); \
+	if [ -n "$$unterminated" ]; then \
+		echo "no newline at end of file, which the pre-commit end-of-file-fixer hook refuses to commit:"; \
+		echo "$$unterminated"; exit 1; \
+	fi
+
 test:  ## Run the test suite (pass args through: make test PYTEST_ARGS="-k cache")
 	uv run pytest -q $(PYTEST_ARGS)
 
@@ -77,9 +112,11 @@ fuzz:  ## Fuzz every entry point for FUZZ_SECONDS, or one via FUZZER=<name> (ins
 		uv run --locked --extra fuzz ./fuzzers/$$f -max_total_time=$(FUZZ_SECONDS) || exit 1; \
 	done
 
-# The order mirrors .github/workflows/tests.yml and pylint.yml: static
-# checks first (cheap, fixable), then the suite.
-check:  ## Run every check CI runs
+# The order mirrors .github/workflows/tests.yml and pylint.yml: the file
+# hygiene the commit gate enforces, then the static checks (cheap, fixable),
+# then the suite.
+check:  ## Run every check CI runs, plus the commit-gate file checks
+	$(MAKE) hygiene
 	$(MAKE) types
 	uv run ruff check .
 	uv run black --check .

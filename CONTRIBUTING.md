@@ -100,7 +100,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
     uv run pytest tests/test_cli.py -k config_set                      # by name
     uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
     ```
-    `make help` lists the shortcuts: `make test`, `make lint`, `make types`, `make format`, `make check`.
+    `make help` lists the shortcuts: `make test`, `make lint`, `make types`, `make format`, `make hygiene`, `make check`.
 
 - **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
     ```bash
@@ -251,7 +251,7 @@ Dependencies represent a long-term maintenance cost and security liability. Ther
     # For a development-only dependency (lands in [project.optional-dependencies].dev)
     uv add --optional dev <package-name>
     ```
-Unlike `uv pip install`, which only touches the virtual environment, `uv add` records the dependency in `pyproject.toml` and the lockfile, guaranteeing reproducible builds for all contributors.  
+Unlike `uv pip install`, which only touches the virtual environment, `uv add` records the dependency in `pyproject.toml` and the lockfile, guaranteeing reproducible builds for all contributors.
 
 ## Part 5: Submitting Your Contribution
 This final part walks you through the process of getting your work reviewed and merged into the project.
@@ -259,7 +259,7 @@ This final part walks you through the process of getting your work reviewed and 
 ### Preparing Your Pull Request
 Before opening a pull request, please run through this pre-flight checklist to ensure your submission is in good shape.
 
-1.  **Run Everything CI Runs:** `make check` runs mypy, ruff, black, pylint, and the test suite, which is exactly the pipeline a pull request must pass.
+1.  **Run Everything CI Runs:** `make check` runs the file-hygiene checks the pre-commit hooks enforce, then mypy, ruff, black, pylint, and the test suite. That covers the pull request pipeline and the commit gate, so a green run means the commit will not be refused and the checks will not fail after the push.
     ```bash
     make check
     ```

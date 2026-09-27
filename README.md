@@ -343,8 +343,11 @@ uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
 ```
 
 `make help` lists the shortcuts (`make test`, `make lint`, `make types`,
-`make format`, `make db-test`). `make check` runs exactly what CI runs: mypy,
-ruff, black, pylint, then the test suite.
+`make format`, `make hygiene`, `make db-test`). `make check` runs everything CI
+runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
+hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
+enforce and no CI workflow does, so a green `make check` is a commit the hooks
+will accept.
 
 The PostgreSQL and MySQL integration tests skip themselves unless
 `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is

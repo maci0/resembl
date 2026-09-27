@@ -15,6 +15,10 @@ project follows [Semantic Versioning](https://semver.org/).
   zone.  A fixed offset (`+02:00`) is rejected, since it names one instant of
   the year rather than a zone that follows daylight saving.  `json` and `csv`
   output is unchanged and still carries the stored UTC string.
+- `make hygiene` checks the trailing whitespace and the missing final newline
+  that the `pre-commit` hooks refuse to commit. No CI workflow ran those two
+  hooks, so a green `make check` did not mean the commit would be accepted;
+  `make check` now runs the target first.
 - `resembl --version` prints the installed version and exits `0`; it is
   answered before the database is opened, so it works against a missing or
   unreachable database URL.

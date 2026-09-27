@@ -29,11 +29,18 @@ The pre-commit hooks run, over the project rather than the staged files
 | mypy  | `uv run mypy`      | `files` in `pyproject.toml` |
 | pylint | `uv run pylint`    | `resembl/ tests/ fuzzers/` |
 
+The same config also runs three mirror hooks: `check-yaml`,
+`end-of-file-fixer` and `trailing-whitespace`. No CI workflow runs them, so
+`make hygiene` reproduces the two that touch repository files and `make check`
+runs it first; a green `make check` is therefore a commit the hooks accept.
+`check-yaml` stays hook-only, because validating the workflows is a job CI does
+by running them.
+
 The hooks run **no tests**. Before handing work over, run the full gate
 yourself:
 
 ```bash
-make check                         # mypy, ruff, black --check, pylint, pytest: what CI runs
+make check                         # hygiene, mypy, ruff, black --check, pylint, pytest
 uv run pytest --cov=resembl --cov-report=term-missing
 ```
 
