@@ -60,6 +60,17 @@ runs:
       run: |
         set -euo pipefail
         curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+        # The installer prints where it put the binary and leaves PATH alone.
+        # The Linux and macOS runner images already carry a uv, so only the
+        # Windows leg noticed; there the next step failed with "The term 'uv'
+        # is not recognized". $GITHUB_PATH takes the platform's own path
+        # spelling, which is why the Git Bash view of ~/.local/bin is converted
+        # when cygpath is there.
+        installed="$HOME/.local/bin"
+        if command -v cygpath >/dev/null 2>&1; then
+          installed="$(cygpath -w "$installed")"
+        fi
+        printf '%s\n' "$installed" >> "$GITHUB_PATH"
         if [ -n "$UV_PYTHON_REQUESTED" ]; then
           echo "UV_PYTHON=$UV_PYTHON_REQUESTED" >> "$GITHUB_ENV"
         fi
