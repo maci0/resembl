@@ -4,13 +4,27 @@
 #
 # `make help` lists the targets.
 
-.PHONY: help install format lint types test db-test fuzz check
+# Recipe shells are bash with the usual strict flags, so a failing command in
+# a pipeline (`tar | gzip`) aborts the target instead of leaving the last
+# command's exit code as the verdict.  The Makefile writes no files itself,
+# only checks and builds.
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+
+.DEFAULT_GOAL := help
+
+.PHONY: help install format lint types test db-test fuzz check dist dist-verify
 
 PYTEST_ARGS ?=
 
 # Seconds atheris fuzzes for, per target.  A fuzzer run without a bound
 # never returns, so the duration is an argument rather than a constant.
 FUZZ_SECONDS ?= 60
+
+# Artifact build epoch: the commit time of HEAD, never the build host's clock.
+# setuptools stamps SOURCE_DATE_EPOCH into the wheel's zip entries; the sdist
+# is normalized afterwards (see `dist`).
+SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 
 # The PostgreSQL and MySQL integration modules skip themselves unless
 # RESEMBL_TEST_PG_URL / RESEMBL_TEST_MYSQL_URL are set.  CI sets both, so a
@@ -75,3 +89,35 @@ check:  ## Run every check CI runs
 		echo "note: the PostgreSQL and MySQL integration tests were skipped (unset"; \
 		echo "RESEMBL_TEST_PG_URL / RESEMBL_TEST_MYSQL_URL). CI runs them; 'make db-test' does too."; \
 	fi
+
+# The release build.  `uv build` alone is not reproducible: setuptools honors
+# SOURCE_DATE_EPOCH for the wheel, but the sdist keeps the source mtimes, the
+# build user's uid/gid, the member order it happened to walk and the gzip
+# header's wall clock, so two runs of the same commit produce different bytes.
+# The tar normalization below pins all four (reproducible-builds.org), so
+# `make dist` twice from the same commit yields identical sha256 sums.
+dist:  ## Build the sdist and wheel into dist/ reproducibly
+	@tar --sort=name --help >/dev/null 2>&1 || { \
+		echo "make dist needs GNU tar (--sort=name); on macOS install gnu-tar"; exit 1; }
+	rm -rf dist
+	SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" LC_ALL=C TZ=UTC uv build --out-dir dist
+	@set -e; for sdist in dist/*.tar.gz; do \
+		unpack=$$(mktemp -d); \
+		tar --extract --file "$$sdist" --directory "$$unpack"; \
+		root=$$(ls "$$unpack"); \
+		tar --create --sort=name \
+			--mtime="@$(SOURCE_DATE_EPOCH)" \
+			--owner=0 --group=0 --numeric-owner \
+			--directory "$$unpack" --file - "$$root" | gzip -n -9 > "$$sdist.tmp"; \
+		mv "$$sdist.tmp" "$$sdist"; \
+		rm -rf "$$unpack"; \
+	done
+
+# Proves the claim above instead of asserting it: build twice, compare.
+dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-identical
+	@$(MAKE) --no-print-directory dist
+	@sha256sum dist/* > .dist-first.sha256
+	@touch pyproject.toml
+	@$(MAKE) --no-print-directory dist
+	@sha256sum --check .dist-first.sha256
+	@rm -f .dist-first.sha256

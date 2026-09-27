@@ -171,5 +171,9 @@ minor; anything else is a patch. The same commit turns `[Unreleased]` into
 `## [X.Y.Z] - YYYY-MM-DD` and bumps `version` in `pyproject.toml`, then
 `uv lock` (the lockfile records the project's own version). Verify
 `uv run pytest` green and a wheel that answers `resembl --help` before tagging.
+The artifacts come from `make dist`, never a bare `uv build`: it pins the build
+clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
+metadata, so the same commit always produces the same bytes. `make
+dist-verify` builds twice and compares the sha256 sums.
 Push the tag, then confirm the published version imports and runs. A published
 version is immutable: something wrong means a new patch, never a re-upload.

@@ -8,6 +8,11 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The sdist and wheel are now built by `make dist`, which pins the build clock
+  to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
+  metadata. Two builds of one commit produce identical bytes; `make dist-verify`
+  builds twice and fails if they differ. Building from the sdist needs
+  `setuptools==80.9.0`, the now-pinned build backend.
 - **Breaking:** a refused find parameter on `resembl serve` now answers `400`
   with a `{"error": "..."}` body, on `POST /find` and `POST /find-batch`
   alike.  Before, `POST /find` answered `200` and put the error in the
