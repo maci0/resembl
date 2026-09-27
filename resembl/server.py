@@ -398,6 +398,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         ``"x"``) is malformed for this API: the handlers index it by
         ``body["query"]`` / ``body["queries"]``, which a list or a number
         answers with a ``TypeError`` that would surface as a 500.
+
+        Deeply nested documents are malformed too: the JSON decoder
+        recurses once per nesting level, so a body of a few hundred
+        kilobytes of ``[[[...]]]`` raised ``RecursionError``, which is not
+        a ``ValueError`` and so escaped this guard and the handler's own
+        ``except`` alike, killing the thread without a response.
         """
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -407,7 +413,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             return None
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, KeyError):
+        except (ValueError, KeyError, RecursionError):
             return None
         return body if isinstance(body, dict) else None
 

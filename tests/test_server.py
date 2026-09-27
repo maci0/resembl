@@ -2,6 +2,7 @@
 
 # pylint: disable=protected-access  # tests exercise private internals
 
+import io
 import json
 import os
 import subprocess
@@ -1181,6 +1182,26 @@ class TestServerMode(unittest.TestCase):
 
         self.assertEqual(_FindHandler.protocol_version, "HTTP/1.1")
         self.assertEqual(_FindHandler.timeout, 30)
+
+    def test_read_body_rejects_deeply_nested_json(self):
+        """A body nested past the decoder's recursion limit is a 400, not a crash.
+
+        ``json.loads`` recurses once per nesting level, so a few hundred
+        kilobytes of ``[[[...]]]`` raised ``RecursionError``.  That is not a
+        ``ValueError``, so it escaped ``_read_body``'s guard and the
+        handler's own ``except`` alike, killing the thread with no response
+        at all.  Found by ``fuzzers/fuzz_find_request.py``.
+        """
+        from resembl.server import _FindHandler
+
+        class _Stub:
+            def __init__(self, body):
+                self.headers = {"Content-Length": str(len(body))}
+                self.rfile = io.BytesIO(body)
+
+        depth = sys.getrecursionlimit() * 4
+        for body in (b"[" * depth + b"]" * depth, b'{"a":' * depth + b"}" * depth):
+            self.assertIsNone(_FindHandler._read_body(_Stub(body)))
 
     def test_ensure_tables_once_survives_concurrent_first_finds(self):
         """Concurrent LSH facade construction serializes the one-time DDL.

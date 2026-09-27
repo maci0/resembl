@@ -23,11 +23,23 @@ project follows [Semantic Versioning](https://semver.org/).
   stdlib's HTML 404 page, and a method other than `POST` answers `405`
   instead of the stdlib's HTML 501.
 
+### Fixed
+
+- A `POST /find` or `POST /find-batch` body nested deeper than the JSON
+  decoder's recursion limit is now answered with `400` and the standard
+  error envelope.  It used to raise `RecursionError`, which escaped the
+  body's parse guard and the handler's own error handling, so the
+  connection died with no response at all.
+
 ### Added
 
 - `docs/http_api.md` documents the `serve` endpoints: the request fields of
   `/find` and `/find-batch`, the `200` response shapes, and the
   `400`/`404`/`405`/`415`/`500` error envelope.
+- Two fuzz harnesses cover the surfaces that parse untrusted input:
+  `fuzzers/fuzz_minhash_blob.py` for the stored-fingerprint byte format, and
+  `fuzzers/fuzz_find_request.py` for the `serve` request body and find
+  parameters.
 
 ## [2.0.0] - 2026-09-15
 

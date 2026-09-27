@@ -111,7 +111,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 
 | Status | When |
 | ------ | ---- |
-| `400` | Unparseable body, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
+| `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `404` | Unknown path. |
 | `405` | A method other than `POST`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
