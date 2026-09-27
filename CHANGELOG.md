@@ -43,6 +43,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `docs/THREAT_MODEL.md` and `SECURITY.md` re-verified against the current
+  tree: every file reference now resolves in `resembl/`, the environment
+  overrides are documented where they are read (`resembl/paths.py`), and two
+  gaps are named that were not, `find-batch --file` reading its whole input
+  into memory, and `resembl import` sizing a worker pool from a directory
+  listing with no file-count cap. `SECURITY.md` also states the
+  `RESEMBL_DATABASE_URL` precedence over `DATABASE_URL` and that the config
+  directory is separate from the cache directory.
 - `RESEMBL_SEED` now governs one generator for the whole run instead of one
   generator per draw. A seeded run used to replay its first sampling offset
   for every draw, so every `stats` estimate in that run was computed from the
