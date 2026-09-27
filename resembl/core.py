@@ -133,7 +133,13 @@ def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
 def snippet_name_add(
     session: Session, checksum: str, new_name: str, quiet: bool = False
 ) -> Snippet | None:
-    """Add a new name to an existing snippet."""
+    """Add a new name to an existing snippet (idempotent).
+
+    A name already on the snippet is a no-op that returns the snippet, the
+    same contract :func:`snippet_tag_add` has.  Reporting a failure there
+    made a retried add (a lost response, a double-clicked command, a script
+    re-run) exit 1 for an end state it had already produced.
+    """
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
         if not quiet:
@@ -142,9 +148,7 @@ def snippet_name_add(
 
     name_list = snippet.name_list
     if new_name in name_list:
-        if not quiet:
-            logger.error("Name '%s' already exists for this snippet.", new_name)
-        return None
+        return snippet  # Idempotent: already named
 
     name_list.append(new_name)
     snippet.names = json.dumps(name_list)
@@ -1664,7 +1668,19 @@ def db_clean(session: Session) -> dict:
 
 
 def collection_create(session: Session, name: str, description: str = "") -> Collection:
-    """Create a new snippet collection."""
+    """Create a snippet collection, or return the existing one of that name.
+
+    Idempotent: ``name`` is the primary key, so a second execution used to
+    raise an ``IntegrityError`` and leave the caller reporting a failure for
+    a collection that already exists — the state after the first run was
+    already the requested one.  Setup scripts and any retried create now
+    converge, and the stored row (its description and ``created_at``) is left
+    untouched rather than overwritten, so re-running a create cannot rewrite
+    a description a human has since edited.
+    """
+    existing = Collection.get_by_name(session, name)
+    if existing is not None:
+        return existing
     collection = Collection(name=name, description=description)
     session.add(collection)
     session.commit()

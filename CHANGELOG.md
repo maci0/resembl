@@ -29,6 +29,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `resembl collection create` on a name that already exists now reports the
+  collection as already there and exits 0, instead of failing with the
+  database's `IntegrityError` and its SQL text. The stored description is
+  left alone, so re-running a create never rewrites a collection.
+- `resembl name add` on a name the snippet already carries is now a no-op
+  that exits 0, like `resembl tag add` already was. A script that re-ran
+  the command after a failure used to see exit 1 for an end state it had
+  already produced.
 - The sdist and wheel are now built by `make dist`, which pins the build clock
   to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
   metadata. Two builds of one commit produce identical bytes; `make dist-verify`

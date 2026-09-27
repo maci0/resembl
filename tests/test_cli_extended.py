@@ -166,6 +166,34 @@ class TestCLICollections(BaseCLITest):
         self.assertEqual(result.returncode, 0)
         self.assertIn("test_col", result.stdout)
 
+    def test_collection_create_twice_exits_zero(self):
+        """A repeated create converges instead of failing on the primary key."""
+        first = self.run_command("collection create twice_col --description 'Original'")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.run_command("collection create twice_col --description 'Overwritten'")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("already exists", second.stdout)
+        with Session(self.engine) as session:
+            from resembl.models import Collection
+
+            rows = Collection.get_all(session)
+            self.assertEqual([row.name for row in rows].count("twice_col"), 1)
+            self.assertEqual(Collection.get_by_name(session, "twice_col").description, "Original")
+
+    def test_name_add_twice_exits_zero(self):
+        """A repeated `name add` is a no-op, like `tag add`."""
+        with Session(self.engine) as session:
+            snippet = snippet_add(session, "rerun_proc", "MOV ECX, 9")
+            checksum = snippet.checksum
+        first = self.run_command(f"name add {checksum} alias")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        second = self.run_command(f"name add {checksum} alias")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        with Session(self.engine) as session:
+            from resembl.core import snippet_get
+
+            self.assertEqual(snippet_get(session, checksum).name_list.count("alias"), 1)
+
     def test_collection_list(self):
         """Listing collections should show created ones."""
         with Session(self.engine) as session:

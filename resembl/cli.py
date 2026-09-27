@@ -1700,12 +1700,24 @@ def collection_create_cmd(
     ),
 ) -> None:
     """Create a new snippet collection."""
+    from .models import Collection
+
+    # ``collection_create`` converges on a name that already exists, so probe
+    # first to report which of the two happened rather than claiming a fresh
+    # creation on every run.
+    already_existed = Collection.get_by_name(state.session, name) is not None
     try:
         col = collection_create(state.session, name, description)
-        _echo(f"[green]✓[/green] Created collection [bold]{col.name}[/bold]")
-    except Exception as e:
-        err_console.print(f"[red]Error:[/red] {e}")
+    except SQLAlchemyError as e:
+        # Driver text carries the SQL statement and its bind parameters, which
+        # must not reach the terminal; the name is the caller's own input.
+        logger.error("Could not create collection %r: %s", name, e)
+        err_console.print(f"[red]Error:[/red] could not create collection '{name}'.")
         raise typer.Exit(code=1) from e
+    if already_existed:
+        _echo(f"[green]✓[/green] Collection [bold]{col.name}[/bold] already exists.")
+    else:
+        _echo(f"[green]✓[/green] Created collection [bold]{col.name}[/bold]")
 
 
 @collection_app.command("delete")

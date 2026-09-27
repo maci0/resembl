@@ -78,7 +78,8 @@ Return version history for a snippet.
 ## Collection Operations
 
 ### `collection_create(session, name: str, description: str = "") → Collection`
-Create a new snippet collection.
+Create a snippet collection, or return the existing one of that name with its
+stored description and `created_at` untouched. Idempotent.
 
 ### `collection_delete(session, name: str) → bool`
 Delete a collection (snippets are kept but unassigned).

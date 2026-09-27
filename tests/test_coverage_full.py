@@ -366,10 +366,11 @@ class TestNameOperations(BaseDBTest):
     """Tests for snippet_name_add and snippet_name_remove."""
 
     def test_name_add_duplicate(self):
-        """Adding an existing name should return None."""
+        """Adding an existing name is a no-op returning the snippet."""
         snippet = snippet_add(self.session, "original", "NOP")
         result = snippet_name_add(self.session, snippet.checksum, "original", quiet=True)
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name_list, ["original"])
 
     def test_name_remove_last_name(self):
         """Removing the last name must be refused, keeping the snippet named."""

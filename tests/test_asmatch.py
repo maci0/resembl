@@ -411,11 +411,12 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         self.assertIsNone(result)
 
     def test_snippet_name_add_existing_name(self):
-        """Test adding a name that already exists."""
+        """Adding a name that already exists is a no-op, like tag add."""
         snippet = snippet_add(self.session, "test", "MOV EAX, 1")
         self.assertIsNotNone(snippet)
         result = snippet_name_add(self.session, snippet.checksum, "test")
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name_list, ["test"])
 
     def test_snippet_name_remove_nonexistent_snippet(self):
         """Test removing a name from a non-existent snippet."""

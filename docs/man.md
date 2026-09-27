@@ -160,13 +160,15 @@ The `compare` command also reports control-flow graph similarity.
 ### Naming & Tags
 
 **name add** *CHECKSUM* *NAME*
-:   Add an alias to a snippet.  Accepts checksum prefixes.
+:   Add an alias to a snippet.  Accepts checksum prefixes.  A name the
+    snippet already carries is a no-op, so a re-run exits 0.
 
 **name remove** *CHECKSUM* *NAME*
 :   Remove an alias from a snippet.  Accepts checksum prefixes.
 
 **tag add** *CHECKSUM* *TAG*
-:   Add a tag to a snippet.  Accepts checksum prefixes.
+:   Add a tag to a snippet.  Accepts checksum prefixes.  A tag the snippet
+    already carries is a no-op, so a re-run exits 0.
 
 **tag remove** *CHECKSUM* *TAG*
 :   Remove a tag from a snippet.  Accepts checksum prefixes.
@@ -174,7 +176,8 @@ The `compare` command also reports control-flow graph similarity.
 ### Collections
 
 **collection create** *NAME* [--description TEXT]
-:   Create a new snippet collection.
+:   Create a new snippet collection.  A name that already exists is left
+    untouched and reported as such, so a re-run exits 0.
 
 **collection delete** *NAME*
 :   Delete a collection (snippets are kept).
