@@ -168,6 +168,31 @@ class TestSnippetRoundTrip(_InMemoryDbTestCase):
         self.assertEqual(stored.name_list, ["\U0001f600-combining"])
 
 
+def _filesystem_holds_undecodable_names() -> bool:
+    """Whether this filesystem can hold a name with a byte that is not UTF-8.
+
+    POSIX filesystems are byte-oriented, but the capability is not "is POSIX":
+    macOS' APFS refuses the byte outright (``OSError`` Errno 92) and Windows
+    cannot even build the bytes path (``os.fsencode``/``ntpath.join`` raise
+    ``UnicodeDecodeError``).  Probed once, rather than assumed from
+    ``os.name``, so the round trip runs wherever the filesystem allows it.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            raw = os.path.join(os.fsencode(temp_dir), b"probe\xff.asm")
+            with open(raw, "wb"):
+                pass
+        except (OSError, UnicodeError, ValueError):
+            return False
+        os.remove(raw)
+    return True
+
+
+#: Probed at import: the undecodable-filename round trip needs a byte-oriented
+#: filesystem, which APFS and NTFS are not.
+_HOLDS_UNDECODABLE_NAMES = _filesystem_holds_undecodable_names()
+
+
 class TestSafeFilenameSurrogates(unittest.TestCase):
     """POSIX filenames are bytes; an undecodable one must still export."""
 
@@ -179,9 +204,9 @@ class TestSafeFilenameSurrogates(unittest.TestCase):
         self.assertIsInstance(stem.encode("utf-8"), bytes)
 
     @unittest.skipUnless(
-        os.name == "posix",
-        "a filename carrying a byte that is not valid UTF-8 needs a byte-oriented "
-        "POSIX filesystem: NTFS and APFS store names as text and refuse it",
+        _HOLDS_UNDECODABLE_NAMES,
+        "this filesystem stores names as text and refuses a byte that is not "
+        "valid UTF-8 (APFS and NTFS both do)",
     )
     def test_a_real_undecodable_filename_exports(self):
         """The import path, end to end, with a byte no encoding can decode.
