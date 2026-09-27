@@ -915,6 +915,63 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("error", payload)
         self.assertIn("ngram_size", payload["error"])
 
+    def test_find_rejects_out_of_range_top_n(self):
+        """A top_n that names the whole corpus answers 400, not the corpus.
+
+        top_n was the one find parameter with no bound, so one unauthenticated
+        POST could ask for every row the LSH index returns.
+        """
+        port = self._start_server()
+        status, payload = _post_json_status(port, "/find", {"query": "push ebx", "top_n": 10**9})
+        self.assertEqual(status, 400)
+        self.assertIn("top_n", payload["error"])
+
+    def test_find_accepts_top_n_at_the_cap(self):
+        """The bound is a ceiling, not a refusal: a top_n at the cap still runs."""
+        from resembl.server import _MAX_TOP_N
+
+        port = self._start_server()
+        status, payload = _post_json_status(
+            port, "/find", {"query": "push ebx\nret", "top_n": _MAX_TOP_N}
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("matches", payload)
+
+    def test_find_rejects_rebound_host(self):
+        """A loopback server refuses a request whose Host names another host.
+
+        A page that rebinds its own name onto 127.0.0.1 sends a same-origin
+        request (no preflight, response readable) to an endpoint with no
+        authentication; the Host header still carries the rebound name.
+        """
+        port = self._start_server()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=json.dumps({"query": "push ebx"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Host": "attacker.example"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                status, payload = response.status, json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            status, payload = exc.code, json.loads(exc.read())
+        self.assertEqual(status, 403)
+        self.assertIn("error", payload)
+
+    def test_allowed_hosts_covers_only_loopback_binds(self):
+        """The Host check is scoped to loopback binds, and covers their names."""
+        from resembl.server import _loopback_allowed_hosts
+
+        allowed = _loopback_allowed_hosts("127.0.0.1", 8080)
+        self.assertIn("127.0.0.1:8080", allowed)
+        self.assertIn("localhost:8080", allowed)
+        self.assertIn("[::1]:8080", allowed)
+        self.assertNotIn("attacker.example:8080", allowed)
+        # A routable bind is reached by names the server cannot know in
+        # advance, so it stays unrestricted rather than refusing real clients.
+        self.assertEqual(_loopback_allowed_hosts("0.0.0.0", 8080), frozenset())
+        self.assertEqual(_loopback_allowed_hosts("192.168.1.10", 8080), frozenset())
+
     def test_find_rejects_non_string_query(self):
         """A non-string query answers 400, never a 500 with internal error text.
 

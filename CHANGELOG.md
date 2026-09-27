@@ -69,6 +69,26 @@ project follows [Semantic Versioning](https://semver.org/).
   Unset, one seed is drawn from the OS, logged at INFO with the value to
   replay with, and reused for the rest of the process, where before each
   draw drew a fresh one and the run reported numbers nothing could reproduce.
+- The find server bounds `top_n` at 1000 per request, like every other find
+  parameter. It was the one unbounded field, so one unauthenticated `POST
+  /find` with a low `threshold` and a large `top_n` returned the whole
+  matching corpus in a single response. A larger value now answers `400`;
+  `resembl find` falls back to its in-process path, which is unchanged.
+- The find server refuses a request whose `Host` header does not name it, on a
+  loopback bind. It answers `403` to anything but `127.0.0.1`, `localhost` and
+  `::1` (with or without the port). A page that rebinds its own hostname onto
+  127.0.0.1 reached `/find` same-origin, with no CORS preflight and a readable
+  response, and the server had no other caller check; the `Host` header still
+  carries the rebound name. A non-loopback bind is unrestricted, since it is
+  reached by whatever name resolves to it.
+- The cache directory `serve` creates is `0o700` and the port file it writes is
+  `0o600`, instead of both following the process umask. Both `find` clients
+  trust the advertisement to name the port they send the query to, so nothing
+  in that directory needs to be readable by another account on a shared host.
+  An existing cache directory keeps the permissions the user gave it.
+- `resembl serve -v` now records every request at DEBUG (peer address, request
+  line, outcome, with control characters stripped so a crafted path cannot
+  forge a second record). At the default level the server still logs nothing.
 - Full-corpus reads are ordered by the checksum primary key: `snippet list`
   (including a `--range` window), `name search`, `collection show`,
   `stats`, `export` and `merge` all read rows in one defined order, where

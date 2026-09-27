@@ -140,7 +140,10 @@ The `compare` command also reports control-flow graph similarity.
     `--port`), with a clean error rather than a traceback.
     `resembl serve -v` logs the configuration the server started with (the
     served database with its password masked, the port file, and the find
-    defaults every request inherits).
+    defaults every request inherits), and every request it serves.  On a
+    loopback bind it answers `403` to a request whose `Host` header is not
+    `127.0.0.1`, `localhost` or `::1`, so a page that rebinds its hostname
+    onto 127.0.0.1 cannot reach the endpoints.
     The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, JSON
     requests, `{"error": ...}` bodies) are documented in
     [http_api.md](http_api.md).

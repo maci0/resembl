@@ -235,6 +235,11 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # match every other one (all shingles collapse to the empty token tuple).
     if ngram_size < 1:
         raise BadRequestError("ngram_size must be at least 1")
+    # The response is bounded too, not just the work: a top_n large enough to
+    # name the whole corpus turns one unauthenticated request into a complete
+    # export of the snippet table.
+    if top_n > _MAX_TOP_N:
+        raise BadRequestError(f"top_n must be at most {_MAX_TOP_N}")
     # Reject an unbuildable threshold up front: the banding needs b >= 2
     # bands, and an unbuildable one would make the find return zero matches
     # silently.  (The thin client cannot run the banding search without
@@ -355,6 +360,55 @@ _MAX_BODY_BYTES = 8 * 1024 * 1024
 #: input (the CLI's ``find-batch`` reads a file of any size, in chunks).
 _MAX_BATCH_QUERIES = 1000
 
+#: Largest ``top_n`` one request may ask for.  Every other find parameter is
+#: range-checked, and without this one ``POST /find`` answers the whole corpus:
+#: ``top_n`` is the only parameter that grows the response itself (one row per
+#: match) rather than the work behind it, so an unauthenticated request naming
+#: a huge value walks every LSH candidate, Levenshtein-scores it, and returns
+#: it.  A caller that wants more splits its query; ``resembl find`` never
+#: sends one request for more than this many results.
+_MAX_TOP_N = 1000
+
+#: Host names a loopback bind answers to.  A request carrying any other
+#: ``Host`` reached a loopback port the browser resolved by rebinding an
+#: attacker-controlled name onto 127.0.0.1, so the header, not the peer
+#: address, is what identifies the origin of such a request.
+_LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
+
+
+def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
+    """Return the ``Host`` values a server bound to *host* may answer.
+
+    Empty for any bind that is not loopback: a server on a routable interface
+    is reached by whatever name resolves to it, which the server cannot know
+    in advance, and a check would refuse legitimate clients instead of
+    protecting them.  A loopback bind is only ever addressed by the names
+    below, so the check costs nothing there and closes the rebinding path.
+    """
+    is_loopback = host.lower() == "localhost"
+    if not is_loopback:
+        try:
+            import ipaddress
+
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        return frozenset()
+    allowed: set[str] = set()
+    for name in _LOOPBACK_NAMES:
+        # HTTP/1.1 carries the port in the header (all but 80), and an IPv6
+        # literal is bracketed there; the bare form covers a client that omits
+        # the port.
+        literal = f"[{name}]" if ":" in name else name
+        allowed.update({f"{literal}:{port}", literal, f"{name}:{port}"})
+    return frozenset(allowed)
+
+
+#: C0 and DEL, dropped from a logged request line so a crafted path cannot
+#: end the record and append forged lines to the log.
+_LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), 0x7F])
+
 
 def port_file_cleanup(port_file: str, port: int) -> None:
     """Remove the port file only when it still advertises our own *port*.
@@ -441,7 +495,26 @@ class _FindHandler(BaseHTTPRequestHandler):
         declared = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         return declared in ("", "application/json")
 
+    def _host_allowed(self) -> bool:
+        """Whether the request's ``Host`` names this loopback server.
+
+        A browser on the host is a second peer, and the loopback bind does not
+        stop it: a page that rebinds its own name onto 127.0.0.1 sends a
+        same-origin request (no CORS preflight, and the response is readable
+        because the origin matches) to an unauthenticated endpoint.  The
+        ``Host`` header still carries the rebound name, so refusing anything
+        but the names the server answers to closes that path.  A non-loopback
+        bind is unrestricted (see :func:`_loopback_allowed_hosts`).
+        """
+        allowed = self.server.allowed_hosts  # type: ignore[attr-defined]
+        if not allowed:
+            return True
+        return (self.headers.get("Host") or "").strip().lower() in allowed
+
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
+        if not self._host_allowed():
+            self._respond(403, {"error": "host not allowed"})
+            return
         if self.path not in ("/find", "/find-batch"):
             self._respond(404, {"error": f"unknown path: {self.path}"})
             return
@@ -459,6 +532,9 @@ class _FindHandler(BaseHTTPRequestHandler):
 
     def _method_not_allowed(self) -> None:
         """Answer a non-POST request with the same JSON error envelope."""
+        if not self._host_allowed():
+            self._respond(403, {"error": "host not allowed"})
+            return
         self._respond(
             405,
             {"error": f"method not allowed: {self.command} (use POST)"},
@@ -598,8 +674,16 @@ class _FindHandler(BaseHTTPRequestHandler):
         format: str,  # noqa: A002  # pylint: disable=redefined-builtin
         *args: Any,
     ) -> None:
-        # Quiet by default; the CLI prints its own status line.
-        return
+        # Quiet at the default level: the CLI prints its own status line.  At
+        # DEBUG (``resembl serve -v``) every request is recorded with its peer
+        # and outcome, which is the only trail a served query leaves: without
+        # it a scrape through this unauthenticated endpoint leaves nothing to
+        # investigate.  The request line is request-controlled, so control
+        # characters are stripped from the rendered record: a raw one lets a
+        # crafted path write a second, forged log line.
+        peer = self.client_address[0]
+        record = (format % args).translate(_LOG_CONTROL_CHARS)
+        logger.debug("%s %s", peer, record)
 
 
 class _FindServer(ThreadingHTTPServer):
@@ -612,6 +696,9 @@ class _FindServer(ThreadingHTTPServer):
     """
 
     engine: Any
+    #: ``Host`` values this generation answers to; empty means unrestricted
+    #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
+    allowed_hosts: frozenset[str] = frozenset()
     #: This generation's exit-hook callback, set by :func:`serve`.
     #: ``server_close`` runs it (retiring the port file) and unregisters it,
     #: so a process cycling servers accumulates neither stale advertisements
@@ -778,16 +865,25 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # generation carries its own engine and find defaults.
     httpd.engine = engine
     httpd.find_defaults = find_defaults
+    httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     tmp_port_path = f"{port_file}.{os.getpid()}.tmp"
     try:
-        os.makedirs(os.path.dirname(port_file), exist_ok=True)
+        # 0o700 at creation: the cache dir holds the advertisement, and both
+        # clients trust its contents to name the port they send their query
+        # to, so nothing in it should be readable or writable by another
+        # account on a shared host.  An existing directory keeps whatever
+        # permissions the user gave it.
+        os.makedirs(os.path.dirname(port_file), mode=0o700, exist_ok=True)
         # Publish via write-temp-then-rename: ``open(port_file, "w")``
         # truncates in place, so a find client racing this write could read
         # an empty or half-written port number and wrongly conclude no
         # server is running.  ``os.replace`` flips the whole advertisement
         # atomically (POSIX rename semantics; also atomic on Windows), and
-        # a same-directory temp keeps the rename on one filesystem.
-        with open(tmp_port_path, "w", encoding="utf-8") as f:
+        # a same-directory temp keeps the rename on one filesystem.  The
+        # temp is created 0o600 rather than with the process umask, so the
+        # advertised port is not world-readable even before the rename.
+        fd = os.open(tmp_port_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8") as f:
             f.write(str(httpd.server_address[1]))
         os.replace(tmp_port_path, port_file)
     except BaseException:

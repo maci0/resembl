@@ -11,6 +11,14 @@ non-loopback address only prints a warning; the bind proceeds. Any process
 that can reach the port can read the whole snippet corpus. Do not expose the
 port.
 
+A loopback bind additionally checks the request's `Host` header and answers
+`403` to anything but `127.0.0.1`, `localhost` or `::1` (with or without the
+port). That closes DNS rebinding: a page that points its own hostname at
+127.0.0.1 reaches the endpoint same-origin, with no CORS preflight and a
+readable response, and the `Host` header still carries the rebound name. A
+non-loopback bind accepts any `Host`, since it is reached by whatever name
+resolves to it.
+
 `docs/THREAT_MODEL.md` records this boundary and the rest of the surface.
 
 ## Discovery
@@ -54,7 +62,7 @@ the server's configured default", exactly like an omitted field):
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
 | `query` | string | required |
-| `top_n` | integer | default from the server's config. No upper bound is enforced: a large value with a low `threshold` returns the matching corpus in one response |
+| `top_n` | integer | at most 1000, else `400`. The default is the server's config |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must equal the server's configured `lsh_threshold` |
 | `normalize` | boolean | default `true` |
 | `ngram_size` | integer | at least `1`. Must equal the server's configured `ngram_size` |
@@ -112,6 +120,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | Status | When |
 | ------ | ---- |
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
+| `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
 | `405` | A method other than `POST`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
@@ -123,3 +132,12 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 which the server cannot watch for external writers. `X-Content-Type-Options`,
 `X-Frame-Options`, and `Content-Security-Policy` are set so a browser pointed
 at the port cannot reinterpret a response as a page.
+
+## Logging
+
+The server logs nothing at the default level. Started with `-v` (`resembl
+serve -v`) it records every request at DEBUG: peer address, request line and
+outcome, with control characters stripped from the request line so a crafted
+path cannot forge a second record. That is the only trail a served query
+leaves, so it is the first thing to raise when investigating a suspected
+scrape.
