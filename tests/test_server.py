@@ -651,7 +651,7 @@ class TestServerMode(unittest.TestCase):
         payload = _post_json(port, "/find-batch", {"queries": [q1, q2], "top_n": 5})
 
         self.assertEqual(len(payload["results"]), 2)
-        for query, result in zip((q1, q2), payload["results"]):
+        for query, result in zip((q1, q2), payload["results"], strict=True):
             self.assertEqual(result["query"], query)
             # Matches the single /find result for the same query.
             single = _post_json(port, "/find", {"query": query, "top_n": 5})

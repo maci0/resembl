@@ -476,11 +476,11 @@ def serve(
         # ValueError: another serve process already owns this database;
         # IndexBuildError: the warm-up migration/index build failed.
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     except OSError as e:
         # e.g. --port already in use by another process.
         err_console.print(f"[red]Error:[/red] could not bind {host}:{port}: {e.strerror or e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
 
     # Service managers (systemd, Docker stop, kill) send SIGTERM, whose
@@ -659,7 +659,7 @@ def app_callback(
             f"[red]Error:[/red] cannot open the database "
             f"({db_url_mask(os.environ.get('DATABASE_URL', 'sqlite:///assembly.db'))}): {e}"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     state.session = Session(get_engine())
     atexit.register(state.session.close)
 
@@ -706,7 +706,7 @@ def export_cmd(
         result = snippet_export(state.session, directory)
     except OSError as e:
         err_console.print(f"[red]Error:[/red] Export failed: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -736,7 +736,7 @@ def export_yara_cmd(
         result = snippet_export_yara(state.session, output_file)
     except OSError as e:
         err_console.print(f"[red]Error:[/red] YARA export failed: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -1090,7 +1090,7 @@ def stats() -> None:
         # clears the stamps; the healing reindex runs on `find`, not here).
         # Report cleanly instead of a traceback — same contract as compare.
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
@@ -1266,7 +1266,7 @@ def find(
         )
     except IndexBuildError as e:
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     _render_find_payload(snippet_matches_payload(num_candidates, matches))
 
@@ -1340,7 +1340,7 @@ def find_batch(
                 )
         except IndexBuildError as e:
             err_console.print(f"[red]Error:[/red] {e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
         _echo_format(results)
@@ -1392,7 +1392,7 @@ def compare(
     except ValueError as e:
         # e.g. a corrupt fingerprint (disk rot) — report cleanly, no traceback.
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     if not comparison:
         err_console.print("[red]Error:[/red] One or both snippets could not be found.")
         raise typer.Exit(code=1)
@@ -1605,7 +1605,7 @@ def collection_create_cmd(
         _echo(f"[green]✓[/green] Created collection [bold]{col.name}[/bold]")
     except Exception as e:
         err_console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 @collection_app.command("delete")
@@ -1842,7 +1842,7 @@ def config_set_cmd(
         new_config = update_config(key, typed_value)
     except OSError as e:
         err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
     state.config.update(new_config)
 
@@ -1856,7 +1856,7 @@ def config_unset_cmd(
         new_config = remove_config_key(key)
     except OSError as e:
         err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     _echo(f"[green]✓[/green] Unset [bold]{key}[/bold], returning to default.")
     state.config.update(new_config)
 

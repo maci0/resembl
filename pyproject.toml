@@ -162,11 +162,27 @@ select = [
     "PERF",
     "N",
     "T10",
+    # Bug-prone correctness group: raises inside except without explicit
+    # chaining (B904), zip() without strict= (B905), mutable/loop hazards.
+    "B",
+    # Commented-out code left behind after a refactor.
+    "ERA",
+    # Logging misuse: f-strings and eager %-formatting in logger calls, which
+    # cost formatting work even when the record is filtered out.
+    "LOG",
+    # pygrep-hooks: bad type: ignore / noqa spellings, exec/eval warnings.
+    "PGH",
     # Full ruff group (includes RUF100, which keeps `# noqa` honest):
     # ambiguous-unicode docstring/comment checks are enabled and the tree
     # is kept free of confusable characters.
     "RUF",
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer builds its parameter metadata by calling typer.Option/typer.Argument in
+# the signature default; that is the framework's documented idiom, not a mutable
+# default argument.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["resembl"]
@@ -183,6 +199,9 @@ warn_unused_configs = true
 strict_equality = true
 warn_unreachable = true
 disallow_subclassing_any = true
+# bytes stays bytes: passing a bytearray/memoryview where bytes is declared is
+# a type error, not a silent copy.
+strict_bytes = true
 extra_checks = true
 # Extra error codes the whole tree passes; each catches a defect class:
 # unscoped (bare) suppressions, tautological expressions, always-truthy
@@ -196,6 +215,12 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_globals = true
 disallow_untyped_decorators = true
+
+# numpy is type-checked through its shipped stubs.  An earlier
+# `follow_imports = "skip"` override for `numpy.*` was needed while the check
+# target was Python 3.11, which could not parse the PEP 695 syntax those stubs
+# use; the target is 3.13 and the stubs parse, so the override is gone and
+# resembl.minhash is checked against real numpy types instead of `Any`.
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable"

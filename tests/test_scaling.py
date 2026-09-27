@@ -82,7 +82,7 @@ class TestMinHashStorage(BaseScalingTest):
     def test_pack_unpack_roundtrip(self):
         m = code_create_minhash("push ebx; mov eax, dword [esp+0x10]; pop ebx; ret")
         raw = minhash_pack(m)
-        # Magic (4) + num_perm (4) + 128 * uint32 (512)
+        # 4-byte magic + 4-byte permutation count + one uint32 per permutation
         self.assertEqual(len(raw), 8 + 4 * NUM_PERMUTATIONS)
         self.assertTrue(raw.startswith(b"RMLH"))
         restored = minhash_unpack(raw)
@@ -190,7 +190,7 @@ class TestBatchConsistency(BaseScalingTest):
         ]
         singles = [code_create_minhash(c) for c in codes]
         batch = code_create_minhash_batch(codes)
-        for m1, m2 in zip(singles, batch):
+        for m1, m2 in zip(singles, batch, strict=True):
             self.assertAlmostEqual(m1.jaccard(m2), 1.0, places=6)
 
     def test_batch_weighted_shingling(self):

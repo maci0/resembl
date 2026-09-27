@@ -986,7 +986,7 @@ def db_reindex(
 
     def apply_batch(batch: list[Snippet], blobs: list[bytes]) -> None:
         nonlocal reindexed, batches_since_commit
-        for snippet, blob in zip(batch, blobs):
+        for snippet, blob in zip(batch, blobs, strict=True):
             snippet.minhash = blob
         reindexed += len(batch)
         if progress is not None:

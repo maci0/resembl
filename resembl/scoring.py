@@ -1141,7 +1141,7 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     for s in sizes2:
         hist2[s] += 1
 
-    dot = sum(a * b for a, b in zip(hist1, hist2))
+    dot = sum(a * b for a, b in zip(hist1, hist2, strict=True))
     mag1 = sum(a * a for a in hist1) ** 0.5
     mag2 = sum(b * b for b in hist2) ** 0.5
 
