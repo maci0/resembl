@@ -207,7 +207,8 @@ authority that overrides it. The same commit turns `[Unreleased]` into
 `uv lock` (the lockfile records the project's own version) and the
 supported-versions table in `SECURITY.md`; `tests/test_changelog.py` holds the
 manifest, the sections, the break markers and that table to each other. Verify
-`uv run pytest` green and a wheel that answers `resembl --help` before tagging;
+`uv run --locked pytest` green and a wheel that answers `resembl --help` before
+tagging;
 the `Build` workflow runs both halves of that on the tag before it is cut.
 The artifacts come from `make dist`, never a bare `uv build`: it pins the build
 clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive

@@ -47,7 +47,7 @@ help:  ## Show this help
 
 install:  ## Create .venv from uv.lock and install the git hooks
 	uv sync --locked --extra dev
-	uv run pre-commit install
+	uv run --locked pre-commit install
 
 format:  ## Apply the auto-fixes black and ruff can make
 	uv run --locked black .
