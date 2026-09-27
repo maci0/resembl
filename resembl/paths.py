@@ -129,7 +129,7 @@ def _encoding_is_utf8(encoding: str) -> bool:
 
 
 def console_utf8_reconfigure() -> None:
-    """Make the process's output streams UTF-8 for the rest of the run.
+    """Make the process's output streams UTF-8 and LF-terminated for this run.
 
     Every string in the package is UTF-8 by the time it is printed (names
     and tags arrive from files, argv and JSON; code is stored NFC), but
@@ -139,12 +139,21 @@ def console_utf8_reconfigure() -> None:
     the whole report rather than one character, so the user saw a traceback
     where a list was due.  ``errors="replace"`` keeps a character the
     terminal's own code page cannot draw from escalating that into a crash.
-    Streams that are already UTF-8 (the common case) are left untouched, so
-    the Windows console's own writer keeps its Unicode path.
+
+    The encoding is only replaced where it is not already UTF-8, so the
+    Windows console's own writer keeps its Unicode path.  ``newline="\\n"``
+    is pinned on every stream, UTF-8 or not: ``newline=None`` rewrites every
+    ``"\\n"`` to ``os.linesep``, so the same command emitted LF-terminated
+    output on POSIX and CRLF on Windows.  Every renderer here writes ``"\\n"``
+    (see ``_CSV_LINETERMINATOR`` in the CLI), and a report that a script
+    reads should not differ by platform.
     """
     for stream in (sys.stdout, sys.stderr):
         if not isinstance(stream, io.TextIOWrapper):
             continue
-        if stream.closed or _encoding_is_utf8(stream.encoding):
+        if stream.closed:
             continue
-        stream.reconfigure(encoding="utf-8", errors="replace")
+        if _encoding_is_utf8(stream.encoding):
+            stream.reconfigure(newline="\n")
+            continue
+        stream.reconfigure(encoding="utf-8", errors="replace", newline="\n")
