@@ -43,8 +43,10 @@ Insert many prepared snippets in one pass (content-addressable dedup, alias merg
 ### `snippet_get(session, checksum: str) → Snippet | None`
 Retrieve a snippet by checksum.
 
-### `snippet_list(session, start: int = 0, end: int = 0) → list[Snippet]`
+### `snippet_list(session, start: int = 0, end: int | None = None) → list[Snippet]`
 List snippets, optionally within a `[start, end)` window of the full listing.
+`end=None` (the default) lists everything; an explicit `end` selects a window,
+so `end=0` is the empty window rather than "no window".
 
 ### `snippet_delete(session, checksum: str) → bool`
 Delete a snippet. Returns `True` on success.

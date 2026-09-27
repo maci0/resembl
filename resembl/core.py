@@ -1421,14 +1421,19 @@ def db_stats(session: Session) -> dict:
     }
 
 
-def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet]:
-    """List snippets, optionally within a given range.
+def snippet_list(session: Session, start: int = 0, end: int | None = None) -> list[Snippet]:
+    """List snippets, optionally within a given half-open ``[start, end)`` range.
+
+    *end* of ``None`` (the default) lists everything.  The window is selected
+    by an explicit ``end``, not by ``end > 0``: a caller asking for the
+    ``0-0`` window means "no rows", and the old sentinel answered it with the
+    entire database.
 
     Ordered by the checksum primary key, so a paged window selects the same
     rows on every run: an unordered ``OFFSET``/``LIMIT`` over the same
     database can return a different page once the plan changes.
     """
-    if end > 0:
+    if end is not None:
         return list(
             session.exec(
                 select(Snippet).order_by(Snippet.checksum).offset(start).limit(end - start)

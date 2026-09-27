@@ -152,6 +152,15 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `resembl verify` exits 1 on a stale index in every output format.  The
+  documented exit status was only applied to the table render, so
+  `verify --format json` reported the same issues and still exited 0, and a
+  script gating on it never saw the failure.
+- `resembl list --range 0-0` no longer lists the whole database.  An
+  explicit `0-0` window meant "no rows"; `snippet_list` treated any
+  `end <= 0` as "unbounded", so the empty window was answered with every
+  snippet.  `snippet_list` now selects a window whenever an `end` is given
+  (`end=None`, the default, still lists everything).
 - The token-type classification cache is published instead of mutated in
   place.  `serve` runs one handler thread per request and every request
   lexes, so the cache was written by several threads while others read it,

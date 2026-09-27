@@ -1111,7 +1111,7 @@ def list_cmd(
     ),
 ) -> None:
     """List all snippets."""
-    start, end = 0, 0
+    start, end = 0, None
     if range_str:
         parts = range_str.split("-")
         if len(parts) != 2 or not all(part.isdigit() for part in parts):
@@ -1127,7 +1127,7 @@ def list_cmd(
             )
             raise typer.Exit(code=USAGE_ERROR)
 
-    if start == 0 and end == 0:
+    if end is None:
         # Unbounded list: stream in batches so a large database never loads
         # every row (including the code column, which dominates the table)
         # into memory at once.  Use --range to page a specific window.
@@ -1278,6 +1278,11 @@ def verify() -> None:
     result = db_verify(state.session)
     if state.format in ("json", "csv"):
         _echo_format(result)
+        # The exit status is part of the contract in every format: a script
+        # gating on `verify --format json` must see the same failure the table
+        # render reports, not a clean 0 carrying a non-empty ``issues`` list.
+        if result["issues"]:
+            raise typer.Exit(code=1)
     else:
         table = Table(title="Database Health", show_header=False, title_style=f"bold {ACCENT}")
         table.add_column("Metric", style="dim")
