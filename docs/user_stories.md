@@ -2,6 +2,12 @@
 
 This document outlines the features of the `resembl` CLI from a user's perspective.
 
+Each story's acceptance criteria are the requirement: a criterion that no
+command or test can check is a defect in the criterion, not a loose goal. Keep
+them in step with the CLI in the same change that moves the behavior.
+
+Last reviewed: 2026-09-27.
+
 ---
 
 ## Personas
@@ -45,9 +51,10 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 
 **Acceptance Criteria:**
 - `resembl find --query "..."` returns a list of the most similar snippets.
-- The search is robust against changes in register allocation and immediate values.
+- Normalization folds every register token to `REG` and every token the lexer classifies as a number to `IMM` before hashing, so a snippet still matches after register renaming or an immediate value changes; `--no-normalization` skips the folding.
 - The user can specify the number of results with `--top-n`.
-- The user can provide the query from a file with `--file`.
+- The user can provide the query from a file with `--file` (`-` reads stdin).
+- With neither `--query` nor `--file`, `find` reads the query from stdin when stdin is not a terminal, so `resembl find < snippet.asm` works.
 - The output can be formatted as JSON with `--format json`.
 - Results are ranked by a hybrid score combining Jaccard and Levenshtein similarity.
 - A database-backed LSH index speeds up searches (built lazily, kept in sync incrementally).
@@ -103,7 +110,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **so that I can** keep the database organized and up-to-date.
 
 **Acceptance Criteria:**
-- `resembl name add <checksum> <new_name>` adds a new name to an existing snippet.
+- `resembl name add <checksum> <new_name>` adds a new name to an existing snippet; a name the snippet already carries exits `0` without a change, so re-running the command converges.
 - `resembl name remove <checksum> <name_to_remove>` removes a name from a snippet.
 - The tool prevents removing the last name from a snippet.
 
@@ -217,7 +224,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **so that I can** manage them as logical sets.
 
 **Acceptance Criteria:**
-- `resembl collection create <name>` creates a new collection.
+- `resembl collection create <name>` creates a new collection; a name that already exists reports the collection as already there and exits `0`, leaving its stored description alone.
 - `resembl collection add <collection> <checksum>` adds a snippet to a collection.
 - `resembl collection remove <checksum>` removes a snippet from its collection.
 - `resembl collection show <name>` displays all snippets in a collection.

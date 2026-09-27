@@ -11,7 +11,7 @@ resembl needs a persistent store for snippets and their MinHash fingerprints. Op
 **SQLite** is the default backend, with support for alternative backends
 (PostgreSQL, MySQL/MariaDB, DuckDB) via the `RESEMBL_DATABASE_URL`
 environment variable. The unprefixed `DATABASE_URL` is still honored when
-`RESEMBL_DATABASE_URL` is unset; `DB_URL_ENV_VARS` in `database.py` holds the
+`RESEMBL_DATABASE_URL` is unset; `DB_URL_ENV_VARS` in `paths.py` holds the
 lookup order.
 
 ## Rationale
