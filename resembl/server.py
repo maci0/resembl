@@ -25,6 +25,8 @@ import os
 import socket
 import sys
 import threading
+import time
+import uuid
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterator
@@ -536,8 +538,13 @@ def _result_cache_get(key: tuple, version: int) -> dict | None:
     with _RESULT_CACHE_LOCK:
         entry = _RESULT_CACHE.get(key)
         if entry is None or entry[0] != version:
+            # Counted here rather than at the call sites: a request looks the
+            # key up twice when it queues behind another thread, and both
+            # lookups are what the cache's cost is made of.
+            _METRICS.record_cache_lookup(hit=False)
             return None
         _RESULT_CACHE.move_to_end(key)
+        _METRICS.record_cache_lookup(hit=True)
         return entry[1]
 
 
@@ -674,10 +681,189 @@ def _query_field_error(query: object) -> str | None:
     return None
 
 
+#: Latency histogram buckets, in seconds.  Fixed, so the exposition costs the
+#: same on an idle server and under load, and a latency percentile can be read
+#: off the cumulative counts.  A find is ~1.4 ms uncached, so the lower
+#: buckets separate the result cache from a cold find without needing a
+#: client-side average.
+_LATENCY_BUCKETS: tuple[float, ...] = (
+    0.001,
+    0.005,
+    0.01,
+    0.05,
+    0.1,
+    0.5,
+    1.0,
+    5.0,
+    30.0,
+)
+
+#: The exposition media type a scraper expects from ``GET /metrics``.
+_PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+#: A served request slower than this is recorded at WARNING even without
+#: ``-v``: latency is the signal that a warm server has stopped being warm
+#: (a saturated connection pool, a database gone read-write), and it is the
+#: one problem whose absence from the log is indistinguishable from health.
+_SLOW_REQUEST_SECONDS = 1.0
+
+#: Paths that get a metric series of their own.  Anything else (a 404 for a
+#: crafted path) counts as ``other``: the label has to stay bounded by what
+#: this server serves, not by what a client asks for.
+_METRIC_PATHS: tuple[str, ...] = ("/find", "/find-batch", "/health", "/metrics")
+
+
+def _metric_path_label(path: str) -> str:
+    """Return the metric label for *path*, folding unknown paths into one."""
+    return path if path in _METRIC_PATHS else "other"
+
+
+class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one field per metric
+    """Per-process counters for the served request path.
+
+    In-process, and bounded by the number of paths in :data:`_METRIC_PATHS`
+    rather than by traffic: there is no label a caller controls, so the series
+    count is constant for the life of the process and a long-lived serve needs
+    no time-series store to answer "did it succeed, how long, which
+    dependency".
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._requests: dict[tuple[str, str], int] = {}
+        self._buckets: dict[tuple[str, float], int] = {}
+        self._sum: dict[str, float] = {}
+        self._count: dict[str, int] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._query_errors: dict[str, int] = {}
+        self._started = time.monotonic()
+
+    def uptime_seconds(self) -> float:
+        """Seconds this process has been serving."""
+        return time.monotonic() - self._started
+
+    def record_request(self, path: str, status: int, seconds: float) -> None:
+        """Record one answered request under *path* with *status*."""
+        label = _metric_path_label(path)
+        status_label = str(status)
+        with self._lock:
+            key = (label, status_label)
+            self._requests[key] = self._requests.get(key, 0) + 1
+            self._sum[label] = self._sum.get(label, 0.0) + seconds
+            self._count[label] = self._count.get(label, 0) + 1
+            for bound in _LATENCY_BUCKETS:
+                if seconds <= bound:
+                    bkey = (label, bound)
+                    self._buckets[bkey] = self._buckets.get(bkey, 0) + 1
+
+    def record_cache_lookup(self, hit: bool) -> None:
+        """Record one result-cache lookup."""
+        with self._lock:
+            if hit:
+                self._cache_hits += 1
+            else:
+                self._cache_misses += 1
+
+    def record_query_error(self, path: str) -> None:
+        """Record one query that failed inside an otherwise-successful request.
+
+        ``/find-batch`` isolates a failing query and still answers ``200``, so
+        without this counter a batch that failed every entry is invisible to
+        anything reading status codes.
+        """
+        label = _metric_path_label(path)
+        with self._lock:
+            self._query_errors[label] = self._query_errors.get(label, 0) + 1
+
+    def render(self) -> str:
+        """Return the Prometheus text exposition of the counters."""
+        with self._lock:
+            requests = sorted(self._requests.items())
+            counts = dict(self._count)
+            sums = dict(self._sum)
+            buckets = {
+                (label, bound): self._buckets.get((label, bound), 0)
+                for label in counts
+                for bound in _LATENCY_BUCKETS
+            }
+            cache_hits = self._cache_hits
+            cache_misses = self._cache_misses
+            query_errors = sorted(self._query_errors.items())
+        lines = [
+            "# HELP resembl_server_up 1 while this process is answering requests.",
+            "# TYPE resembl_server_up gauge",
+            "resembl_server_up 1",
+            "# HELP resembl_server_uptime_seconds Seconds since this process started serving.",
+            "# TYPE resembl_server_uptime_seconds gauge",
+            f"resembl_server_uptime_seconds {self.uptime_seconds():.3f}",
+            "# HELP resembl_server_requests_total Requests answered, by path and status.",
+            "# TYPE resembl_server_requests_total counter",
+        ]
+        lines += [
+            f'resembl_server_requests_total{{path="{label}",status="{status}"}} {count}'
+            for (label, status), count in requests
+        ]
+        lines += [
+            (
+                "# HELP resembl_server_request_duration_seconds Answered-request "
+                "latency, by path, measured to the response headers."
+            ),
+            "# TYPE resembl_server_request_duration_seconds histogram",
+        ]
+        for label in sorted(counts):
+            for bound in _LATENCY_BUCKETS:
+                lines.append(
+                    f"resembl_server_request_duration_seconds_bucket"
+                    f'{{path="{label}",le="{bound}"}} {buckets[(label, bound)]}'
+                )
+            total = counts[label]
+            lines.append(
+                f"resembl_server_request_duration_seconds_bucket"
+                f'{{path="{label}",le="+Inf"}} {total}'
+            )
+            lines.append(
+                f'resembl_server_request_duration_seconds_sum{{path="{label}"}} '
+                f"{sums[label]:.6f}"
+            )
+            lines.append(f'resembl_server_request_duration_seconds_count{{path="{label}"}} {total}')
+        hits = cache_hits + cache_misses
+        hit_rate = cache_hits / hits if hits else 0.0
+        lines += [
+            "# HELP resembl_server_result_cache_total Result-cache lookups, by outcome.",
+            "# TYPE resembl_server_result_cache_total counter",
+            f'resembl_server_result_cache_total{{result="hit"}} {cache_hits}',
+            f'resembl_server_result_cache_total{{result="miss"}} {cache_misses}',
+            (
+                "# HELP resembl_server_result_cache_hit_ratio Share of lookups "
+                "answered from the version-guarded result cache."
+            ),
+            "# TYPE resembl_server_result_cache_hit_ratio gauge",
+            f"resembl_server_result_cache_hit_ratio {hit_rate:.6f}",
+        ]
+        if query_errors:
+            lines += [
+                (
+                    "# HELP resembl_server_query_errors_total Queries that failed "
+                    "inside an otherwise-successful request, by path."
+                ),
+                "# TYPE resembl_server_query_errors_total counter",
+            ]
+            lines += [
+                f'resembl_server_query_errors_total{{path="{label}"}} {count}'
+                for label, count in query_errors
+            ]
+        return "\n".join(lines) + "\n"
+
+
+_METRICS = _ServerMetrics()
+
+
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find`` and ``POST /find-batch``; one session per request
     (concurrent reads).  Also carries this server's 403, 404, 405 and 415
-    answers, which need no database."""
+    answers, which need no database, and the ``GET /health`` and
+    ``GET /metrics`` endpoints a supervisor and a scraper read."""
 
     # HTTP/1.1 enables keep-alive: well-behaved clients reuse the connection
     # instead of opening a fresh one per request, which cut measured
@@ -687,6 +873,48 @@ class _FindHandler(BaseHTTPRequestHandler):
     # how long a keep-alive connection can hold its handler thread.
     protocol_version = "HTTP/1.1"
     timeout = 30
+
+    #: Correlates every log record and every response this request produces.
+    #: The server writes no log line per request by default, so without an id
+    #: that survives into the 500 and the slow-request warning, an operator
+    #: holding one failed client report has nothing to search for.
+    request_id: str = "-"
+
+    #: The base class leaves both unset when a request line fails to parse, and
+    #: the answer to *that* request is counted and logged like any other.
+    path: str = ""
+    command: str = ""
+
+    def handle_one_request(self) -> None:
+        """Stamp the request with a correlation id and start its clock.
+
+        One per request, not per connection: ``BaseHTTPRequestHandler.handle``
+        calls this again for every request on a keep-alive connection, which
+        is the only place the id can be attached before any record is made.
+        """
+        self.request_id = uuid.uuid4().hex[:12]
+        self._request_start = time.monotonic()
+        super().handle_one_request()
+
+    #: Set by :meth:`handle_one_request`; the class default keeps a record
+    #: made outside a request (a connection that never parsed one) readable.
+    _request_start: float | None = None
+
+    def request_seconds(self) -> float:
+        """Seconds since this request started, or 0.0 outside one."""
+        if self._request_start is None:
+            return 0.0
+        return time.monotonic() - self._request_start
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        """Answer with *code*, counting the request and its latency first.
+
+        Every answer this server produces passes here, including the stdlib's
+        own ``send_error`` paths, so one hook covers the whole surface instead
+        of leaving an operator with a request that never appears in a metric.
+        """
+        _METRICS.record_request(self.path, code, self.request_seconds())
+        super().send_response(code, message)
 
     @property
     def engine(self) -> Any:
@@ -792,7 +1020,63 @@ class _FindHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:  # pylint: disable=invalid-name; http.server API
+        # The two endpoints a supervisor and a scraper read; every other path
+        # keeps the verb answer, so a stray GET cannot look like a find.
+        if not self._host_allowed():
+            self._respond(403, {"error": "host not allowed"})
+            return
+        if self.path == "/health":
+            self._handle_health()
+            return
+        if self.path == "/metrics":
+            self._handle_metrics()
+            return
         self._method_not_allowed()
+
+    def _handle_health(self) -> None:
+        """Answer whether this process can still serve a find.
+
+        A cheap round trip to the served database, and nothing else: the
+        fingerprint migration and the LSH index build already happened at
+        startup, so a health check that re-ran them would report a slow
+        server as an unhealthy one.  The engine is the only dependency that
+        can stop a find from being answered, so it is the only one probed.
+        """
+        from sqlmodel import select
+
+        started = time.monotonic()
+        try:
+            with Session(self.engine) as session:
+                session.exec(select(1)).one()
+        except Exception as exc:  # any driver error means "not ready", not "broken"
+            # The probe failure is the answer, not an incident: a database
+            # being momentarily unreachable must not raise a traceback per
+            # poll.  The exception *type* goes to the client, the message
+            # (SQL, file paths, credentials in a DSN) stays in the log.
+            logger.warning("[%s] health check failed: %s", self.request_id, exc)
+            self._respond(
+                503,
+                {
+                    "status": "degraded",
+                    "database": "unavailable",
+                    "error": type(exc).__name__,
+                    "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
+                },
+            )
+            return
+        self._respond(
+            200,
+            {
+                "status": "ok",
+                "database": "ok",
+                "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            },
+        )
+
+    def _handle_metrics(self) -> None:
+        """Answer the counters in the Prometheus text exposition format."""
+        self._respond(200, _METRICS.render(), content_type=_PROMETHEUS_CONTENT_TYPE)
 
     def do_PUT(self) -> None:  # pylint: disable=invalid-name; http.server API
         self._method_not_allowed()
@@ -844,7 +1128,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             # A long-lived serve process prints nothing per request (see
             # ``log_message``): without this record, 500s are completely
             # unobserved and an on-call operator has no trace to debug.
-            logger.exception("POST %s failed", self.path)
+            logger.exception("[%s] POST %s failed", self.request_id, self.path)
             # The full exception text stays in the log only: driver and ORM
             # messages carry SQL fragments, bind parameters, and file paths,
             # which must not reach the client.
@@ -889,6 +1173,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                     if reason is not None:
                         results.append({"query": query, "error": reason})
                         continue
+                    query_started = time.monotonic()
                     try:
                         results.append(
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
@@ -899,16 +1184,23 @@ class _FindHandler(BaseHTTPRequestHandler):
                         # the batch still completes.
                         results.append({"query": query, "error": str(exc)})
                     except Exception as exc:  # isolate per-query failures
-                        logger.warning("find-batch query %.200r failed: %s", query, exc)
+                        logger.warning(
+                            "[%s] find-batch query %.200r failed after %.3fs: %s",
+                            self.request_id,
+                            query,
+                            time.monotonic() - query_started,
+                            exc,
+                        )
                         # Like the 500 path below: the exception text (SQL,
                         # paths) is for the log, not the wire.
+                        _METRICS.record_query_error(self.path)
                         results.append(
                             {"query": query, "error": "internal error while processing this query"}
                         )
         except Exception:
             # Malformed container or session/pool failure — answer 500 rather
             # than dropping the connection with a handler-thread traceback.
-            logger.exception("POST %s failed", self.path)
+            logger.exception("[%s] POST %s failed", self.request_id, self.path)
             self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, {"results": results})
@@ -916,14 +1208,22 @@ class _FindHandler(BaseHTTPRequestHandler):
     def _respond(
         self,
         status: int,
-        payload: dict[str, Any],
+        payload: dict[str, Any] | str,
         extra_headers: dict[str, str] | None = None,
         *,
         send_body: bool = True,
+        content_type: str = "application/json",
     ) -> None:
-        data = json.dumps(payload).encode("utf-8")
+        # A pre-rendered string is the one exception to the JSON envelope:
+        # ``/metrics`` is read by a scraper that wants the exposition itself,
+        # not a JSON string carrying it.
+        data = (
+            payload.encode("utf-8")
+            if isinstance(payload, str)
+            else json.dumps(payload).encode("utf-8")
+        )
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         # The payload is always JSON; forbid content-type sniffing so a
         # response can never be reinterpreted as HTML/script by a browser
         # pointed at the endpoint.
@@ -950,16 +1250,40 @@ class _FindHandler(BaseHTTPRequestHandler):
         format: str,  # noqa: A002  # pylint: disable=redefined-builtin
         *args: Any,
     ) -> None:
-        # Quiet at the default level: the CLI prints its own status line.  At
-        # DEBUG (``resembl serve -v``) every request is recorded with its peer
-        # and outcome, which is the only trail a served query leaves: without
-        # it a scrape through this unauthenticated endpoint leaves nothing to
-        # investigate.  The request line is request-controlled, so control
-        # characters are stripped from the rendered record: a raw one lets a
-        # crafted path write a second, forged log line.
+        # The base class routes its own error records here (``log_error``);
+        # the per-request outcome is :meth:`log_request`, which carries the
+        # same correlation id so a client report quoting it reaches both.
+        # Quiet at the default level: the CLI prints its own status line.  The
+        # rendered record can carry a request-controlled path, so control
+        # characters are stripped: a raw one lets a crafted path write a
+        # second, forged log line.
         peer = self.client_address[0]
         record = (format % args).translate(_LOG_CONTROL_CHARS)
-        logger.debug("%s %s", peer, record)
+        logger.debug("[%s] %s %s", self.request_id, peer, record)
+
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        """Record the request's outcome, replacing the stdlib's request line.
+
+        The stdlib's version carries the request line and status but neither
+        the latency nor this process's id, which is what a slow or failed
+        request is actually looked up by.  Quiet at the default level, as
+        before; a request slower than :data:`_SLOW_REQUEST_SECONDS` is raised
+        to WARNING, because a warm find that stopped being warm leaves no
+        other trace and a saturated pool only shows up as latency.
+        """
+        seconds = self.request_seconds()
+        peer = self.client_address[0]
+        record = f"{self.command} {self.path} {self.request_version}".translate(_LOG_CONTROL_CHARS)
+        logger.debug("[%s] %s %s -> %s in %.3fs", self.request_id, peer, record, code, seconds)
+        if seconds >= _SLOW_REQUEST_SECONDS:
+            logger.warning(
+                "[%s] slow request: %s %s answered %s in %.3fs",
+                self.request_id,
+                self.command,
+                self.path,
+                code,
+                seconds,
+            )
 
 
 class _FindServer(ThreadingHTTPServer):

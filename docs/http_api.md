@@ -49,14 +49,17 @@ curl -s "http://127.0.0.1:$port/find" \
 | ------ | ---- | ------- |
 | `POST` | `/find` | Find matches for one query. |
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
+| `GET` | `/health` | Whether this process can still serve a find. |
+| `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
 
-Both are read-only, and the path is matched verbatim: a query string makes
-`/find?x=1` an unknown path, answered `404`. `GET`, `PUT`, `DELETE`, `PATCH`,
-`HEAD` and `OPTIONS` are answered `405` on any path (with an `Allow: POST`
-header), so the path is only checked for `POST`. A `HEAD` answer carries those
-headers and no body bytes, as `HEAD` requires. Any other verb is answered by
-the stdlib base class with `501` and an HTML body. Every response this server
-produces itself, success or error, is `Content-Type: application/json`.
+The two `POST` endpoints are read-only, and the path is matched verbatim: a
+query string makes `/find?x=1` an unknown path, answered `404`. `PUT`,
+`DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405` on any path (with
+an `Allow: POST` header), as is a `GET` to any path other than `/health` and
+`/metrics`. A `HEAD` answer carries those headers and no body bytes, as
+`HEAD` requires. Any other verb is answered by the stdlib base class with
+`501` and an HTML body. Every response this server produces itself, success or
+error, is `Content-Type: application/json`, except `/metrics`.
 
 A connection is closed after 30 s idle, which bounds how long a keep-alive
 connection holds its handler thread. The client side gives up sooner: 5 s for
@@ -126,6 +129,47 @@ key and the other queries still return results, so the response is always
 ]}
 ```
 
+### `GET /health`
+
+For a supervisor, a load balancer or a shell check. It runs one `SELECT 1`
+against the served database and nothing else: the fingerprint migration and
+the LSH index build happen once at startup, so re-running them here would
+report a slow server as an unhealthy one, and the engine is the only
+dependency that can stop a find from being answered.
+
+```json
+{"status": "ok", "database": "ok", "uptime_seconds": 1284.31, "latency_ms": 0.21}
+```
+
+A database that cannot be reached answers `503` with
+`{"status": "degraded", "database": "unavailable", "error": "OperationalError",
+"uptime_seconds": ...}`: `error` is the exception's *type*, never its message,
+which carries SQL and file paths. A failed probe is a normal answer, not an
+incident, so it is logged at WARNING once per poll rather than raising a
+traceback.
+
+### `GET /metrics`
+
+Counters for the served request path, in the Prometheus text exposition
+format (`Content-Type: text/plain; version=0.0.4`). The only label is the
+request path, and a path outside `/find`, `/find-batch`, `/health` and
+`/metrics` is folded into `other`, so a crafted path cannot grow the series
+count.
+
+| Metric | Type | Meaning |
+| ------ | ---- | ------- |
+| `resembl_server_up` | gauge | `1` while this process answers requests. |
+| `resembl_server_uptime_seconds` | gauge | Seconds since the process started serving. |
+| `resembl_server_requests_total{path,status}` | counter | Requests answered. |
+| `resembl_server_request_duration_seconds{path}` | histogram | Latency to the response headers, in the fixed buckets `0.001` … `30` plus `+Inf`. |
+| `resembl_server_result_cache_total{result}` | counter | Result-cache lookups, `hit` or `miss`. |
+| `resembl_server_result_cache_hit_ratio` | gauge | Share of lookups answered from the version-guarded cache. |
+| `resembl_server_query_errors_total{path}` | counter | Queries that failed inside an otherwise-`200` `/find-batch` request. |
+
+A find is ~1.4 ms uncached, so the `le="0.001"` and `le="0.005"` buckets
+separate a cache hit from a cold find. The counters are in-process and reset
+when the server restarts; nothing is exported anywhere.
+
 ## Errors
 
 Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
@@ -135,9 +179,10 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body). |
+| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health` and `/metrics`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
+| `503` | `/health` only: the served database did not answer its probe. |
 
 ## Other response headers
 
@@ -148,9 +193,27 @@ at the port cannot reinterpret a response as a page.
 
 ## Logging
 
-The server logs nothing at the default level. Started with `-v` (`resembl
-serve -v`) it records every request at DEBUG: peer address, request line and
-outcome, with control characters stripped from the request line so a crafted
-path cannot forge a second record. That is the only trail a served query
-leaves, so it is the first thing to raise when investigating a suspected
-scrape.
+Every record the server makes leads with a correlation id, twelve hex digits
+of a fresh id per request. A `500` traceback, a failed `/find-batch` query, a
+slow request and the request's own DEBUG line all quote the same one, so a
+client report that carries an id (or a timestamp and a peer) reaches the rest.
+
+At the default level the server records two things: a `500`, with its
+traceback, and a request slower than a second. A served find is ~1.4 ms, so
+the slow-request WARNING is the signal that the warm process has stopped
+being warm; it names the id, the verb, the path, the status and the elapsed
+time.
+
+Started with `-v` (`resembl serve -v`) it also records every request at
+DEBUG: peer address, request line, status and latency. That is the fuller
+trail a served query leaves, so it is the first thing to raise when
+investigating a suspected scrape. The request line is request-controlled, so
+control characters are stripped from the rendered record: a raw one lets a
+crafted path write a second, forged log line.
+
+## Tracing
+
+The server is a single process with no upstream to correlate against, so it
+emits no distributed trace. The correlation id above is the trace: one id per
+request, on every record that request produces, and on the metric series for
+its path.

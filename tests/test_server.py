@@ -1737,6 +1737,147 @@ class TestServerMode(unittest.TestCase):
         port_file_cleanup(port_file, 1111)
 
 
+class TestServerObservability(unittest.TestCase):
+    """Health, metrics and the per-request trail a served query leaves."""
+
+    def setUp(self):
+        self._db = tempfile.mktemp(suffix=".db")
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        self._engine = create_engine(f"sqlite:///{self._db}")
+        SQLModel.metadata.create_all(self._engine)
+        self._session = Session(self._engine)
+        self.addCleanup(self._session.close)
+        snippet_add_batch(
+            self._session,
+            [
+                snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+                for i in range(10)
+            ],
+        )
+        self._env = patch.dict(
+            os.environ,
+            {"RESEMBL_CACHE_DIR": cache.name, "DATABASE_URL": f"sqlite:///{self._db}"},
+        )
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self.addCleanup(self._remove_db)
+
+    def _remove_db(self):
+        for path in (self._db, self._db + "-wal", self._db + "-shm"):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _start_server(self):
+        from resembl.server import serve
+
+        httpd = serve(f"sqlite:///{self._db}", port=0)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        return httpd
+
+    def _get(self, port: int, path: str) -> tuple[int, str, str]:
+        """GET *path* and return ``(status, content_type, body)``."""
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10) as response:
+            return response.status, response.headers["Content-Type"], response.read().decode()
+
+    def test_health_reports_ready_against_a_live_database(self):
+        port = self._start_server().server_address[1]
+        status, content_type, body = self._get(port, "/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(content_type, "application/json")
+        payload = json.loads(body)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["database"], "ok")
+        self.assertGreaterEqual(payload["uptime_seconds"], 0.0)
+
+    def test_health_reports_degraded_when_the_database_answers_no_query(self):
+        port = self._start_server().server_address[1]
+        # Standing in for a database that stopped answering: every probe
+        # session fails, the way a dropped connection or a locked file does.
+        with patch("resembl.server.Session", side_effect=RuntimeError("pool is closed")):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self._get(port, "/health")
+        self.assertEqual(caught.exception.code, 503)
+        payload = json.loads(caught.exception.read())
+        self.assertEqual(payload["status"], "degraded")
+        self.assertEqual(payload["database"], "unavailable")
+        # The driver's own message (SQL, file paths) stays in the log; only the
+        # exception type reaches the client.
+        self.assertEqual(payload["error"], "RuntimeError")
+        self.assertNotIn("pool is closed", json.dumps(payload))
+
+    def test_metrics_expose_requests_latency_and_cache_outcome(self):
+        port = self._start_server().server_address[1]
+        _post_json(port, "/find", {"query": "push ebx\nmov eax, 5\npop ebx\nret"})
+        status, content_type, body = self._get(port, "/metrics")
+        self.assertEqual(status, 200)
+        self.assertTrue(content_type.startswith("text/plain; version=0.0.4"))
+        self.assertIn("resembl_server_up 1", body)
+        self.assertIn('resembl_server_requests_total{path="/find",status="200"}', body)
+        self.assertIn(
+            'resembl_server_request_duration_seconds_bucket{path="/find",le="+Inf"}', body
+        )
+        self.assertIn('resembl_server_request_duration_seconds_count{path="/find"}', body)
+        self.assertIn('resembl_server_result_cache_total{result="miss"}', body)
+
+    def test_metrics_fold_an_unbounded_path_into_one_series(self):
+        port = self._start_server().server_address[1]
+        series = 'resembl_server_requests_total{path="other",status="404"}'
+        before = self._series_total(self._get(port, "/metrics")[2], series)
+        for i in range(5):
+            _post_json_status(port, f"/nope{i}", {})
+        _, _, body = self._get(port, "/metrics")
+        # A crafted path must not buy a series per request: every one of the
+        # five lands in the same label.  The counters are per process, so the
+        # assertion is on the delta, not on an absolute count.
+        self.assertEqual(self._series_total(body, series), before + 5)
+        self.assertNotIn("/nope3", body)
+
+    @staticmethod
+    def _series_total(exposition: str, series: str) -> int:
+        """Return the counter value of *series* in a Prometheus exposition."""
+        for line in exposition.splitlines():
+            if line.startswith(f"{series} "):
+                return int(line.rsplit(" ", 1)[1])
+        return 0
+
+    def test_a_bad_request_is_counted_by_status(self):
+        port = self._start_server().server_address[1]
+        status, _ = _post_json_status(port, "/find", {"query": "   "})
+        self.assertEqual(status, 400)
+        _, _, body = self._get(port, "/metrics")
+        self.assertIn('resembl_server_requests_total{path="/find",status="400"}', body)
+
+    def test_slow_request_is_reported_without_verbose(self):
+        from resembl import server as server_mod
+
+        port = self._start_server().server_address[1]
+        with self.assertLogs("resembl.server", level="WARNING") as captured:
+            with patch.object(server_mod, "_SLOW_REQUEST_SECONDS", 0.0):
+                _post_json(port, "/find", {"query": "push ebx\nmov eax, 5\npop ebx\nret"})
+        self.assertTrue(
+            any("slow request" in line for line in captured.output),
+            captured.output,
+        )
+
+    def test_error_records_carry_the_request_id(self):
+        port = self._start_server().server_address[1]
+        with self.assertLogs("resembl.server", level="DEBUG") as captured:
+            with patch("resembl.server._find_uncached", side_effect=RuntimeError("boom")):
+                status, _ = _post_json_status(port, "/find", {"query": "push ebx"})
+        self.assertEqual(status, 500)
+        ids = {
+            line.split("[", 1)[1].split("]", 1)[0]
+            for line in captured.output
+            if "resembl.server" in line and "[" in line
+        }
+        # The 500 traceback and the request's own record quote the same id, so
+        # a client report naming one id reaches both.
+        self.assertEqual(len(ids), 1, captured.output)
+
+
 class TestResultCacheCoherence(unittest.TestCase):
     """The version guard holds across the connections of a pool."""
 

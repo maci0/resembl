@@ -455,7 +455,9 @@ Key properties that keep these numbers flat as the database grows:
   which includes the client's own startup).  The
   port file lives in the cache directory and is cleaned up on exit; a second `serve` for the same
   database is refused, restarts skip rebuilding a current index, and a slow-but-alive server's port
-  file survives client timeouts.
+  file survives client timeouts.  A long-lived `serve` answers `GET /health` (readiness) and
+  `GET /metrics` (request counts, latency histogram, result-cache hit rate) in the Prometheus text
+  format, and every log record it makes carries a per-request correlation id.
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses

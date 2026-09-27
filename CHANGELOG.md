@@ -8,6 +8,17 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `resembl serve` answers `GET /health` (readiness, one `SELECT 1` against
+  the served database) and `GET /metrics` (Prometheus text format: requests
+  by path and status, request latency histogram, result-cache hit rate, and
+  the per-query failures a `200` `/find-batch` otherwise hides).  A warm
+  server had no endpoint a supervisor could probe and no number an operator
+  could read.
+- Every log record the serve process makes now leads with a per-request
+  correlation id, and a request slower than a second is recorded at WARNING
+  even without `-v`, naming the id, the path, the status and the elapsed
+  time.
+
 - A release now carries a provenance attestation.  Pushing a `vX.Y.Z` tag
   runs a Sigstore-backed attestation over the sdist and the wheel, so
   `gh attestation verify` can tie a downloaded artifact to this repository
