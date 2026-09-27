@@ -53,10 +53,15 @@ relies on, not configuration options.
   bind. Do not put it behind a reverse proxy that does not authenticate.
 - **The cache directory is private to the user.** The port file in it is
   read as an unauthenticated port number by every `find` client, which then
-  dials that port on `127.0.0.1`. A shared or world-writable cache directory
-  lets another local user point queries at a listener of their own. The
-  config directory (`RESEMBL_CONFIG_DIR`, else `$XDG_CONFIG_HOME/resembl`,
-  else `~/.config/resembl`) is a separate directory with the same
+  dials that port on `127.0.0.1`. `resembl serve` creates that directory with
+  mode `0700` and the port file with mode `0600`, so a directory the server
+  made itself is not writable by anyone else. Nothing re-checks the mode, so
+  a cache directory created earlier by an operator's own `mkdir`, by another
+  tool, or with a different umask keeps that mode, and a shared or
+  world-writable one lets another local user point queries at a listener of
+  their own. The config directory (`RESEMBL_CONFIG_DIR`, else
+  `$XDG_CONFIG_HOME/resembl`, else `~/.config/resembl`) is a separate directory
+  with the same
   requirement: it supplies thresholds and match settings, and the tool does
   not report that it is running under a non-default configuration.
 - **`DATABASE_URL` is trusted verbatim.** `RESEMBL_DATABASE_URL` takes
@@ -72,4 +77,6 @@ relies on, not configuration options.
   snippets, names, tags, and collections into the local corpus. Point it only
   at databases you control. Its one closed edge is fingerprint
   deserialization: blobs without the `RMLH` magic are rejected and
-  recomputed rather than unpickled.
+  recomputed rather than unpickled. The failure path is not closed: a source
+  that will not open makes `merge` print the driver's own error text, which
+  can name the host and port it dialled.
