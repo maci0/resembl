@@ -51,12 +51,12 @@ curl -s "http://127.0.0.1:$port/find" \
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
 
 Both are read-only, and the path is matched verbatim: a query string makes
-`/find?x=1` an unknown path, answered `404`. `GET`, `PUT`, `DELETE` and
-`PATCH` are answered `405` on any path (with an `Allow: POST` header), so the
-path is only checked for `POST`. Every response the server produces, success
-or error, is `Content-Type: application/json`; a verb with no handler at all
-(`HEAD`, `OPTIONS`, …) is answered by the stdlib base class with `501` and an
-HTML body.
+`/find?x=1` an unknown path, answered `404`. `GET`, `PUT`, `DELETE`, `PATCH`,
+`HEAD` and `OPTIONS` are answered `405` on any path (with an `Allow: POST`
+header), so the path is only checked for `POST`. A `HEAD` answer carries those
+headers and no body bytes, as `HEAD` requires. Any other verb is answered by
+the stdlib base class with `501` and an HTML body. Every response this server
+produces itself, success or error, is `Content-Type: application/json`.
 
 A connection is closed after 30 s idle, which bounds how long a keep-alive
 connection holds its handler thread. The client side gives up sooner: 5 s for
@@ -71,7 +71,7 @@ the server's configured default", exactly like an omitted field):
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
 | `query` | string | required |
-| `top_n` | integer | at most 1000, else `400`. A fractional value is rejected, not truncated. The default is the server's config |
+| `top_n` | integer | `1` to `1000`, else `400`. A non-positive one would answer `200` with an empty `matches`, which reads as "no matches" rather than as a bad request. A fractional value is rejected, not truncated. The default is the server's config |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must match the server's configured `lsh_threshold` (compared with a `1e-6` tolerance, since MySQL and DuckDB store it single-precision) |
 | `normalize` | boolean | default `true` |
 | `ngram_size` | integer | at least `1`, whole. Must equal the server's configured `ngram_size` |
@@ -134,7 +134,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A method other than `POST`. |
+| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body). |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
 

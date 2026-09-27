@@ -43,9 +43,10 @@ Every entry point below is present in the code at the cited location.
 | `POST /find-batch` | `resembl/server.py:667` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:510`). |
 | `resembl serve` bind | `resembl/cli.py:547` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:560`). |
 
-No other method is served: `GET`, `PUT`, `DELETE`, and `PATCH` answer `405`
-(`resembl/server.py:688`). A `POST` to any other path answers `404`
-(`resembl/server.py:668`).
+No other method is served: `GET`, `PUT`, `DELETE`, `PATCH`, `HEAD` and
+`OPTIONS` answer `405` with the same JSON error envelope
+(`resembl/server.py:735`); a `HEAD` carries those headers without a body. A
+`POST` to any other path answers `404` (`resembl/server.py:711`).
 
 ### CLI surface
 
@@ -166,8 +167,9 @@ fetch at import.
 
 *Information disclosure.* Any process on the host can enumerate the corpus,
 one request at a time. Every find parameter is range-checked, `top_n`
-included: a request asking for more than 1000 rows is refused with a `400`
-(`resembl/server.py:322`, `_MAX_TOP_N` at `resembl/server.py:519`). That
+included: a request outside `1..1000` rows is refused with a `400`
+(`resembl/server.py:354`, `_MAX_TOP_N` at `resembl/server.py:560`, the lower
+bound at `resembl/server.py:363`). That
 bounds one response, not the corpus: repeated requests with a permissive
 `threshold` and `top_n = 1000` still page the whole table out of an
 unauthenticated endpoint, and the config layer deliberately leaves the local
@@ -282,13 +284,13 @@ HTTP handlers replaced theirs with a fixed body
 | ------- | ----- | ------ |
 | Loopback bind default | `resembl/cli.py:547` | Reduces B1 exposure to same-host processes |
 | Non-loopback warning | `resembl/cli.py:560` | Informs the operator; does not prevent the bind |
-| Loopback `Host` check, 403 | `resembl/server.py:647`, `resembl/server.py:665` | A page that rebinds its own hostname onto the loopback port reading a served query |
-| Request body cap, 8 MiB | `resembl/server.py:499` | B1 memory exhaustion |
-| JSON depth and shape guard | `resembl/server.py:633` | `RecursionError` from a nested body killing the handler thread with no response |
-| Batch query cap, 1000 | `resembl/server.py:510`, `resembl/server.py:748` | B1 work per request |
-| Find parameter range checks | `resembl/server.py:293` | NaN, out-of-range, and degenerate fingerprints |
-| `top_n` cap, 1000 | `resembl/server.py:322`, `resembl/server.py:519` | One response returning the whole corpus. A sequence of requests is not bounded |
-| Index-parameter match check | `resembl/server.py:347` | A request rebuilding the shared LSH index mid-serve |
+| Loopback `Host` check, 403 | `resembl/server.py:690`, `resembl/server.py:707` | A page that rebinds its own hostname onto the loopback port reading a served query |
+| Request body cap, 8 MiB | `resembl/server.py:672` | B1 memory exhaustion |
+| JSON depth and shape guard | `resembl/server.py:675` | `RecursionError` from a nested body killing the handler thread with no response |
+| Batch query cap, 1000 | `resembl/server.py:550`, `resembl/server.py:812` | B1 work per request |
+| Find parameter range checks | `resembl/server.py:316` | NaN, out-of-range, and degenerate fingerprints |
+| `top_n` bounds, 1 to 1000 | `resembl/server.py:354`, `resembl/server.py:363`, `resembl/server.py:560` | One response returning the whole corpus (upper bound), or a `200` with an empty `matches` read as "no duplicates" (lower bound). A sequence of requests is not bounded |
+| Index-parameter match check | `resembl/server.py:394` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:71` | An unbounded dict grown by cycling permutation counts |
 | Result-cache key is a query digest | `resembl/server.py:71` | Query text retained by the result cache, and an entry count standing in for a memory bound |
 | Per-key compute lock | `resembl/server.py:117` | A burst of identical queries multiplying one find across connections |

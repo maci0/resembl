@@ -353,6 +353,14 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # export of the snippet table.
     if top_n > _MAX_TOP_N:
         raise BadRequestError(f"top_n must be at most {_MAX_TOP_N}")
+    # Same rule as ``config.VALUE_BOUNDS["top_n"]`` (Range(1.0)): a
+    # non-positive top_n does not fail, it truncates the ranking to nothing and
+    # answers ``200`` with an empty ``matches``, which a client reads as "this
+    # snippet has no duplicates" rather than as a bad request. The CLI refuses
+    # the same value at the config boundary, so the endpoint refusing it too is
+    # what keeps one request from meaning two different things.
+    if top_n < 1:
+        raise BadRequestError("top_n must be at least 1")
     # Reject an unbuildable threshold up front: the banding needs b >= 2
     # bands, and an unbuildable one would make the find return zero matches
     # silently.  (The thin client cannot run the banding search without
@@ -714,15 +722,20 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         self._handle_find_batch(body)
 
-    def _method_not_allowed(self) -> None:
-        """Answer a non-POST request with the same JSON error envelope."""
+    def _method_not_allowed(self, *, send_body: bool = True) -> None:
+        """Answer a non-POST request with the same JSON error envelope.
+
+        *send_body* is false for ``HEAD``, which carries the status and headers
+        of the answer a ``GET`` would have produced and no body bytes.
+        """
         if not self._host_allowed():
-            self._respond(403, {"error": "host not allowed"})
+            self._respond(403, {"error": "host not allowed"}, send_body=send_body)
             return
         self._respond(
             405,
             {"error": f"method not allowed: {self.command} (use POST)"},
             extra_headers={"Allow": "POST"},
+            send_body=send_body,
         )
 
     def do_GET(self) -> None:  # pylint: disable=invalid-name; http.server API
@@ -735,6 +748,22 @@ class _FindHandler(BaseHTTPRequestHandler):
         self._method_not_allowed()
 
     def do_PATCH(self) -> None:  # pylint: disable=invalid-name; http.server API
+        self._method_not_allowed()
+
+    def do_HEAD(self) -> None:  # pylint: disable=invalid-name; http.server API
+        # Answered like every other unsupported verb rather than left to
+        # ``BaseHTTPRequestHandler``, which has no ``do_HEAD`` and replies 501
+        # with an HTML page: a client that parses responses as JSON (or a
+        # liveness probe asking whether the port answers) got a body it could
+        # not read and a status that claimed the server does not know the
+        # method, not that the method is wrong for this resource.
+        self._method_not_allowed(send_body=False)
+
+    def do_OPTIONS(self) -> None:  # pylint: disable=invalid-name; http.server API
+        # Same envelope as the other verbs. The server allows no cross-origin
+        # request (no CORS headers, and a loopback bind refuses a rebound
+        # ``Host``), so advertising the resource's capabilities to a browser
+        # preflight would describe access it cannot get.
         self._method_not_allowed()
 
     def _handle_find(self, body: dict) -> None:
@@ -833,6 +862,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         status: int,
         payload: dict[str, Any],
         extra_headers: dict[str, str] | None = None,
+        *,
+        send_body: bool = True,
     ) -> None:
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -849,9 +880,14 @@ class _FindHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
+        # A HEAD answer keeps the Content-Length the body would have had, so
+        # the client reads the same headers a GET produces, but writes no
+        # bytes: on a keep-alive connection the length left unfulfilled would
+        # be read as the start of the next response.
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        if send_body:
+            self.wfile.write(data)
 
     def log_message(
         self,

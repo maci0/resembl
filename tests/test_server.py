@@ -834,6 +834,22 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(headers.get("Allow"), "POST")
         self.assertIn("method not allowed", json.loads(body)["error"])
 
+        # Every other verb the base class does not implement (HEAD, OPTIONS)
+        # is answered by this handler too, not by the stdlib's HTML 501.
+        for method in ("HEAD", "OPTIONS"):
+            with self.subTest(method=method):
+                status, headers, body = request(method, "/find")
+                self.assertEqual(status, 405)
+                self.assertEqual(headers.get("Allow"), "POST")
+                self.assertEqual(headers.get("Content-Type"), "application/json")
+                if method == "HEAD":
+                    # A HEAD answer carries the headers a GET produces and no
+                    # body bytes; anything else desynchronizes keep-alive.
+                    self.assertEqual(body, b"")
+                    self.assertGreater(int(headers["Content-Length"]), 0)
+                else:
+                    self.assertIn("method not allowed", json.loads(body)["error"])
+
         # Explicit non-JSON content type: 415, not a silently parsed body.
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         try:
@@ -936,6 +952,32 @@ class TestServerMode(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertIn("matches", payload)
+
+    def test_find_rejects_non_positive_top_n(self):
+        """A top_n below 1 answers 400, not 200 with an empty match list.
+
+        ``config.VALUE_BOUNDS`` already refuses a non-positive ``top_n`` for
+        the CLI, and a non-positive one silently truncates the ranking to
+        nothing: a client asking for ``top_n: -1`` (a miscomputed cap) read
+        the empty ``matches`` as "this snippet has no duplicates".
+        """
+        port = self._start_server()
+        for top_n in (0, -1):
+            with self.subTest(top_n=top_n):
+                status, payload = _post_json_status(
+                    port, "/find", {"query": "push ebx\nret", "top_n": top_n}
+                )
+                self.assertEqual(status, 400)
+                self.assertIn("top_n", payload["error"])
+
+    def test_find_batch_rejects_non_positive_top_n(self):
+        """The batch endpoint applies the same top_n bound as /find."""
+        port = self._start_server()
+        status, payload = _post_json_status(
+            port, "/find-batch", {"queries": ["push ebx\nret"], "top_n": 0}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("top_n", payload["error"])
 
     def test_find_rejects_rebound_host(self):
         """A loopback server refuses a request whose Host names another host.
