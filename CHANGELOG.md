@@ -268,11 +268,19 @@ project follows [Semantic Versioning](https://semver.org/).
   documented exit status was only applied to the table render, so
   `verify --format json` reported the same issues and still exited 0, and a
   script gating on it never saw the failure.
+- **Breaking:** `resembl.core.snippet_list` (and its `resembl` re-export)
+  takes `end: int | None = None` where it took `end: int = 0`, and a window
+  is now selected by any `end` that is given rather than by `end > 0`.  The
+  old `0` was an "unbounded" sentinel, so a caller that passed one
+  explicitly to mean "every row" (`snippet_list(session, 0, 0)`,
+  `snippet_list(session, 5, 0)`, or a `0` carried by a variable) is now
+  answered with the empty half-open window `[start, end)`, and `end < start`
+  computes a negative `LIMIT`.  Migration: drop the argument
+  (`snippet_list(session)`) or pass `end=None` where the old `0` stood.
 - `resembl list --range 0-0` no longer lists the whole database.  An
-  explicit `0-0` window meant "no rows"; `snippet_list` treated any
-  `end <= 0` as "unbounded", so the empty window was answered with every
-  snippet.  `snippet_list` now selects a window whenever an `end` is given
-  (`end=None`, the default, still lists everything).
+  explicit `0-0` window meant "no rows", and the sentinel `0` that answered
+  it with the whole database is gone; `--range` without an `end` still lists
+  everything.
 - The token-type classification cache is published instead of mutated in
   place.  `serve` runs one handler thread per request and every request
   lexes, so the cache was written by several threads while others read it,

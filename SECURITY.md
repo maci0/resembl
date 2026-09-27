@@ -31,11 +31,14 @@ and ranked risks for the code as it stands. Read it before reporting: it
 names the mitigations that already exist, so a report of a
 missing control is far more useful than a report of a known gap.
 
-The one gap to be aware of while using `resembl serve` is that `POST /find`
-accepts `top_n` without an upper bound, so a single request can return the
-whole corpus. On a loopback bind that is a concern for other processes on the
-same host, and on a non-loopback bind it is the same exposure as the bind
-itself.
+The one gap to be aware of while using `resembl serve` is that
+`POST /find` is unauthenticated: it answers any caller that can reach the
+port, so the corpus is readable a page at a time. A single response is
+capped at 1000 rows, but a sequence of requests is not. On a loopback bind
+that is a concern for other processes on the same host, and on a
+non-loopback bind it is the same exposure as the bind itself. Run
+`resembl serve -v` if the served queries have to be attributable after the
+fact; nothing is recorded at the default log level.
 
 ## Deployment assumptions
 
