@@ -4,6 +4,31 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** a refused find parameter on `resembl serve` now answers `400`
+  with a `{"error": "..."}` body, on `POST /find` and `POST /find-batch`
+  alike.  Before, `POST /find` answered `200` and put the error in the
+  payload, so a client that read `error` out of a successful response has to
+  check the status code instead.  The message also lost its `bad request: `
+  prefix.  `resembl find` and `resembl-find` speak both shapes.
+- `POST /find-batch` refuses more than 1000 queries with `400`; a client with
+  a larger set splits it across requests (the CLI's `find-batch` already
+  chunks its input file).
+- An explicit `Content-Type` other than `application/json` is refused with
+  `415` rather than parsed anyway.
+- An unknown path answers the JSON error envelope with `404` instead of the
+  stdlib's HTML 404 page, and a method other than `POST` answers `405`
+  instead of the stdlib's HTML 501.
+
+### Added
+
+- `docs/http_api.md` documents the `serve` endpoints: the request fields of
+  `/find` and `/find-batch`, the `200` response shapes, and the
+  `400`/`404`/`405`/`415`/`500` error envelope.
+
 ## [2.0.0] - 2026-09-15
 
 ### Changed
@@ -84,3 +109,10 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
+
+[Unreleased]: https://github.com/maci0/resembl/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/maci0/resembl/compare/v1.2.0...v2.0.0
+[1.2.0]: https://github.com/maci0/resembl/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/maci0/resembl/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/maci0/resembl/compare/v0.1.0...v1.0.0
+[0.1.0]: https://github.com/maci0/resembl/releases/tag/v0.1.0

@@ -278,4 +278,15 @@ Once your pull request is submitted, it will go through a review process. Here i
 - **Responding to Feedback:** It is common for reviewers to request changes. This is a normal and healthy part of the collaborative process. Please engage in the discussion and address the feedback by pushing new commits to your branch. The pull request will update automatically.
 - **Approval and Merge:** Once all automated checks are passing and a maintainer has approved the changes, your pull request will be merged.
 
+## Part 6: Releasing
+Releases are cut by a maintainer from `main`. Every release is a single `release X.Y.Z` commit, followed by a tag `vX.Y.Z`; the tag is what the published version is taken from.
+
+1. **Pick the number from the diff.** resembl follows [Semantic Versioning](https://semver.org/). A change that removes or renames a public export, changes a signature, a default, a stored format (fingerprint, database, cache) or the `serve` HTTP responses, or raises the minimum Python version, is a major. A new command, flag or config field is a minor. Everything else is a patch. The release-drafter draft follows the same rule: a `!` in a commit subject, or a `BREAKING CHANGE:` footer, resolves to the next major, never to a patch.
+2. **Write the notes for a consumer.** Turn the `[Unreleased]` section of `CHANGELOG.md` into a `## [X.Y.Z] - YYYY-MM-DD` section, grouped as `### Added` / `### Changed` / `### Fixed`, with the migration step spelled out for anything breaking. A note is consumer-facing: what changed for you, not the commit hash.
+3. **Bump `pyproject.toml`.** `version = "X.Y.Z"`, in the same commit, plus the tag link reference at the foot of the changelog. `uv lock` follows, because the lockfile records the project's own version.
+4. **Verify, then tag.** `uv run pytest` green, plus a clean `uv build` and an install of the wheel that answers `resembl --help` and one `resembl find` run.
+5. **Publish, then check the artifact.** Push the tag, publish, and confirm the published version imports and runs. A published version is immutable: if something is wrong, cut a new patch. Never re-upload over an existing version.
+
+Nothing reaches a release without a changelog entry. If a change cannot be described for a consumer in one bullet, it is not ready to ship.
+
 Congratulations, and thank you! Your contribution is now part of the `resembl` project. We deeply appreciate your time and effort.

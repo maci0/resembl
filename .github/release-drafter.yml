@@ -1,24 +1,67 @@
 # .github/release-drafter.yml
-name-template: 'v$NEXT_PATCH_VERSION'
-tag-template: 'v$NEXT_PATCH_VERSION'
+# The project releases by hand (a `release X.Y.Z` commit bumps the manifest
+# and writes the CHANGELOG section) but drafts and tags here, so the version
+# resolver has to follow SemVer: a `!` in the commit subject, or a
+# `BREAKING CHANGE:` footer, has to land on a major, never on a patch.
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'minor'
+  patch:
+    labels:
+      - 'patch'
+  default: patch
 categories:
+  - title: '💥 Breaking Changes'
+    labels:
+      - 'major'
   - title: '🚀 Features'
     labels:
       - 'feature'
       - 'enhancement'
+      - 'minor'
   - title: '🐛 Bug Fixes'
     labels:
       - 'fix'
       - 'bug'
+      - 'patch'
+  - title: '⚡ Performance'
+    labels:
+      - 'perf'
+      - 'performance'
   - title: '📖 Documentation'
     labels:
       - 'docs'
       - 'documentation'
+  - title: '🧪 Tests'
+    labels:
+      - 'test'
+      - 'testing'
+  - title: '📦 Build'
+    labels:
+      - 'build'
+      - 'ci'
   - title: '🧰 Maintenance'
     labels:
       - 'chore'
       - 'refactor'
-      - 'ci'
+      - 'style'
+autolabeler:
+  - label: 'major'
+    title:
+      - '/^feat(\(.+\))?!:/'
+      - '/^fix(\(.+\))?!:/'
+  - label: 'minor'
+    title:
+      - '/^feat(\(.+\))?:/'
+  - label: 'patch'
+    title:
+      - '/^fix(\(.+\))?:/'
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 template: |
   ## Changes
