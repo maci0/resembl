@@ -70,8 +70,8 @@ the server's configured default", exactly like an omitted field):
 
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
-| `query` | string | required |
-| `top_n` | integer | `1` to `1000`, else `400`. A non-positive one would answer `200` with an empty `matches`, which reads as "no matches" rather than as a bad request. A fractional value is rejected, not truncated. The default is the server's config |
+| `query` | string | required, and not blank. A blank one fingerprints to an empty token set and would answer `200` with an empty `matches`, which reads as "no matches" rather than as a bad request |
+| `top_n` | integer | `1` to `1000`, else `400`. A non-positive one would answer `200` with an empty `matches`, which reads as "no matches" rather than as a bad request. A fractional value is rejected, not truncated. The default is the server's config, capped at `1000` (a config above it is reported once at startup, since a cap above the endpoint's own bound would refuse every request that omitted the field) |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must match the server's configured `lsh_threshold` (compared with a `1e-6` tolerance, since MySQL and DuckDB store it single-precision) |
 | `normalize` | boolean | default `true` |
 | `ngram_size` | integer | at least `1`, whole. Must equal the server's configured `ngram_size` |
@@ -111,7 +111,7 @@ Same find parameters, plus:
 
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
-| `queries` | list of string | required, at most 1000 entries |
+| `queries` | list of string | required, at most 1000 entries, each one non-blank |
 
 A parameter error is answered once, as a `400` for the whole request. A
 *query* that cannot be processed fails alone: its entry carries an `error`
@@ -121,7 +121,8 @@ key and the other queries still return results, so the response is always
 ```json
 {"results": [
   {"query": "push ebx", "lsh_candidates": 7, "matches": []},
-  {"query": "mov eax", "error": "query must be a string"}
+  {"query": 42, "error": "query must be a string"},
+  {"query": "   ", "error": "query must not be empty"}
 ]}
 ```
 
@@ -131,7 +132,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 
 | Status | When |
 | ------ | ---- |
-| `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
+| `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
 | `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body). |

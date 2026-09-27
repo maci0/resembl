@@ -1027,6 +1027,54 @@ class TestServerMode(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("query must be a string", payload["error"])
 
+    def test_find_rejects_blank_query(self):
+        """A blank query answers 400, not 200 with an empty match list.
+
+        ``resembl find`` refuses a query it reads as empty, and a blank one
+        fingerprints to an empty token set: the endpoint answered ``200``
+        with no ``matches``, which a client reads as "this snippet has no
+        duplicates" rather than as a request that searched for nothing.
+        """
+        port = self._start_server()
+        for blank in ("", "   ", "\n\t"):
+            with self.subTest(query=blank):
+                status, payload = _post_json_status(port, "/find", {"query": blank})
+                self.assertEqual(status, 400)
+                self.assertIn("query must not be empty", payload["error"])
+
+    def test_find_batch_isolates_unusable_queries(self):
+        """A blank or wrongly typed entry fails alone; the rest still answer."""
+        port = self._start_server()
+        status, payload = _post_json_status(
+            port, "/find-batch", {"queries": ["push ebx\nret", "   ", 7]}
+        )
+        self.assertEqual(status, 200)
+        found, blank, wrong_type = payload["results"]
+        self.assertIn("matches", found)
+        self.assertEqual(blank["error"], "query must not be empty")
+        self.assertEqual(wrong_type["error"], "query must be a string")
+
+    def test_served_top_n_default_stays_within_the_request_bound(self):
+        """A configured top_n above the request cap still answers requests.
+
+        The config layer leaves ``top_n`` unbounded while the request path
+        caps it, so the configured value became a default the endpoint
+        refused: every request omitting ``top_n`` — what a plain third-party
+        client sends — was answered ``400`` over a value it never sent.
+        """
+        from resembl.server import _MAX_TOP_N
+
+        config_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(config_dir.cleanup)
+        with open(os.path.join(config_dir.name, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(f"top_n = {_MAX_TOP_N * 2}\n")
+        with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": config_dir.name}):
+            with self.assertLogs("resembl.server", level="WARNING"):
+                port = self._start_server()
+            status, payload = _post_json_status(port, "/find", {"query": "push ebx\nret"})
+        self.assertEqual(status, 200)
+        self.assertIn("matches", payload)
+
     def test_find_rejects_non_numeric_params_cleanly(self):
         """Non-numeric find parameters answer a clean error payload, not a 500.
 

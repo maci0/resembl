@@ -621,6 +621,23 @@ def port_file_cleanup(port_file: str, port: int) -> None:
         pass
 
 
+def _query_field_error(query: object) -> str | None:
+    """Return why *query* is unusable as a find, or None when it is fine.
+
+    One rule for both endpoints: ``/find`` answers it as the request's only
+    ``400``, and ``/find-batch`` carries it on that query's entry.  A blank
+    query is refused for the reason ``resembl find`` refuses one: it
+    fingerprints to an empty token set, so the endpoint would answer ``200``
+    with no matches and a client would read that as "this snippet has no
+    duplicates" rather than as a request that searched for nothing.
+    """
+    if not isinstance(query, str):
+        return "query must be a string"
+    if not query.strip():
+        return "query must not be empty"
+    return None
+
+
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find`` and ``POST /find-batch``; one session per request
     (concurrent reads).  Also carries this server's 403, 404, 405 and 415
@@ -772,11 +789,13 @@ class _FindHandler(BaseHTTPRequestHandler):
         except KeyError:
             self._respond(400, {"error": "bad request: 'query' is required"})
             return
-        # Same type rule as /find-batch's per-query check: a non-string query
-        # (dict, number, list) would otherwise crash the lexer downstream and
-        # answer 500 with the internal exception text instead of a clean 400.
-        if not isinstance(query, str):
-            self._respond(400, {"error": "bad request: query must be a string"})
+        # Same rule as /find-batch's per-query check, in one function: a
+        # non-string query (dict, number, list) would crash the lexer
+        # downstream and answer 500 with the internal exception text, and a
+        # blank one would answer 200 with no matches.
+        reason = _query_field_error(query)
+        if reason is not None:
+            self._respond(400, {"error": f"bad request: {reason}"})
             return
         try:
             with Session(self.engine) as session:
@@ -827,20 +846,21 @@ class _FindHandler(BaseHTTPRequestHandler):
         try:
             with Session(self.engine) as session:
                 for query in queries:
-                    # Same type rule as /find's boundary check, answered
-                    # without raising so the controlled message reaches the
-                    # client while unexpected failures cannot.
-                    if not isinstance(query, str):
-                        results.append({"query": query, "error": "query must be a string"})
+                    # Same rule as /find's boundary check, answered without
+                    # raising so the controlled message reaches the client
+                    # while unexpected failures cannot.
+                    reason = _query_field_error(query)
+                    if reason is not None:
+                        results.append({"query": query, "error": reason})
                         continue
                     try:
                         results.append(
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
                         )
                     except BadRequestError as exc:
-                        # A query the caller controls (empty string, say) is a
-                        # bad request, not a server fault: answered per query
-                        # so the rest of the batch still completes.
+                        # A parameter the caller controls is a bad request, not
+                        # a server fault: answered per query so the rest of
+                        # the batch still completes.
                         results.append({"query": query, "error": str(exc)})
                     except Exception as exc:  # isolate per-query failures
                         logger.warning("find-batch query %.200r failed: %s", query, exc)
@@ -1021,9 +1041,26 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
             from .config import load_config
 
             cfg = load_config()
+            # The config layer leaves ``top_n`` unbounded (only the request
+            # path needs a bound), so a config above ``_MAX_TOP_N`` would
+            # become a default the endpoint refuses: every request that
+            # omitted ``top_n`` — the ones a plain third-party client sends —
+            # was answered 400 for a value the caller never sent.  The served
+            # default is clamped, and the clamp is reported, since a client
+            # then gets fewer rows than ``resembl find`` would return locally.
+            served_top_n = min(cfg.top_n, _MAX_TOP_N)
+            if served_top_n != cfg.top_n:
+                logger.warning(
+                    "config top_n is %d, above the %d this server returns per "
+                    "request; requests that omit top_n are served with %d. "
+                    "Lower top_n in the config, or use the in-process find.",
+                    cfg.top_n,
+                    _MAX_TOP_N,
+                    served_top_n,
+                )
             find_defaults = ResemblConfig(
                 lsh_threshold=cfg.lsh_threshold,
-                top_n=cfg.top_n,
+                top_n=served_top_n,
                 num_permutations=cfg.num_permutations,
                 ngram_size=cfg.ngram_size,
                 jaccard_weight=cfg.jaccard_weight,

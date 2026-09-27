@@ -279,6 +279,22 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `POST /find` answers `400` for a blank `query`, and `POST /find-batch`
+  carries the same message on that query's entry.  A blank query
+  fingerprints to an empty token set, so the endpoint answered `200` with an
+  empty `matches`, which a client reads as "this snippet has no duplicates"
+  rather than as a request that searched for nothing.  `resembl find` and
+  `resembl-find` already refused such a query.
+
+- `resembl serve` clamps a configured `top_n` above 1000 to 1000 as its served
+  default, and reports the clamp once at startup.  The config layer leaves
+  `top_n` unbounded while the request path caps it, so a large configured
+  value became a default the endpoint refused: every request that omitted
+  `top_n`, which is what a plain third-party client sends, was answered `400`
+  over a value it never sent.  An explicit `top_n` above the cap is still a
+  `400`, and the in-process `resembl find` still returns the configured
+  number of rows.
+
 - `resembl verify` no longer crashes on an `lsh_meta` row naming parameters no
   index can be built from (a permutation count below 2, a threshold outside
   `[0.0, 1.0]`).  The stored values went straight into the banding search,

@@ -20,10 +20,10 @@ Ranked by exploitability against the shipped defaults, then by impact.
 
 | # | Risk | Boundary | Impact | Control today |
 | - | ---- | -------- | ------ | ------------- |
-| R1 | `POST /find` is unauthenticated and answers any local caller, so the corpus is readable a page at a time | B1 | Full corpus disclosure to any same-host process; memory pressure on the server | `top_n` capped at 1000 per request (`resembl/server.py:322`, `resembl/server.py:519`), which bounds one response but not a sequence of them; the config layer leaves the local `top_n` unbounded (`resembl/config.py:63`) |
-| R2 | The find server has no authentication and no rate limit, and a non-loopback bind is a warning, not a block | B1 | R1 plus sustained exhaustion | `Host` check on a loopback bind, which answers `403` to a rebound name (`resembl/server.py:647`, `resembl/server.py:665`); loopback default only (`resembl/cli.py:547`, `resembl/cli.py:560`) |
-| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | none on a cache directory that already existed (`resembl/find_client.py:118`, `resembl/cli.py:399`); the server's own directory is `0o700` (`resembl/server.py:876`) |
-| R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`resembl/server.py:823`, `resembl/server.py:835`) |
+| R1 | `POST /find` is unauthenticated and answers any local caller, so the corpus is readable a page at a time | B1 | Full corpus disclosure to any same-host process; memory pressure on the server | `top_n` capped at 1000 per request (`resembl/server.py:322`, `resembl/server.py:560`), which bounds one response but not a sequence of them; the config layer leaves the local `top_n` unbounded (`resembl/config.py:63`) |
+| R2 | The find server has no authentication and no rate limit, and a non-loopback bind is a warning, not a block | B1 | R1 plus sustained exhaustion | `Host` check on a loopback bind, which answers `403` to a rebound name (`resembl/server.py:707`, `resembl/server.py:721`); loopback default only (`resembl/cli.py:547`, `resembl/cli.py:560`) |
+| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | none on a cache directory that already existed (`resembl/find_client.py:118`, `resembl/cli.py:399`); the server's own directory is `0o700` (`resembl/server.py:1133`) |
+| R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`resembl/server.py:924`, `resembl/server.py:926`) |
 | R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at an attacker-chosen host; config read from an attacker-chosen directory | none, by design (`resembl/paths.py:47`, `resembl/paths.py:74`, `resembl/paths.py:90`) |
 | R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows; a source that fails to open has the raw driver error text returned to the caller | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`resembl/core.py:2027`); the error path is not sanitized (`resembl/core.py:1955`) |
 | R7 | `import` walks a directory, holds every matching path in memory, and spawns a worker process per CPU for the tree, with no count or size cap | B2 | Process, memory, and CPU exhaustion from a hostile directory | Chunked database writes only (`resembl/cli.py:959`, `resembl/cli.py:998`) |
@@ -39,14 +39,14 @@ Every entry point below is present in the code at the cited location.
 
 | Entry point | Location | Notes |
 | ----------- | -------- | ----- |
-| `POST /find` | `resembl/server.py:667` | Unauthenticated, read-only. |
-| `POST /find-batch` | `resembl/server.py:667` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:510`). |
+| `POST /find` | `resembl/server.py:723` | Unauthenticated, read-only. |
+| `POST /find-batch` | `resembl/server.py:723` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:550`). |
 | `resembl serve` bind | `resembl/cli.py:547` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:560`). |
 
 No other method is served: `GET`, `PUT`, `DELETE`, `PATCH`, `HEAD` and
 `OPTIONS` answer `405` with the same JSON error envelope
-(`resembl/server.py:735`); a `HEAD` carries those headers without a body. A
-`POST` to any other path answers `404` (`resembl/server.py:711`).
+(`resembl/server.py:752`); a `HEAD` carries those headers without a body. A
+`POST` to any other path answers `404` (`resembl/server.py:728`).
 
 ### CLI surface
 
@@ -86,23 +86,23 @@ server, and the standalone client cannot disagree about where they read from.
 
 ### Files the tool writes
 
-The port file (`resembl/server.py:915`), the config file
+The port file (`resembl/server.py:1012`), the config file
 (`resembl/config.py:222`), exported YARA rules (`resembl/core.py:936`), and
 the database itself. Each is published with write-temp-then-rename
-(`resembl/config.py:245`, `resembl/server.py:1037`, `resembl/core.py:1017`).
+(`resembl/config.py:245`, `resembl/server.py:1032`, `resembl/core.py:1017`).
 
 ## Trust boundaries
 
 **B1, process to loopback socket.** The largest boundary in the codebase, and
 the only one a peer can cross without the same OS account. Everything the
 server accepts is treated as untrusted: body size
-(`resembl/server.py:499`, `resembl/server.py:626`), content type
-(`resembl/server.py:671`), JSON object shape and nesting depth
-(`resembl/server.py:620`, `resembl/server.py:633`), field types
-(`resembl/server.py:638`, `resembl/server.py:671`), and the range of
+(`resembl/server.py:544`, `resembl/server.py:689`), content type
+(`resembl/server.py:705`), JSON object shape and nesting depth
+(`resembl/server.py:692`, `resembl/server.py:695`), field types
+(`resembl/server.py:624`, `resembl/server.py:635`), and the range of
 `threshold`, `jaccard_weight`, `ngram_size`, and `num_permutations`
-(`resembl/server.py:293`, `resembl/server.py:300`, `resembl/server.py:317`,
-`resembl/server.py:312`).
+(`resembl/server.py:325`, `resembl/server.py:332`, `resembl/server.py:349`,
+`resembl/server.py:344`).
 
 **B2, files and arguments to library code.** Snippet text is untrusted
 input. It is lexed and fingerprinted (`resembl/scoring.py:954`), and on
@@ -156,7 +156,7 @@ fetch at import.
 | Snippet corpus | Proprietary reverse-engineering data; the reason the tool exists | `snippet` table, served over B1 |
 | Database credentials | Reach to a shared Postgres/MySQL corpus | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, process environment |
 | LSH index | Minutes of CPU to rebuild; its loss is an availability hit, not a data loss | `lsh_bucket` table |
-| Warm server availability | The performance reason to run `serve` at all | `resembl/server.py:819` |
+| Warm server availability | The performance reason to run `serve` at all | `resembl/server.py:997` |
 | Port file | Discovery of the running server, and a redirect target | cache dir |
 | Exported YARA rules | Downstream detection artifacts | caller-chosen output file |
 | Config file | Thresholds and match settings, applied with no on-screen report that they are in force | `config.toml` |
@@ -174,7 +174,9 @@ bounds one response, not the corpus: repeated requests with a permissive
 `threshold` and `top_n = 1000` still page the whole table out of an
 unauthenticated endpoint, and the config layer deliberately leaves the local
 `top_n` unbounded (`resembl/config.py:63`) because only the request path
-needs a bound.
+needs a bound.  A config above that bound is clamped to it as the served
+default (`resembl/server.py`), so it bounds the rows a request omitting
+`top_n` receives too.
 
 A request may also name a `threshold`, `ngram_size`, or `num_permutations`
 that differs from the one the server's index was built for. That is refused
@@ -186,7 +188,7 @@ A browser on the same host is a second peer, and the binding does not stop
 it. The server sets no CORS headers, which blocks a cross-origin `fetch`
 from *reading* the answer, and on a loopback bind it also checks the `Host`
 header and answers `403` to anything but the names it was bound to
-(`resembl/server.py:647`, `resembl/server.py:665`), so a page that rebinds
+(`resembl/server.py:707`, `resembl/server.py:721`), so a page that rebinds
 its own hostname onto `127.0.0.1` and sends a same-origin request with no
 preflight is refused. The `Host` a rebound page carries is still its own
 name, which is what the check reads. The auto-assigned port
@@ -196,17 +198,17 @@ whatever name resolves to it.
 
 *Denial of service.* `ThreadingHTTPServer` spawns a thread per connection
 with no cap; each thread holds a 30-second idle timeout
-(`resembl/server.py:593`). The engine pool is 32 plus 64 overflow
-(`resembl/server.py:1037`). A client that opens connections faster than
+(`resembl/server.py:653`). The engine pool is 32 plus 64 overflow
+(`resembl/server.py:1032`). A client that opens connections faster than
 requests complete exhausts threads, pool connections, and file descriptors
 before any of the three limits is a policy decision. There is no request
 accounting of any kind.
 
-*Repudiation.* `log_message` writes at DEBUG (`resembl/server.py:823`,
-`resembl/server.py:835`), which is quiet unless the server was started with
+*Repudiation.* `log_message` writes at DEBUG (`resembl/server.py:924`,
+`resembl/server.py:926`), which is quiet unless the server was started with
 `serve -v`, so a default deployment records that a query was made, from
 where, or what was asked for nothing. Failures are logged with
-`logger.exception` (`resembl/server.py:728`), which is the only per-request
+`logger.exception` (`resembl/server.py:811`), which is the only per-request
 trace that exists at any level.
 
 *Elevation of privilege.* None available: the server executes no request-
@@ -243,9 +245,9 @@ which changes match results silently rather than failing.
 `resembl/cli.py:399` read the port file, parse an integer, and connect. A
 local process that can write the cache directory controls the port every
 subsequent query is sent to. The server does create its side defensively: the
-cache directory is made with mode `0o700` (`resembl/server.py:876`) and the
+cache directory is made with mode `0o700` (`resembl/server.py:1133`) and the
 port file is created `0o600` rather than with the process umask
-(`resembl/server.py:885`). That covers the server's own creation path only.
+(`resembl/server.py:1142`). That covers the server's own creation path only.
 `os.makedirs(..., exist_ok=True)` does not repair the mode of a directory that
 already exists, and no code path reads the mode back, so a cache directory
 created earlier by another tool, another user, or an operator's own `mkdir`
@@ -284,26 +286,27 @@ HTTP handlers replaced theirs with a fixed body
 | ------- | ----- | ------ |
 | Loopback bind default | `resembl/cli.py:547` | Reduces B1 exposure to same-host processes |
 | Non-loopback warning | `resembl/cli.py:560` | Informs the operator; does not prevent the bind |
-| Loopback `Host` check, 403 | `resembl/server.py:690`, `resembl/server.py:707` | A page that rebinds its own hostname onto the loopback port reading a served query |
-| Request body cap, 8 MiB | `resembl/server.py:672` | B1 memory exhaustion |
-| JSON depth and shape guard | `resembl/server.py:675` | `RecursionError` from a nested body killing the handler thread with no response |
-| Batch query cap, 1000 | `resembl/server.py:550`, `resembl/server.py:812` | B1 work per request |
+| Loopback `Host` check, 403 | `resembl/server.py:707`, `resembl/server.py:724` | A page that rebinds its own hostname onto the loopback port reading a served query |
+| Request body cap, 8 MiB | `resembl/server.py:689` | B1 memory exhaustion |
+| JSON depth and shape guard | `resembl/server.py:692` | `RecursionError` from a nested body killing the handler thread with no response |
+| Batch query cap, 1000 | `resembl/server.py:550`, `resembl/server.py:831` | B1 work per request |
 | Find parameter range checks | `resembl/server.py:316` | NaN, out-of-range, and degenerate fingerprints |
+| Query field check, string and non-blank | `resembl/server.py:624` | A non-string query crashing the lexer into a `500` with its message, and a blank one answering `200` with no matches |
 | `top_n` bounds, 1 to 1000 | `resembl/server.py:354`, `resembl/server.py:363`, `resembl/server.py:560` | One response returning the whole corpus (upper bound), or a `200` with an empty `matches` read as "no duplicates" (lower bound). A sequence of requests is not bounded |
 | Index-parameter match check | `resembl/server.py:394` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:71` | An unbounded dict grown by cycling permutation counts |
 | Result-cache key is a query digest | `resembl/server.py:71` | Query text retained by the result cache, and an entry count standing in for a memory bound |
 | Per-key compute lock | `resembl/server.py:117` | A burst of identical queries multiplying one find across connections |
-| Content-Type check, 415 | `resembl/server.py:671` | B1 request shape |
-| Generic 500 body, details to log | `resembl/server.py:791` | B1 error-text disclosure of SQL, bind parameters, and paths |
-| Response hardening headers | `resembl/server.py:808` | Browser reinterpretation of a snippet-derived response; caching of that response |
-| Thread timeout, 30s | `resembl/server.py:593` | Connections parked open by an idle client |
-| Engine pool, 32 + 64 | `resembl/server.py:1037` | Pool exhaustion; the overflow is what a client that outruns requests consumes first |
-| Disconnect failures swallowed | `resembl/server.py:814` | Traceback spam from connection churn, not a security control |
-| Double-serve check | `resembl/server.py:915` | Two servers advertising one database |
-| Atomic file publication | `resembl/server.py:1037`, `resembl/config.py:245`, `resembl/core.py:1017` | Partial-file reads by a concurrent client |
-| Cache directory created `0o700` | `resembl/server.py:876` | Another local user reading or writing the port file, for a directory the server itself creates |
-| Port file created `0o600` | `resembl/server.py:885` | The same, for the file inside it. Neither checks a directory that already existed |
+| Content-Type check, 415 | `resembl/server.py:705` | B1 request shape |
+| Generic 500 body, details to log | `resembl/server.py:815` | B1 error-text disclosure of SQL, bind parameters, and paths |
+| Response hardening headers | `resembl/server.py:900` | Browser reinterpretation of a snippet-derived response; caching of that response |
+| Thread timeout, 30s | `resembl/server.py:653` | Connections parked open by an idle client |
+| Engine pool, 32 + 64 | `resembl/server.py:1032` | Pool exhaustion; the overflow is what a client that outruns requests consumes first |
+| Disconnect failures swallowed | `resembl/server.py:983` | Traceback spam from connection churn, not a security control |
+| Double-serve check | `resembl/server.py:1012` | Two servers advertising one database |
+| Atomic file publication | `resembl/server.py:1145`, `resembl/config.py:245`, `resembl/core.py:1017` | Partial-file reads by a concurrent client |
+| Cache directory created `0o700` | `resembl/server.py:1133` | Another local user reading or writing the port file, for a directory the server itself creates |
+| Port file created `0o600` | `resembl/server.py:1142` | The same, for the file inside it. Neither checks a directory that already existed |
 | Fingerprint magic check | `resembl/scoring.py:1280` | Deserialization of attacker-controlled bytes from a hostile database or merge source |
 | Legacy cache files never deserialized | `resembl/cache.py:6`, `resembl/cache.py:311` | Code execution from a planted cache file |
 | YARA string escaping | `resembl/core.py:963` | A snippet name breaking out of a generated rule string |
@@ -355,7 +358,7 @@ was executed or tested against a running server.
 
 **Corpus exfiltration by a local process.** A process on the same host reads
 `~/.cache/resembl/server_<hash>.port`, POSTs
-`{"query": "", "threshold": 0.0, "top_n": 1000}` to
+`{"query": "mov eax, 1", "threshold": 0.0, "top_n": 1000}` to
 `127.0.0.1:<port>/find` under a `Host` of `127.0.0.1:<port>`, and receives
 the first 1000 rows; it repeats with varying queries to page out the rest.
 Nothing in the request path distinguishes this from `resembl find`. Enabled
@@ -381,7 +384,7 @@ The tool's own warning is a confirmation prompt, not a bound.
 **Port-file forgery against a shared cache directory.** Two local users share
 a cache directory that one of them, or an operator, created with a permissive
 mode. Neither `serve` nor `find` reads the directory mode back, so the
-`0o700` at `resembl/server.py:876` never applies and the second user's forged
+`0o700` at `resembl/server.py:1133` never applies and the second user's forged
 port file is read as if the first user had written it.
 
 **Silent configuration redirection.** Setting `RESEMBL_CONFIG_DIR` for a
@@ -406,11 +409,11 @@ callers that reach it in-process.
 
 ## Response readiness
 
-`resembl serve` records every request at DEBUG (`resembl/server.py:823`,
-`resembl/server.py:835`), which is below the default level, so a server left
+`resembl serve` records every request at DEBUG (`resembl/server.py:924`,
+`resembl/server.py:926`), which is below the default level, so a server left
 running as shipped has no trail to investigate from after a suspected
 exfiltration. Errors are logged with stack context at any level
-(`resembl/server.py:728`); successful queries are logged only under
+(`resembl/server.py:811`); successful queries are logged only under
 `serve -v`.
 
 No repository document describes the path from a reported vulnerability to a
