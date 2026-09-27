@@ -1494,10 +1494,11 @@ def code_create_minhash_batch(
 ) -> list[MinHash]:
     """Create MinHash objects for multiple code snippets in batch.
 
-    Pre-tokenizes all snippets and builds MinHash objects in a tight loop,
-    amortizing interpreter overhead across the batch.  Produces exactly the
-    same fingerprints as :func:`code_create_minhash` (including weighted
-    shingling) so that ``reindex`` never changes existing similarity scores.
+    Fingerprints each snippet in a tight loop, so the per-snippet overhead
+    stays in one function's locals and only one snippet's tokens are resident
+    at a time.  Produces exactly the same fingerprints as
+    :func:`code_create_minhash` (including weighted shingling) so that
+    ``reindex`` never changes existing similarity scores.
     """
     results: list[MinHash] = []
     for code_snippet in snippets:

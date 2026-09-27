@@ -356,8 +356,8 @@ uv run pytest tests/test_cli.py -k config_set      # by name
 uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
 ```
 
-`make help` lists the shortcuts (`make test`, `make lint`, `make types`,
-`make format`, `make hygiene`, `make db-test`). `make check` runs everything CI
+`make help` lists every target (`install`, `format`, `lint`, `types`, `hygiene`,
+`test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`). `make check` runs everything CI
 runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
 hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
 enforce and no CI workflow does, so a green `make check` is a commit the hooks
@@ -448,8 +448,9 @@ Key properties that keep these numbers flat as the database grows:
 - **CLI startup is lean**: numpy and the database engine are imported lazily, so commands
   that never touch fingerprints (`list`, `stats`, `export`, …) skip ~200 ms of startup.
 - **Instant warm finds with `serve`**: start `resembl serve` once and `find` (or the stdlib-only
-  `resembl-find` client) answers in ~40 ms instead of ~450 ms — the interpreter and libraries stay
-  warm in the server process (measured 74 ms end to end at 5k snippets on a loaded machine).  The
+  `resembl-find` client) answers in a few milliseconds instead of the ~450 ms of interpreter and
+  library startup a fresh process pays (measured 74 ms end to end at 5k snippets on a loaded machine,
+  which includes the client's own startup).  The
   port file lives in the cache directory and is cleaned up on exit; a second `serve` for the same
   database is refused, restarts skip rebuilding a current index, and a slow-but-alive server's port
   file survives client timeouts.

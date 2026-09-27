@@ -48,8 +48,10 @@ The `compare` command also reports control-flow graph similarity.
 
 **1**
 :   The command failed: a missing snippet or collection, an unopenable
-    database, or health issues reported by `verify`.  An unreadable import
-    file is not a failure: `import` counts it as skipped and exits 0.
+    database, an `import` path that does not exist or holds no `.asm` /
+    `.txt` file, or health issues reported by `verify`.  An unreadable
+    individual import file is not a failure: `import` counts it as skipped
+    and exits 0.
 
 **2**
 :   The command line was rejected: an unknown command or flag, a bad flag
@@ -156,7 +158,8 @@ The `compare` command also reports control-flow graph similarity.
     recomputation in parallel (default: one worker per CPU core).
     After a fingerprint-format change, the first `find` reindexes
     automatically once (a format version is stamped in the database);
-    `reindex --force` is only needed to force it early.
+    `reindex` recomputes the same fingerprints on demand, and `--force`
+    only skips the confirmation prompt.
 
 **stats**
 :   Show database statistics.

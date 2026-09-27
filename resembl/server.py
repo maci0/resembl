@@ -365,8 +365,9 @@ _MAX_BATCH_QUERIES = 1000
 #: ``top_n`` is the only parameter that grows the response itself (one row per
 #: match) rather than the work behind it, so an unauthenticated request naming
 #: a huge value walks every LSH candidate, Levenshtein-scores it, and returns
-#: it.  A caller that wants more splits its query; ``resembl find`` never
-#: sends one request for more than this many results.
+#: it.  A caller that wants more splits its query.  ``--top-n`` is not capped
+#: to match, since its config range has no upper bound: a larger value is
+#: answered 400 and the CLI falls back to its in-process path.
 _MAX_TOP_N = 1000
 
 #: Host names a loopback bind answers to.  A request carrying any other
@@ -432,7 +433,9 @@ def port_file_cleanup(port_file: str, port: int) -> None:
 
 
 class _FindHandler(BaseHTTPRequestHandler):
-    """Serves ``POST /find``; one session per request (concurrent reads)."""
+    """Serves ``POST /find`` and ``POST /find-batch``; one session per request
+    (concurrent reads).  Also carries this server's 403, 404, 405 and 415
+    answers, which need no database."""
 
     # HTTP/1.1 enables keep-alive: well-behaved clients reuse the connection
     # instead of opening a fresh one per request, which cut measured

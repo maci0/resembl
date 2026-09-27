@@ -1,18 +1,21 @@
 """Command-line interface for the resembl assembly similarity tool.
 
 This module wires together the ``core``, ``config``, ``database``, and
-``models`` modules into a user-facing CLI built with Typer.  Every
-command respects the ``--quiet``, ``--no-color``, and ``--format``
-global options.
+``models`` modules into a user-facing CLI built with Typer.  The
+``--quiet``, ``--no-color``, and ``--format`` global options are read
+from ``state``; a command that never reads ``state.format`` ignores
+``--format``.
 
 Key design choices
 ------------------
 * **Checksum prefix resolution** - Any command that accepts a checksum
   also accepts a unique prefix, resolved via ``_resolve_checksum``.
-* **Structured output** - Every command supports ``--format json`` and
-  ``--format csv`` in addition to the default Rich table output.
+* **Structured output** - The commands that report data render
+  ``--format json`` and ``--format csv`` in addition to the default
+  Rich table output.  The commands that only acknowledge a mutation
+  print a human line in every format.
 * **Quiet mode** - ``_echo`` is used instead of ``console.print`` so
-  that ``--quiet`` suppresses all informational output.
+  that ``--quiet`` suppresses informational output.
 """
 
 from __future__ import annotations
@@ -1694,9 +1697,9 @@ def clean() -> None:
         rows = []
         if result.get("vacuum_success"):
             rows.append(("Database", "[green]Vacuumed successfully[/green]"))
-        rows.append(("Cache", "[green]Invalidated[/green]"))
+        rows.append(("LSH index", "[green]Dropped[/green]"))
         rows.append(("Time elapsed", f"{result['time_elapsed']:.4f}s"))
-        _echo_kv_table("Database and Cache Cleaned", rows)
+        _echo_kv_table("Database Cleaned", rows)
 
 
 @app.command()
@@ -1922,7 +1925,11 @@ def collection_show_cmd(
             for checksum, raw in rows()
         )
     elif state.format == "csv":
-        writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names", "collection"])
+        writer = csv.DictWriter(
+            sys.stdout,
+            fieldnames=["checksum", "names", "collection"],
+            lineterminator=_CSV_LINETERMINATOR,
+        )
         writer.writeheader()
         for checksum, raw in rows():
             writer.writerow(

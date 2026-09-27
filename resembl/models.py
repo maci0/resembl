@@ -264,9 +264,10 @@ class Snippet(SQLModel, table=True):
 
 
 #: Maximum width of the ``lsh_bucket.bucket`` hex key column.  The bound is
-#: the widest key a composite primary key may have while staying inside
-#: MySQL InnoDB's 3072-byte index-key limit (utf8mb4: 640*4 + checksum
-#: 64*4 + int).  Banding configurations that would need wider keys are
+#: chosen with headroom: the composite primary key (utf8mb4) is
+#: 640*4 + checksum 64*4 + int, about 2.8 kB against MySQL InnoDB's
+#: 3072-byte index-key limit.  Banding configurations that would need wider
+#: keys are
 #: rejected when the index object is constructed (see
 #: :class:`resembl.lsh.ResemblLSH`), so every backend fails identically and
 #: early instead of silently writing out-of-spec keys (SQLite) or failing

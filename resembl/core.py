@@ -480,8 +480,8 @@ def snippet_add_batch(
 
     Deduplication is content-addressable: code that already exists in the
     database is not re-inserted; any new names are merged into the existing
-    snippet as aliases.  Rows are written in batches with a single LSH cache
-    invalidation at the end, making bulk imports orders of magnitude faster
+    snippet as aliases.  Rows are written in batches with one incremental LSH
+    index update at the end, making bulk imports orders of magnitude faster
     than one ``snippet_add`` call per file.
 
     Returns ``{"added", "aliased", "skipped", "time_elapsed"}``.
@@ -1077,9 +1077,10 @@ def db_reindex(
     are stored).  On SQLite the writes are committed periodically so the WAL
     stays bounded — a single transaction spanning the whole reindex would
     grow the WAL to the size of the database and force one huge checkpoint
-    at commit.  PostgreSQL segments its own WAL and pays an fsync per
-    commit, so it keeps a single final commit.  If *progress* is given it is
-    called as ``progress(done, total)`` with snippets processed so far.
+    at commit.  Every other backend keeps a single final commit (PostgreSQL
+    segments its own WAL and pays an fsync per commit), so only SQLite
+    commits periodically.  If *progress* is given it is called as
+    ``progress(done, total)`` with snippets processed so far.
 
     The whole run holds the database's index-rebuild lock: a reindex clears
     the LSH index up front and rewrites every fingerprint, so two of them at

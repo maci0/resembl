@@ -100,7 +100,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
     uv run pytest tests/test_cli.py -k config_set                      # by name
     uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
     ```
-    `make help` lists the shortcuts: `make test`, `make lint`, `make types`, `make format`, `make hygiene`, `make check`.
+    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`.
 
 - **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
     ```bash

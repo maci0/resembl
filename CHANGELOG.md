@@ -231,8 +231,8 @@ project follows [Semantic Versioning](https://semver.org/).
   unprefixed name next, so an existing deployment keeps working and an
   unrelated `DATABASE_URL` in the environment no longer picks the backend.
 - A rejected command line exits `2`, not `1`, matching what typer already
-  returned for its own parse errors: a bad `--threshold`, `--num-perm`,
-  `--ngram-size` or `--format` value, a missing query, or a bare `resembl`
+  returned for its own parse errors: a bad `--threshold` or `--format` value, a
+  missing query, or a bare `resembl`
   with no subcommand.  A script that treated `1` as "you typed it wrong"
   has to read `2` now; `1` still means the command failed.
 - An unsupported `--format` value, and an unsupported `format` in the config
@@ -295,7 +295,14 @@ project follows [Semantic Versioning](https://semver.org/).
   each record ended `\r\r\n` there and every CSV reader parsed the extra `\r`
   as a field.  Records now end in a bare `\n` on every platform, matching the
   `json` renderer.
-- `resembl export` and `resembl export --yara` write LF on every platform.
+- `resembl collection show --format csv` writes LF on every platform too.  It
+  builds its writer inline rather than through the shared CSV helper, so it
+  kept the `csv` module's `\r\n` default and was the one CSV render that still
+  differed across platforms.
+- `resembl clean` reports the LSH index it dropped instead of a cache it never
+  touched.  `clean` drops the index rows and vacuums; the legacy pickle cache
+  is removed by the next index write, not by `clean`.
+- `resembl export` and `resembl export-yara` write LF on every platform.
   Text mode rewrote each `\n` to `os.linesep`, so the same database exported
   CRLF on Windows and LF elsewhere and the two trees diffed against each
   other; the generated rule file and the `.asm` files are now byte-identical

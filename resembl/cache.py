@@ -66,12 +66,19 @@ _BUILD_RETRY_BACKOFF = 3
 
 
 def db_checksum_path_get() -> str:
-    """Return the path to the DB checksum file."""
+    """Return the legacy DB checksum file's path.
+
+    Never written today; :func:`lsh_pickle_cache_remove` deletes the file if a
+    pre-SQLite version left one behind.
+    """
     return os.path.join(cache_dir_get(), "db_checksum.txt")
 
 
 def lsh_cache_path_get(threshold: float) -> str:
-    """Return the path to the LSH cache file for a given threshold."""
+    """Return the legacy LSH cache file's path for a given threshold.
+
+    Never written today; see :func:`db_checksum_path_get`.
+    """
     return os.path.join(cache_dir_get(), f"lsh_{threshold:.2f}.pkl")
 
 

@@ -33,6 +33,10 @@ their ASCII equivalents, which changes the text rather than its spelling.
 Return *text* in Normalization Form C. The identity on ASCII, so it is safe to
 apply to any string on the import hot path.
 
+The four scoring helpers below (`shingle_weight`, `score_hybrid`,
+`cfg_extract`, `cfg_similarity`) are not package-root exports; import them
+from their module (`from resembl.scoring import score_hybrid`).
+
 ### `code_tokenize(code_snippet: str, normalize: bool = True) → list[str]`
 Tokenize assembly code using the Pygments NASM lexer. When `normalize=True`, registers become `REG`, immediates become `IMM`, labels become `LABEL`, and memory sizes become `MEM_SIZE`. Supports x86, ARM, MIPS, and RISC-V register sets.
 
@@ -180,7 +184,7 @@ Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied
 Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard — all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
 
 ### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1, num_perm: int = 128, progress=None) → dict`
-Recompute every snippet's MinHash. With `jobs > 1` the CPU-bound tokenization runs in a process pool. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded. `progress(done, total)` is called with snippets processed so far.
+Recompute every snippet's MinHash. With `jobs > 1` *and* more than `batch_size` snippets, the CPU-bound tokenization runs in a process pool; below that the pool's spawn cost exceeds the work and it stays sequential. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded. `progress(done, total)` is called with snippets processed so far.
 
 ## LSH Index & Fingerprints
 

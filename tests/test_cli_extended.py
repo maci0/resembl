@@ -461,6 +461,33 @@ class TestCLIFormatFlag(BaseCLITest):
                 # terminator would show up here as an extra empty field.
                 self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
 
+    def test_collection_show_csv_terminates_with_lf_only(self):
+        """``collection show --format csv`` ends records with a bare LF too.
+
+        Its writer is built inline rather than through the shared CSV helper,
+        so it is the one place the ``lineterminator`` can silently be left at
+        ``csv``'s ``"\\r\\n"`` default.  A Linux-only run cannot see the
+        difference on the wire, but the absent argument is visible here.
+        """
+        import csv
+        import io
+
+        with Session(self.engine) as session:
+            collection_create(session, "csv_col")
+            from resembl.core import collection_add_snippet
+            from resembl.models import Snippet
+
+            snippet = Snippet.get_by_name(session, "test_snippet")
+            collection_add_snippet(session, "csv_col", snippet.checksum)
+
+        result = self.run_command("--format csv collection show csv_col")
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("\r", result.stdout)
+        rows = list(csv.DictReader(io.StringIO(result.stdout)))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["collection"], "csv_col")
+        self.assertEqual(rows[0]["checksum"], snippet.checksum)
+
     def test_find_json(self):
         """find --format json should produce valid JSON with matches key."""
         result = self.run_command("--format json find --query 'MOV EAX, 1'")

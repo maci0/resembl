@@ -72,7 +72,7 @@ the server's configured default", exactly like an omitted field):
 | ----- | ---- | ---------- |
 | `query` | string | required |
 | `top_n` | integer | at most 1000, else `400`. The default is the server's config |
-| `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must equal the server's configured `lsh_threshold` |
+| `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must match the server's configured `lsh_threshold` (compared with a `1e-6` tolerance, since MySQL and DuckDB store it single-precision) |
 | `normalize` | boolean | default `true` |
 | `ngram_size` | integer | at least `1`. Must equal the server's configured `ngram_size` |
 | `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM`. Must equal the server's configured `num_permutations` |
