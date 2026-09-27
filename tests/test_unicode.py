@@ -178,8 +178,20 @@ class TestSafeFilenameSurrogates(unittest.TestCase):
         # The result must be encodable: that was the crash.
         self.assertIsInstance(stem.encode("utf-8"), bytes)
 
+    @unittest.skipUnless(
+        os.name == "posix",
+        "a filename carrying a byte that is not valid UTF-8 needs a byte-oriented "
+        "POSIX filesystem: NTFS and APFS store names as text and refuse it",
+    )
     def test_a_real_undecodable_filename_exports(self):
-        """The import path, end to end, with a byte no encoding can decode."""
+        """The import path, end to end, with a byte no encoding can decode.
+
+        Gated on the capability it needs rather than deleted: a lone surrogate
+        can only reach a name where the filesystem is bytes (see
+        ``os.fsdecode``), which is the platform this contract is about.  The
+        sanitizer's handling of such a name still runs everywhere, in
+        ``test_lone_surrogate_in_a_name_does_not_crash_the_export``.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             raw = os.path.join(os.fsencode(temp_dir), b"bad\xff.asm")
             with open(raw, "wb") as handle:
