@@ -548,7 +548,9 @@ _MAX_BODY_BYTES = 8 * 1024 * 1024
 #: endpoint runs one find per entry on a single connection, so an unbounded
 #: list turns one request into unbounded work; callers with more split the
 #: input (the CLI's ``find-batch`` reads a file of any size, in chunks).
-_MAX_BATCH_QUERIES = 1000
+#: Public because the chunking client needs the same number, and a caller
+#: outside this module cannot honor a private constant.
+MAX_BATCH_QUERIES = 1000
 
 #: Largest ``top_n`` one request may ask for.  Every other find parameter is
 #: range-checked, and without this one ``POST /find`` answers the whole corpus:
@@ -1106,10 +1108,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not isinstance(queries, list):
             self._respond(400, {"error": "bad request: queries must be a list"})
             return
-        if len(queries) > _MAX_BATCH_QUERIES:
+        if len(queries) > MAX_BATCH_QUERIES:
             self._respond(
                 400,
-                {"error": f"queries must hold at most {_MAX_BATCH_QUERIES} entries"},
+                {"error": f"queries must hold at most {MAX_BATCH_QUERIES} entries"},
             )
             return
         # Validated once for the whole batch: a parameter error concerns the

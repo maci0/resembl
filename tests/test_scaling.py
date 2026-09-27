@@ -47,6 +47,12 @@ from resembl.core import (
     snippet_get,
     snippet_prepare,
 )
+from resembl.diagnostics import (
+    SEED_ENV_VAR,
+    _sample_key,
+    db_calculate_average_similarity,
+    db_stats,
+)
 from resembl.lsh import lsh_index_clear, lsh_meta_get
 from resembl.models import (
     Snippet,
@@ -998,18 +1004,17 @@ class TestIndexBuild(BaseScalingTest):
         A run is a fresh process, so each simulated run here starts from a
         cleared generator (the module state a new process would not have).
         """
-        from resembl import core
-        from resembl.core import SEED_ENV_VAR, _sample_key, db_stats
+        from resembl import diagnostics
 
         def run(seed: str) -> tuple[dict, list[str]]:
-            saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
-            core._SAMPLE_RNG = None
-            core._SAMPLE_SEED = None
+            saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+            diagnostics._SAMPLE_RNG = None
+            diagnostics._SAMPLE_SEED = None
             try:
                 with patch.dict(os.environ, {SEED_ENV_VAR: seed}):
                     return db_stats(self.session), [_sample_key() for _ in range(3)]
             finally:
-                core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+                diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
 
         self._add(30, "seeded")
         first, first_keys = run("1234")
@@ -1031,21 +1036,20 @@ class TestIndexBuild(BaseScalingTest):
         unset, so a number the run reported could not be reproduced; the
         drawn seed is logged precisely so a failing run can be replayed.
         """
-        from resembl import core
-        from resembl.core import SEED_ENV_VAR, _sample_key
+        from resembl import diagnostics
 
-        saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
-        core._SAMPLE_RNG = None
-        core._SAMPLE_SEED = None
+        saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+        diagnostics._SAMPLE_RNG = None
+        diagnostics._SAMPLE_SEED = None
         try:
             with patch.dict(os.environ):
                 os.environ.pop(SEED_ENV_VAR, None)
-                with self.assertLogs("resembl.core", level="INFO") as logs:
+                with self.assertLogs("resembl.diagnostics", level="INFO") as logs:
                     first = _sample_key()
                 second = _sample_key()
-            seed = core._SAMPLE_SEED
+            seed = diagnostics._SAMPLE_SEED
         finally:
-            core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+            diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
         self.assertIsInstance(seed, int)
         self.assertIn(f"{SEED_ENV_VAR}={seed}", "\n".join(logs.output))
         self.assertNotEqual(first, second)
@@ -1060,19 +1064,18 @@ class TestIndexBuild(BaseScalingTest):
         are computed from the same offsets.  The draws must therefore be the
         one seeded sequence, whoever asks for them and in whatever order.
         """
-        from resembl import core
-        from resembl.core import SEED_ENV_VAR, _sample_key
+        from resembl import diagnostics
 
         threads, per_thread = 8, 10
-        saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
+        saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
         try:
             with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
-                core._SAMPLE_RNG = None
-                core._SAMPLE_SEED = None
+                diagnostics._SAMPLE_RNG = None
+                diagnostics._SAMPLE_SEED = None
                 expected = [_sample_key() for _ in range(threads * per_thread)]
 
-                core._SAMPLE_RNG = None
-                core._SAMPLE_SEED = None
+                diagnostics._SAMPLE_RNG = None
+                diagnostics._SAMPLE_SEED = None
                 drawn: list[str] = []
                 lock = threading.Lock()
                 start = threading.Barrier(threads)
@@ -1096,7 +1099,7 @@ class TestIndexBuild(BaseScalingTest):
                     time.sleep(0.02)
                     return real_random(seed)
 
-                with patch.object(core.random, "Random", slow_random):
+                with patch.object(diagnostics.random, "Random", slow_random):
                     workers = [threading.Thread(target=draw) for _ in range(threads)]
                     for worker in workers:
                         worker.start()
@@ -1104,7 +1107,7 @@ class TestIndexBuild(BaseScalingTest):
                         worker.join(timeout=30)
                         self.assertFalse(worker.is_alive())
         finally:
-            core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+            diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
         # Exactly one generator for the whole run, whichever thread asked
         # first.
         self.assertEqual(built, [1234])
@@ -1145,7 +1148,6 @@ class TestIndexBuild(BaseScalingTest):
 
     def test_stats_survives_corrupt_fingerprint(self):
         """A corrupt blob in the similarity sample must not crash `stats`."""
-        from resembl.core import db_calculate_average_similarity, db_stats
         from resembl.models import Snippet as SnippetModel
 
         self._add(30, "st")
@@ -1168,7 +1170,6 @@ class TestIndexBuild(BaseScalingTest):
         calls; the per-pair values (equal-count / num_perm) must stay
         identical, so the returned mean matches the direct loop exactly.
         """
-        from resembl.core import db_calculate_average_similarity
         from resembl.models import minhash_jaccard
 
         self._add(12, "avg")
