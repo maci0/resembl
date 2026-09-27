@@ -23,7 +23,7 @@ This section provides a streamlined, one-time setup process to get the resembl c
 Before you begin, please ensure you have the following software installed on your system:
 
 - Git
-- Python 3.12 or newer
+- Python 3.13 or newer
 - uv for dependency and environment management.  
 
 ### One-Time Setup
