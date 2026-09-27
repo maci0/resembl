@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import threading
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -505,15 +505,29 @@ def fingerprint_stamps_reconcile(
     permanently invisible until a manual ``reindex --force``.
     """
 
-    def reconcile(
-        get: Callable[[], int | None],
-        set_: Callable[[], None],
-        clear: Callable[[], None],
-        expected: int,
-    ) -> None:
+    for get, set_, clear, expected in (
+        (
+            lambda: fingerprint_version_get(session),
+            lambda: fingerprint_version_set(session, FINGERPRINT_VERSION),
+            lambda: fingerprint_version_clear(session),
+            FINGERPRINT_VERSION,
+        ),
+        (
+            lambda: fingerprint_ngram_get(session),
+            lambda: fingerprint_ngram_set(session, ngram_size),
+            lambda: fingerprint_ngram_clear(session),
+            ngram_size,
+        ),
+        (
+            lambda: fingerprint_perm_get(session),
+            lambda: fingerprint_perm_set(session, num_perm),
+            lambda: fingerprint_perm_clear(session),
+            num_perm,
+        ),
+    ):
         current = get()
         if current == expected:
-            return
+            continue
         if current is not None:
             # The write introduced rows at other parameters than stamped:
             # the population is now mixed, so the stamp must go — keeping
@@ -526,25 +540,6 @@ def fingerprint_stamps_reconcile(
         # else: stamp absent with pre-existing rows (legacy database, or a
         # merge cleared it) — leave it absent; publishing a value here would
         # vouch for rows this write never saw.
-
-    reconcile(
-        lambda: fingerprint_version_get(session),
-        lambda: fingerprint_version_set(session, FINGERPRINT_VERSION),
-        lambda: fingerprint_version_clear(session),
-        FINGERPRINT_VERSION,
-    )
-    reconcile(
-        lambda: fingerprint_ngram_get(session),
-        lambda: fingerprint_ngram_set(session, ngram_size),
-        lambda: fingerprint_ngram_clear(session),
-        ngram_size,
-    )
-    reconcile(
-        lambda: fingerprint_perm_get(session),
-        lambda: fingerprint_perm_set(session, num_perm),
-        lambda: fingerprint_perm_clear(session),
-        num_perm,
-    )
 
 
 def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:

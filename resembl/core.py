@@ -276,13 +276,18 @@ def snippet_prepare(
     return checksum, name, code, minhash_pack(minhash_from_tokens(token_list, ngram_size))
 
 
-def _checksum_chunks(checksums: list[str]) -> list[list[str]]:
-    """Split checksums into chunks small enough for one SQL ``IN`` clause.
+#: Checksums per SQL ``IN`` clause (and the merge chunk size that feeds one).
+#: 900 stays comfortably under SQLite's variable limit (999 by default,
+#: 32766 on modern builds), halving the round trips of the old 500.
+_CHECKSUM_CHUNK_SIZE = 900
 
-    900 stays comfortably under SQLite's variable limit (999 by default,
-    32766 on modern builds), halving the round trips of the old 500.
-    """
-    return [checksums[i : i + 900] for i in range(0, len(checksums), 900)]
+
+def _checksum_chunks(checksums: list[str]) -> list[list[str]]:
+    """Split checksums into chunks small enough for one SQL ``IN`` clause."""
+    return [
+        checksums[i : i + _CHECKSUM_CHUNK_SIZE]
+        for i in range(0, len(checksums), _CHECKSUM_CHUNK_SIZE)
+    ]
 
 
 def _snippets_by_checksums(session: Session, checksums: list[str]) -> dict[str, Snippet]:
@@ -311,6 +316,23 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
     except ValueError:
         return None
     return value if isinstance(value, list) else None
+
+
+def _source_lists_or_none(src_snippet: Snippet) -> tuple[list[str], list[str]] | None:
+    """Return a merge source's ``(names, tags)``, or ``None`` if either is corrupt.
+
+    Both columns are copied verbatim into the destination, so unreadable
+    metadata is rejected (with the same warning the merge paths emit) before
+    it poisons the destination.
+    """
+    names = _string_list_or_none(src_snippet.names)
+    tags = _string_list_or_none(src_snippet.tags)
+    if names is None or tags is None:
+        logger.warning(
+            "Skipping source snippet %s: corrupt names/tags metadata.", src_snippet.checksum
+        )
+        return None
+    return names, tags
 
 
 def _snippet_minhashes_by_checksums(session: Session, checksums: list[str]) -> dict[str, bytes]:
@@ -726,39 +748,7 @@ def snippet_find_matches(
     # pass over the (N, 128) uint32 array — SIMD under the hood.  This is
     # what keeps find fast when a query lands in a crowded band (thousands
     # of candidates at scale).
-    # Normalize each candidate's blob (legacy pickles -> packed) and skip
-    # corrupt ones: a single rotten fingerprint must not crash the query —
-    # it is excluded from scoring (a reindex heals it from its code).
-    # Blobs written at a different permutation count are stale for this
-    # query by the same token; scoring them would raise inside the batch
-    # Jaccard, so they are skipped here.
-    normalized: list[bytes] = []
-    valid_keys: list[str] = []
-    # ``minhash_ensure_packed`` has already validated the header, and the
-    # compact format's length is exactly ``8 + 4 * num_perm`` — so the length
-    # alone reports the permutation count.  Parsing the header a second time
-    # per candidate cost ~10% of a crowded find (tens of thousands of
-    # candidates); this is the same rejection, one ``len`` compare.
-    expected_len = 8 + 4 * num_permutations
-    for k in keys:
-        # A stale bucket row may reference a snippet deleted between the
-        # index query and this fetch (same race the full-row pass below
-        # tolerates); skipping it keeps the query alive until the index
-        # catches up.
-        blob_or_none = minhashes.get(k)
-        if blob_or_none is None:
-            continue
-        try:
-            blob = minhash_ensure_packed(blob_or_none)
-            if len(blob) != expected_len:
-                logger.warning("Skipping candidate %s: stale fingerprint permutation count.", k)
-                continue
-        except ValueError:
-            logger.warning("Skipping candidate %s: corrupt fingerprint.", k)
-            continue
-        normalized.append(blob)
-        valid_keys.append(k)
-    keys = valid_keys
+    normalized, keys = _candidate_blobs_scorable(keys, minhashes, num_permutations)
     if not keys:
         return 0, []
     jaccards = minhash_jaccard_batch(query_minhash_bytes, normalized)
@@ -815,6 +805,45 @@ def snippet_find_matches(
     top_matches = [(snippet, hybrid) for hybrid, _idx, snippet in scored[:top_n]]
 
     return len(candidate_keys), top_matches
+
+
+def _candidate_blobs_scorable(
+    keys: list[str], minhashes: dict[str, bytes], num_permutations: int
+) -> tuple[list[bytes], list[str]]:
+    """Return the packed blobs of the candidates this query can score.
+
+    Each blob is normalized (legacy pickles -> packed), and unusable ones are
+    dropped with a warning: a single rotten fingerprint must not crash the
+    query (a reindex heals it from its code), and a blob written at a
+    different permutation count is stale for this query by the same token —
+    scoring it would raise inside the batch Jaccard.  A candidate whose row
+    has disappeared (deleted between the index query and this fetch) is
+    dropped too, the same race the later full-row pass tolerates.
+
+    ``minhash_ensure_packed`` has already validated the header, and the
+    compact format's length is exactly ``8 + 4 * num_perm`` — so the length
+    alone reports the permutation count.  Parsing the header a second time
+    per candidate cost ~10% of a crowded find (tens of thousands of
+    candidates); this is the same rejection, one ``len`` compare.
+    """
+    expected_len = 8 + 4 * num_permutations
+    blobs: list[bytes] = []
+    valid_keys: list[str] = []
+    for key in keys:
+        blob_or_none = minhashes.get(key)
+        if blob_or_none is None:
+            continue
+        try:
+            blob = minhash_ensure_packed(blob_or_none)
+            if len(blob) != expected_len:
+                logger.warning("Skipping candidate %s: stale fingerprint permutation count.", key)
+                continue
+        except ValueError:
+            logger.warning("Skipping candidate %s: corrupt fingerprint.", key)
+            continue
+        blobs.append(blob)
+        valid_keys.append(key)
+    return blobs, valid_keys
 
 
 def snippet_matches_payload(num_candidates: int, matches: list[tuple[Snippet, float]]) -> dict:
@@ -1767,17 +1796,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
 
         def record_new(src_snippet: Snippet) -> None:
             nonlocal added, skipped
-            # The names/tags columns are copied verbatim, so unreadable
-            # metadata must be rejected before it poisons the destination
-            # (every later read of the row would crash parsing it).
-            if (
-                _string_list_or_none(src_snippet.names) is None
-                or _string_list_or_none(src_snippet.tags) is None
-            ):
-                logger.warning(
-                    "Skipping source snippet %s: corrupt names/tags metadata.",
-                    src_snippet.checksum,
-                )
+            if _source_lists_or_none(src_snippet) is None:
                 skipped += 1
                 return
             try:
@@ -1829,18 +1848,11 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     # treat as new, matching the old fallback.
                     record_new(src_snippet)
                     continue
-                src_names = _string_list_or_none(src_snippet.names)
-                src_tags = _string_list_or_none(src_snippet.tags)
-                if src_names is None or src_tags is None:
-                    # Same corrupt-metadata rule as ``record_new``: skip the
-                    # source row (with a warning) instead of letting one bad
-                    # JSON column abort the whole merge.
-                    logger.warning(
-                        "Skipping source snippet %s: corrupt names/tags metadata.",
-                        src_snippet.checksum,
-                    )
+                src_lists = _source_lists_or_none(src_snippet)
+                if src_lists is None:
                     skipped += 1
                     continue
+                src_names, src_tags = src_lists
                 changed = False
 
                 # Merge names and tags order-preservingly: existing entries
@@ -1877,7 +1889,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # Import snippets (streaming, so memory stays bounded for big sources)
         for src_snippet in Snippet.stream_all(source_session):
             merge_chunk.append(src_snippet)
-            if len(merge_chunk) >= 900:
+            if len(merge_chunk) >= _CHECKSUM_CHUNK_SIZE:
                 flush_merge_chunk()
         flush_merge_chunk()
 

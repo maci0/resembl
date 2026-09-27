@@ -107,7 +107,7 @@ autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minh
 ## Configuration
 
 ### `ResemblConfig` (dataclass)
-Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports dict-like `get()`, `items()`, `update()`.
+Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`; every value read from the config file is coerced and validated against its field's type.
 
 ### `load_config() → ResemblConfig`
 Load from `~/.config/resembl/config.toml` (or `RESEMBL_CONFIG_DIR`).

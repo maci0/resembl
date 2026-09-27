@@ -190,16 +190,28 @@ def save_config(config: dict | ResemblConfig) -> None:
         raise
 
 
-def _read_config_dict() -> dict:
-    """Read the raw config file as a dict (empty when missing or malformed)."""
+def _read_config_file() -> tuple[dict, Exception | None]:
+    """Return the raw config file as a dict, plus the read error if any.
+
+    The one reader behind every config access: a missing, malformed, or
+    unreadable file yields an empty config rather than an exception, so a
+    broken file never takes down ``load_config`` or a read-modify-write
+    update.  The error travels with the data so :func:`load_config` can
+    report it instead of silently running on defaults.
+    """
     cfg_path = config_path_get()
     if not os.path.exists(cfg_path):
-        return {}
+        return {}, None
     try:
         with open(cfg_path, "rb") as f:
-            return tomllib.load(f)
-    except tomllib.TOMLDecodeError:
-        return {}
+            return tomllib.load(f), None
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        return {}, e
+
+
+def _read_config_dict() -> dict:
+    """Read the raw config file as a dict (empty when missing or malformed)."""
+    return _read_config_file()[0]
 
 
 def update_config(key: str, value: int | float | str) -> dict:
@@ -226,21 +238,13 @@ def remove_config_key(key: str) -> dict:
 
 def load_config() -> ResemblConfig:
     """Load the user's configuration file and return a typed config object."""
-    cfg_path = config_path_get()
     cfg = ResemblConfig()
-
-    if not os.path.exists(cfg_path):
+    user_config, error = _read_config_file()
+    if error is not None:
+        # Malformed TOML or an unreadable file: report it and run on defaults
+        # instead of crashing every command.
+        logger.error("Error reading config file at %s: %s", config_path_get(), error)
         return cfg
 
-    try:
-        with open(cfg_path, "rb") as f:
-            user_config = tomllib.load(f)
-        cfg.update(user_config)
-    except tomllib.TOMLDecodeError as e:
-        logger.error("Error decoding config file at %s: %s", cfg_path, e)
-    except OSError as e:
-        # Unreadable file (permissions, I/O error): run on defaults like
-        # the malformed-TOML path instead of crashing every command.
-        logger.error("Error reading config file at %s: %s", cfg_path, e)
-
+    cfg.update(user_config)
     return cfg

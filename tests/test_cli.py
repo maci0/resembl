@@ -420,6 +420,12 @@ class TestCLIConfig(BaseCLITest):
             self.assertEqual(result.returncode, 0)
             self.assertIn("5", result.stdout)  # Default value
 
+    def test_config_get_invalid_key(self):
+        """`config get` should reject an unknown key instead of printing None."""
+        result = self.run_command("config get invalid_key")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid configuration key", result.stderr)
+
     def test_config_unset(self):
         """`config unset` should remove a key from the config file."""
         with tempfile.TemporaryDirectory() as home:

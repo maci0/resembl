@@ -1191,9 +1191,9 @@ def verify() -> None:
         _echo(table)
         for warning in result["warnings"]:
             _echo(f"[yellow]• {warning}[/yellow]")
+        for issue in result["issues"]:
+            _echo(f"[red]• {issue}[/red]")
         if result["issues"]:
-            for issue in result["issues"]:
-                _echo(f"[red]• {issue}[/red]")
             raise typer.Exit(code=1)
         if not result["warnings"]:
             _echo("[green]All checks passed.[/green]")
@@ -1872,13 +1872,15 @@ def config_get_cmd(
 ) -> None:
     """Get a configuration value."""
     if key not in DEFAULTS:
+        # Same rule as `config set`: an unknown key is a typo, not a value.
+        # getattr's default would have answered "None" and exited 0.
         err_console.print(
             f"[red]Error:[/red] Invalid configuration key: '{key}'. "
             f"Valid keys: {', '.join(DEFAULTS)}."
         )
         raise typer.Exit(code=USAGE_ERROR)
     cfg = load_config()
-    value = getattr(cfg, key, None)
+    value = getattr(cfg, key)
     if state.format in ("json", "csv"):
         _echo_format({key: value})
     else:
