@@ -38,8 +38,8 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
   answered `400` naming the values the running server searches with, because a
   handler thread rebuilding the shared `lsh_bucket` table under concurrent
   readers could leave `lsh_meta` advertising a complete index over missing
-  rows (`resembl/server.py:390`).  That keeps the served process read-only,
-  as ADR 002 requires.
+  rows (`_parse_find_request` in `resembl/server.py:288`, which raises at
+  line 412).  That keeps the served process read-only, as ADR 002 requires.
 - Banding parameters are derived by the in-tree `resembl.minhash.optimal_param`
   (ADR 005), which reproduces datasketch's `_optimal_param` bit-compatibly, so
   recall behavior at a given threshold is unchanged.

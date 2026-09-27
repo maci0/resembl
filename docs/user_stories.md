@@ -87,6 +87,8 @@ Last reviewed: 2026-09-27.
 - The standalone `resembl-find` client queries the running server directly; it imports only the standard library so each call skips the full CLI startup cost.
 - Binding a non-loopback interface prints a warning that the service is unauthenticated.
 - The HTTP endpoints (`POST /find`, `POST /find-batch`) are documented in [http_api.md](http_api.md): every response, success or error, is JSON, and a rejected parameter answers `400` with `{"error": ...}` naming the field.
+- `GET /health` reports whether the served database still answers; a probe that fails answers `503` rather than reporting a server that cannot search.
+- `GET /metrics` reports requests by path and status, a request-latency histogram, the result-cache hit rate, and the per-query failures an otherwise-`200` `/find-batch` hides, in the Prometheus text format; every other response is `application/json`.
 
 ---
 
@@ -333,6 +335,8 @@ command does with the rows it would read.
 **Acceptance Criteria:**
 - `resembl reindex` recalculates all hashes.
 - The user is prompted for confirmation before starting.
+- `--jobs N` recomputes fingerprints in a process pool of N workers; the default is one per CPU.
+- The user can bypass the confirmation prompt with the `--force` flag.
 - The tool displays statistics about the re-indexing process.
 
 ---

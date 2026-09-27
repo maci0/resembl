@@ -30,7 +30,8 @@ SQLAlchemy, nor numpy: the client's startup is part of what the warm
 
 ## Decision
 
-Move all four into `resembl.paths`, the only module that reads the environment:
+Move all four into `resembl.paths`, the only module that reads the environment
+for a path:
 
 - `db_url_get()` resolves at call time over `DB_URL_ENV_VARS`
   (`RESEMBL_DATABASE_URL` first, the unprefixed `DATABASE_URL` next, an empty
@@ -55,3 +56,8 @@ re-exported; the changelog records the migration for each.
   major release.
 - `resembl.paths` imports only the standard library, so the import-light
   client contract (roughly 50 ms of startup) keeps holding.
+- Two environment variables stay with the modules that own their behavior,
+  because they are replay seams rather than paths: `CLOCK_ENV_VAR` in
+  `resembl.models.timestamp_now` fixes the clock a stored stamp is read from,
+  and `SEED_ENV_VAR` in `resembl.core` seeds the sampling stream. Neither
+  names a filesystem location, so neither moved.

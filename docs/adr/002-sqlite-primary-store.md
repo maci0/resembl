@@ -21,10 +21,12 @@ lookup order.
 - **SQLModel/SQLAlchemy:** The ORM layer abstracts the SQL dialect, making a server backend a drop-in replacement when teams need concurrency.
 
 ## Consequences
-- SQLite has limited concurrent write support. `resembl serve` exposes only the
-  read-only `/find` and `/find-batch` endpoints (`docs/http_api.md`), so the
-  served API never issues writes; concurrent writers serialize instead, with a
-  30 s busy timeout applied as a pragma.
+- SQLite has limited concurrent write support. Every `resembl serve` endpoint
+  is read-only: `POST /find` and `POST /find-batch` search, `GET /health` runs
+  one `SELECT 1`, and `GET /metrics` reads counters held in the process
+  (`docs/http_api.md`). The served API therefore never issues writes;
+  concurrent writers serialize instead, with a 30 s busy timeout applied as a
+  pragma.
 - Teams needing shared databases should set `RESEMBL_DATABASE_URL` to a
   PostgreSQL, MySQL/MariaDB or DuckDB connection string.
 - SQLite-specific pragmas (WAL, synchronous, busy timeout) are applied
