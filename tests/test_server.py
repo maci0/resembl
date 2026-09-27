@@ -112,9 +112,32 @@ class _ServeTestCase(unittest.TestCase):
         from resembl.server import serve
 
         httpd = serve(f"sqlite:///{self._db}", port=0)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        # A short poll interval keeps the teardown below prompt: it waits for
+        # the loop to notice the stop, and the default 0.5 s poll would add
+        # that wait to every test that serves.
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
+
+        # Stop the loop before closing the socket.  ``server_close`` alone
+        # leaves a running ``serve_forever`` polling a closed descriptor: poll
+        # reports it invalid on every pass, the ``accept`` that follows fails
+        # and socketserver swallows that error, so the loop spins instead of
+        # exiting.  One such thread per test kept burning a core for the rest
+        # of the process and starved the request threads of the tests that ran
+        # later, which is how the thin client's fixed 5 s timeout expired
+        # (test_thin_client_queries_server).  Cleanups run last-in-first-out,
+        # so registering close, check, join, shutdown runs shutdown, join,
+        # check, close — each step on its own, so a failure in one still lets
+        # the socket and the advertisement be released.
+        def _assert_loop_stopped() -> None:
+            self.assertFalse(thread.is_alive(), "the serve loop is still running")
+
         self.addCleanup(httpd.server_close)
+        self.addCleanup(_assert_loop_stopped)
+        self.addCleanup(thread.join, 10)
+        self.addCleanup(httpd.shutdown)
         return httpd.server_address[1]
 
 
