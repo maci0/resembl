@@ -245,6 +245,11 @@ class TestCLICommands(BaseCLITest):
                 if fname.endswith(".asm")  # the export manifest is not a snippet
             }
             self.assertEqual(len(contents), 3)  # 2 here + setUp's test_snippet
+            # No two exported names may fold together: 'Memcpy.asm' and
+            # 'memcpy.asm' are one file on macOS and Windows, so the export
+            # has to disambiguate on a case-sensitive volume too, and this is
+            # the assertion a Linux-only run can see that with.
+            self.assertEqual(len({fname.casefold() for fname in contents}), 3)
             self.assertIn("MOV AX, 1", contents.values())
             self.assertIn("MOV BX, 2", contents.values())
 

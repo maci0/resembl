@@ -1635,11 +1635,13 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     previous_exports = _export_manifest_read(export_dir)
 
     abs_export_dir = os.path.realpath(export_dir)
-    # Keys are os.path.normcase()-normalized so names differing only by
-    # case cannot silently overwrite each other on case-insensitive
-    # filesystems (macOS defaults, Windows).
+    # Keys are case-folded so names differing only by case cannot silently
+    # overwrite each other on a case-insensitive filesystem.  Folding is done
+    # here rather than by os.path.normcase(), which only folds on Windows:
+    # macOS' default volume is case-insensitive too, so there the guard did
+    # nothing and the second snippet's file landed on the first one.
     used_paths: set[str] = set()
-    # Plain file names, for the manifest (the keys above are normcase'd paths,
+    # Plain file names, for the manifest (the keys above are folded paths,
     # which would record two spellings of one file on a case-folding
     # filesystem).
     written: set[str] = set()
@@ -1667,13 +1669,13 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 
         # Avoid silently overwriting when several snippets share a name
         # (compared case-insensitively — see used_paths above).
-        used_key = os.path.normcase(file_path)
+        used_key = file_path.casefold()
         if used_key in used_paths:
             # 12 hex chars (48 bits) keeps the disambiguator collision-free
             # even with hundreds of thousands of same-named snippets (the
             # previous 8 chars collided at ~30 pairs per 500k).
             file_path = os.path.join(abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm")
-            used_key = os.path.normcase(file_path)
+            used_key = file_path.casefold()
         used_paths.add(used_key)
         written.add(os.path.basename(file_path))
 

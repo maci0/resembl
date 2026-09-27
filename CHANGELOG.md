@@ -4,6 +4,17 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `export` no longer lets two snippets whose names differ only by case write
+  to one file. The guard compared the file names with `os.path.normcase`,
+  which only folds case on Windows, while macOS' default volume is
+  case-insensitive too, so the second snippet's file landed on the first
+  one. The names are folded on every platform now, so a directory exported
+  on Linux carries the same file names it does on macOS and Windows.
+
 ## [3.0.0] - 2026-09-27
 
 ### Fixed
