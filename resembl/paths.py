@@ -1,0 +1,119 @@
+"""Environment and filesystem path resolution.
+
+One owner for every path a resembl process derives from the environment:
+the database URL, the cache directory, the config directory, and the port
+file ``resembl serve`` writes.  The CLI, the server and the standalone
+``resembl-find`` client all read them from here, so a change to the override
+rules or the port-file naming cannot leave the client looking for a file the
+server never wrote.
+
+Standard library only, and importing it pulls in nothing from this package:
+``resembl.find_client`` resolves its paths through this module instead of
+copying the rules, which keeps the client off the sqlmodel / SQLAlchemy /
+numpy import graph and its ~50 ms startup.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+
+#: Database URL used when the environment names none.
+DEFAULT_DB_URL = "sqlite:///assembly.db"
+
+#: Environment variables consulted for the database URL, most specific first.
+#: ``RESEMBL_DATABASE_URL`` is the namespaced name every other resembl
+#: override uses (``RESEMBL_CONFIG_DIR``, ``RESEMBL_CACHE_DIR``) and wins
+#: outright.  The unprefixed ``DATABASE_URL`` stays supported and is read
+#: next: it is the name other Python and hosting stacks already export, so
+#: dropping it would break a working deployment.  An empty value counts as
+#: unset in both, matching the directory overrides, rather than handing
+#: SQLAlchemy an empty URL to fail on obscurely.
+DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
+
+#: Matches the credentials component of ``scheme://user:password@host/...``.
+#: The password run stops at the first character a URL may not carry bare;
+#: percent-encoded passwords round-trip untouched.
+_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
+
+#: Cache directory used when the environment names none.
+DEFAULT_CACHE_DIR = "~/.cache/resembl"
+
+#: Config directory used when the environment names none.
+DEFAULT_CONFIG_DIR = "~/.config/resembl"
+
+
+def db_url_get() -> str:
+    """Return the database URL configured in the environment.
+
+    Read at call time, not at import time: an embedder that sets
+    ``RESEMBL_DATABASE_URL`` after importing resembl (and a test that points
+    the engine at a temporary database) gets the value it set, instead of
+    whatever the environment happened to hold when the module was first
+    imported.
+    """
+    for var in DB_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+    return DEFAULT_DB_URL
+
+
+def db_url_mask(url: str) -> str:
+    """Return *url* with any embedded password replaced by ``***``.
+
+    Display helper for messages that echo a database URL (connection
+    failures, merge progress): URLs like
+    ``postgresql+pg8000://user:pass@host/db`` must not print the password.
+    URLs without credentials are returned unchanged.
+    """
+    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
+
+
+def cache_dir_get() -> str:
+    """Return the cache directory, respecting override environment variables.
+
+    ``RESEMBL_CACHE_DIR`` wins outright.  Otherwise ``$XDG_CACHE_HOME`` is
+    honored when set (freedesktop base-directory spec), falling back to the
+    historical ``~/.cache/resembl`` default.
+    """
+    override = os.environ.get("RESEMBL_CACHE_DIR")
+    if override:
+        return os.path.expanduser(override)
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return os.path.join(xdg, "resembl")
+    return os.path.expanduser(DEFAULT_CACHE_DIR)
+
+
+def config_dir_get() -> str:
+    """Return the config directory, respecting override environment variables.
+
+    ``RESEMBL_CONFIG_DIR`` wins outright.  Otherwise ``$XDG_CONFIG_HOME`` is
+    honored when set (freedesktop base-directory spec), falling back to the
+    historical ``~/.config/resembl`` default.
+    """
+    override = os.environ.get("RESEMBL_CONFIG_DIR")
+    if override:
+        return os.path.expanduser(override)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return os.path.join(xdg, "resembl")
+    return os.path.expanduser(DEFAULT_CONFIG_DIR)
+
+
+def config_path_get() -> str:
+    """Return the path to the config file."""
+    return os.path.join(config_dir_get(), "config.toml")
+
+
+def server_port_path(db_url: str, cache_dir: str) -> str:
+    """Return the port file *serve* writes for *db_url*, under *cache_dir*.
+
+    Both sides of the warm-find protocol hash the same string: the raw
+    database URL, never :func:`db_url_mask`'s ``user:***@host`` rendering,
+    which would name a different file for a URL that carries credentials.
+    """
+    digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+    return os.path.join(cache_dir, f"server_{digest}.port")

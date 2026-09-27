@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import atexit
 import functools
-import hashlib
 import json
 import logging
 import os
@@ -34,7 +33,7 @@ from typing import Any, cast
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
-from .cache import cache_dir_get, lsh_index_build
+from .cache import lsh_index_build
 from .config import ResemblConfig
 from .core import (
     LSH_THRESHOLD,
@@ -43,6 +42,7 @@ from .core import (
     snippet_find_matches,
     snippet_matches_payload,
 )
+from .paths import cache_dir_get, db_url_mask, server_port_path
 
 logger = logging.getLogger(__name__)
 
@@ -320,12 +320,6 @@ def _find_one(
             while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
                 _RESULT_CACHE.popitem(last=False)
     return payload
-
-
-def server_port_path(db_url: str) -> str:
-    """Return the port-file path for a database URL."""
-    digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
-    return os.path.join(cache_dir_get(), f"server_{digest}.port")
 
 
 #: Maximum accepted request body (8 MiB — orders of magnitude above any real
@@ -655,7 +649,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     startup so serving is read-only; the port file is written on startup and
     removed on exit.
     """
-    from .database import create_db_engine, db_url_mask
+    from .database import create_db_engine
 
     # Refuse to double-serve: if a port file exists for this database and a
     # server is actually listening on it, another ``serve`` is already
@@ -663,7 +657,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # bind different auto-ports, and find clients use the port file, which
     # the last starter overwrites.  (A stale port file whose port is dead is
     # ignored and replaced.)
-    port_file = server_port_path(db_url)
+    port_file = server_port_path(db_url, cache_dir_get())
     try:
         with open(port_file, encoding="utf-8") as f:
             existing_port = int(f.read().strip())

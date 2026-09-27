@@ -85,8 +85,9 @@ from .core import (
     snippet_tag_remove,
     snippet_version_list,
 )
-from .database import db_create, db_url_get, db_url_mask, get_engine
+from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
+from .paths import cache_dir_get, db_url_get, db_url_mask, server_port_path
 from .scoring import MAX_NUM_PERM
 from .theme import ACCENT, score_color
 
@@ -324,10 +325,10 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     import urllib.error
     import urllib.request
 
-    from .server import port_file_cleanup, server_port_path
+    from .server import port_file_cleanup
 
     db_url = _session_db_url(state.session)
-    port_file = server_port_path(db_url)
+    port_file = server_port_path(db_url, cache_dir_get())
     try:
         with open(port_file, encoding="utf-8") as f:
             port = int(f.read().strip())

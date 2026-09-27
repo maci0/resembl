@@ -14,9 +14,8 @@ from typing import NamedTuple
 
 import tomli_w
 
+from .paths import config_dir_get, config_path_get
 from .scoring import MAX_NUM_PERM
-
-DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
 #: Output formats every renderer switches on (``--format`` / config ``format``).
 #: Anything else cannot be rendered: reject it where it enters instead of
@@ -102,27 +101,6 @@ def validate_value(key: str, value: object) -> str | None:
         return None
     end = "at most" if bounds.high_inclusive else "below"
     return f"expected a value {end} {bounds.high:g}"
-
-
-def config_dir_get() -> str:
-    """Return the config directory, respecting override environment variables.
-
-    ``RESEMBL_CONFIG_DIR`` wins outright.  Otherwise ``$XDG_CONFIG_HOME`` is
-    honored when set (freedesktop base-directory spec), falling back to the
-    historical ``~/.config/resembl`` default.
-    """
-    override = os.environ.get("RESEMBL_CONFIG_DIR")
-    if override:
-        return os.path.expanduser(override)
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
-        return os.path.join(xdg, "resembl")
-    return os.path.expanduser(DEFAULT_CONFIG_DIR)
-
-
-def config_path_get() -> str:
-    """Return the path to the config file."""
-    return os.path.join(config_dir_get(), "config.toml")
 
 
 @dataclasses.dataclass

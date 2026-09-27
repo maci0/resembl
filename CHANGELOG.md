@@ -13,6 +13,18 @@ project follows [Semantic Versioning](https://semver.org/).
   metadata. Two builds of one commit produce identical bytes; `make dist-verify`
   builds twice and fails if they differ. Building from the sdist needs
   `setuptools==80.9.0`, the now-pinned build backend.
+- **Breaking:** `resembl.database.db_url_get`, `resembl.database.db_url_mask`,
+  `resembl.database.DEFAULT_DB_URL`, `resembl.cache.cache_dir_get`,
+  `resembl.cache.DEFAULT_CACHE_DIR`, `resembl.config.config_dir_get`,
+  `resembl.config.config_path_get` and `resembl.config.DEFAULT_CONFIG_DIR`
+  moved to the new `resembl.paths` module, which owns every path resembl
+  derives from the environment.  `resembl.server.server_port_path` and
+  `resembl.find_client.server_port_path` collapse into one
+  `resembl.paths.server_port_path(db_url, cache_dir)`.  The CLI, `serve` and
+  the thin find client resolve these through the shared module instead of
+  keeping copies, so a change to the override rules can no longer leave the
+  client looking for a port file the server never wrote.
+
 - **Breaking:** a refused find parameter on `resembl serve` now answers `400`
   with a `{"error": "..."}` body, on `POST /find` and `POST /find-batch`
   alike.  Before, `POST /find` answered `200` and put the error in the

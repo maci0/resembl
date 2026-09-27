@@ -151,9 +151,9 @@ def main() -> None:
         stderr=subprocess.DEVNULL,
     )
     try:
-        from resembl.server import server_port_path
+        from resembl.paths import cache_dir_get, server_port_path
 
-        port_file = server_port_path(db_url)
+        port_file = server_port_path(db_url, cache_dir_get())
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             try:

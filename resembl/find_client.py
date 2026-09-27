@@ -1,10 +1,11 @@
 """Thin client for ``resembl serve`` — instant warm finds.
 
-This module deliberately imports only the standard library so the client
+This module deliberately imports nothing but the standard library (and
+:mod:`resembl.paths`, which is itself standard-library-only) so the client
 process starts in ~50 ms instead of ~450 ms.  It reads the same
 ``RESEMBL_DATABASE_URL`` / ``DATABASE_URL`` / ``RESEMBL_CACHE_DIR``
-environment variables the CLI uses,
-locates the port file written by ``resembl serve``, and POSTs the query.
+environment variables the CLI uses, locates the port file written by
+``resembl serve``, and POSTs the query.
 
 Usage::
 
@@ -15,47 +16,24 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
-import re
 import sys
+import tomllib
 import urllib.error
 import urllib.request
 
-_DEFAULT_DB_URL = "sqlite:///assembly.db"
-_DEFAULT_CACHE_DIR = "~/.cache/resembl"
+from .paths import cache_dir_get, config_path_get, db_url_get, db_url_mask, server_port_path
 
-#: Mirrors resembl.database.DB_URL_ENV_VARS (this module stays stdlib-only):
-#: the namespaced name wins, the unprefixed one is read next, and an empty
-#: value counts as unset so a stray ``export DATABASE_URL=`` in a shell
-#: profile does not send the client looking for a port file named after "".
-_DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
-
-
-#: Mirrors resembl.database.db_url_mask (this module stays stdlib-only):
-#: hides an embedded password before a URL reaches stderr.
-_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
-
-
-def _mask_db_url(url: str) -> str:
-    """Return *url* with any embedded password replaced by ``***``."""
-    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
-
-
-def _db_url_get() -> str:
-    """Return the database URL from the environment (see ``_DB_URL_ENV_VARS``)."""
-    for var in _DB_URL_ENV_VARS:
-        url = os.environ.get(var)
-        if url:
-            return url
-    return _DEFAULT_DB_URL
-
-
-def server_port_path(db_url: str, cache_dir: str) -> str:
-    """Return the port-file path for a database URL (matches ``serve``)."""
-    digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
-    return os.path.join(cache_dir, f"server_{digest}.port")
+#: The find defaults this client falls back to, mirroring
+#: ``ResemblConfig`` (resembl.config cannot be imported here: it pulls in
+#: ``tomli_w`` and the scoring module, which this client must not pay for).
+_CFG_DEFAULTS: dict[str, float] = {
+    "top_n": 5,
+    "lsh_threshold": 0.5,
+    "ngram_size": 3,
+    "num_permutations": 128,
+    "jaccard_weight": 0.4,
+}
 
 
 def _load_config() -> dict:
@@ -67,37 +45,11 @@ def _load_config() -> dict:
     ``lsh_threshold``, ``ngram_size``, ``num_permutations``,
     ``jaccard_weight``).
     """
-    # Mirrors resembl.config.config_dir_get: RESEMBL_CONFIG_DIR wins, then
-    # $XDG_CONFIG_HOME (freedesktop base-dir spec), then the historical
-    # ~/.config/resembl default.
-    override = os.environ.get("RESEMBL_CONFIG_DIR")
-    if override:
-        config_dir = os.path.expanduser(override)
-    else:
-        xdg = os.environ.get("XDG_CONFIG_HOME")
-        config_dir = (
-            os.path.join(xdg, "resembl") if xdg else os.path.expanduser("~/.config/resembl")
-        )
-    path = os.path.join(config_dir, "config.toml")
     try:
-        import tomllib
-
-        with open(path, "rb") as f:
+        with open(config_path_get(), "rb") as f:
             return tomllib.load(f)
     except (OSError, ValueError):
         return {}
-
-
-#: The find defaults this client falls back to, mirroring
-#: ``ResemblConfig`` (resembl.config cannot be imported here: this module is
-#: stdlib-only so a warm find starts in ~50 ms).
-_CFG_DEFAULTS: dict[str, float] = {
-    "top_n": 5,
-    "lsh_threshold": 0.5,
-    "ngram_size": 3,
-    "num_permutations": 128,
-    "jaccard_weight": 0.4,
-}
 
 
 def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
@@ -152,27 +104,15 @@ def _main(argv: list[str] | None = None) -> int:
         print("error: no query provided (--query, --file, or stdin)", file=sys.stderr)
         return 2
 
-    db_url = _db_url_get()
-    # Mirrors resembl.cache.cache_dir_get: RESEMBL_CACHE_DIR wins, then
-    # $XDG_CACHE_HOME, then the historical ~/.cache/resembl default.  The
-    # port file must resolve to the exact path `resembl serve` wrote.
-    cache_override = os.environ.get("RESEMBL_CACHE_DIR")
-    if cache_override:
-        cache_dir = os.path.expanduser(cache_override)
-    else:
-        xdg_cache = os.environ.get("XDG_CACHE_HOME")
-        cache_dir = (
-            os.path.join(xdg_cache, "resembl")
-            if xdg_cache
-            else os.path.expanduser(_DEFAULT_CACHE_DIR)
-        )
-    port_file = server_port_path(db_url, cache_dir)
+    db_url = db_url_get()
+    # The port file must resolve to the exact path `resembl serve` wrote.
+    port_file = server_port_path(db_url, cache_dir_get())
     try:
         with open(port_file, encoding="utf-8") as f:
             port = int(f.read().strip())
     except (OSError, ValueError):
         print(
-            f"error: no server running for {_mask_db_url(db_url)} (start `resembl serve`)",
+            f"error: no server running for {db_url_mask(db_url)} (start `resembl serve`)",
             file=sys.stderr,
         )
         return 1

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import re
 import threading
 
 from sqlalchemy import Engine, event
@@ -14,55 +12,13 @@ from sqlmodel import SQLModel, create_engine
 # Imported for its side effect: defining the SQLModel classes registers the
 # tables that ``db_create`` creates (an empty metadata creates nothing).
 from . import models  # noqa: F401
+from .paths import db_url_get
 
 # Default to assembly.db, but allow overriding for testing or PostgreSQL use.
 # Examples:
 #   sqlite:///assembly.db        (default, local file)
 #   sqlite:///:memory:           (in-memory, for tests)
 #   postgresql://user:pass@host/db  (PostgreSQL for teams)
-DEFAULT_DB_URL = "sqlite:///assembly.db"
-
-#: Environment variables consulted for the database URL, most specific first.
-#: ``RESEMBL_DATABASE_URL`` is the namespaced name every other resembl
-#: override uses (``RESEMBL_CONFIG_DIR``, ``RESEMBL_CACHE_DIR``) and wins
-#: outright.  The unprefixed ``DATABASE_URL`` stays supported and is read
-#: next: it is the name other Python and hosting stacks already export, so
-#: dropping it would break a working deployment.  An empty value counts as
-#: unset in both, matching the directory overrides, rather than handing
-#: SQLAlchemy an empty URL to fail on obscurely.
-DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
-
-#: Matches the credentials component of ``scheme://user:password@host/...``.
-#: The password run stops at the first character a URL may not carry bare;
-#: percent-encoded passwords round-trip untouched.
-_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
-
-
-def db_url_get() -> str:
-    """Return the database URL configured in the environment.
-
-    Read at call time, not at import time: an embedder that sets
-    ``RESEMBL_DATABASE_URL`` after importing resembl (and a test that points
-    the engine at a temporary database) gets the value it set, instead of
-    whatever the environment happened to hold when the module was first
-    imported.
-    """
-    for var in DB_URL_ENV_VARS:
-        url = os.environ.get(var)
-        if url:
-            return url
-    return DEFAULT_DB_URL
-
-
-def db_url_mask(url: str) -> str:
-    """Return *url* with any embedded password replaced by ``***``.
-
-    Display helper for messages that echo a database URL (connection
-    failures, merge progress): URLs like
-    ``postgresql+pg8000://user:pass@host/db`` must not print the password.
-    URLs without credentials are returned unchanged.
-    """
-    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
 
 
 def create_db_engine(

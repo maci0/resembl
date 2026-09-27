@@ -167,11 +167,11 @@ class TestServerMode(unittest.TestCase):
         import atexit
 
         from resembl import server as server_mod
-        from resembl.server import server_port_path
+        from resembl.paths import cache_dir_get, server_port_path
 
         db_url = f"sqlite:///{self._db}"
         httpd_a = server_mod.serve(db_url, port=0)
-        port_file = server_port_path(db_url)
+        port_file = server_port_path(db_url, cache_dir_get())
         self.assertTrue(os.path.exists(port_file))
 
         # A second server for another database shares this cache directory
@@ -195,7 +195,7 @@ class TestServerMode(unittest.TestCase):
         # A's advertisement is retired eagerly, not left for interpreter exit.
         self.assertFalse(os.path.exists(port_file))
         # B's advertisement is untouched by A's close.
-        self.assertTrue(os.path.exists(server_port_path(other_db_url)))
+        self.assertTrue(os.path.exists(server_port_path(other_db_url, cache_dir_get())))
 
         # Closing again is idempotent (callers with finally blocks may repeat).
         httpd_a.server_close()
@@ -386,10 +386,10 @@ class TestServerMode(unittest.TestCase):
 
     def test_port_file_written(self):
         """serve writes a discoverable port file in the cache dir."""
-        from resembl.server import server_port_path
+        from resembl.paths import cache_dir_get, server_port_path
 
         port = self._start_server()
-        port_file = server_port_path(f"sqlite:///{self._db}")
+        port_file = server_port_path(f"sqlite:///{self._db}", cache_dir_get())
         self.assertTrue(os.path.exists(port_file))
         with open(port_file, encoding="utf-8") as f:
             self.assertEqual(int(f.read()), port)
@@ -404,10 +404,10 @@ class TestServerMode(unittest.TestCase):
         """
         import glob
 
-        from resembl.server import server_port_path
+        from resembl.paths import cache_dir_get, server_port_path
 
         self._start_server()
-        port_file = server_port_path(f"sqlite:///{self._db}")
+        port_file = server_port_path(f"sqlite:///{self._db}", cache_dir_get())
         with open(port_file, encoding="utf-8") as f:
             self.assertTrue(f.read().strip().isdigit())
         leftovers = glob.glob(os.path.join(os.path.dirname(port_file), "*.tmp"))
@@ -492,7 +492,8 @@ class TestServerMode(unittest.TestCase):
         import io
         import urllib.error
 
-        from resembl.find_client import _main, server_port_path
+        from resembl.find_client import _main
+        from resembl.paths import server_port_path
 
         port_file = server_port_path(f"sqlite:///{self._db}", self._cache_dir)
         with open(port_file, "w", encoding="utf-8") as f:
@@ -508,7 +509,7 @@ class TestServerMode(unittest.TestCase):
         self.assertIn("unreachable", stderr.getvalue())
 
     def test_port_file_digest_uses_unmasked_url(self):
-        """serve-side port files hash the raw URL the thin client hashes.
+        """The port file is named from the raw URL, never the masked one.
 
         ``str(engine.url)`` masks the password (``user:***@host``); hashing
         that masked string made ``resembl-find`` look under a different
@@ -519,10 +520,8 @@ class TestServerMode(unittest.TestCase):
         from sqlalchemy import create_engine as sa_create_engine
         from sqlmodel import Session
 
-        from resembl.cache import cache_dir_get
         from resembl.cli import _session_db_url
-        from resembl.find_client import server_port_path as client_port_path
-        from resembl.server import server_port_path as server_port_path_for
+        from resembl.paths import cache_dir_get, db_url_mask, server_port_path
 
         url = "postgresql+pg8000://user:secretpw@dbhost/resembl"
         engine = sa_create_engine(url)
@@ -533,10 +532,10 @@ class TestServerMode(unittest.TestCase):
             engine.dispose()
         # The password is rendered back, not masked to ***.
         self.assertEqual(db_url, url)
-        # Both sides resolve the same port file for the same DATABASE_URL.
-        self.assertEqual(
-            server_port_path_for(db_url),
-            client_port_path(url, cache_dir_get()),
+        # Naming the file after the masked URL would break discovery.
+        self.assertNotEqual(
+            server_port_path(db_url, cache_dir_get()),
+            server_port_path(db_url_mask(url), cache_dir_get()),
         )
 
     def test_thin_client_propagates_error_payload(self):
@@ -1491,9 +1490,9 @@ class TestCLIServerEndToEnd(unittest.TestCase):
         self.addCleanup(server.terminate)
         try:
             # Wait for the port file.
-            from resembl.server import server_port_path
+            from resembl.paths import cache_dir_get, server_port_path
 
-            port_file = server_port_path(f"sqlite:///{self._db}")
+            port_file = server_port_path(f"sqlite:///{self._db}", cache_dir_get())
             deadline = time.monotonic() + 20
             while not os.path.exists(port_file) and time.monotonic() < deadline:
                 time.sleep(0.1)

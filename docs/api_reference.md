@@ -126,12 +126,30 @@ when it is fine. `resembl config set` refuses a value that returns a message;
 `ResemblConfig.update` warns and keeps the current value for one found in a
 hand-edited file.
 
-## Database
+## Paths
 
-### `db_url_get() → str`
+`resembl.paths` owns every path derived from the environment. It imports
+nothing from the rest of the package and only the standard library, so the CLI,
+`resembl serve` and the stdlib-only `resembl-find` client all resolve the same
+files without any of them importing another's dependencies.
+
+### `db_url_get() → str` / `db_url_mask(url: str) → str`
 The configured database URL, read from the environment at call time:
 `RESEMBL_DATABASE_URL` first, then `DATABASE_URL`, else
 `sqlite:///assembly.db`. An empty value of either variable counts as unset.
+`db_url_mask` replaces an embedded password with `***` for display.
+
+### `cache_dir_get() → str` / `config_dir_get() → str` / `config_path_get() → str`
+`RESEMBL_CACHE_DIR` / `RESEMBL_CONFIG_DIR` win outright; otherwise
+`$XDG_CACHE_HOME/resembl` or `$XDG_CONFIG_HOME/resembl` when set, else
+`~/.cache/resembl` or `~/.config/resembl`.
+
+### `server_port_path(db_url: str, cache_dir: str) → str`
+The port file `resembl serve` advertises itself with, named from a SHA-1 prefix
+of the *unmasked* URL. The client resolves the same path, so a
+credential-carrying `DATABASE_URL` stays discoverable.
+
+## Database
 
 ### `create_db_engine(url: str | None = None)`
 Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`). Pass a PostgreSQL URL for team use.

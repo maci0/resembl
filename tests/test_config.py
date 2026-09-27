@@ -10,15 +10,19 @@ from unittest.mock import patch
 from resembl.config import (
     DEFAULTS,
     ResemblConfig,
-    config_dir_get,
-    config_path_get,
     load_config,
     remove_config_key,
     save_config,
     update_config,
     validate_value,
 )
-from resembl.database import DEFAULT_DB_URL, create_db_engine, db_url_get
+from resembl.database import create_db_engine
+from resembl.paths import (
+    DEFAULT_DB_URL,
+    config_dir_get,
+    config_path_get,
+    db_url_get,
+)
 from resembl.scoring import MAX_NUM_PERM
 
 

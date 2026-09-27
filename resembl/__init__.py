@@ -62,6 +62,7 @@ _SUBMODULES = frozenset(
         "lsh",
         "minhash",
         "models",
+        "paths",
         "scoring",
         "server",
     )

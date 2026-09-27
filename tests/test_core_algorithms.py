@@ -347,7 +347,7 @@ class TestDbUrlMask(unittest.TestCase):
     """db_url_mask hides credentials before URLs reach output/messages."""
 
     def test_masks_password(self):
-        from resembl.database import db_url_mask
+        from resembl.paths import db_url_mask
 
         self.assertEqual(
             db_url_mask("postgresql+pg8000://user:secret@db.example.com/resembl"),
@@ -355,7 +355,7 @@ class TestDbUrlMask(unittest.TestCase):
         )
 
     def test_leaves_clean_urls_unchanged(self):
-        from resembl.database import db_url_mask
+        from resembl.paths import db_url_mask
 
         for url in (
             "sqlite:///assembly.db",
@@ -366,7 +366,7 @@ class TestDbUrlMask(unittest.TestCase):
             self.assertEqual(db_url_mask(url), url)
 
     def test_masks_first_password_only_and_keeps_path(self):
-        from resembl.database import db_url_mask
+        from resembl.paths import db_url_mask
 
         masked = db_url_mask("mysql://bob:hunter2@host:3306/db?charset=utf8")
         self.assertEqual(masked, "mysql://bob:***@host:3306/db?charset=utf8")

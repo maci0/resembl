@@ -6,13 +6,13 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from resembl.cache import (
-    cache_dir_get,
     db_checksum_path_get,
     lsh_cache_load,
     lsh_cache_path_get,
     lsh_cache_save,
     lsh_index_build,
 )
+from resembl.paths import cache_dir_get
 
 
 def _unpickle_canary() -> None:

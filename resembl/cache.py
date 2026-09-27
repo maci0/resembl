@@ -34,14 +34,13 @@ from .lsh import (
     lsh_meta_set,
 )
 from .models import FINGERPRINT_VERSION, Snippet
+from .paths import cache_dir_get
 
 # Default permutation count when (re)building the index: shared with scoring.
 from .scoring import NUM_PERMUTATIONS as DEFAULT_NUM_PERMUTATIONS
 from .scoring import minhash_ensure_packed
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_CACHE_DIR = "~/.cache/resembl"
 
 #: Rows buffered per band before a sorted bulk insert during index builds.
 #: Every snippet contributes one row to *every* band, so all bands fill
@@ -64,22 +63,6 @@ _BATCH_SIZE = 2_000
 _BUILD_RETRIES = 3
 #: Linear backoff between build retries, in seconds.
 _BUILD_RETRY_BACKOFF = 3
-
-
-def cache_dir_get() -> str:
-    """Return the cache directory, respecting override environment variables.
-
-    ``RESEMBL_CACHE_DIR`` wins outright.  Otherwise ``$XDG_CACHE_HOME`` is
-    honored when set (freedesktop base-directory spec), falling back to the
-    historical ``~/.cache/resembl`` default.
-    """
-    override = os.environ.get("RESEMBL_CACHE_DIR")
-    if override:
-        return os.path.expanduser(override)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
-        return os.path.join(xdg, "resembl")
-    return os.path.expanduser(DEFAULT_CACHE_DIR)
 
 
 def db_checksum_path_get() -> str:
