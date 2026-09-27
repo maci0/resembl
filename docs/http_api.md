@@ -5,8 +5,13 @@ a warm engine and LSH index. `resembl find` and `resembl find-batch` use it
 automatically when it is running; the endpoints are documented here so other
 clients can use the same server.
 
-The server binds `127.0.0.1` and has no authentication: it is a
-single-user local tool, not a service. Do not expose the port.
+The server has no authentication: it is a single-user local tool, not a
+service. It binds `127.0.0.1` by default, but `--host` overrides that and a
+non-loopback address only prints a warning; the bind proceeds. Any process
+that can reach the port can read the whole snippet corpus. Do not expose the
+port.
+
+`docs/THREAT_MODEL.md` records this boundary and the rest of the surface.
 
 ## Discovery
 
@@ -49,7 +54,7 @@ the server's configured default", exactly like an omitted field):
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
 | `query` | string | required |
-| `top_n` | integer | default from the server's config |
+| `top_n` | integer | default from the server's config. No upper bound is enforced: a large value with a low `threshold` returns the matching corpus in one response |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations` |
 | `normalize` | boolean | default `true` |
 | `ngram_size` | integer | at least `1` |

@@ -176,6 +176,7 @@ resembl/
 │   ├── flowcharts.md
 │   ├── http_api.md
 │   ├── man.md
+│   ├── THREAT_MODEL.md
 │   ├── tutorial.md
 │   └── user_stories.md
 ├── fuzzers/
@@ -183,6 +184,7 @@ resembl/
 ├── .gitignore
 ├── CONTRIBUTING.md
 ├── README.md
+├── SECURITY.md
 └── pyproject.toml
 ```
 
@@ -439,6 +441,15 @@ the optimization.
 ## Development
 
 For detailed guidelines on contributing to this project, please see our [Contributor Guide](./CONTRIBUTING.md).
+
+## Security
+
+resembl is a single-user local tool with no authentication: `resembl serve`
+answers anyone who reaches its port, so keep it on loopback. Report a
+vulnerability through GitHub's private reporting, and see
+[SECURITY.md](./SECURITY.md) for the supported versions and the deployment
+assumptions the code relies on. The full surface, boundaries, and ranked
+risks are in [docs/THREAT_MODEL.md](./docs/THREAT_MODEL.md).
 
 ### Generating Test Data
 
