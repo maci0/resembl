@@ -1056,9 +1056,16 @@ def cfg_extract(code: str) -> dict:
     label_to_block: dict[str, int] = {}  # label name → block index
 
     for line in lines:
-        # Strip comments (everything after ';')
-        if ";" in line:
-            line = line[: line.index(";")].strip()
+        # Strip comments.  NASM spells a line comment with either ';' or
+        # '#', and NasmLexer recognizes both, so a '#' comment must be cut
+        # here too: a commented-out '#foo:' line would otherwise be read as
+        # a label and split the block, changing every CFG-derived score.
+        cut = min(
+            (i for i in (line.find(";"), line.find("#")) if i >= 0),
+            default=-1,
+        )
+        if cut >= 0:
+            line = line[:cut].strip()
         if not line:
             continue
 

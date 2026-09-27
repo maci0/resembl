@@ -312,6 +312,36 @@ project follows [Semantic Versioning](https://semver.org/).
   every response as JSON, or a liveness probe checking the port, no longer
   gets a body it cannot decode.
 
+- Collection names are normalized in both directions.  `collection_create`
+  stored the name in NFC while `collection add` and `collection delete`
+  looked it up raw, so the NFD spelling macOS hands back for an accented
+  name missed the row and reported "Collection not found"; `db merge`
+  compared the incoming name against un-normalized local names and could
+  abort on a primary-key collision.  All three now compare on the stored
+  form.
+- `cfg_extract` drops `#` comments, not only `;` ones.  NASM spells a line
+  comment both ways and the tokenizer the rest of the module uses drops
+  both, so a commented-out `#label:` line was counted as a label and split
+  its block, changing every CFG-derived score.
+- `find` and `find-batch` reject a `--top-n` below 1, and `serve` answers
+  `400` for one, the way `config set top_n` already did.  A zero or
+  negative override bypassed that check and truncated the ranking to
+  nothing, which reads as a clean "no matches" beside a full candidate
+  count.
+- `resembl serve -v` works.  `-v` was only a global option, so the
+  documented spelling was rejected with "No such option"; the per-request
+  DEBUG log is the only trail a served query leaves, so serve now takes
+  the flag itself.
+- `--format csv` writes `find-batch`'s `matches` cell as JSON.  It was
+  handed the nested list of match dicts, which `csv` stringified with
+  `str()`, so the cell held a Python repr no JSON or CSV reader could
+  parse back.  The CSV formula guard is applied to the strings inside it,
+  so a name smuggled into a nested payload is still neutralized.
+- `snippet_list` clamps a `LIMIT` of `end - start` to zero.  A window
+  asked for with `end < start` reached SQLite as a negative `LIMIT`, which
+  it reads as "unbounded" and answers with every row from the offset, and
+  which PostgreSQL rejects outright.
+
 - `resembl export` no longer aborts on a filename that contains a byte no
   encoding can decode.  POSIX filenames are byte strings, so importing a
   directory whose entries carry one produced a name with a lone surrogate

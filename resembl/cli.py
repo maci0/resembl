@@ -264,6 +264,21 @@ def _csv_safe(value: object) -> object:
     return value
 
 
+def _csv_safe_tree(value: object) -> object:
+    """Return *value* with every string inside it made safe for a CSV cell.
+
+    :func:`_csv_safe` only sees a cell that is already a string, so the
+    guard is reapplied down through the nested lists and dicts a per-query
+    payload carries (find-batch's ``matches``), where an untrusted name
+    would otherwise reach a spreadsheet as a formula.
+    """
+    if isinstance(value, dict):
+        return {k: _csv_safe_tree(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_csv_safe_tree(v) for v in value]
+    return _csv_safe(value)
+
+
 def _echo_format(data: object) -> None:
     """Print data in the requested format (JSON/CSV) unless ``--quiet``."""
     if state.quiet:
@@ -287,6 +302,16 @@ def _echo_format(data: object) -> None:
             for row in data:
                 if isinstance(row.get("names"), list):
                     row["names"] = ", ".join(row["names"])
+                # A per-query payload (find-batch) keeps its nested match
+                # list in one cell.  ``csv`` would stringify that with
+                # ``str()``, writing Python's single-quoted repr into the
+                # cell; JSON is the same value the json format emits and
+                # both are read back.  The strings inside it still go
+                # through the formula guard, so a name smuggled into a
+                # nested payload is neutralized like a top-level one.
+                for key, value in row.items():
+                    if key != "names" and isinstance(value, (list, dict)):
+                        row[key] = json.dumps(_csv_safe_tree(value))
             rows = data
             fieldnames = list(dict.fromkeys(k for row in rows for k in row))
         elif isinstance(data, dict):
@@ -553,6 +578,9 @@ def serve(
         "127.0.0.1", "--host", help="Interface to bind (default: loopback only)."
     ),
     port: int = typer.Option(0, "--port", help="Port to bind (0 = auto-assign)."),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Log every served request (DEBUG)."
+    ),
 ) -> None:
     """Serve find queries from a warm process (instant warm finds).
 
@@ -561,6 +589,14 @@ def serve(
     The port is written to the cache directory and removed on exit.
     """
     from .server import serve as serve_start
+
+    # ``-v`` is also a global (callback-level) option, which click only
+    # accepts before the subcommand name.  serve has no other work to do in
+    # the foreground, and the per-request DEBUG log is the only trail a
+    # served query leaves, so the flag is repeated here and it is the one
+    # that reaches it.
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     db_url = _session_db_url(state.session)
     if host not in ("127.0.0.1", "localhost", "::1"):
@@ -608,7 +644,9 @@ def serve(
 USAGE_ERROR = 2
 
 
-def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> None:
+def _validate_find_params(
+    threshold: float, num_perm: int, ngram_size: int, top_n: int | None = None
+) -> None:
     """Exit with a clean error if *threshold* / *num_perm* / *ngram* are unusable.
 
     The banding needs b >= 2 bands; at 128 permutations that caps the
@@ -635,6 +673,14 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
         raise typer.Exit(code=USAGE_ERROR)
     if ngram_size < 1:
         err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
+        raise typer.Exit(code=USAGE_ERROR)
+    # A --top-n override bypasses ``config validate_value``, which is where
+    # top_n is otherwise kept at 1 or above.  A zero or negative top_n
+    # truncates the ranking to nothing and reads as a clean "no matches"
+    # with a full candidate count next to it, which is indistinguishable
+    # from a real miss.
+    if top_n is not None and top_n < 1:
+        err_console.print(f"[red]Error:[/red] --top-n must be at least 1 (got {top_n}).")
         raise typer.Exit(code=USAGE_ERROR)
     try:
         bands, _ = banding_params(threshold, num_perm)
@@ -1425,6 +1471,7 @@ def find(
         effective_threshold,
         state.config.num_permutations,
         state.config.ngram_size,
+        effective_top_n,
     )
 
     query_string: str | None = None
@@ -1518,6 +1565,7 @@ def find_batch(
         effective_threshold,
         state.config.num_permutations,
         ngram_size,
+        effective_top_n,
     )
 
     queries = [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]

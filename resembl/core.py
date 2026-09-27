@@ -1512,9 +1512,12 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
     database can return a different page once the plan changes.
     """
     if end is not None:
+        # ``end < start`` is an empty window, not a negative LIMIT: SQLite
+        # reads a negative LIMIT as "unbounded" and would return every row
+        # from the offset, while PostgreSQL rejects it outright.
         return list(
             session.exec(
-                select(Snippet).order_by(Snippet.checksum).offset(start).limit(end - start)
+                select(Snippet).order_by(Snippet.checksum).offset(start).limit(max(0, end - start))
             ).all()
         )
     return list(Snippet.get_all(session))
@@ -1875,6 +1878,9 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
 
 def collection_delete(session: Session, name: str, quiet: bool = False) -> bool:
     """Delete a collection and unassign all its snippets."""
+    # Normalized for the same reason as ``collection_add_snippet``: the row
+    # is stored NFC, and the bulk UPDATE below matches on that same form.
+    name = normalize_unicode(name)
     collection = Collection.get_by_name(session, name)
     if not collection:
         if not quiet:
@@ -1930,6 +1936,10 @@ def collection_add_snippet(
     session: Session, collection_name: str, checksum: str, quiet: bool = False
 ) -> Snippet | None:
     """Add a snippet to a collection."""
+    # The name is the primary key and is stored NFC by ``collection_create``,
+    # so it is normalized before the lookup: the NFD spelling macOS hands
+    # back for an accented name would otherwise miss the row.
+    collection_name = normalize_unicode(collection_name)
     collection = Collection.get_by_name(session, collection_name)
     if not collection:
         if not quiet:
@@ -2037,7 +2047,9 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # (a per-source ``get_by_name`` was one destination round trip per
         # imported collection); new names are added to the snapshot as they
         # are created so duplicates stay impossible without re-querying.
-        local_collections = {col.name: col for col in Collection.get_all(session)}
+        local_collections = {
+            normalize_unicode(col.name): col for col in Collection.get_all(session)
+        }
         for col in source_session.exec(select(Collection).order_by(Collection.name)).all():
             # The name is the collection's primary key on both sides, so the
             # comparison has to be on the form both stores: a source row whose
