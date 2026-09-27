@@ -33,7 +33,7 @@ The hooks run **no tests**. Before handing work over, run the full gate
 yourself:
 
 ```bash
-uv run pytest
+make check                         # mypy, ruff, black --check, pylint, pytest: what CI runs
 uv run pytest --cov=resembl --cov-report=term-missing
 ```
 
