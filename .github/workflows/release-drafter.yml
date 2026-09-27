@@ -23,6 +23,14 @@ permissions:
 
 jobs:
   update_release_draft:
+    # The drafter writes the draft release and posts the changelog preview as
+    # a comment, and both need the write scopes above.  A pull request from a
+    # fork runs with a read-only GITHUB_TOKEN whatever this workflow declares,
+    # so the run could only fail on the write; the job skips it instead, and a
+    # same-repository pull request is drafted and commented on as before.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

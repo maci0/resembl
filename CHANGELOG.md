@@ -105,7 +105,28 @@ project follows [Semantic Versioning](https://semver.org/).
   `uv lock` (or `make install`) is now the way forward.  The commands
   `README.md` and `CONTRIBUTING.md` spell out carry `--locked` for the same
   reason, and a fuzzer run names the `fuzz` extra on the invocation, since
-  `uv run` syncs the environment against the lockfile before it starts.
+  `uv run` syncs the environment against the lockfile before it starts.  The
+  same flag is on every `uv run` in the `Test Suite`, `Code Coverage` and
+  `Pylint` workflows, which were the last commands that could still
+  re-resolve the lockfile inside a run.
+- The `SBOM` workflow runs `make sbom` instead of a second copy of its
+  `uv export` line.  The copy had drifted: it lacked `--no-dev`, so the
+  inventory attached to a release listed the development dependencies
+  (`pytest`, `mypy`, `datasketch`, ...) alongside the runtime graph, while
+  its own comment and `CONTRIBUTING.md` both described it as the runtime
+  set.  The report also lands in `build/` rather than the repository root.
+- The `Code Coverage` workflow runs `make coverage`, the target added for
+  it, so the number a contributor reads locally and the one Codecov stores
+  come from one invocation; the XML report is named explicitly for the
+  upload instead of being left to the action's root-level search.
+- `make dist-verify` keeps the sha256 sums of its first build under
+  `.scratch/` rather than in the repository root, so a failed comparison no
+  longer leaves a file behind in the tree for a contributor to find and
+  delete.
+- The Release Drafter workflow skips a pull request opened from a fork
+  instead of failing on it.  Its token is read-only there whatever the
+  workflow declares, so the write the job exists for could only error; a
+  same-repository pull request is drafted and commented on as before.
 - **Breaking:** Snippet code, names and tags are stored in Unicode
   Normalization Form C, and every checksum, fingerprint and query is taken
   over that same form.  The same string could previously arrive in two

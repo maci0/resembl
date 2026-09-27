@@ -69,11 +69,17 @@ jobs:
       run: uv sync --locked --extra dev
 
     - name: Run tests and generate coverage report
-      run: |
-        uv run pytest --cov=resembl --cov-report=xml
+      # The `make coverage` target, not a second copy of its command, so the
+      # report Codecov stores and the one a contributor reads locally are the
+      # same invocation of the same suite.
+      run: make coverage
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
+        # Where `make coverage` writes it.  Named explicitly rather than left
+        # to the action's root-level search, because the file is generated
+        # output and does not sit in the repository root.
+        files: build/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }} # Optional for private repos
         fail_ci_if_error: true

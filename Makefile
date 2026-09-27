@@ -22,7 +22,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test db-test fuzz check dist dist-verify sbom
+.PHONY: help install format lint types hygiene test coverage db-test fuzz check dist dist-verify sbom
 
 PYTEST_ARGS ?=
 
@@ -97,6 +97,17 @@ hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing white
 
 test:  ## Run the test suite (pass args through: make test PYTEST_ARGS="-k cache")
 	uv run --locked pytest -q $(PYTEST_ARGS)
+
+# The command the Code Coverage workflow runs, so the number a contributor
+# reads locally and the one Codecov stores come from the same invocation.
+# term-missing names the uncovered lines a contributor acts on; the XML report
+# lands in build/ with the other generated output rather than the repository
+# root.  The suite is not quieter here than in `test`: a coverage run over a
+# partial selection measures a partial codebase, so PYTEST_ARGS is deliberately
+# not passed through.
+coverage:  ## Run the suite under coverage (terminal report plus build/coverage.xml)
+	@mkdir -p build
+	uv run --locked pytest --cov=resembl --cov-report=term-missing --cov-report=xml:build/coverage.xml
 
 db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URLs set)
 	@if [ -z "$$RESEMBL_TEST_PG_URL" ] || [ -z "$$RESEMBL_TEST_MYSQL_URL" ]; then \
@@ -175,22 +186,25 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 # `pyproject.toml` moves its mtime so the second build cannot be served by
 # anything that keys on it.  `sha256sum` is coreutils; macOS ships
 # `shasum -a 256` instead.  Each recipe line is its own shell, so the choice is
-# repeated rather than exported.
+# repeated rather than exported.  The sums sit under `.scratch/`, the
+# repository's scratch directory, so a failed comparison leaves nothing behind
+# in the tree a contributor would have to notice and delete.
 dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-identical
 	@$(MAKE) --no-print-directory dist
+	@mkdir -p .scratch
 	@if command -v sha256sum >/dev/null 2>&1; then \
-		sha256sum dist/* > .dist-first.sha256; \
+		sha256sum dist/* > .scratch/dist-first.sha256; \
 	else \
-		shasum -a 256 dist/* > .dist-first.sha256; \
+		shasum -a 256 dist/* > .scratch/dist-first.sha256; \
 	fi
 	@touch pyproject.toml
 	@$(MAKE) --no-print-directory dist
 	@if command -v sha256sum >/dev/null 2>&1; then \
-		sha256sum --check .dist-first.sha256; \
+		sha256sum --check .scratch/dist-first.sha256; \
 	else \
-		shasum -a 256 --check .dist-first.sha256; \
+		shasum -a 256 --check .scratch/dist-first.sha256; \
 	fi
-	@rm -f .dist-first.sha256
+	@rm -f .scratch/dist-first.sha256
 
 # The release inventory, exported by uv from the hash-pinned uv.lock rather
 # than read back out of the built wheel, so it describes what the lock resolves

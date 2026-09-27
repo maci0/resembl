@@ -359,7 +359,7 @@ uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # o
 ```
 
 `make help` lists every target (`install`, `format`, `lint`, `types`, `hygiene`,
-`test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`). `make check` runs everything CI
+`test`, `coverage`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`). `make check` runs everything CI
 runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
 hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
 enforce and no CI workflow does, so a green `make check` is a commit the hooks
@@ -377,8 +377,12 @@ This project uses `pytest-cov` for line-level coverage measurement. A GitHub Act
 
 You can run the coverage report locally with:
 ```bash
-uv run --locked pytest --cov=resembl --cov-report=term-missing
+make coverage
 ```
+
+`make coverage` is the command that workflow runs, so the number you read
+locally is the one Codecov stores. It writes the per-file report to the
+terminal and `build/coverage.xml` alongside it.
 
 ## Advanced Usage
 

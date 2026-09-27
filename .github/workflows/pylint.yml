@@ -45,4 +45,4 @@ jobs:
       # Same target set as the pre-commit hook, so CI and the local hook
       # gate the same files.
       run: |
-        uv run pylint resembl/ tests/ fuzzers/
+        uv run --locked pylint resembl/ tests/ fuzzers/

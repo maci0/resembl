@@ -75,16 +75,16 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run mypy
-        run: uv run mypy
+        run: uv run --locked mypy
 
       - name: Run ruff
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
 
       - name: Check formatting with black
-        run: uv run black --check .
+        run: uv run --locked black --check .
 
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run --locked pytest -q
 
   # README.md, CONTRIBUTING.md and docs/tutorial.md all document Windows
   # (and macOS is implied by the POSIX install path), so those platforms are
@@ -122,4 +122,4 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run --locked pytest -q

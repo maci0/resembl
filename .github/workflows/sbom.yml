@@ -32,13 +32,17 @@ jobs:
       - uses: ./.github/actions/setup-uv
 
       - name: Export CycloneDX SBOM from uv.lock
-        # Runtime dependencies only: this is the set that ships to users.
-        # Package hashes are preserved so the SBOM doubles as an integrity
-        # manifest.
-        run: uv export --preview-features sbom-export --format cyclonedx1.5 --output-file sbom.cdx.json
+        # The `make sbom` target, not a second copy of its command: this
+        # inventory is what a release is assessed with, and a workflow that
+        # exported it its own way is how the two drift into describing
+        # different dependency sets.  Runtime dependencies only (`--no-dev` in
+        # the target), package hashes preserved, so the SBOM doubles as an
+        # integrity manifest.  The file lands in build/, like every other
+        # generated artifact, and not in the repository root.
+        run: make sbom
 
       - name: Validate SBOM parses as JSON
-        run: jq empty sbom.cdx.json
+        run: jq empty build/sbom.cdx.json
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
@@ -47,4 +51,4 @@ jobs:
           # A release SBOM is consumed while a release is being assessed, not
           # kept; a tag run regenerates the same bytes from the same lockfile.
           retention-days: 30
-          path: sbom.cdx.json
+          path: build/sbom.cdx.json

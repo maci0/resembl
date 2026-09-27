@@ -45,7 +45,7 @@ yourself:
 
 ```bash
 make check                         # hygiene, mypy, ruff, black --check, pylint, pytest
-uv run pytest --cov=resembl --cov-report=term-missing
+make coverage                      # the same pytest-cov invocation the codecov workflow runs
 ```
 
 Coverage may rise, never fall; CI reports the number to Codecov from
