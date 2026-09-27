@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 #: ~1.4 ms, never stale.  Non-SQLite backends get no version counter and
 #: bypass the cache.  The key ends with the serving engine's URL: one
 #: process may run several servers for different databases (tests,
-#: embeddings), and ``data_version`` is per-database — without that final
+#: embedded callers), and ``data_version`` is per-database — without that final
 #: component a hit computed for database A could be served to database B
 #: whenever both counters happened to carry the same value.
 _RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
@@ -229,7 +229,7 @@ def _find_one(
                 return entry[1]
     # Reject unbuildable thresholds up front: the banding needs b >= 2
     # bands, and an unbuildable one would make the find return zero matches
-    # silently.  (The thin client cannot run the scipy banding check without
+    # silently.  (The thin client cannot run the banding search without
     # losing its ~50 ms startup, so the server is the right place.)
     from .lsh import banding_params
 
@@ -528,7 +528,7 @@ class _FindServer(ThreadingHTTPServer):
     ``server_close`` releases the engine's pooled DB connections instead of
     leaving them to interpreter exit: a stopped server generation must not
     pin up to ``pool_size + max_overflow`` SQLite handles in a process that
-    starts and stops servers repeatedly (tests, embeddings).
+    starts and stops servers repeatedly (tests, embedded callers).
     """
 
     engine: Any
@@ -660,7 +660,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
                     # Serving over the unmigrated fingerprints would let the
                     # index build below restamp them as current, silently
                     # masking the migration; fail the startup instead (the
-                    # BaseException handler above disposes the engine).
+                    # enclosing `except BaseException` disposes the engine).
                     raise IndexBuildError(reindex_result["error"])
             # Build the index only if it is missing or was built with different
             # parameters — rebuilding an already-current index on every restart

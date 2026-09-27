@@ -63,16 +63,18 @@ class TestDialectDispatch(unittest.TestCase):
         """Both the build and reindex gate sqlite-only behavior on the same check.
 
         This pins the gate expression; the full behavior is exercised by the
-        integration test against a real server.
+        integration test against a real server.  The whole module is read
+        rather than the individual function objects: ``inspect.getsource`` on
+        a function relies on ``co_firstlineno``, which does not survive a
+        function object that a previous test rebound.
         """
         import inspect
 
         from resembl import cache, core
 
-        build_src = inspect.getsource(cache.lsh_index_build)
-        build_src += inspect.getsource(cache._build_once)
+        build_src = inspect.getsource(cache)
         self.assertIn('dialect.name == "sqlite"', build_src)
-        reindex_src = inspect.getsource(core.db_reindex)
+        reindex_src = inspect.getsource(core)
         self.assertIn('dialect.name == "sqlite"', reindex_src)
 
     def test_insert_sql_variants(self):

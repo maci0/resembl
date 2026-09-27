@@ -116,8 +116,8 @@ class IndexBuildError(RuntimeError):
 def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
     """Choose a sensible worker count for a parallel job of *num_items* items.
 
-    One worker per CPU is wasteful for small jobs: spawning each ``spawn``
-    worker costs the full interpreter + library import (~450 ms and ~50 MB),
+    One worker per CPU is wasteful for small jobs: spawning each worker
+    costs the full interpreter + library import (~450 ms and ~50 MB),
     so a 300-item job measured 1.85 s with 32 workers vs 0.84 s with 4.
     The default scales with the work (one worker per ~100 items) and is
     capped at the CPU count, so small jobs stay single-process and large
@@ -679,6 +679,15 @@ def snippet_find_matches(
 ) -> tuple[int, list[tuple[Snippet, float]]]:
     """Find and rank matches for a query string.
 
+    Returns ``(lsh_candidate_count, matches)``.  The count is the number of
+    checksums the index returned, which can exceed ``len(matches)``.  A
+    non-positive ``top_n`` returns the candidate count with no matches, and
+    skips the scoring passes.
+
+    Raises :class:`IndexBuildError` when the fingerprint migration or the
+    index build fails, so callers can tell "no matches" from "the search
+    could not be answered at all".
+
     ``progress`` is forwarded to the lazy index build and to a one-time
     automatic reindex (see below) when either is triggered.
     """
@@ -754,9 +763,10 @@ def snippet_find_matches(
     jaccards = minhash_jaccard_batch(query_minhash_bytes, normalized)
 
     # Hybrid score (Jaccard + Levenshtein) with an early exit: since
-    # ``hybrid = 40 * jaccard + 0.6 * levenshtein`` and levenshtein <= 100,
-    # a candidate whose upper bound ``40 * jaccard + 60`` is strictly below
-    # the current n-th best hybrid can never enter the top-n — it skips the
+    # ``hybrid = 100 * w * jaccard + (1 - w) * levenshtein`` and
+    # levenshtein <= 100, a candidate whose upper bound (the same expression
+    # with levenshtein = 100, computed through ``score_hybrid``) is strictly
+    # below the current n-th best hybrid can never enter the top-n: it skips the
     # ``fuzz.ratio`` call and the full-row fetch entirely.  Candidates are
     # processed in descending jaccard order so the bound only shrinks: once
     # one candidate is pruned, the rest of the list is provably pruned too,
@@ -977,9 +987,10 @@ def db_reindex(
 ) -> dict:
     """Recalculate the MinHash for every snippet in the database.
 
-    With ``jobs > 1`` the CPU-bound tokenization runs in a process pool
-    (bounded in-flight batches), turning a long sequential reindex into a
-    parallel one.
+    With ``jobs > 1`` *and* more than ``batch_size`` snippets in the
+    database, the CPU-bound tokenization runs in a process pool (bounded
+    in-flight batches), turning a long sequential reindex into a parallel
+    one.  Below that the pool's spawn cost exceeds the work.
 
     The fingerprints are invalidated *before* the update: any built index is
     cleared up front, so a crash mid-reindex can never leave a stale index
@@ -1565,10 +1576,15 @@ def db_verify(session: Session) -> dict:
 
 
 def db_clean(session: Session) -> dict:
-    """Clean the LSH cache and vacuum the database."""
+    """Drop the LSH index and vacuum the database.
+
+    Legacy pickle cache files are not touched here; they are removed by the
+    next index write (:func:`resembl.cache._remove_pickle_cache`), not by
+    ``clean``.
+    """
     start_time = time.monotonic()
 
-    # 1. Wipe the legacy cache files and the DB-backed index.
+    # 1. Wipe the DB-backed index (bucket rows and the metadata row).
     lsh_index_clear(session)
 
     # 2. Vacuum the database to reclaim space (SQLite only).

@@ -9,12 +9,13 @@ Install from a checkout of the repository (see the
 [README](../README.md#1-installation) for details):
 
 ```bash
-uv venv
+uv sync --locked --extra dev
 source .venv/bin/activate
-uv pip install -e .
 ```
 
-On Windows, use `.venv\Scripts\Activate.ps1` (PowerShell) or
+`uv sync --locked` installs the exact versions recorded in `uv.lock` and
+fails if the lockfile has drifted, so a checkout runs the same way locally
+and in CI. On Windows, use `.venv\Scripts\Activate.ps1` (PowerShell) or
 `.venv\Scripts\activate.bat` (cmd.exe) to activate the environment.
 
 ## Step 1: Build Your Reference Library

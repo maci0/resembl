@@ -30,8 +30,9 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
   stored as fixed-width lowercase hex (20 bytes -> 40 chars).
 - A single-row `lsh_meta` table records the `(threshold, num_perm)` the index
   was built with; a mismatch (or absence) triggers a rebuild.
-- Banding parameters are still derived with datasketch's `_optimal_param`,
-  so recall behavior at a given threshold is unchanged.
+- Banding parameters are derived by the in-tree `resembl.minhash.optimal_param`
+  (ADR 005), which reproduces datasketch's `_optimal_param` bit-compatibly, so
+  recall behavior at a given threshold is unchanged.
 - Fingerprints are stored as packed uint32 arrays (520 bytes at 128
   permutations, `RMLH`-prefixed, self-describing) instead of pickles.
 
@@ -40,7 +41,7 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
   `UNION ALL` round trip (each branch an indexed point lookup) plus a chunked
   `IN` fetch — independent of database size (~1.4 ms in-process per query;
   ~0.5 s wall including interpreter startup).  The banding parameters are
-  cached per `(threshold, num_perm)`, avoiding a ~13 ms scipy optimization on
+  cached per `(threshold, num_perm)`, avoiding a ~13 ms banding search on
   every query.
 - **Incremental maintenance:** `add`, `import`, `merge`, and `rm` update only
   the affected snippets' bucket rows, so a search never requires a rebuild.
@@ -50,8 +51,8 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
   would grow the WAL to the size of the index (hundreds of MB at scale) and
   force one huge checkpoint at commit.  A crash mid-build leaves only a
   partial index, which is invisible until `lsh_meta` is set and is wiped on
-  the next build, so atomicity is not required.  PostgreSQL segments its own
-  WAL and pays an fsync per commit, so it keeps a single final commit.
+  the next build, so atomicity is not required.  The per-band commit is not
+  SQLite-specific: the build commits each band's chunk on every backend.
 - **Append-friendly builds:** rows are buffered per band and inserted
   band-major sorted by bucket, so the `(band, bucket, checksum)` primary key
   grows by sequential append instead of random probe — random inserts into a

@@ -1,11 +1,13 @@
-"""A SQLite-backed MinHash LSH index for resembl.
+"""A database-backed MinHash LSH index for resembl (SQLite, PostgreSQL,
+MySQL/MariaDB, DuckDB).
 
-Why SQLite instead of datasketch's in-memory :class:`~datasketch.MinHashLSH`?
+Why a database table instead of datasketch's in-memory
+:class:`~datasketch.MinHashLSH`?
 
 - The in-memory index must be rebuilt and pickled to a cache file on every
   change; for large databases that pickle is hundreds of megabytes and takes
   seconds to write and read back.
-- Here the band buckets live in ordinary SQLite tables.  Building the index
+- Here the band buckets live in ordinary tables.  Building the index
   streams rows in batches, queries hit a handful of indexed lookups, and
   single snippet additions/deletions update only that snippet's rows.
 
@@ -45,9 +47,10 @@ def banding_params(threshold: float, num_perm: int) -> tuple[int, int]:
     false-positive/false-negative probability integrals for every ``(b, r)``
     split (~13 ms) — and it was being recomputed on every :class:`ResemblLSH`
     construction, i.e. every query.  Caching the result turns a ~13 ms
-    per-query cost into a dict lookup.  numpy is imported lazily inside
-    :func:`resembl.minhash.optimal_param` so commands that never touch the
-    index (list, stats, export, ...) skip the numpy startup cost.
+    per-query cost into a dict lookup.  ``resembl.minhash`` (and with it
+    numpy) is imported lazily inside this function, so commands that never
+    build or query the index (``list``, ``export``, …) skip the numpy
+    startup cost.
     The 64-entry cache keeps varied-threshold workflows (a script cycling
     many thresholds) from thrashing and re-paying the integral on evictions.
     """

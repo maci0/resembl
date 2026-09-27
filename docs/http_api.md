@@ -13,11 +13,17 @@ single-user local tool, not a service. Do not expose the port.
 `resembl serve` writes the port it bound to
 `server_<dbhash>.port` in the cache dir (`RESEMBL_CACHE_DIR`, else
 `$XDG_CACHE_HOME/resembl`, else `~/.cache/resembl`). The hash is the first 12
-hex digits of the SHA1 of the database URL, so one process can serve several
-databases. The file is removed when the server exits.
+hex digits of the SHA1 of the **resolved** database URL (the engine's URL as
+rendered with the password intact, falling back to `sqlite:///assembly.db`
+when `DATABASE_URL` is unset), so one process can serve several databases. The
+file is removed when the server exits.
 
 ```bash
-resembl serve &                       # any terminal
+# any terminal; the digest below must be of the *resolved* URL, so set
+# DATABASE_URL even when you rely on the default.
+export DATABASE_URL=sqlite:///assembly.db
+resembl serve &
+
 port=$(cat ~/.cache/resembl/server_$(printf %s "$DATABASE_URL" | sha1sum | cut -c1-12).port)
 curl -s "http://127.0.0.1:$port/find" \
   -H 'Content-Type: application/json' \

@@ -42,10 +42,13 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
 
 
 def _load_config() -> dict:
-    """Read the CLI config.toml (lsh_threshold / ngram_size), if present.
+    """Read the whole CLI config.toml, if present.
 
     The thin client must produce the same results as `resembl find`, which
     honors these settings — ignoring them would silently change matches.
+    Returns the raw table; the caller picks the find keys (``top_n``,
+    ``lsh_threshold``, ``ngram_size``, ``num_permutations``,
+    ``jaccard_weight``).
     """
     # Mirrors resembl.config.config_dir_get: RESEMBL_CONFIG_DIR wins, then
     # $XDG_CONFIG_HOME (freedesktop base-dir spec), then the historical

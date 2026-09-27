@@ -25,7 +25,7 @@ graph LR
     subgraph "New Snippet Path"
         D -- No --> F{Generate MinHash from Tokens}
         F --> G[Store Snippet in DB: Checksum, Names, Code, MinHash]
-        G --> H[Add Snippet to DB-backed LSH Index]
+        G --> H[Add Snippet to DB-backed LSH Index, if one is built]
     end
 
     subgraph "Output"

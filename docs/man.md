@@ -144,7 +144,9 @@ The `compare` command also reports control-flow graph similarity.
     `reindex --force` should run).  Exits 1 when issues are found.
 
 **clean**
-:   Wipe the LSH index and any legacy cache files, then vacuum the database.
+:   Drop the LSH index (bucket rows and metadata), then vacuum the
+    database.  Legacy pickle cache files are removed by the next index
+    write, not by `clean`.
 
 **merge** *PATH*
 :   Merge snippets from another resembl database into the current one,

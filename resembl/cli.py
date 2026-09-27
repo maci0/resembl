@@ -220,7 +220,8 @@ def _echo_format(data: object) -> None:
         else:
             console.print(json.dumps(data, indent=2))
     else:
-        # JSON is the default structured format
+        # Reached only for "json": every caller guards on
+        # `format in ("json", "csv")`.
         console.print_json(json.dumps(data, indent=2))
 
 
@@ -1526,7 +1527,7 @@ def compare(
 
 @app.command()
 def clean() -> None:
-    """Clean the LSH cache and vacuum the database."""
+    """Drop the LSH index and vacuum the database."""
     result = db_clean(state.session)
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -1761,8 +1762,8 @@ def collection_show_cmd(
                 }
             )
     else:
-        # One table as before, built from lightweight rows: the ORM objects
-        # and their ``code`` strings never enter memory in the first place.
+        # The table is built from the streamed (checksum, names) rows; the
+        # ORM objects and their ``code`` strings never enter memory.
         table = Table(title=f"Collection: {name}", title_style="bold cyan")
         table.add_column("Checksum", style="dim")
         table.add_column("Names", style="bold")

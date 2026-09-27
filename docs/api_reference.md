@@ -31,8 +31,8 @@ Normalize an assembly snippet to a canonical string (strips comments, collapses 
 
 ## Snippet Operations
 
-### `snippet_add(session, name: str, code: str, ...) → Snippet`
-Add a snippet or alias. Stores the MinHash fingerprint in a compact packed format and keeps the database-backed LSH index in sync.
+### `snippet_add(session, name: str, code: str, ngram_size: int = 3) → Snippet | None`
+Add a snippet or alias. Stores the MinHash fingerprint in a compact packed format and keeps the database-backed LSH index in sync. Returns `None` for empty (blank) code.
 
 ### `snippet_prepare(name: str, code: str, ngram_size: int = 3) → tuple | None`
 Pure function computing `(checksum, name, code, minhash_bytes)` for a snippet — safe to run in worker processes for parallel bulk import.
@@ -57,8 +57,8 @@ cannot beat the current top-N, and full rows are fetched only for
 survivors — so the data movement is proportional to the top-N, not the
 candidate count.
 
-### `snippet_compare(session, checksum1: str, checksum2: str) → dict`
-Compare two snippets. Returns Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared normalized token count.
+### `snippet_compare(session, checksum1: str, checksum2: str) → dict | None`
+Compare two snippets. Returns Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared normalized token count, or `None` when either checksum is not in the database.
 
 ### `shingle_weight(shingle: str) → int`
 Return the insertion weight for a shingle: 3 (rare instruction), 1 (all common), or 2 (default).
@@ -107,10 +107,13 @@ autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minh
 ## Configuration
 
 ### `ResemblConfig` (dataclass)
-Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`; every value read from the config file is coerced and validated against its field's type.
+Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`, which merges a dict (or another `ResemblConfig`) in, coercing each value to its field's type and rejecting out-of-range ones with a warning; every value read from the config file is coerced and validated against its field's type.
 
 ### `load_config() → ResemblConfig`
-Load from `~/.config/resembl/config.toml` (or `RESEMBL_CONFIG_DIR`).
+Load from `~/.config/resembl/config.toml`. `RESEMBL_CONFIG_DIR` overrides that
+directory outright; otherwise `$XDG_CONFIG_HOME/resembl` is used when
+`XDG_CONFIG_HOME` is set. A missing, malformed, or unreadable file yields the
+defaults (malformed and unreadable files are logged as errors).
 
 ## Database
 

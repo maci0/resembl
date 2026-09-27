@@ -7,7 +7,8 @@ deliberately free of the database stack so that it can be imported without
 ``resembl.cache`` / ``resembl.lsh`` / ``resembl.models``).
 
 It imports only:
-- the standard library (``hashlib``, ``struct``, ``operator``, ``copy``)
+- the standard library (``hashlib``, ``operator``, ``struct``, ``threading``;
+  ``copy`` is imported inside :func:`minhash_new`)
 - ``pygments.token`` (cheap constant types); the ``NasmLexer`` itself is
   constructed lazily on first use (:func:`get_lexer`) — importing
   ``pygments.lexers`` costs ~65 ms, which commands that never touch
@@ -937,9 +938,11 @@ def _shingle_weight_tokens(tokens: Sequence[str]) -> int:
     - **1** if every token in the shingle is a common instruction.
     - **2** otherwise (the default).
 
-    Higher weight means the shingle is inserted multiple times into the
-    MinHash, increasing its probability of being selected as a minimum
-    hash value and thus boosting its influence on similarity.
+    A weight of ``w`` means the shingle is hashed as ``w`` *distinct*
+    pseudo-elements (``base|0`` … ``base|w-1``), so it is ``w`` times as
+    likely to be a per-position minimum, boosting its influence on the
+    fingerprint.  Inserting the same bytes ``w`` times instead would be a
+    no-op: ``MinHash.update`` keeps the per-position minimum.
     """
     # ``set.isdisjoint`` / ``set.issuperset`` loop in C; the generator
     # ``any``/``all`` equivalents measured ~2.4x slower on the same shingles.
@@ -1053,7 +1056,9 @@ def cfg_extract(code: str) -> dict:
     adj: dict[int, list[int]] = {i: [] for i in range(len(blocks))}
     for i, block in enumerate(blocks):
         if not block:
-            # Empty block (label-only) falls through
+            # Defensive: the parser never emits a block with no lines (a
+            # label-only line creates no block at all, see above), so this
+            # guard is unreachable today.
             if i + 1 < len(blocks):
                 adj[i].append(i + 1)
             continue
@@ -1303,12 +1308,12 @@ def minhash_jaccard_batch(
     deserialized — see :func:`minhash_unpack`).  The vectorized pass loads
     each candidate's uint32 hash values with ``numpy.frombuffer`` (no
     per-blob ``struct.unpack`` Python loops) and compares the whole
-    ``(N, 128)`` array against the query row in one C-level pass — measured
-    ~7x faster than the per-blob path at 10k candidates.  Results are
-    bit-for-bit identical to repeated :func:`minhash_jaccard` calls:
-    equality counts are small integers and the ``num_perm`` divisor is a
-    power of two, so both paths round identically.  Candidates are processed
-    in chunks to bound peak memory.
+    ``(N, num_perm)`` array against the query row in one C-level pass —
+    measured ~7x faster than the per-blob path at 10k candidates.  Results
+    are bit-for-bit identical to repeated :func:`minhash_jaccard` calls:
+    both compute the equality count as an integer and divide it by
+    ``num_perm``, a float64 int/int division that is correctly rounded in
+    either path.  Candidates are processed in chunks to bound peak memory.
 
     Raises ``ValueError`` when the query or a candidate is malformed, or
     when a candidate uses a different permutation count than the query —

@@ -225,7 +225,7 @@ LSH_BUCKET_KEY_MAX = 640
 
 
 class LSHBucket(SQLModel, table=True):
-    """SQLite-backed LSH index entry (one row per band bucket hit).
+    """LSH index entry row (one row per band bucket hit).
 
     The index is a banded Locality-Sensitive Hash: every snippet contributes
     one row per band whose bucket hash matches.  ``find`` queries only touch

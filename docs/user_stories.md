@@ -231,7 +231,7 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **so that I can** ensure the tool is running efficiently.
 
 **Acceptance Criteria:**
-- `resembl clean` removes the LSH index (buckets and metadata) and any legacy cache files.
+- `resembl clean` removes the LSH index (buckets and metadata). Legacy pickle cache files are removed by the next index write, not by `clean`.
 - `resembl clean` vacuums the database to reclaim unused space (SQLite only).
 - The LSH index is rebuilt automatically on the next `find`.
 
@@ -351,6 +351,6 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **so that** I can verify the tool and its LSH index are working.
 
 **Acceptance Criteria:**
-- `resembl add my_snippet "MOV EAX, EBX"` stores the snippet and updates the LSH index.
+- `resembl add my_snippet "MOV EAX, EBX"` stores the snippet, and adds it to the LSH index when one is already built (on a fresh database the next `find` builds the index).
 - `resembl find --query "MOV EAX, EBX"` returns that snippet among the results.
 - Each result includes a similarity score.
