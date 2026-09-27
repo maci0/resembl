@@ -6,8 +6,12 @@ import subprocess
 import sys
 import unittest
 
+from tests.benchmark import REPO_ROOT
+
 # This must match the DATA_DIR used in the benchmark script.
-DATA_DIR = "data"
+DATA_DIR = os.path.join(REPO_ROOT, "data")
+DB_NAME = os.path.join(REPO_ROOT, "benchmark.db")
+BENCHMARK_SCRIPT = os.path.join(REPO_ROOT, "tests", "benchmark.py")
 
 
 class TestBenchmarkScript(unittest.TestCase):
@@ -15,7 +19,7 @@ class TestBenchmarkScript(unittest.TestCase):
 
     def setUp(self):
         """Ensure the benchmark artifacts don't exist before a test."""
-        self.db_name = "benchmark.db"
+        self.db_name = DB_NAME
         if os.path.exists(self.db_name):
             os.remove(self.db_name)
         if os.path.exists(DATA_DIR):
@@ -39,13 +43,14 @@ class TestBenchmarkScript(unittest.TestCase):
 
         # Run the benchmark script
         env = os.environ.copy()
-        env["PYTHONPATH"] = "."
+        env["PYTHONPATH"] = REPO_ROOT
         result = subprocess.run(
-            [sys.executable, "tests/benchmark.py"],
+            [sys.executable, BENCHMARK_SCRIPT],
             capture_output=True,
             text=True,
             check=False,
             env=env,
+            cwd=REPO_ROOT,
         )
 
         # Check that the script executed successfully

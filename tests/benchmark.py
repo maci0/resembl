@@ -19,21 +19,33 @@ from tests.generate_data import generate_files
 
 # --- Benchmark Configuration ---
 NUM_FILES = 1000
-DATA_DIR = "data"
+
+# Anchored to the repository root, not the working directory: the script is
+# documented as `uv run python tests/benchmark.py` and the suite runs it as a
+# subprocess, and a relative path makes the run depend on where the caller
+# happened to be, failing with an import error rather than saying so.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(REPO_ROOT, "data")
+DB_NAME = os.path.join(REPO_ROOT, "benchmark.db")
 
 
 def run_command(command, extra_env=None):
-    """Helper function to run a command and return the elapsed time."""
+    """Run one `resembl` command and return the elapsed time.
+
+    A non-zero exit raises: a benchmark of a failing command is a timing for
+    an error path, and printing it as a result hides the failure from whoever
+    reads the output and from the test that runs this script.
+    """
     env = {
         **os.environ,
-        "PYTHONPATH": os.path.join(os.getcwd(), "."),
+        "PYTHONPATH": REPO_ROOT,
     }
     if extra_env:
         env.update(extra_env)
 
     start_time = time.monotonic()
-    subprocess.run(
-        [sys.executable, "-m", "resembl.cli", *command.split()],
+    result = subprocess.run(
+        [sys.executable, "-m", "resembl.cli", *command],
         shell=False,
         capture_output=True,
         text=True,
@@ -41,13 +53,17 @@ def run_command(command, extra_env=None):
         env=env,
     )
     end_time = time.monotonic()
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"'resembl {' '.join(command)}' exited with {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
     return end_time - start_time
 
 
 def main():
     """Main function to run the benchmarks."""
-    db_name = "benchmark.db"
-    db_url = f"sqlite:///{db_name}"
+    db_url = f"sqlite:///{DB_NAME}"
     extra_env = {"DATABASE_URL": db_url}
 
     # --- 1. Generate test data ---
@@ -57,7 +73,7 @@ def main():
 
     # --- 2. Benchmark `import` command ---
     print(f"\n--- Benchmarking 'import' on {NUM_FILES} files ---")
-    import_time = run_command(f"import --force {DATA_DIR}", extra_env=extra_env)
+    import_time = run_command(["import", "--force", DATA_DIR], extra_env=extra_env)
     print(f"Import took: {import_time:.4f} seconds")
 
     # --- 3. Benchmark `find` command ---
@@ -66,13 +82,13 @@ def main():
     random_file = random.choice(os.listdir(DATA_DIR))
     query_file_path = os.path.join(DATA_DIR, random_file)
 
-    find_time = run_command(f"find --file {query_file_path}", extra_env=extra_env)
+    find_time = run_command(["find", "--file", query_file_path], extra_env=extra_env)
     print(f"Find took: {find_time:.4f} seconds")
 
     # --- 4. Clean up ---
     print("\nCleaning up generated files and database...")
-    if os.path.exists(db_name):
-        os.remove(db_name)
+    if os.path.exists(DB_NAME):
+        os.remove(DB_NAME)
     if os.path.exists(DATA_DIR):
         shutil.rmtree(DATA_DIR)
     print("Cleanup complete.")

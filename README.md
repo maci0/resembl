@@ -205,7 +205,9 @@ source .venv/bin/activate
 ```
 
 Without `make`, the same two steps are `uv sync --locked --extra dev` and
-`uv run pre-commit install`.
+`uv run pre-commit install`. Windows ships no `make` by default, so that is
+the path there (`winget install GnuWin32.Make` or WSL if you would rather have
+the shortcuts).
 
 `uv sync --locked` installs the exact versions recorded in `uv.lock` and fails
 if that lockfile has drifted from `pyproject.toml`, so a checkout builds the

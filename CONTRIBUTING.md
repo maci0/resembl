@@ -24,7 +24,8 @@ Before you begin, please ensure you have the following software installed on you
 
 - Git
 - Python 3.13 or newer
-- uv for dependency and environment management.  
+- uv for dependency and environment management.
+- GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`). 
 
 ### One-Time Setup
 Follow these steps to create a local development environment. This workflow uses modern tooling to ensure a consistent and reproducible setup for all contributors.  
