@@ -1242,26 +1242,65 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
 
 
 #: Environment variable holding the seed for every sampled value in a run
-#: (see :func:`_sample_key`).  Unset, the seed is drawn from the OS, which
-#: keeps production sampling as varied as it was; set, the whole run draws
-#: the same samples, which is what makes a recorded result replayable.
+#: (see :func:`sample_rng`).  Unset, one seed is drawn from the OS for the
+#: whole process and reported, so a run can still be replayed by setting
+#: this variable; set, the whole run draws the same samples, which is what
+#: makes a recorded result replayable.
 SEED_ENV_VAR = "RESEMBL_SEED"
+
+#: The one generator every sample in a run draws from, and the seed it was
+#: built from.  One generator per process, not one per draw: a per-draw
+#: generator replayed the first value over and over, so every sample in a
+#: seeded run covered the same rows (correlated estimates, and a vocabulary
+#: count that ignored all but one window of the checksum key space), and an
+#: unseeded run drew a fresh OS seed per draw, so a number it reported could
+#: not be reproduced at all.
+_SAMPLE_RNG: random.Random | None = None
+_SAMPLE_SEED: int | None = None
+
+
+def sample_rng() -> random.Random:
+    """Return the process-wide generator every sampled value is drawn from.
+
+    Seeded from :data:`SEED_ENV_VAR` when it is set, so two runs with the
+    same seed draw the same sequence of samples.  Unset, one seed is drawn
+    from the OS, logged at INFO with the value to replay with, and reused
+    for the rest of the process.  The draws are sampling offsets over the
+    checksum key space, not secrets, so a logged seed carries no security
+    weight.  Reading the variable per call (rather than caching the seed at
+    import) keeps the seam usable by a test or an embedding process that
+    changes it between calls; a changed value restarts the stream.
+    """
+    global _SAMPLE_RNG, _SAMPLE_SEED  # pylint: disable=global-statement
+
+    env_seed = os.environ.get(SEED_ENV_VAR)
+    if env_seed is None:
+        if _SAMPLE_RNG is None:
+            import secrets
+
+            _SAMPLE_SEED = secrets.randbits(64)
+            _SAMPLE_RNG = random.Random(_SAMPLE_SEED)
+            logger.info(
+                "Sampling from an OS-drawn seed; replay this run with %s=%d",
+                SEED_ENV_VAR,
+                _SAMPLE_SEED,
+            )
+        return _SAMPLE_RNG
+
+    seed = int(env_seed, 0)  # an unparseable value aborts the command
+    if _SAMPLE_RNG is None or _SAMPLE_SEED != seed:
+        _SAMPLE_SEED = seed
+        _SAMPLE_RNG = random.Random(seed)
+    return _SAMPLE_RNG
 
 
 def _sample_key() -> str:
     """Return the 32-byte hex key a row sample starts from.
 
-    Drawn from :data:`SEED_ENV_VAR` when it is set, so a run that reports a
-    sample-derived number reports the same one on every replay; unset, the
-    seed comes from the OS, which is where it came from before this seam
-    existed.  The value is a sampling offset over the checksum key space, not
-    a secret, so a seeded draw carries no security weight.
+    The next draw from :func:`sample_rng`, so one seed reproduces the whole
+    run's sequence of samples.
     """
-    import secrets
-
-    seed = os.environ.get(SEED_ENV_VAR)
-    gen = random.Random(int(seed, 0) if seed is not None else secrets.randbits(64))
-    return gen.randbytes(32).hex()
+    return sample_rng().randbytes(32).hex()
 
 
 def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
@@ -1383,9 +1422,18 @@ def db_stats(session: Session) -> dict:
 
 
 def snippet_list(session: Session, start: int = 0, end: int = 0) -> list[Snippet]:
-    """List snippets, optionally within a given range."""
+    """List snippets, optionally within a given range.
+
+    Ordered by the checksum primary key, so a paged window selects the same
+    rows on every run: an unordered ``OFFSET``/``LIMIT`` over the same
+    database can return a different page once the plan changes.
+    """
     if end > 0:
-        return list(session.exec(select(Snippet).offset(start).limit(end - start)).all())
+        return list(
+            session.exec(
+                select(Snippet).order_by(Snippet.checksum).offset(start).limit(end - start)
+            ).all()
+        )
     return list(Snippet.get_all(session))
 
 
@@ -1452,13 +1500,16 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     happens to fold case in ``LIKE``, but PostgreSQL and DuckDB do not,
     which made the same search behave differently across backends.
     *limit* bounds the result (and the fetch) so a broad pattern on a
-    large database returns a useful page instead of everything.
+    large database returns a useful page instead of everything.  The page is
+    ordered by the checksum primary key, so two runs over the same database
+    return the same rows in the same order.
     """
     query_pattern = f"%{pattern}%"
     return list(
         session.exec(
             select(Snippet)
             .where(Snippet.names.ilike(query_pattern))  # type: ignore[attr-defined]
+            .order_by(Snippet.checksum)
             .limit(limit)
         ).all()
     )
@@ -1853,7 +1904,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # imported collection); new names are added to the snapshot as they
         # are created so duplicates stay impossible without re-querying.
         local_collections = {col.name: col for col in Collection.get_all(session)}
-        for col in source_session.exec(select(Collection)).all():
+        for col in source_session.exec(select(Collection).order_by(Collection.name)).all():
             if col.name not in local_collections:
                 new_col = Collection(
                     name=col.name,

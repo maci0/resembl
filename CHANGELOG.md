@@ -40,6 +40,18 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `RESEMBL_SEED` now governs one generator for the whole run instead of one
+  generator per draw. A seeded run used to replay its first sampling offset
+  for every draw, so every `stats` estimate in that run was computed from the
+  same rows; the same seed now replays the same sequence of distinct draws.
+  Unset, one seed is drawn from the OS, logged at INFO with the value to
+  replay with, and reused for the rest of the process, where before each
+  draw drew a fresh one and the run reported numbers nothing could reproduce.
+- Full-corpus reads are ordered by the checksum primary key: `snippet list`
+  (including a `--range` window), `name search`, `collection show`,
+  `stats`, `export` and `merge` all read rows in one defined order, where
+  before the row order was whatever plan the backend picked, so output and
+  float sums could differ between two runs over the same database.
 - `resembl collection create` on a name that already exists now reports the
   collection as already there and exits 0, instead of failing with the
   database's `IntegrityError` and its SQL text. The stored description is

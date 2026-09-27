@@ -988,22 +988,92 @@ class TestIndexBuild(BaseScalingTest):
         The vocabulary and average-similarity figures are estimated from a
         random sample, and the similarity mean is a float sum over it, so an
         unseeded offset made every number move between two runs over the same
-        database.  ``RESEMBL_SEED`` pins the offset.
+        database.  ``RESEMBL_SEED`` pins the whole sequence of offsets, and
+        two runs with the same seed draw the same ones in the same order.
+        A run is a fresh process, so each simulated run here starts from a
+        cleared generator (the module state a new process would not have).
         """
+        from resembl import core
         from resembl.core import SEED_ENV_VAR, _sample_key, db_stats
 
+        def run(seed: str) -> tuple[dict, list[str]]:
+            saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
+            core._SAMPLE_RNG = None
+            core._SAMPLE_SEED = None
+            try:
+                with patch.dict(os.environ, {SEED_ENV_VAR: seed}):
+                    return db_stats(self.session), [_sample_key() for _ in range(3)]
+            finally:
+                core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+
         self._add(30, "seeded")
-        with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
-            first = db_stats(self.session)
-            first_key = _sample_key()
-        with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
-            second = db_stats(self.session)
-            second_key = _sample_key()
-        with patch.dict(os.environ, {SEED_ENV_VAR: "4321"}):
-            other_key = _sample_key()
+        first, first_keys = run("1234")
+        second, second_keys = run("1234")
+        other, other_keys = run("4321")
+        self.assertIsInstance(other, dict)
         self.assertEqual(first, second)
-        self.assertEqual(first_key, second_key)
-        self.assertNotEqual(first_key, other_key)
+        self.assertEqual(first_keys, second_keys)
+        self.assertNotEqual(first_keys, other_keys)
+        # One generator for the whole run, not one per draw: consecutive
+        # samples within a run must differ, or every estimate in a seeded
+        # run is computed from the same rows.
+        self.assertEqual(len(set(first_keys)), 3)
+
+    def test_unseeded_run_reports_the_seed_it_drew(self):
+        """An unseeded run logs the seed to replay it with.
+
+        Nothing in the process pins the sample offsets when the variable is
+        unset, so a number the run reported could not be reproduced; the
+        drawn seed is logged precisely so a failing run can be replayed.
+        """
+        from resembl import core
+        from resembl.core import SEED_ENV_VAR, _sample_key
+
+        saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
+        core._SAMPLE_RNG = None
+        core._SAMPLE_SEED = None
+        try:
+            with patch.dict(os.environ):
+                os.environ.pop(SEED_ENV_VAR, None)
+                with self.assertLogs("resembl.core", level="INFO") as logs:
+                    first = _sample_key()
+                second = _sample_key()
+            seed = core._SAMPLE_SEED
+        finally:
+            core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+        self.assertIsInstance(seed, int)
+        self.assertIn(f"{SEED_ENV_VAR}={seed}", "\n".join(logs.output))
+        self.assertNotEqual(first, second)
+
+    def test_reads_return_rows_in_checksum_order(self):
+        """Every full-corpus read orders by the primary key.
+
+        Rendered listings, paged windows, name searches and the float sum
+        behind ``stats`` all consume these rows, and a row order the backend
+        picks per plan is a difference between two runs over the same data.
+        """
+        from resembl.core import snippet_list, snippet_search_by_name
+        from resembl.models import Snippet as SnippetModel
+
+        self._add(30, "ordered")
+        expected = sorted(s.checksum for s in self.session.exec(select(SnippetModel)).all())
+
+        self.assertEqual([s.checksum for s in SnippetModel.get_all(self.session)], expected)
+        self.assertEqual(
+            [s.checksum for s in SnippetModel.stream_all(self.session, batch_size=7)], expected
+        )
+        self.assertEqual([s.checksum for s in snippet_list(self.session)], expected)
+        self.assertEqual(
+            [s.checksum for s in snippet_list(self.session, start=5, end=12)],
+            expected[5:12],
+        )
+        self.assertEqual(
+            [s.checksum for s in snippet_search_by_name(self.session, "ordered_1", limit=50)],
+            sorted(s.checksum for s in snippet_search_by_name(self.session, "ordered_1")),
+        )
+        self.assertEqual(
+            [s.checksum for s in SnippetModel.get_by_collection(self.session, "nope")], []
+        )
 
     def test_stats_survives_corrupt_fingerprint(self):
         """A corrupt blob in the similarity sample must not crash `stats`."""

@@ -89,8 +89,13 @@ class Collection(SQLModel, table=True):
 
     @classmethod
     def get_all(cls, session: Session) -> Sequence[Collection]:
-        """Return all collections."""
-        return session.exec(select(cls)).all()
+        """Return all collections, in name order.
+
+        Name order rather than the backend's row order: `collection list`
+        renders these rows directly, and a merge snapshots them in the same
+        order, so an unspecified order is a run-to-run difference in output.
+        """
+        return session.exec(select(cls).order_by(cls.name)).all()
 
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> Collection | None:
@@ -182,13 +187,24 @@ class Snippet(SQLModel, table=True):
 
     @classmethod
     def get_all(cls, session: Session) -> Sequence[Snippet]:
-        """Return all snippets in the database."""
-        return session.exec(select(cls)).all()
+        """Return all snippets in the database, in checksum order.
+
+        Ordered by the primary key so the row order is a property of the
+        data rather than of the plan the backend happens to pick: every
+        caller renders, paginates or float-sums these rows, and none of
+        that may differ between two runs over the same database.
+        """
+        return session.exec(select(cls).order_by(cls.checksum)).all()
 
     @classmethod
     def stream_all(cls, session: Session, batch_size: int = 1000) -> Iterator[Snippet]:
-        """Yield all snippets in batches, bounding memory for large databases."""
-        yield from session.exec(select(cls)).yield_per(batch_size)
+        """Yield all snippets in batches, bounding memory for large databases.
+
+        Checksum-ordered, like :meth:`get_all`; the sort rides the primary
+        key index, so a streamed scan stays a merge over the b-tree rather
+        than a sort of the whole table.
+        """
+        yield from session.exec(select(cls).order_by(cls.checksum)).yield_per(batch_size)
 
     @classmethod
     def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:
@@ -237,8 +253,10 @@ class Snippet(SQLModel, table=True):
 
     @classmethod
     def get_by_collection(cls, session: Session, collection_name: str) -> Sequence[Snippet]:
-        """Return all snippets in a given collection."""
-        return session.exec(select(cls).where(cls.collection == collection_name)).all()
+        """Return all snippets in a given collection, in checksum order."""
+        return session.exec(
+            select(cls).where(cls.collection == collection_name).order_by(cls.checksum)
+        ).all()
 
     def get_minhash_obj(self) -> MinHash:
         """Return the stored MinHash object for this snippet."""

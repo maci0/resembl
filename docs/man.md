@@ -261,10 +261,12 @@ The `compare` command also reports control-flow graph similarity.
 
 **RESEMBL_SEED**
 :   Integer seed for the values a command samples rather than reads
-    (`stats` vocabulary and average-similarity estimates). Unset, the seed
-    is drawn from the OS. Set it, and the same database reports the same
-    estimates on every run, so a number can be reproduced after the fact. An
-    unparseable value aborts the command.
+    (`stats` vocabulary and average-similarity estimates). One seed governs
+    the whole run: successive samples within a run differ, and two runs with
+    the same seed draw the same sequence. Unset, one seed is drawn from the
+    OS, logged at INFO, and used for the rest of the process, so an unseeded
+    run can still be replayed by setting this variable to the logged value.
+    An unparseable value aborts the command.
 
 **RESEMBL_NOW**
 :   ISO 8601 instant to stamp `created_at` with, instead of the wall clock.
