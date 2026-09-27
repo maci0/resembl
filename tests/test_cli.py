@@ -51,11 +51,18 @@ class BaseCLITest(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
 
+        # ``encoding="utf-8"``: the CLI puts its own stdout and stderr into
+        # UTF-8 on every platform (resembl.paths.console_utf8_reconfigure), so
+        # its bytes are UTF-8 whatever the host locale says.  Letting
+        # subprocess decode them with the locale (cp1252 on the Windows
+        # runners) raised in its reader thread, which leaves ``stdout`` as
+        # None instead of failing in the test that asked for it.
         return subprocess.run(
             [sys.executable, "-m", "resembl.cli", *shlex.split(command)],
             shell=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             input=input_data,
             env=env,
             check=False,

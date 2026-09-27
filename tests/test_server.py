@@ -2064,6 +2064,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             check=False,
         )
@@ -2084,6 +2085,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         self.addCleanup(server.terminate)
         try:
@@ -2116,6 +2118,7 @@ class TestCLIServerEndToEnd(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 env=self._env,
                 check=False,
                 timeout=30,
@@ -2150,6 +2153,7 @@ class TestLazyPackageInit(unittest.TestCase):
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
         )
@@ -2198,6 +2202,7 @@ class TestLazyPackageInit(unittest.TestCase):
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             # The next line asserts returncode == 0 with a useful message;
             # a CalledProcessError would hide result.stderr from the output.

@@ -57,6 +57,7 @@ def _cli_run(*args: str, env: dict[str, str] | None = None) -> subprocess.Comple
         [sys.executable, "-m", "resembl.cli", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         env={
             **os.environ,

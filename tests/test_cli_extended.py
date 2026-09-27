@@ -722,6 +722,7 @@ class TestCLIServeLifecycle(BaseCLITest):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
 
     def _wait_for_port_file(self, port_file, timeout=30):
@@ -818,6 +819,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                     env=self._serve_env(cache_dir),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     timeout=30,
                     check=False,
                 )
@@ -848,6 +850,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                     env=self._serve_env(cache_dir),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
                     timeout=30,
                     check=False,
                 )

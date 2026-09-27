@@ -48,6 +48,7 @@ class TestBenchmarkScript(unittest.TestCase):
             [sys.executable, BENCHMARK_SCRIPT],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=env,
             cwd=REPO_ROOT,
