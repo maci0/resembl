@@ -242,6 +242,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A process that drives the CLI repeatedly in one interpreter (a test
+  harness, an embedding script) no longer leaks a database session and a
+  checked-out connection per invocation.  The main callback registered
+  `state.session.close` as an exit hook on every run, so each registration
+  held a strong reference to its own session, the earlier ones were never
+  released, and the engine's connection pool drained until it stalled.  One
+  stable exit hook now covers the session currently in use, and a new
+  invocation closes the previous one first.
 - `--format csv` output no longer carries a stray carriage return on Windows.
   The `csv` module terminates records with `\r\n` and the writers target
   `sys.stdout`, a text stream that rewrites every `\n` to `os.linesep`, so

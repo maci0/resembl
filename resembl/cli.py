@@ -142,6 +142,30 @@ class State:
 
 state = State()
 
+#: The session the main callback opened, tracked so it can be released.
+#: Registering ``state.session.close`` itself as the exit hook left one
+#: atexit entry per CLI invocation, and every entry holds a strong reference
+#: to its own session: a process that embeds the CLI (a test harness driving
+#: ``CliRunner``, a long-lived wrapper script) grew an unbounded registry and
+#: kept every one of those sessions alive, each holding a checked-out
+#: connection, so repeated invocations drained the engine's pool.  A
+#: module-level function is a single stable callable, so it registers once
+#: for the process and covers every session it is asked to close.
+#: Mutable lazy singleton, not a constant: pylint's const-rgx would have it
+#: UPPER_CASE because the initializer is a literal.
+_active_session: Session | None = None  # pylint: disable=invalid-name
+
+
+def _close_active_session() -> None:
+    """Close the session the main callback opened, if one is open."""
+    global _active_session
+    if _active_session is not None:
+        _active_session.close()
+        _active_session = None
+
+
+atexit.register(_close_active_session)
+
 #: Next step shown whenever a listing comes back empty.  An empty result
 #: printed nothing at all, or a bare "No snippets found.", which reads as a
 #: finished answer: the user has no way to tell an empty database from a
@@ -728,7 +752,7 @@ def app_callback(
     ),
 ) -> None:
     """Set up logging and shared state."""
-    global console, err_console
+    global console, err_console, _active_session
 
     if version:
         # Eager: answer before the database is opened, so `resembl --version`
@@ -785,8 +809,9 @@ def app_callback(
             f"[red]Error:[/red] cannot open the database ({db_url_mask(db_url_get())}): {e}"
         )
         raise typer.Exit(code=1) from e
+    _close_active_session()
     state.session = Session(get_engine())
-    atexit.register(state.session.close)
+    _active_session = state.session
 
 
 # --- Snippet commands ---

@@ -11,10 +11,12 @@ import tempfile
 import tomllib
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from resembl import cli
 from resembl.cli import _format_created_at, _zone_get
 from resembl.core import snippet_add
 from resembl.models import Snippet
@@ -843,6 +845,61 @@ class TestResolveChecksum(unittest.TestCase):
                 cli.state.session = old_session
                 if old_session is None:
                     del cli.state.session
+
+
+class _StubContext:
+    """The slice of ``typer.Context`` the main callback reads."""
+
+    invoked_subcommand: str | None = "list"
+
+
+class _RecordingSession:
+    """A stand-in for the session the callback opens, tracking its close."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class TestSessionLifecycle(unittest.TestCase):
+    """The session the main callback opens is released, not just pooled.
+
+    Registering ``state.session.close`` as the exit hook ran once per
+    callback, and each registration held a strong reference to its own
+    session: a process driving the CLI repeatedly (a test harness, an
+    embedding script) kept every earlier session alive, each holding a
+    checked-out connection, and grew the exit-hook registry without bound.
+    """
+
+    def setUp(self):
+        self.addCleanup(cli._close_active_session)
+        self.addCleanup(setattr, cli, "_active_session", None)
+
+    def _run_callback(self):
+        """Run the main callback against a recording session; return it."""
+        session = _RecordingSession()
+        with (
+            patch.object(cli, "Session", return_value=session),
+            patch.object(cli, "db_create"),
+            patch("resembl.database.get_engine"),
+        ):
+            cli.app_callback(_StubContext(), False, False, False, None, False, None)
+        return session
+
+    def test_a_new_callback_closes_the_previous_session(self):
+        first = self._run_callback()
+        self.assertFalse(first.closed)
+        second = self._run_callback()
+        self.assertTrue(first.closed, "the previous session was never released")
+        self.assertIs(cli.state.session, second)
+
+    def test_the_exit_hook_registers_once_per_process(self):
+        with patch("atexit.register") as register:
+            self._run_callback()
+            self._run_callback()
+        register.assert_not_called()
 
 
 if __name__ == "__main__":
