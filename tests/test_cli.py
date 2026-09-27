@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from resembl.cli import _format_created_at
+from resembl.cli import _format_created_at, _zone_get
 from resembl.core import snippet_add
 from resembl.models import Snippet
 
@@ -723,6 +723,63 @@ class TestFormatCreatedAt(unittest.TestCase):
         value = "2024-06-01T00:00:00+00:00"
         expected = datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M %z")
         self.assertEqual(_format_created_at(value, "%Y-%m-%d %H:%M %z"), expected)
+
+
+class TestZoneGet(unittest.TestCase):
+    """Tests for the ``--tz`` zone resolver."""
+
+    def test_named_zone_resolves(self):
+        self.assertEqual(_zone_get("Europe/Warsaw"), ZoneInfo("Europe/Warsaw"))
+
+    def test_none_keeps_the_local_zone(self):
+        self.assertIsNone(_zone_get(None))
+
+    def test_fixed_offset_refused(self):
+        """A fixed offset names one instant of the year, so it is not a zone."""
+        for name in ("+02:00", "-05:00", "UTC+2"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                _zone_get(name)
+
+    def test_unknown_zone_refused(self):
+        with self.assertRaises(ValueError):
+            _zone_get("Mars/Olympus_Mons")
+
+
+class TestTimezoneOption(BaseCLITest):
+    """``--tz`` decides the zone printed timestamps are rendered in."""
+
+    def test_tz_shifts_the_printed_date(self):
+        """The same stored instant prints a different date per zone."""
+        env = {"RESEMBL_NOW": "2024-06-01T23:30:00+00:00"}
+        result = self.run_command("collection create zoned", extra_env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        warsaw = self.run_command("--tz Europe/Warsaw collection list", extra_env=env)
+        tokyo = self.run_command("--tz Asia/Tokyo collection list", extra_env=env)
+        self.assertEqual(warsaw.returncode, 0, warsaw.stderr)
+        self.assertEqual(tokyo.returncode, 0, tokyo.stderr)
+        self.assertIn("2024-06-02", warsaw.stdout)
+        self.assertIn("2024-06-02", tokyo.stdout)
+
+    def test_tz_before_the_stored_date(self):
+        """A zone behind UTC can print the previous calendar day."""
+        self.run_command(
+            "collection create zoned", extra_env={"RESEMBL_NOW": "2024-06-02T00:30:00+00:00"}
+        )
+        result = self.run_command("--tz America/Los_Angeles collection list")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("2024-06-01", result.stdout)
+
+    def test_unknown_zone_exits_2(self):
+        """An unknown zone is a usage error, not a silent local-zone fallback."""
+        result = self.run_command("--tz Mars/Olympus_Mons collection list")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not a known IANA time zone", result.stderr)
+
+    def test_fixed_offset_exits_2(self):
+        """A fixed offset is refused: it cannot follow a DST transition."""
+        result = self.run_command("--tz +02:00 collection list")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fixed offset", result.stderr)
 
 
 class TestResolveChecksum(unittest.TestCase):

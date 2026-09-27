@@ -8,6 +8,13 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `resembl --tz <ZONE>` picks the zone printed timestamps are rendered in
+  (`collection list`, `version <checksum>`), e.g. `--tz Europe/Warsaw`.
+  Timestamps are stored in UTC and only the display converts, so the printed
+  date no longer changes with the host's `TZ`; the default is still the local
+  zone.  A fixed offset (`+02:00`) is rejected, since it names one instant of
+  the year rather than a zone that follows daylight saving.  `json` and `csv`
+  output is unchanged and still carries the stored UTC string.
 - `resembl --version` prints the installed version and exits `0`; it is
   answered before the database is opened, so it works against a missing or
   unreachable database URL.

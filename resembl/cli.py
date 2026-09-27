@@ -32,6 +32,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING, Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import typer
 from rich.console import Console
@@ -130,6 +131,7 @@ class State:
     session: Session
     quiet: bool = False
     format: str = "table"
+    tz: tzinfo | None = None
 
     def __init__(self) -> None:
         # Config defaults until the CLI callback loads the user's file;
@@ -157,16 +159,37 @@ def _echo(message: object, **kwargs: Any) -> None:
         console.print(message, **kwargs)
 
 
+def _zone_get(name: str | None) -> tzinfo | None:
+    """Return the IANA zone *name* resolves to, or ``None`` for the local zone.
+
+    ``None`` keeps :func:`_format_created_at` on the host's zone.  A fixed
+    offset (``+02:00``) is refused rather than accepted: it names one instant
+    of the year, so every date after a DST transition would render at the
+    wrong wall clock.  Raises :class:`ValueError` naming the input.
+    """
+    if name is None:
+        return None
+    if name.startswith(("+", "-", "UTC+", "UTC-")) or not name[:1].isalpha():
+        raise ValueError(
+            f"{name!r} is a fixed offset, not a zone name; pass an IANA zone such as "
+            "'Europe/Warsaw', whose offset follows daylight saving."
+        )
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"{name!r} is not a known IANA time zone") from exc
+
+
 def _format_created_at(value: object, fmt: str, tz: tzinfo | None = None) -> str:
     """Render a stored ``created_at`` string in the viewer's local zone.
 
     Stored values are aware-UTC ISO 8601 strings (see ``Collection.created_at``);
-    they are converted to *tz* (the system's local zone by default) before
-    formatting so table output matches the user's wall clock.  Naive legacy
-    values are interpreted as UTC; unparseable values are shown verbatim, and
-    a NULL column (a database written without one) has no instant to show and
-    renders as an empty cell.  Structured (JSON/CSV) output keeps the raw
-    stored string.
+    they are converted to *tz* (the ``--tz`` zone, else the system's local
+    zone) before formatting so table output matches the viewer's wall clock.
+    Naive legacy values are interpreted as UTC; unparseable values are shown
+    verbatim, and a NULL column (a database written without one) has no instant
+    to show and renders as an empty cell.  Structured (JSON/CSV) output keeps
+    the raw stored string.
     """
     if not isinstance(value, str):
         return ""
@@ -675,6 +698,15 @@ def app_callback(
         is_eager=True,
         help="Show the resembl version and exit.",
     ),
+    tz_name: str | None = typer.Option(
+        None,
+        "--tz",
+        metavar="ZONE",
+        help=(
+            "IANA zone for printed timestamps (e.g. Europe/Warsaw). "
+            "Default: the host's local zone."
+        ),
+    ),
 ) -> None:
     """Set up logging and shared state."""
     global console, err_console
@@ -718,6 +750,11 @@ def app_callback(
             f"[red]Error:[/red] --format must be one of {', '.join(FORMATS)}, got '{state.format}'."
         )
         raise typer.Exit(code=2)
+    try:
+        state.tz = _zone_get(tz_name)
+    except ValueError as e:
+        err_console.print(f"[red]Error:[/red] {e}.")
+        raise typer.Exit(code=2) from e
     try:
         db_create()
     except SQLAlchemyError as e:
@@ -1757,7 +1794,7 @@ def collection_list_cmd() -> None:
             col["name"],
             col["description"],
             str(col["snippet_count"]),
-            _format_created_at(col["created_at"], "%Y-%m-%d"),
+            _format_created_at(col["created_at"], "%Y-%m-%d", state.tz),
         )
     _echo(table)
 
@@ -1884,7 +1921,9 @@ def version_cmd(
     table.add_column("ID", justify="right")
     table.add_column("Created At")
     for v in versions:
-        table.add_row(str(v["id"]), _format_created_at(v["created_at"], "%Y-%m-%d %H:%M:%S %z"))
+        table.add_row(
+            str(v["id"]), _format_created_at(v["created_at"], "%Y-%m-%d %H:%M:%S %z", state.tz)
+        )
     _echo(table)
 
 

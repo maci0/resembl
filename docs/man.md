@@ -27,6 +27,16 @@ The `compare` command also reports control-flow graph similarity.
 :   Output format (overrides config).  Any other value is rejected (exit 2);
     an unrecognized format cannot be rendered.
 
+**--tz** *ZONE*
+:   IANA zone the printed timestamps are rendered in, e.g.
+    `resembl --tz Europe/Warsaw collection list`.  A global option, so it
+    goes before the subcommand.  Timestamps are stored in UTC; only the
+    display converts, and the default is the host's local zone.  A fixed
+    offset (`+02:00`) is rejected (exit 2): it names one instant of the year,
+    so dates on the other side of a daylight-saving transition would print
+    the wrong wall clock.  `json` and `csv` output keeps the stored UTC
+    string.
+
 **--version**
 :   Print the resembl version and exit.  Read before the database is
     opened, so it works with an unreachable `DATABASE_URL`.
@@ -43,7 +53,8 @@ The `compare` command also reports control-flow graph similarity.
 **2**
 :   The command line was rejected: an unknown command or flag, a bad flag
     value (`--format`, `--range`, `--threshold`, a `config` key or value),
-    a missing query, or a bare `resembl` with no subcommand.
+    a missing query, or a bare `resembl` with no subcommand.  `--tz` is
+    rejected the same way, for both an unknown zone name and a fixed offset.
 
 ## COMMANDS
 
