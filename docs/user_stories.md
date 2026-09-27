@@ -301,7 +301,9 @@ command does with the rows it would read.
 
 **Acceptance Criteria:**
 - `resembl version <checksum>` lists recorded versions (id and timestamp); checksum prefixes are accepted.
-- When no history exists, the tool says so instead of erroring.
+- When no history exists, the tool says so instead of erroring: table output
+  prints "No version history for this snippet.", `--format json` prints an
+  empty list and `--format csv` prints no rows, both with exit code 0.
 - The output can be formatted as JSON or CSV via the global `--format` option.
 
 ---

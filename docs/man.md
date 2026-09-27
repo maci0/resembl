@@ -224,6 +224,9 @@ The `compare` command also reports control-flow graph similarity.
 **version** *CHECKSUM*
 :   Show the version history for a snippet.  Accepts checksum prefixes.
     (The tool's own version comes from the global `--version` option.)
+    No code path writes a version row yet, so this always reports an empty
+    history; see the `version` story in
+    [user_stories.md](user_stories.md).
 
 ### Configuration
 

@@ -334,6 +334,26 @@ class TestCLIVersion(BaseCLITest):
         result = self.run_command(f"version {checksum}")
         self.assertEqual(result.returncode, 0)
 
+    def test_version_without_history_is_empty_not_an_error(self):
+        """No recorded version is a message in table mode, empty in the
+        machine formats, and an exit code of 0 in all three."""
+        with Session(self.engine) as session:
+            from resembl.models import Snippet
+
+            checksum = Snippet.get_by_name(session, "test_snippet").checksum
+
+        table = self.run_command(f"version {checksum}")
+        self.assertEqual(table.returncode, 0)
+        self.assertIn("No version history", table.stdout)
+
+        as_json = self.run_command(f"--format json version {checksum}")
+        self.assertEqual(as_json.returncode, 0, as_json.stderr)
+        self.assertEqual(json.loads(as_json.stdout), [])
+
+        as_csv = self.run_command(f"--format csv version {checksum}")
+        self.assertEqual(as_csv.returncode, 0, as_csv.stderr)
+        self.assertEqual(as_csv.stdout.strip(), "")
+
 
 class TestCLISearch(BaseCLITest):
     """Integration tests for the search command."""
@@ -512,6 +532,23 @@ class TestCLIFormatFlag(BaseCLITest):
         self.assertGreaterEqual(len(data["matches"]), 1)
         self.assertEqual(data["matches"][0]["names"], ["multi"])
 
+    def test_find_no_normalization_skips_token_folding(self):
+        """--no-normalization stops registers and immediates being folded.
+
+        The stored snippet is ``MOV EAX, 1``; a query renaming the register
+        and changing the immediate still matches once both sides are folded
+        to REG/IMM, and no longer matches when the folding is skipped.
+        """
+        result = self.run_command("--format json find --query 'MOV ECX, 9'")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [m["names"] for m in json.loads(result.stdout)["matches"]], [["test_snippet"]]
+        )
+
+        result = self.run_command("--format json find --no-normalization --query 'MOV ECX, 9'")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["matches"], [])
+
     def test_find_reports_lazy_index_build(self):
         """Table-mode find announces the one-time LSH index build."""
         result = self.run_command("find --query 'MOV EAX, 1'")
@@ -521,6 +558,38 @@ class TestCLIFormatFlag(BaseCLITest):
         result = self.run_command("find --query 'MOV EAX, 1'")
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("Building LSH index", result.stdout)
+
+
+class TestCLIServeWarnings(BaseCLITest):
+    """The bind warning the serve story requires.
+
+    ``serve`` blocks in ``serve_forever`` once it is listening, so each
+    command is pointed at a port this process already holds: the bind
+    fails, the command exits 1, and the warning is on stdout by then.
+    """
+
+    def run_serve(self, host):
+        """Run ``serve --host host`` on a port already in use; return the result."""
+        import socket
+
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            port = taken.getsockname()[1]
+            taken.listen(1)
+            result = self.run_command(f"serve --host {host} --port {port}")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        return result
+
+    def test_non_loopback_bind_warns_about_authentication(self):
+        """Binding a routable interface says the service is unauthenticated."""
+        result = self.run_serve("0.0.0.0")
+        self.assertIn("non-loopback", result.stdout)
+        self.assertIn("unauthenticated", result.stdout)
+
+    def test_loopback_bind_does_not_warn(self):
+        """The default loopback bind is the safe one, so it stays quiet."""
+        result = self.run_serve("127.0.0.1")
+        self.assertNotIn("unauthenticated", result.stdout)
 
 
 class TestCLITagEdgeCases(BaseCLITest):
