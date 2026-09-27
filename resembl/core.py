@@ -1649,6 +1649,13 @@ _WINDOWS_RESERVED_STEMS = frozenset(
 #: MAX_PATH budget) regardless of how long the snippet's name is.
 _EXPORT_STEM_MAX_BYTES = 230
 
+#: Manifest a previous :func:`snippet_export` run left in the export
+#: directory: the file names it wrote.  Only names listed here are ever
+#: removed on a later run, so a user's own files in the same directory are
+#: never touched, and the manifest is replaced wholesale every run (it is
+#: bounded by one entry per exported snippet, not a growing log).
+_EXPORT_MANIFEST_NAME = ".resembl-export.json"
+
 
 def _export_safe_filename(name: str) -> str:
     """Sanitize a snippet name into a portable filename stem.
@@ -1678,18 +1685,97 @@ def _export_safe_filename(name: str) -> str:
     return cleaned
 
 
+def _export_manifest_read(export_dir: str) -> set[str]:
+    """Return the file names a previous export wrote, or an empty set.
+
+    A missing, unreadable, or malformed manifest yields no names, which
+    disables pruning for that run: the export still writes every file, and a
+    damaged manifest can never turn into an unbounded delete.
+    """
+    try:
+        with open(os.path.join(export_dir, _EXPORT_MANIFEST_NAME), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {name for name in data if isinstance(name, str)}
+
+
+def _export_stale_remove(export_dir: str, previous: set[str], written: set[str]) -> int:
+    """Delete the files a previous export wrote that this run did not, and count them.
+
+    Only names the previous manifest recorded are considered, only ones this
+    run did not rewrite, and only plain file names: a name carrying a
+    separator or a ``..`` component, or one that is not a file anymore, is
+    skipped rather than resolved, so a hand-edited or hostile manifest cannot
+    reach outside the export directory.
+    """
+    removed = 0
+    for name in sorted(previous - written):
+        if name in {_EXPORT_MANIFEST_NAME, "", ".", ".."} or os.path.basename(name) != name:
+            continue
+        path = os.path.join(export_dir, name)
+        if not os.path.isfile(path) or os.path.islink(path):
+            continue
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError as e:
+            logger.warning("Could not remove stale export file %s: %s", path, e)
+    return removed
+
+
+def _export_manifest_write(export_dir: str, written: set[str]) -> None:
+    """Record *written* as the file list the next export run may prune.
+
+    Published through a same-directory temp and one rename (the pattern
+    :func:`snippet_export_yara` uses for its rules), so a crash or a
+    concurrent reader never sees a half-written manifest.  Bookkeeping only:
+    a failure is logged and skipped, because the files themselves are
+    already on disk and the export has otherwise succeeded.
+    """
+    tmp_path = os.path.join(export_dir, f"{_EXPORT_MANIFEST_NAME}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(sorted(written), f)
+        os.replace(tmp_path, os.path.join(export_dir, _EXPORT_MANIFEST_NAME))
+    except OSError as e:
+        logger.warning("Could not write the export manifest: %s", e)
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 def snippet_export(session: Session, export_dir: str) -> dict:
-    """Export all snippets to a directory."""
+    """Export all snippets to a directory.
+
+    Convergent on a re-run: the directory ends up holding exactly the files
+    the database produces.  Files a previous run wrote for snippets that have
+    since been renamed or deleted are removed (see :func:`_export_stale_remove`
+    for the manifest that records them), so an exported directory is a valid
+    input to a later ``import`` rather than one that re-adds retired
+    snippets.  Files the export did not write are never touched.
+    """
     start_time = time.monotonic()
     num_exported = 0
 
     os.makedirs(export_dir, exist_ok=True)
+    # Read before the writes: the manifest names what the *previous* run
+    # produced, which is what this run may prune.
+    previous_exports = _export_manifest_read(export_dir)
 
     abs_export_dir = os.path.realpath(export_dir)
     # Keys are os.path.normcase()-normalized so names differing only by
     # case cannot silently overwrite each other on case-insensitive
     # filesystems (macOS defaults, Windows).
     used_paths: set[str] = set()
+    # Plain file names, for the manifest (the keys above are normcase'd paths,
+    # which would record two spellings of one file on a case-folding
+    # filesystem).
+    written: set[str] = set()
 
     for snippet in Snippet.stream_all(session):
         # Use the first name as the primary name, sanitized for safety.
@@ -1722,6 +1808,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             file_path = os.path.join(abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm")
             used_key = os.path.normcase(file_path)
         used_paths.add(used_key)
+        written.add(os.path.basename(file_path))
 
         # ``newline="\n"``: the default text-mode translate rewrites every
         # "\n" to ``os.linesep``, so the same database would export CRLF on
@@ -1732,14 +1819,24 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             f.write(snippet.code)
         num_exported += 1
 
+    # Every file is on disk: drop what a previous run wrote for snippets the
+    # database no longer holds, then record this run's files for the next one.
+    # Both steps are bookkeeping over files this export owns, and neither can
+    # fail the export (a failed write inside the loop already raised).
+    num_removed = _export_stale_remove(export_dir, previous_exports, written)
+    _export_manifest_write(export_dir, written)
+
     end_time = time.monotonic()
     time_elapsed = end_time - start_time
 
-    return {
+    result = {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
         "avg_time_per_snippet": (time_elapsed / num_exported if num_exported > 0 else 0),
     }
+    if num_removed:
+        result["num_removed"] = num_removed
+    return result
 
 
 def _usable_band_count(threshold: float, num_perm: int) -> int | None:

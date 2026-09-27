@@ -622,7 +622,7 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         with tempfile.TemporaryDirectory() as temp_dir:
             result = snippet_export(self.session, temp_dir)
             self.assertEqual(result["num_exported"], 2)
-            exported = sorted(os.listdir(temp_dir))
+            exported = sorted(f for f in os.listdir(temp_dir) if f.endswith(".asm"))
             self.assertEqual(len(exported), 2)
             for fname in exported:
                 stem = fname[: -len(".asm")]

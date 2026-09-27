@@ -74,6 +74,16 @@ so `end=0` is the empty window rather than "no window".
 ### `snippet_delete(session, checksum: str) → bool`
 Delete a snippet. Returns `True` on success.
 
+### `snippet_export(session, export_dir: str) → dict`
+Write every snippet to `export_dir` as `<primary name>.asm`. Returns
+`num_exported`, `time_elapsed`, `avg_time_per_snippet`, and `num_removed`
+when the run dropped files an earlier run had written. The run converges: the
+`.resembl-export.json` manifest in `export_dir` records the files this export
+wrote, and a later run removes the ones the database no longer produces (a
+snippet renamed or deleted since). Only manifest entries are ever removed,
+and only as plain file names, so nothing else in the directory is touched; a
+missing or damaged manifest disables pruning for that run.
+
 ### `snippet_find_matches(session, query_string: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
 Find similar snippets. Returns the LSH candidate count and the top matches
 (snippet + hybrid score).  Candidates are scored with a vectorized numpy

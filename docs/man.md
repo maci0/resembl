@@ -123,7 +123,13 @@ The `compare` command also reports control-flow graph similarity.
 
 **export** *DIRECTORY* [--force]
 :   Export all snippets to a directory as `.asm` files (one per snippet,
-    named after the snippet's primary name).
+    named after the snippet's primary name).  A re-run converges: the files
+    an earlier run wrote for snippets that have since been renamed or
+    deleted are removed, and the JSON/CSV output carries `num_removed` when
+    any were.  Only the files the export itself wrote are ever removed, so
+    anything else living in the directory is left alone.  The file list is
+    kept in `DIRECTORY/.resembl-export.json`; a missing or damaged manifest
+    simply disables the pruning for that run.
 
 **export-yara** *OUTPUT_FILE* [--force]
 :   Export all snippets to *OUTPUT_FILE* as YARA string-matching rules.

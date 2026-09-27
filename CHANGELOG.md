@@ -304,6 +304,16 @@ project follows [Semantic Versioning](https://semver.org/).
   `400`, and the in-process `resembl find` still returns the configured
   number of rows.
 
+- `resembl export` converges on a re-run.  A second export into a directory an
+  earlier one wrote left the files of snippets that had since been renamed or
+  deleted in place, so the directory was not a faithful copy of the database
+  and re-importing it brought retired snippets back.  The export now records
+  the files it wrote in `DIRECTORY/.resembl-export.json` and a later run
+  removes the ones the database no longer produces; only those entries are
+  ever removed, so other files in the directory are untouched, and a missing
+  or damaged manifest just disables the pruning.  The removed count is
+  reported in the `json` / `csv` output as `num_removed` and in the table.
+
 - `resembl verify` no longer crashes on an `lsh_meta` row naming parameters no
   index can be built from (a permutation count below 2, a threshold outside
   `[0.0, 1.0]`).  The stored values went straight into the banding search,

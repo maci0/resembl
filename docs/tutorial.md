@@ -107,6 +107,11 @@ Export your library for team use:
 resembl export ./export_dir/ --force
 ```
 
+Re-running the export into the same directory keeps it in step with the
+database: files an earlier run wrote for snippets you have since renamed or
+deleted are removed, so the directory can be handed to someone else (or
+re-imported) without carrying retired snippets along.
+
 ## Working with Different Architectures
 
 resembl normalizes registers from multiple architectures:

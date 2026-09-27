@@ -648,7 +648,7 @@ class TestIncrementalIndexSync(BaseScalingTest):
         with _tempfile.TemporaryDirectory() as tmp:
             result = snippet_export(self.session, tmp)
             self.assertEqual(result["num_exported"], 3)
-            files = sorted(os.listdir(tmp))
+            files = sorted(f for f in os.listdir(tmp) if f.endswith(".asm"))
             self.assertEqual(len(files), 3)  # no overwrite
             # The collision got a checksum-suffixed name.
             self.assertTrue(any("dup-" in f for f in files))

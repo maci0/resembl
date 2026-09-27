@@ -287,6 +287,11 @@ class TestAverageSimilarity(BaseDBTest):
 # ---------------------------------------------------------------------------
 
 
+def _exported_asm_files(export_dir: str) -> list[str]:
+    """The ``.asm`` files an export wrote (its manifest is not one of them)."""
+    return sorted(f for f in os.listdir(export_dir) if f.endswith(".asm"))
+
+
 class TestSnippetExport(BaseDBTest):
     """Tests for snippet_export to directory."""
 
@@ -296,7 +301,7 @@ class TestSnippetExport(BaseDBTest):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = snippet_export(self.session, tmpdir)
             self.assertEqual(result["num_exported"], 1)
-            files = os.listdir(tmpdir)
+            files = [f for f in os.listdir(tmpdir) if f.endswith(".asm")]
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith(".asm"))
 
@@ -312,7 +317,7 @@ class TestSnippetExport(BaseDBTest):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = snippet_export(self.session, tmpdir)
             self.assertEqual(result["num_exported"], 1)
-            exported = os.path.join(tmpdir, os.listdir(tmpdir)[0])
+            exported = os.path.join(tmpdir, _exported_asm_files(tmpdir)[0])
             with open(exported, "rb") as handle:
                 raw = handle.read()
         self.assertNotIn(b"\r\n", raw)
@@ -334,7 +339,7 @@ class TestSnippetExport(BaseDBTest):
                 snippet_add(self.session, hostile, f"MOV EAX, {i}")
             result = snippet_export(self.session, tmpdir)
             # Every file landed as a direct child of the export directory.
-            written = os.listdir(tmpdir)
+            written = _exported_asm_files(tmpdir)
             self.assertEqual(result["num_exported"], len(written))
             self.assertTrue(all(f.endswith(".asm") for f in written))
             # Nothing escaped to a prefix-sharing sibling directory.

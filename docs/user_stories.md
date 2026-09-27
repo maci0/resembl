@@ -140,6 +140,10 @@ Last reviewed: 2026-09-27.
 - `resembl export <directory>` exports all snippets to the specified directory.
 - Each snippet is saved as a separate `.asm` file.
 - The filename is the primary name of the snippet.
+- Re-running the export over the same directory leaves it holding exactly the
+  current snippets: files an earlier run wrote for snippets that have since
+  been renamed or deleted are removed, and files the export did not write are
+  left alone.
 - The user is prompted for confirmation before the export begins.
 - The user can bypass the confirmation prompt with the `--force` flag.
 

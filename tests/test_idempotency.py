@@ -322,21 +322,76 @@ class TestMergeWrites(BaseDBTest):
 class TestExportWrites(BaseDBTest):
     """Exporting twice rewrites the same files rather than appending to them."""
 
+    #: The export's own bookkeeping, not part of the exported snippets.
+    MANIFEST = ".resembl-export.json"
+
+    @staticmethod
+    def _read_export(out: str) -> dict[str, str]:
+        """Read the exported ``.asm`` files (the manifest is metadata)."""
+        return {
+            name: open(os.path.join(out, name), encoding="utf-8").read()
+            for name in sorted(os.listdir(out))
+            if name.endswith(".asm")
+        }
+
     def test_export_twice_is_stable(self):
         snippet_add(self.session, "proc", "MOV EAX, 1")
         with tempfile.TemporaryDirectory() as out:
             snippet_export(self.session, out)
-            first = {
-                name: open(os.path.join(out, name), encoding="utf-8").read()
-                for name in os.listdir(out)
-            }
+            first = self._read_export(out)
             snippet_export(self.session, out)
-            second = {
-                name: open(os.path.join(out, name), encoding="utf-8").read()
-                for name in os.listdir(out)
-            }
+            second = self._read_export(out)
         self.assertEqual(second, first)
         self.assertEqual(first, {"proc.asm": "MOV EAX, 1"})
+
+    def test_rerun_drops_files_of_deleted_and_renamed_snippets(self):
+        """A re-run leaves the directory holding exactly what the database holds.
+
+        Without this, ``export`` → ``rm`` → ``export`` left the deleted
+        snippet's file behind, and a directory exported as an input to a
+        later ``import`` re-added what had been retired.
+        """
+        snippet_add(self.session, "alpha", "MOV EAX, 1")
+        beta = snippet_add(self.session, "beta", "MOV EBX, 2")
+        with tempfile.TemporaryDirectory() as out:
+            snippet_export(self.session, out)
+            self.assertEqual(
+                self._read_export(out), {"alpha.asm": "MOV EAX, 1", "beta.asm": "MOV EBX, 2"}
+            )
+            snippet_delete(self.session, beta.checksum, quiet=True)
+            result = snippet_export(self.session, out)
+            self.assertEqual(self._read_export(out), {"alpha.asm": "MOV EAX, 1"})
+        self.assertEqual(result["num_removed"], 1)
+
+    def test_rerun_prunes_a_rename_but_not_a_file_it_did_not_write(self):
+        """Pruning is limited to the entries of the export's own manifest."""
+        alpha = snippet_add(self.session, "alpha", "MOV EAX, 1")
+        snippet_add(self.session, "beta", "MOV EBX, 2")
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "notes.txt"), "w", encoding="utf-8") as f:
+                f.write("hand written")
+            snippet_export(self.session, out)
+            # Renaming the primary name changes the exported file name, so the
+            # old one is stale: a re-run must not leave both.
+            snippet_name_add(self.session, alpha.checksum, "gamma", quiet=True)
+            snippet_name_remove(self.session, alpha.checksum, "alpha", quiet=True)
+            result = snippet_export(self.session, out)
+            self.assertEqual(
+                self._read_export(out),
+                {"beta.asm": "MOV EBX, 2", "gamma.asm": "MOV EAX, 1"},
+            )
+        self.assertEqual(result["num_removed"], 1)
+
+    def test_unreadable_manifest_disables_pruning(self):
+        """A damaged manifest never turns into a delete."""
+        snippet_add(self.session, "alpha", "MOV EAX, 1")
+        with tempfile.TemporaryDirectory() as out:
+            snippet_export(self.session, out)
+            with open(os.path.join(out, self.MANIFEST), "w", encoding="utf-8") as f:
+                f.write("{not json")
+            result = snippet_export(self.session, out)
+            self.assertNotIn("num_removed", result)
+            self.assertEqual(self._read_export(out), {"alpha.asm": "MOV EAX, 1"})
 
 
 if __name__ == "__main__":

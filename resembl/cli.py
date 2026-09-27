@@ -919,6 +919,11 @@ def export_cmd(
         ]
         if result["num_exported"] > 0:
             rows.append(("Avg per snippet", f"{result['avg_time_per_snippet'] * 1000:.4f}ms"))
+        if result.get("num_removed"):
+            # A re-run over a directory an earlier export wrote drops the files
+            # of snippets that have since been renamed or deleted; say so,
+            # because the deletion is the only destructive part of the command.
+            rows.append(("Stale files removed", str(result["num_removed"])))
         _echo_kv_table("Export Complete", rows)
 
 
