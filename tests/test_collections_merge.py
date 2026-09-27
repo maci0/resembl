@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select, text
 
 from resembl.config import ResemblConfig
 from resembl.core import (
@@ -240,6 +240,10 @@ class TestTimestampNormalize(unittest.TestCase):
         """Garbage input is never fabricated into a timestamp."""
         self.assertEqual(timestamp_normalize("not-a-date"), "not-a-date")
 
+    def test_null_passes_through(self):
+        """A NULL column has no instant to convert and is not a parse error."""
+        self.assertIsNone(timestamp_normalize(None))
+
 
 # ---------------------------------------------------------------------------
 # DB Merge tests
@@ -298,6 +302,45 @@ class TestDBMerge(BaseDBTest):
             merged = Collection.get_by_name(self.session, "offset_col")
             self.assertIsNotNone(merged)
             self.assertEqual(merged.created_at, "2024-06-01T10:00:00+00:00")
+        finally:
+            os.unlink(tmp.name)
+
+    def test_merge_stamps_null_created_at(self):
+        """A source collection with a NULL created_at is stamped on import.
+
+        The column is NOT NULL locally, so passing the NULL through aborts the
+        whole merge on an IntegrityError; an empty string would store but sort
+        the collection ahead of every real one.
+        """
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        source_engine = create_engine(f"sqlite:///{tmp.name}")
+        SQLModel.metadata.create_all(source_engine)
+        # A source whose collection table predates the NOT NULL constraint
+        # (hand-built, or written by another tool) can hold a NULL timestamp.
+        with source_engine.begin() as conn:
+            conn.execute(text("DROP TABLE collection"))
+            conn.execute(
+                text(
+                    "CREATE TABLE collection ("
+                    "name VARCHAR(128) PRIMARY KEY, "
+                    "description VARCHAR NOT NULL, "
+                    "created_at VARCHAR)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO collection (name, description, created_at) "
+                    "VALUES ('null_col', 'd', NULL)"
+                )
+            )
+        source_engine.dispose()
+        try:
+            result = db_merge(self.session, tmp.name)
+            self.assertNotIn("error", result)
+            merged = Collection.get_by_name(self.session, "null_col")
+            self.assertIsNotNone(merged)
+            self.assertEqual(timestamp_normalize(merged.created_at), merged.created_at)
         finally:
             os.unlink(tmp.name)
 

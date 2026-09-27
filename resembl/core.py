@@ -57,6 +57,7 @@ from .models import (
     Snippet,
     SnippetVersion,
     timestamp_normalize,
+    timestamp_now,
 )
 from .scoring import (
     NUM_PERMUTATIONS,
@@ -1800,7 +1801,12 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 new_col = Collection(
                     name=col.name,
                     description=col.description,
-                    created_at=timestamp_normalize(col.created_at),
+                    # A source row with no readable timestamp (a NULL column in
+                    # a hand-built or older database) still has to land in a
+                    # NOT NULL column, and leaving it empty would sort it
+                    # ahead of every real collection.  The import moment is
+                    # the only instant this tool can honestly record.
+                    created_at=timestamp_normalize(col.created_at) or timestamp_now(),
                 )
                 session.add(new_col)
                 local_collections[col.name] = new_col

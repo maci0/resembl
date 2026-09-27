@@ -631,6 +631,7 @@ class TestFormatCreatedAt(unittest.TestCase):
     """Tests for local-zone rendering of stored UTC timestamps."""
 
     TOKYO = ZoneInfo("Asia/Tokyo")
+    WARSAW = ZoneInfo("Europe/Warsaw")
     UTC = ZoneInfo("UTC")
 
     def test_utc_value_rendered_in_target_zone(self):
@@ -665,6 +666,33 @@ class TestFormatCreatedAt(unittest.TestCase):
     def test_unparseable_shown_verbatim(self):
         """Garbage from a foreign database is displayed without crashing."""
         self.assertEqual(_format_created_at("not-a-date", "%Y-%m-%d", self.TOKYO), "not-a-date")
+
+    def test_null_renders_empty(self):
+        """A NULL created_at column has no instant to show, and must not crash."""
+        self.assertEqual(_format_created_at(None, "%Y-%m-%d", self.TOKYO), "")
+
+    def test_spring_forward_gap_is_skipped(self):
+        """A UTC instant inside a zone's DST gap renders at the shifted wall time.
+
+        2024-03-31 01:30Z is 03:30 in Warsaw: local 02:00-03:00 does not exist
+        that day, so no correct conversion can place the instant there.
+        """
+        self.assertEqual(
+            _format_created_at("2024-03-31T01:30:00+00:00", "%Y-%m-%d %H:%M %z", self.WARSAW),
+            "2024-03-31 03:30 +0200",
+        )
+
+    def test_fall_back_repeated_hour_keeps_offset(self):
+        """A UTC instant inside a zone's repeated hour carries that hour's offset.
+
+        2024-10-27 00:30Z is 02:30 in Warsaw, the first of the two 02:30s
+        (CEST, +0200), not the second (CET, +0100) an offset-free guess would
+        produce.
+        """
+        self.assertEqual(
+            _format_created_at("2024-10-27T00:30:00+00:00", "%Y-%m-%d %H:%M %z", self.WARSAW),
+            "2024-10-27 02:30 +0200",
+        )
 
     def test_default_zone_is_system_local(self):
         """Without an explicit zone the system local zone is used."""

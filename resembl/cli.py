@@ -156,15 +156,19 @@ def _echo(message: object, **kwargs: Any) -> None:
         console.print(message, **kwargs)
 
 
-def _format_created_at(value: str, fmt: str, tz: tzinfo | None = None) -> str:
+def _format_created_at(value: object, fmt: str, tz: tzinfo | None = None) -> str:
     """Render a stored ``created_at`` string in the viewer's local zone.
 
     Stored values are aware-UTC ISO 8601 strings (see ``Collection.created_at``);
     they are converted to *tz* (the system's local zone by default) before
     formatting so table output matches the user's wall clock.  Naive legacy
-    values are interpreted as UTC; unparseable values are shown verbatim.
-    Structured (JSON/CSV) output keeps the raw stored string.
+    values are interpreted as UTC; unparseable values are shown verbatim, and
+    a NULL column (a database written without one) has no instant to show and
+    renders as an empty cell.  Structured (JSON/CSV) output keeps the raw
+    stored string.
     """
+    if not isinstance(value, str):
+        return ""
     try:
         moment = datetime.fromisoformat(value)
     except ValueError:
@@ -1719,7 +1723,7 @@ def collection_list_cmd() -> None:
             col["name"],
             col["description"],
             str(col["snippet_count"]),
-            _format_created_at(col["created_at"] or "", "%Y-%m-%d"),
+            _format_created_at(col["created_at"], "%Y-%m-%d"),
         )
     _echo(table)
 

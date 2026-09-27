@@ -27,18 +27,25 @@ if TYPE_CHECKING:
     from .minhash import MinHash
 
 
-def timestamp_normalize(value: str) -> str:
+def timestamp_now() -> str:
+    """Return the current instant as a canonical UTC ISO 8601 string."""
+    return datetime.now(UTC).isoformat()
+
+
+def timestamp_normalize(value: str | None) -> str | None:
     """Normalize a ``created_at`` string to the canonical stored form.
 
     Timestamps are stored as aware-UTC ISO 8601 strings, exactly as written
-    by ``datetime.now(UTC).isoformat()``.  Rows are ordered by string
-    comparison (e.g. ``SnippetVersion.get_by_checksum``), which matches
-    chronological order only while every value carries the same offset, so
-    timestamps imported from foreign databases must be re-expressed in UTC
-    before being persisted.  Naive values are interpreted as UTC (the
-    historical writer's zone).  Unparseable input is returned unchanged:
-    a merge never fabricates metadata.
+    by :func:`timestamp_now`.  Rows are ordered by string comparison
+    (e.g. ``SnippetVersion.get_by_checksum``), which matches chronological
+    order only while every value carries the same offset, so timestamps
+    imported from foreign databases must be re-expressed in UTC before being
+    persisted.  Naive values are interpreted as UTC (the historical writer's
+    zone).  A NULL column and unparseable text are returned unchanged:
+    a merge never rewrites metadata it cannot read.
     """
+    if not isinstance(value, str):
+        return value
     try:
         moment = datetime.fromisoformat(value)
     except ValueError:

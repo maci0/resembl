@@ -98,7 +98,11 @@ Remove a snippet from its collection.
 SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes), `tags` (JSON), `collection` (optional collection name; a soft reference to `Collection.name`, not an enforced FK).
 
 ### `Collection`
-SQLModel with fields: `name` (PK), `description`, `created_at`.
+SQLModel with fields: `name` (PK), `description`, `created_at`. `created_at` is
+an aware-UTC ISO 8601 string, written by `timestamp_now()`. `db_merge`
+re-expresses an imported timestamp in UTC (`timestamp_normalize`), so the
+string order of a collection table is chronological; a source row with no
+readable timestamp is stamped with the import moment instead.
 
 ### `SnippetVersion`
 SQLModel with fields: `id` (integer PK, set by the caller; no database-side
