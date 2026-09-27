@@ -167,8 +167,10 @@ resembl/
 │   ├── lsh.py
 │   ├── minhash.py
 │   ├── models.py
+│   ├── paths.py
 │   ├── scoring.py
-│   └── server.py
+│   ├── server.py
+│   └── theme.py
 ├── docs/
 │   ├── adr/
 │   ├── api_reference.md
@@ -287,8 +289,15 @@ Global options:
 --verbose    Increase output verbosity
 --no-color   Disable colored output
 --format     Output format: table, json, or csv (overrides config)
+--tz         Timezone (e.g. UTC, Europe/Berlin) for printed timestamps
 --version    Print the resembl version and exit
 ```
+
+Global options go before the subcommand: `resembl --format json find ...`.
+`--tz` takes an IANA zone name (`Europe/Warsaw`, not `+02:00`, which does not
+follow daylight saving) and only changes how `created_at` is rendered in
+table output; the stored value stays an aware-UTC string, and JSON/CSV
+output keeps it raw. Without `--tz` the host's local zone is used.
 
 Exit codes: `0` success, `1` the command failed, `2` the command line was
 rejected (unknown flag, bad flag value, missing query).
@@ -396,9 +405,11 @@ uv run python tests/benchmark_scale.py --num-files 5000
 
 ### Performance at Scale
 
-Measured on a development workstation (shared, under load) with `tests/benchmark_scale.py`:
+Measured on a development workstation (shared, under load) with
+`tests/benchmark_scale.py`, which parallelizes the import but runs the
+reindex in a single process:
 
-| Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex --jobs` |
+| Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex` (single process) |
 |--------:|------------:|------------:|----------------------------------:|-----------------:|
 | 5,000   | ~2 s        | ~0.45 s     | ~1.0 s                            | ~2 s             |
 | 20,000  | ~3.6 s      | ~0.45 s     | ~3.0 s                            | ~2.9 s           |

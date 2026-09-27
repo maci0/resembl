@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 #: Environment variable that pins :func:`timestamp_now` to a fixed instant,
 #: given as an ISO 8601 string.  The wall clock is otherwise the only source
 #: of ``created_at`` values, and those values are written to the database and
-#: printed back by ``collection list`` and ``version list``, so two runs of
+#: printed back by ``collection list`` and ``version``, so two runs of
 #: the same inputs never produce the same rows or the same output.  Setting
 #: this variable is what makes a recorded run replay byte-for-byte.
 CLOCK_ENV_VAR = "RESEMBL_NOW"

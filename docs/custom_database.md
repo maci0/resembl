@@ -8,8 +8,9 @@ This guide will walk you through the process of using `resembl` with a custom da
 
 Set `RESEMBL_DATABASE_URL` (or the unprefixed `DATABASE_URL` it falls back
 to, or pass a URL to `create_db_engine`) to point the CLI at a different
-backend.  The dialect-specific SQL (bucket upserts, single-row
-metadata upserts, random sampling) is selected automatically:
+backend.  The dialect-specific SQL (bucket upserts, single-row metadata
+upserts, DDL) is selected automatically; the sampled average similarity in
+`stats` is a portable key-range scan that runs the same on every backend:
 
 | Database    | URL example                                      | Notes |
 |-------------|-------------------------------------------------------------|-------|

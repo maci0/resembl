@@ -50,9 +50,18 @@ curl -s "http://127.0.0.1:$port/find" \
 | `POST` | `/find` | Find matches for one query. |
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
 
-Both are read-only. Any other method on either path answers `405`; any other
-path answers `404`. Every response, success or error, is
-`Content-Type: application/json`.
+Both are read-only, and the path is matched verbatim: a query string makes
+`/find?x=1` an unknown path, answered `404`. `GET`, `PUT`, `DELETE` and
+`PATCH` are answered `405` on any path (with an `Allow: POST` header), so the
+path is only checked for `POST`. Every response the server produces, success
+or error, is `Content-Type: application/json`; a verb with no handler at all
+(`HEAD`, `OPTIONS`, …) is answered by the stdlib base class with `501` and an
+HTML body.
+
+A connection is closed after 30 s idle, which bounds how long a keep-alive
+connection holds its handler thread. The client side gives up sooner: 5 s for
+a single `find`, 60 s for a `find-batch` chunk, after which `resembl` falls
+back to the in-process path.
 
 ### `POST /find`
 

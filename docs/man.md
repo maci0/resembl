@@ -47,8 +47,9 @@ The `compare` command also reports control-flow graph similarity.
 :   Success.
 
 **1**
-:   The command failed: a missing snippet or collection, an unreadable
-    file, an unopenable database, or health issues reported by `verify`.
+:   The command failed: a missing snippet or collection, an unopenable
+    database, or health issues reported by `verify`.  An unreadable import
+    file is not a failure: `import` counts it as skipped and exits 0.
 
 **2**
 :   The command line was rejected: an unknown command or flag, a bad flag
@@ -79,9 +80,9 @@ The `compare` command also reports control-flow graph similarity.
 :   Search for snippets by matching their names (a substring of any name,
     case-insensitive).  A broad pattern over a
     large database could otherwise return hundreds of thousands of rows,
-    so results are bounded (default 50; ``N``+ is printed when the limit
-    truncates the output).  A pattern that matches nothing suggests what
-    to try next.
+    so results are bounded (default 50; a count of `N+` means the limit was
+    reached, so there may be more matches than the number shows).  A
+    pattern that matches nothing suggests what to try next.
 
 **find** [--query *QUERY*] [--file *FILE*] [--top-n *N*] [--threshold *T*]
 [--no-normalization]
@@ -111,7 +112,8 @@ The `compare` command also reports control-flow graph similarity.
 **import** *PATH* [--jobs N] [--force]
 :   Import `.asm` / `.txt` files from a single file or a directory
     (subdirectories are included automatically).  A directory holding no
-    such file is an error, not an import of zero snippets.  The default
+    such file is an error, not an import of zero snippets.  `--jobs N`
+    (short form `-j N`) sets the worker count.  The default
     worker count is adaptive — one worker per ~100 files, capped at the
     CPU count — so small directories stay single-process (spawning each
     worker costs ~450 ms of interpreter startup) while large ones
@@ -150,8 +152,8 @@ The `compare` command also reports control-flow graph similarity.
 
 **reindex** [--jobs N] [--force]
 :   Recalculate MinHash fingerprints for all snippets.
-    Accepts `--jobs N` to run the CPU-bound recomputation in parallel
-    (default: one worker per CPU core).
+    Accepts `--jobs N` (short form `-j N`) to run the CPU-bound
+    recomputation in parallel (default: one worker per CPU core).
     After a fingerprint-format change, the first `find` reindexes
     automatically once (a format version is stamped in the database);
     `reindex --force` is only needed to force it early.
@@ -279,7 +281,7 @@ The `compare` command also reports control-flow graph similarity.
 **RESEMBL_NOW**
 :   ISO 8601 instant to stamp `created_at` with, instead of the wall clock.
     Every row written during the run and every timestamp printed back by
-    `collection list` and `version list` takes this value, so a run replayed
+    `collection list` and `version` takes this value, so a run replayed
     with the same inputs produces the same database and the same output. An
     unparseable value aborts the command.
 
@@ -312,7 +314,7 @@ resembl add "memcpy" "mov ecx, [esp+8]"
 resembl find --query "mov ecx, [esp+8]" --top-n 10
 
 # Or pipe the query in
-cat routine.asm | resembl find --format json
+cat routine.asm | resembl --format json find
 
 # Import a directory of .asm files
 resembl import ./samples --jobs 4
