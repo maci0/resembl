@@ -24,7 +24,7 @@ Before you begin, please ensure you have the following software installed on you
 
 - Git
 - Python 3.13 or newer
-- uv for dependency and environment management.
+- uv 0.12.13, which is the release `pyproject.toml` pins under `required-version`: a different one fails at the first uv command rather than after rewriting `uv.lock`.
 - GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`). 
 
 ### One-Time Setup
@@ -55,7 +55,7 @@ Follow these steps to create a local development environment. This workflow uses
     On Windows, use `.venv\Scripts\Activate.ps1` (PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe). The manual equivalent, if you would rather not use `make`, is:
     ```bash
     uv sync --locked --extra dev
-    uv run pre-commit install
+    uv run --locked pre-commit install
     ```
     `uv sync --locked` creates `.venv` itself, so `uv venv` beforehand is not needed. Every locked artifact is hash-pinned, so the install is reproducible and verified, matching what CI runs. The pre-commit hooks run `black`, `ruff`, `mypy` and `pylint` on each commit, so a hook failure is a fix-and-commit-again, not a surprise at review time.
  
@@ -91,19 +91,19 @@ The resembl project follows a test-driven approach to ensure quality and correct
 
 - **Run Tests Locally:** You can run the full test suite at any time with the following command:
     ```bash
-    uv run pytest
+    uv run --locked pytest
     ```
     The pre-commit hooks run formatting, linting, and type checks, but no tests, so it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
 
     The full suite takes several minutes. While editing, run only what you touched:
     ```bash
-    uv run pytest tests/test_cli.py                                    # one file
-    uv run pytest tests/test_cli.py -k config_set                      # by name
-    uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
+    uv run --locked pytest tests/test_cli.py                                    # one file
+    uv run --locked pytest tests/test_cli.py -k config_set                      # by name
+    uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
     ```
-    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`.
+    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`.
 
-- **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
+- **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run --locked pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
     ```bash
     RESEMBL_TEST_PG_URL=postgresql+pg8000://user:pass@host/db \
     RESEMBL_TEST_MYSQL_URL=mysql+pymysql://user:pass@host/db \
@@ -114,23 +114,19 @@ The resembl project follows a test-driven approach to ensure quality and correct
 - **Platforms:** the test suite runs on `ubuntu-latest`, `macos-latest` and `windows-latest`, so the portability surface the docs claim (path separators and Windows-reserved filenames in `export`, `spawn` process pools, `msvcrt` config locking, text-mode line endings, the `os.replace` port-file publication) is exercised rather than assumed. A change that only works on the machine you wrote it on fails here, not in a user's report. Output that a user consumes (CSV records, exported `.asm` and YARA files) is written with LF on every platform, so a diff between two exports is a real change and not a line-ending one.
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
-    uv run pytest --cov=resembl --cov-report=term-missing
+    uv run --locked pytest --cov=resembl --cov-report=term-missing
     ```
     This command runs the test suite under coverage.py, which measures how much of the codebase is exercised by the tests and reports coverage per file when the run finishes. Aim to maintain or increase the coverage percentage with your contributions.
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 
-    Atheris is an optional dependency. Install it with the `fuzz` extra first:
+    Atheris is an optional dependency in the `fuzz` extra, and `uv run` brings the environment in line with the lockfile before it runs, so the extra has to be named on the invocation that runs the fuzzer:
     ```bash
-    uv sync --locked --extra dev --extra fuzz
-    ```
-    To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `code_tokenize` function:
-    ```bash
-    uv run ./fuzzers/fuzz_code_tokenize.py
+    uv run --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py
     ```
     The fuzzer will run indefinitely until you stop it manually (with `Ctrl+C`) or until it finds a crash. To run it for a fixed duration, use the `-max_total_time` flag:
     ```bash
-    uv run ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
+    uv run --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
     ```
     If a crash is found, the fuzzer will stop and create a `crash-<hash>` file in the root directory containing the input that caused the failure. This file is crucial for debugging and should be included in any bug report.
 
@@ -305,7 +301,7 @@ Releases are cut by a maintainer from `main`. Every release is a single `release
 2. **Write the notes for a consumer.** Turn the `[Unreleased]` section of `CHANGELOG.md` into a `## [X.Y.Z] - YYYY-MM-DD` section, grouped as `### Added` / `### Changed` / `### Fixed`, with the migration step spelled out for anything breaking. A note is consumer-facing: what changed for you, not the commit hash. A name that is removed belongs in the notes with its replacement, even when nothing else calls it: a public export a consumer imported is the one removal they cannot discover from a traceback.
 3. **Bump `pyproject.toml`.** `version = "X.Y.Z"`, in the same commit, plus the tag link reference at the foot of the changelog. `uv lock` follows, because the lockfile records the project's own version.
 4. **Update the support policy.** In `SECURITY.md`, move the `yes` row of the supported-versions table to the new line and correct the sentence that names the current release. Without it the project tells a reporter that the line it just abandoned is the supported one, which is the one question that document exists to answer. `tests/test_changelog.py` holds both to the manifest version.
-5. **Verify, then tag.** `uv run pytest` green, plus `make dist` and an install of the wheel that answers `resembl --help` and one `resembl find` run. `make dist` writes `dist/resembl-X.Y.Z.tar.gz` and `dist/resembl-X.Y.Z-py3-none-any.whl`: the build clock comes from the commit's `SOURCE_DATE_EPOCH`, and the sdist is re-tarred with sorted members, a fixed mtime, root ownership and a name-free gzip, so two builds of the same commit are byte-identical. `make dist-verify` builds twice and fails unless the sha256 sums match, which is the check to run if you change anything in the packaging. `make sbom` writes `build/sbom.cdx.json`, the CycloneDX 1.5 inventory of the runtime dependency graph taken from `uv.lock`; the `SBOM` workflow runs the same export on a push to `main` and on every tag. Both halves of the dist run are also CI, in the `Build` workflow: it builds twice, then installs the wheel and the sdist into throwaway environments and runs `resembl --help`, so a packaging change that breaks the install cannot reach `main` on the strength of the test suite alone.
+5. **Verify, then tag.** `uv run --locked pytest` green, plus `make dist` and an install of the wheel that answers `resembl --help` and one `resembl find` run. `make dist` writes `dist/resembl-X.Y.Z.tar.gz` and `dist/resembl-X.Y.Z-py3-none-any.whl`: the build clock comes from the commit's `SOURCE_DATE_EPOCH`, and the sdist is re-tarred with sorted members, a fixed mtime, root ownership and a name-free gzip, so two builds of the same commit are byte-identical. `make dist-verify` builds twice and fails unless the sha256 sums match, which is the check to run if you change anything in the packaging. `make sbom` writes `build/sbom.cdx.json`, the CycloneDX 1.5 inventory of the runtime dependency graph taken from `uv.lock`; the `SBOM` workflow runs the same export on a push to `main` and on every tag. Both halves of the dist run are also CI, in the `Build` workflow: it builds twice, then installs the wheel and the sdist into throwaway environments and runs `resembl --help`, so a packaging change that breaks the install cannot reach `main` on the strength of the test suite alone.
 6. **Publish, then check the artifact.** Push the tag, publish, and confirm the published version imports and runs. A published version is immutable: if something is wrong, cut a new patch. Never re-upload over an existing version. Pushing the tag also starts the `attest` job in the `Build` workflow, which records a Sigstore-backed provenance attestation for the sdist and the wheel; `gh attestation verify resembl-X.Y.Z-py3-none-any.whl --repo maci0/resembl` checks a downloaded artifact against it. Publish the artifacts that job attested, so the attestation names the bytes a consumer actually received.
 
 Nothing reaches a release without a changelog entry. If a change cannot be described for a consumer in one bullet, it is not ready to ship.

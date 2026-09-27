@@ -205,7 +205,7 @@ source .venv/bin/activate
 ```
 
 Without `make`, the same two steps are `uv sync --locked --extra dev` and
-`uv run pre-commit install`. Windows ships no `make` by default, so that is
+`uv run --locked pre-commit install`. Windows ships no `make` by default, so that is
 the path there (`winget install GnuWin32.Make` or WSL if you would rather have
 the shortcuts).
 
@@ -276,7 +276,7 @@ The CLI can be invoked through uv or by running the module directly after activa
 **Examples:**
 ```bash
 # Run commands through uv
-uv run resembl add my_memcpy "MOV EAX, EBX"
+uv run --locked resembl add my_memcpy "MOV EAX, EBX"
 
 # Or, after activating the virtual environment, you can call it directly
 resembl find --query "MOV EAX"
@@ -311,7 +311,7 @@ rejected (unknown flag, bad flag value, missing query).
 
 For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
 ```bash
-uv run resembl --help
+uv run --locked resembl --help
 ```
 
 ### 4. Example with test_data
@@ -320,46 +320,46 @@ This is an example of how to import the provided `test_data` and then search for
 
 ```bash
 # import the data
-uv run resembl import tests/test_data
+uv run --locked resembl import tests/test_data
 ```
 
 ```bash
 # search for a snippet
 # (single-line --query strings use ';' as a statement separator)
-uv run resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
+uv run --locked resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
 ```
 
 ```bash
 # search for a function
-uv run resembl find --file tests/test_data/1000A0A0.asm
+uv run --locked resembl find --file tests/test_data/1000A0A0.asm
 ```
 
 ```bash
 # or pipe the query in (stdin is read when --query/--file are absent)
-cat tests/test_data/1000A0A0.asm | uv run resembl find
+cat tests/test_data/1000A0A0.asm | uv run --locked resembl find
 ```
 
 ```bash
 # check many queries in one process (amortizes startup + index load)
-uv run resembl find-batch --file queries.txt --top-n 5
+uv run --locked resembl find-batch --file queries.txt --top-n 5
 ```
 
 ### 5. Running Tests
 
 To ensure everything is working correctly, you can run the test suite:
 ```bash
-uv run pytest
+uv run --locked pytest
 ```
 
 The suite takes several minutes. While editing, run only what you touched:
 ```bash
-uv run pytest tests/test_cli.py                    # one file
-uv run pytest tests/test_cli.py -k config_set      # by name
-uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
+uv run --locked pytest tests/test_cli.py                    # one file
+uv run --locked pytest tests/test_cli.py -k config_set      # by name
+uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
 ```
 
 `make help` lists every target (`install`, `format`, `lint`, `types`, `hygiene`,
-`test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`). `make check` runs everything CI
+`test`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`). `make check` runs everything CI
 runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
 hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
 enforce and no CI workflow does, so a green `make check` is a commit the hooks
@@ -377,7 +377,7 @@ This project uses `pytest-cov` for line-level coverage measurement. A GitHub Act
 
 You can run the coverage report locally with:
 ```bash
-uv run pytest --cov=resembl --cov-report=term-missing
+uv run --locked pytest --cov=resembl --cov-report=term-missing
 ```
 
 ## Advanced Usage
@@ -391,7 +391,7 @@ A simple benchmarking script is included to measure the performance of the `impo
 To run the benchmark, execute the following command from the root of the project:
 
 ```bash
-uv run python tests/benchmark.py
+uv run --locked python tests/benchmark.py
 ```
 
 The script will:
@@ -407,7 +407,7 @@ bulk import throughput, cold and warm `find` latency, `reindex` time, database s
 MinHash footprint:
 
 ```bash
-uv run python tests/benchmark_scale.py --num-files 5000
+uv run --locked python tests/benchmark_scale.py --num-files 5000
 ```
 
 ### Performance at Scale
@@ -511,15 +511,15 @@ The `tests/generate_data.py` script can be used to create a large number of rand
 **Usage:**
 ```bash
 # Generate 1000 files in the default 'data/' directory
-uv run python tests/generate_data.py
+uv run --locked python tests/generate_data.py
 
 # Generate 500 files in a custom directory
-uv run python tests/generate_data.py --num-files 500 --data-dir custom_data/
+uv run --locked python tests/generate_data.py --num-files 500 --data-dir custom_data/
 ```
 
 You can then import the generated files into `resembl` using the `import` command:
 ```bash
-uv run resembl import data/
+uv run --locked resembl import data/
 ```
 
 ## Visual Flowcharts

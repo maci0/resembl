@@ -43,7 +43,7 @@ DB_TESTS = tests/test_pg_integration.py tests/test_mysql_integration.py
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Create .venv from uv.lock and install the git hooks
 	uv sync --locked --extra dev

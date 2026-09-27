@@ -72,7 +72,10 @@ project follows [Semantic Versioning](https://semver.org/).
   `--locked`, so no check re-resolves `uv.lock` and rewrites it under the
   contributor when `pyproject.toml` has drifted.  Plain `uv run` gated the
   code against a lockfile no CI run and no other contributor ever saw;
-  `uv lock` (or `make install`) is now the way forward.
+  `uv lock` (or `make install`) is now the way forward.  The commands
+  `README.md` and `CONTRIBUTING.md` spell out carry `--locked` for the same
+  reason, and a fuzzer run names the `fuzz` extra on the invocation, since
+  `uv run` syncs the environment against the lockfile before it starts.
 - **Breaking:** Snippet code, names and tags are stored in Unicode
   Normalization Form C, and every checksum, fingerprint and query is taken
   over that same form.  The same string could previously arrive in two
