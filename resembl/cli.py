@@ -88,6 +88,7 @@ from .core import (
 from .database import db_create, db_url_mask, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .scoring import MAX_NUM_PERM
+from .theme import ACCENT, score_color
 
 if TYPE_CHECKING:
     from .models import Snippet
@@ -96,8 +97,11 @@ logger = logging.getLogger(__name__)
 
 # --- Rich Consoles ---
 
-console = Console()
-err_console = Console(stderr=True)
+# highlighting=False keeps rich's stock highlighter from tinting quoted text
+# inside messages: a color in resembl's output is always one this module put
+# there (see ``theme``), never one the library guessed.
+console = Console(highlight=False)
+err_console = Console(stderr=True, highlight=False)
 
 # --- Typer apps ---
 
@@ -232,7 +236,7 @@ def _echo_kv_table(title: str, rows: list[tuple[str, str]]) -> None:
     differ only in title and rows; routing them through here keeps the
     geometry identical by construction.
     """
-    table = Table(title=title, show_header=False, title_style="bold cyan")
+    table = Table(title=title, show_header=False, title_style=f"bold {ACCENT}")
     table.add_column("Key", style="dim")
     table.add_column("Value")
     for key, value in rows:
@@ -247,7 +251,7 @@ def _snippet_table(rows: Iterable[tuple[str, Sequence[str]]], title: str, start:
     differ only in their row source and title; routing them through here
     keeps the geometry identical by construction.
     """
-    table = Table(title=title, title_style="bold cyan")
+    table = Table(title=title, title_style=f"bold {ACCENT}")
     table.add_column("#", style="dim", justify="right")
     table.add_column("Checksum", style="bold")
     table.add_column("Names")
@@ -444,19 +448,19 @@ def _render_find_payload(payload: dict) -> None:
     _echo(f"[dim]Found {payload['lsh_candidates']} candidates via LSH.[/dim]")
     matches = payload["matches"]
     if matches:
-        table = Table(title="Top Matches", title_style="bold cyan")
+        table = Table(title="Top Matches", title_style=f"bold {ACCENT}")
         table.add_column("#", style="dim", justify="right")
         table.add_column("Checksum", style="bold")
         table.add_column("Names")
         table.add_column("Score (Hybrid)", justify="right")
         for i, match in enumerate(matches, 1):
             score = match["score"]
-            score_color = "green" if score >= 80 else "yellow" if score >= 50 else "red"
+            color = score_color(score)
             table.add_row(
                 str(i),
                 match["checksum"][:12] + "…",
                 ", ".join(match["names"]),
-                f"[{score_color}]{score:.2f}[/{score_color}]",
+                f"[{color}]{score:.2f}[/{color}]",
             )
         _echo(table)
     else:
@@ -1113,7 +1117,7 @@ def show(
                 syntax,
                 title=f"[bold]{', '.join(snippet.name_list)}[/bold]",
                 subtitle=snippet.checksum[:16] + "…",
-                border_style="cyan",
+                border_style=ACCENT,
             )
         )
 
@@ -1176,7 +1180,7 @@ def verify() -> None:
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
-        table = Table(title="Database Health", show_header=False, title_style="bold cyan")
+        table = Table(title="Database Health", show_header=False, title_style=f"bold {ACCENT}")
         table.add_column("Metric", style="dim")
         table.add_column("Value", justify="right")
         table.add_row("Snippets", str(result["num_snippets"]))
@@ -1477,21 +1481,24 @@ def compare(
             f"[bold]Snippet 1:[/bold] {s1['names']} [dim]({s1['checksum'][:12]}…)[/dim]\n"
             f"[bold]Snippet 2:[/bold] {s2['names']} [dim]({s2['checksum'][:12]}…)[/dim]",
             title="Snippet Comparison",
-            border_style="cyan",
+            border_style=ACCENT,
         )
     )
 
-    table = Table(title="Similarity Metrics", title_style="bold cyan")
+    table = Table(title="Similarity Metrics", title_style=f"bold {ACCENT}")
     table.add_column("Metric", style="dim")
     table.add_column("Value", justify="right")
     table.add_row(
         "Jaccard Similarity (Structure)",
-        f"[magenta]{comp['jaccard_similarity']:.2f}[/magenta]",
+        f"{comp['jaccard_similarity']:.2f}",
     )
-    table.add_row("Levenshtein Score (Code)", f"[yellow]{comp['levenshtein_score']:.2f}[/yellow]")
-    table.add_row("Hybrid Score", f"[bold green]{comp['hybrid_score']:.2f}[/bold green]")
-    table.add_row("CFG Similarity", f"[blue]{comp['cfg_similarity']:.2f}[/blue]")
-    table.add_row("Shared Normalized Tokens", f"[cyan]{comp['shared_normalized_tokens']}[/cyan]")
+    table.add_row("Levenshtein Score (Code)", f"{comp['levenshtein_score']:.2f}")
+    table.add_row(
+        "[bold]Hybrid Score",
+        f"[bold {ACCENT}]{comp['hybrid_score']:.2f}[/bold {ACCENT}]",
+    )
+    table.add_row("CFG Similarity", f"{comp['cfg_similarity']:.2f}")
+    table.add_row("Shared Normalized Tokens", f"{comp['shared_normalized_tokens']}")
     _echo(table)
 
     _echo("")
@@ -1514,13 +1521,13 @@ def compare(
         from rich.syntax import Syntax
 
         syntax = Syntax(diff_text, "diff", theme="monokai", word_wrap=True)
-        _echo(Panel(syntax, title="[bold]Code Diff[/bold]", border_style="cyan"))
+        _echo(Panel(syntax, title="[bold]Code Diff[/bold]", border_style=ACCENT))
     else:
         _echo(
             Panel(
                 "[italic]Code is identical.[/italic]",
                 title="[bold]Code Diff[/bold]",
-                border_style="cyan",
+                border_style=ACCENT,
             )
         )
 
@@ -1702,7 +1709,7 @@ def collection_list_cmd() -> None:
         _echo("[dim]No collections found.[/dim]")
         return
 
-    table = Table(title="Collections", title_style="bold cyan")
+    table = Table(title="Collections", title_style=f"bold {ACCENT}")
     table.add_column("Name", style="bold")
     table.add_column("Description")
     table.add_column("Snippets", justify="right")
@@ -1764,7 +1771,7 @@ def collection_show_cmd(
     else:
         # The table is built from the streamed (checksum, names) rows; the
         # ORM objects and their ``code`` strings never enter memory.
-        table = Table(title=f"Collection: {name}", title_style="bold cyan")
+        table = Table(title=f"Collection: {name}", title_style=f"bold {ACCENT}")
         table.add_column("Checksum", style="dim")
         table.add_column("Names", style="bold")
         for checksum, raw in rows():
@@ -1835,7 +1842,7 @@ def version_cmd(
         _echo("[dim]No version history for this snippet.[/dim]")
         return
 
-    table = Table(title="Version History", title_style="bold cyan")
+    table = Table(title="Version History", title_style=f"bold {ACCENT}")
     table.add_column("ID", justify="right")
     table.add_column("Created At")
     for v in versions:
@@ -1859,7 +1866,7 @@ def config_list_cmd() -> None:
     if state.format in ("json", "csv"):
         _echo_format(dict(full_config.items()))
     else:
-        table = Table(title="Configuration", title_style="bold cyan")
+        table = Table(title="Configuration", title_style=f"bold {ACCENT}")
         table.add_column("Key", style="bold")
         table.add_column("Value", justify="right")
         for key, value in full_config.items():

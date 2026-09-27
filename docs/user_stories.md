@@ -175,7 +175,9 @@ This document outlines the features of the `resembl` CLI from a user's perspecti
 **Acceptance Criteria:**
 - `resembl compare <checksum1> <checksum2>` displays a side-by-side comparison.
 - The comparison includes Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared token count.
-- The output is color-coded for readability.
+- The hybrid score is set in the brand accent; the component metrics it is
+  computed from are left uncolored, so the one number worth reading stands
+  out and the rest stay comparable.
 - The user can disable colored output with the `--no-color` flag.
 - The output can be formatted as JSON with `--format json`.
 - Checksum prefixes are accepted for convenience.
