@@ -137,9 +137,13 @@ to open the connection. The in-process result cache keys on the *masked* URL
 above plus whatever the release pipeline admits. Static analysis, dependency
 review, and an SBOM run on every release
 (`.github/workflows/codeql.yml`, `.github/workflows/dependency-review.yml`,
-`.github/workflows/sbom.yml`), and the Pygments floor sits above the ReDoS
-advisory (`pyproject.toml:21`). No packaging step pulls code at install time;
-nothing in `resembl/` executes a network fetch at import.
+`.github/workflows/sbom.yml`), the Pygments floor sits above the ReDoS
+advisory (`pyproject.toml:21`), and a tag build records a provenance
+attestation over the sdist and the wheel
+(`.github/workflows/build.yml`, the `attest` job), so a consumer can check an
+artifact against this repository and the commit that built it. No packaging
+step pulls code at install time; nothing in `resembl/` executes a network
+fetch at import.
 
 ## Assets
 
@@ -284,6 +288,7 @@ not a network one.
 | Config file lock | `resembl/config.py:185` | Lost updates between concurrent CLI processes |
 | Dependency CVE floor | `pyproject.toml:21` | The Pygments ReDoS advisory |
 | CI security analysis | `.github/workflows/codeql.yml`, `.github/workflows/dependency-review.yml`, `.github/workflows/sbom.yml` | Static analysis, dependency review, and an SBOM of every release |
+| Release provenance | `.github/workflows/build.yml` (`attest` job) | An artifact published under this project's name that this repository did not build |
 
 ### Threats with no mitigation
 

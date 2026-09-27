@@ -60,7 +60,10 @@ at a time.
 byte-identical, then installs each into a throwaway environment and runs
 `resembl --help`. Run `make dist-verify` locally when a change touches
 `pyproject.toml`'s packaging, the package's data files, or anything the
-wheel's contents depend on; no other gate would notice.
+wheel's contents depend on; no other gate would notice. A change to the
+dependency graph wants `make sbom` as well, which writes the CycloneDX 1.5
+inventory of the runtime graph that the `SBOM` workflow attaches to a
+release; it is `uv export`, so the SBOM and the lockfile cannot disagree.
 
 `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip
 themselves unless `RESEMBL_TEST_PG_URL` / `RESEMBL_TEST_MYSQL_URL` are set, so
@@ -210,5 +213,9 @@ The artifacts come from `make dist`, never a bare `uv build`: it pins the build
 clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
 metadata, so the same commit always produces the same bytes. `make
 dist-verify` builds twice and compares the sha256 sums.
-Push the tag, then confirm the published version imports and runs. A published
-version is immutable: something wrong means a new patch, never a re-upload.
+Push the tag, then confirm the published version imports and runs. Pushing the
+tag also runs the `Build` workflow's `attest` job, which records a provenance
+attestation for both archives; publish the bytes it attested, since an
+attestation over artifacts nobody published proves nothing to a consumer. A
+published version is immutable: something wrong means a new patch, never a
+re-upload.

@@ -77,3 +77,43 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
+
+  # Provenance for the release artifacts.  The job above builds the sdist and
+  # the wheel a release consists of, and the SBOM workflow inventories what is
+  # inside them, but neither ties those bytes to this repository: a consumer
+  # cannot tell an official artifact from anything else carrying the same
+  # name, because both the name and the version are things a third party can
+  # write.  A Sigstore-backed provenance attestation records the workflow run,
+  # the commit and the artifact digests, and `gh attestation verify` checks
+  # them offline against the digest the consumer downloaded.
+  #
+  # Tag runs only.  A pull request has no release artifact to attest, and
+  # `id-token: write` is the scope that can mint a token for anything at all,
+  # so it is granted to a job that exists on a tag and to nothing else.
+  attest:
+    name: attest provenance
+    needs: dist
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The OIDC token the attestation is signed with, and the store it is
+      # written to.  Both are needed only to attest, and both are refused to
+      # a pull request from a fork regardless of what this workflow declares.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: resembl-dist-${{ github.sha }}
+          path: dist
+
+      - name: Attest the sdist and the wheel
+        uses: actions/attest-build-provenance@v4
+        with:
+          # The download directory holds the two archives and nothing else
+          # (the dist job uploads the archives, not the throwaway venvs it
+          # built beside them), so one glob covers both subjects.
+          subject-path: 'dist/*'

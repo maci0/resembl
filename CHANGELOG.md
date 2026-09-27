@@ -8,6 +8,15 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A release now carries a provenance attestation.  Pushing a `vX.Y.Z` tag
+  runs a Sigstore-backed attestation over the sdist and the wheel, so
+  `gh attestation verify` can tie a downloaded artifact to this repository
+  and the commit that built it.  Only a tag run asks for the token the
+  attestation is signed with.
+- `make sbom` writes `build/sbom.cdx.json`, the CycloneDX 1.5 inventory of
+  the runtime dependency graph, from the same `uv export` the `SBOM`
+  workflow runs, so the inventory a release is assessed with can be
+  produced and read before the tag is cut.
 - The test suite runs on macOS and Windows, not only Linux.  Both are
   documented install platforms, and the portability surface they cover
   (path separators and reserved filenames in `export`, `spawn` process

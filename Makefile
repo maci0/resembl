@@ -22,7 +22,7 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test db-test fuzz check dist dist-verify
+.PHONY: help install format lint types hygiene test db-test fuzz check dist dist-verify sbom
 
 PYTEST_ARGS ?=
 
@@ -191,3 +191,20 @@ dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-ident
 		shasum -a 256 --check .dist-first.sha256; \
 	fi
 	@rm -f .dist-first.sha256
+
+# The release inventory, exported by uv from the hash-pinned uv.lock rather
+# than read back out of the built wheel, so it describes what the lock resolves
+# to whether or not anything has been packed.  Same command the SBOM workflow
+# runs, so the file a maintainer inspects before tagging is the file the
+# release carries.  uv is the only tool involved: a third-party SBOM generator
+# would be another dependency to keep current to answer a question the build
+# tool already answers.
+#
+# It lands in build/ rather than dist/ because `dist` starts by removing that
+# directory, and an inventory a release is assessed with should not be deleted
+# by the next `make dist`.  Both are gitignored build output.
+sbom:  ## Write build/sbom.cdx.json, the CycloneDX 1.5 inventory of the runtime dependencies
+	@mkdir -p build
+	uv export --preview-features sbom-export --format cyclonedx1.5 \
+		--no-dev --quiet --output-file build/sbom.cdx.json
+	@echo "wrote build/sbom.cdx.json"
