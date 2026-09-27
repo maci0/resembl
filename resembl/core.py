@@ -2038,9 +2038,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # (a per-source ``get_by_name`` was one destination round trip per
         # imported collection); new names are added to the snapshot as they
         # are created so duplicates stay impossible without re-querying.
-        local_collections = {
-            name_normalize(col.name): col for col in Collection.get_all(session)
-        }
+        local_collections = {name_normalize(col.name): col for col in Collection.get_all(session)}
         for col in source_session.exec(select(Collection).order_by(Collection.name)).all():
             # The name is the collection's primary key on both sides, so the
             # comparison has to be on the form both stores: a source row whose

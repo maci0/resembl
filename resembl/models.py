@@ -209,7 +209,10 @@ class Snippet(SQLModel, table=True):
         # which hands out NFD) stores the other one.
         for spelling in dict.fromkeys((name_normalize(name), unicodedata.normalize("NFD", name))):
             literal = (
-                name_json_escape(spelling).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                name_json_escape(spelling)
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
             )
             candidates = session.exec(
                 select(cls.checksum, cls.names).where(

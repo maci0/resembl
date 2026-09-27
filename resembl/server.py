@@ -297,6 +297,13 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # crash int()/float() (and flip ``normalize`` to False) instead of using
     # the configured default.
     provided = {k: v for k, v in body.items() if v is not None}
+    if "normalize" in provided and not isinstance(provided["normalize"], bool):
+        # ``bool()`` is not a type check: a JSON string ``"false"`` is truthy
+        # and the request silently searched the normalized corpus, so a
+        # client asking for the opposite of what it sent got a 200 with the
+        # wrong matches.  The other typed fields reject a wrong type with the
+        # same clean 400; this one now does too.
+        raise BadRequestError("normalize must be a boolean")
     try:
         top_n = _as_int(provided.get("top_n", params.top_n), "top_n")
         # Coerce inside the same guard as the numeric fields: a JSON string
@@ -326,6 +333,13 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
             "top_n, ngram_size, num_permutations must be whole numbers; "
             "threshold and jaccard_weight must be numbers"
         ) from exc
+    # Same rule as the other integer fields, and the same reason the config
+    # layer bounds ``top_n`` at 1 (``config.VALUE_BOUNDS``): a zero or
+    # negative value truncates every ranking to nothing, so the response says
+    # "no matches" where the caller asked for some.  Left unchecked, a typo
+    # read as a working search that found nothing.
+    if top_n < 1:
+        raise BadRequestError("top_n must be at least 1")
     # Range-check the threshold up front: :class:`ResemblLSH` rejects values
     # outside [0.0, 1.0] anyway, so without this every out-of-range request
     # surfaced as a 500 leaking that internal error instead of a clean one.
@@ -817,6 +831,9 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
 
 
 _METRICS = _ServerMetrics()
+#: The paths this server serves, each POST-only except /health and /metrics.
+_FIND_PATHS = ("/find", "/find-batch")
+_ALL_PATHS = ("/find", "/find-batch", "/health", "/metrics")
 
 
 class _FindHandler(BaseHTTPRequestHandler):
@@ -873,8 +890,37 @@ class _FindHandler(BaseHTTPRequestHandler):
         own ``send_error`` paths, so one hook covers the whole surface instead
         of leaving an operator with a request that never appears in a metric.
         """
-        _METRICS.record_request(self.path, code, self.request_seconds())
+        _METRICS.record_request(self.route or self.path, code, self.request_seconds())
         super().send_response(code, message)
+
+    def __getattr__(self, name: str) -> Any:
+        """Answer every unhandled method with the JSON 405 envelope.
+
+        ``BaseHTTPRequestHandler`` dispatches on ``do_<METHOD>`` and falls back
+        to ``send_error(501)``, an *HTML* page, for any method without a
+        handler.  ``HEAD`` (every ``curl -I`` and health check) and ``OPTIONS``
+        (every CORS preflight) hit that fallback, so the documented contract
+        ("any other method answers 405", "every response is
+        ``Content-Type: application/json``") was false for exactly the methods
+        a client is most likely to send first.  Resolving any ``do_*`` name to
+        the shared not-allowed answer keeps the envelope uniform whatever verb
+        arrives; a non-``do_`` attribute still raises as usual.
+        """
+        if name.startswith("do_") and name[3:].isupper():
+            return self._method_not_allowed
+        raise AttributeError(name)
+
+    @property
+    def route(self) -> str:
+        """The request path with any query string removed.
+
+        ``self.path`` carries the query string, so a client appending one
+        (``/find?trace=1``, what a browser, proxy or logging library does)
+        addressed a path the server does not serve and got a 404 for a
+        request the documentation says is valid.  The parameters are read
+        from the body, so the query string is dropped.
+        """
+        return self.path.split("?", 1)[0]
 
     @property
     def engine(self) -> Any:
@@ -948,8 +994,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
             return
-        if self.path not in ("/find", "/find-batch"):
-            self._respond(404, {"error": f"unknown path: {self.path}"})
+        if self.route not in _FIND_PATHS:
+            self._respond(404, {"error": f"unknown path: {self.route}"})
             return
         if not self._content_type_ok():
             self._respond(415, {"error": "content type must be application/json"})
@@ -958,7 +1004,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         if body is None:
             self._respond(400, {"error": "bad request body"})
             return
-        if self.path == "/find":
+        if self.route == "/find":
             self._handle_find(body)
             return
         self._handle_find_batch(body)
@@ -971,6 +1017,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         """
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"}, send_body=send_body)
+            return
+        if self.route not in _ALL_PATHS:
+            self._respond(404, {"error": f"unknown path: {self.route}"}, send_body=send_body)
             return
         self._respond(
             405,
@@ -985,10 +1034,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
             return
-        if self.path == "/health":
+        if self.route == "/health":
             self._handle_health()
             return
-        if self.path == "/metrics":
+        if self.route == "/metrics":
             self._handle_metrics()
             return
         self._method_not_allowed()
@@ -1188,11 +1237,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         # response can never be reinterpreted as HTML/script by a browser
         # pointed at the endpoint.
         self.send_header("X-Content-Type-Options", "nosniff")
-        # Defense in depth for a browser pointed at the endpoint: deny
-        # framing and script/style/object sources outright, and keep cached
-        # copies of snippet-derived responses out of intermediary caches.
+        # Defense in depth for that browser: deny framing and script/style/
+        # object sources outright.
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        # Keep cached copies of snippet-derived responses out of browser and
+        # intermediary caches.
         self.send_header("Cache-Control", "no-store")
         for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
