@@ -98,6 +98,11 @@ project follows [Semantic Versioning](https://semver.org/).
   source tree survived in the artifact until someone cleaned the directory by
   hand; the sdist is also unpacked under `.scratch/` rather than `mktemp -d`'s
   tmpfs.
+- Pylint's `consider-using-with` is no longer disabled for the whole project.
+  A file handle or a child process a module opens without a context manager
+  now fails the gate; the test modules and the scale benchmark that keep a
+  temp file open across a whole test body scope the message to themselves,
+  each with its reason.
 - Every `uv run` in the `Makefile` and in the `pre-commit` hooks passes
   `--locked`, so no check re-resolves `uv.lock` and rewrites it under the
   contributor when `pyproject.toml` has drifted.  Plain `uv run` gated the

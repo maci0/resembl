@@ -1,6 +1,8 @@
 """Tests for collections, versioning, merge, tags, search, and config dict-compat."""
 
 # pylint: disable=protected-access  # tests exercise private internals
+# pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# directory or a child process open for the whole test body on purpose
 
 import json
 import os

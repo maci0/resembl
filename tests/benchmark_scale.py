@@ -33,6 +33,9 @@ import subprocess
 import sys
 import time
 
+# pylint: disable=consider-using-with  # a benchmark keeps a temp directory, a
+# database file or a served child process open for the whole measurement
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from tests.generate_data import generate_files

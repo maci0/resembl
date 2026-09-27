@@ -7,6 +7,9 @@ change that drops the content-addressed dedup fails a test instead of
 silently duplicating rows on the next retry.
 """
 
+# pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# directory or a child process open for the whole test body on purpose
+
 import os
 import tempfile
 import unittest

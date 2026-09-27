@@ -1,6 +1,8 @@
 """Integration tests for the resembl CLI."""
 
 # pylint: disable=protected-access  # tests exercise private internals
+# pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# directory or a child process open for the whole test body on purpose
 
 import json
 import os
@@ -216,7 +218,7 @@ class TestCLICommands(BaseCLITest):
             result = self.run_command(f"export --force {export_dir}")
             self.assertEqual(result.returncode, 0)
 
-            exported = sorted(os.listdir(export_dir))
+            exported = sorted(f for f in os.listdir(export_dir) if f.endswith(".asm"))
             self.assertEqual(len(exported), 5)  # 4 here + setUp's test_snippet
             for fname in exported:
                 stem = fname[: -len(".asm")]
@@ -240,6 +242,7 @@ class TestCLICommands(BaseCLITest):
             contents = {
                 fname: open(os.path.join(export_dir, fname), encoding="utf-8").read()
                 for fname in os.listdir(export_dir)
+                if fname.endswith(".asm")  # the export manifest is not a snippet
             }
             self.assertEqual(len(contents), 3)  # 2 here + setUp's test_snippet
             self.assertIn("MOV AX, 1", contents.values())

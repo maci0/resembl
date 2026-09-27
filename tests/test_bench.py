@@ -1,5 +1,8 @@
 """Benchmark suite for resembl core operations using pytest-benchmark."""
 
+# pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# directory or a child process open for the whole test body on purpose
+
 import os
 
 import pytest

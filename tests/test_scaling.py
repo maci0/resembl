@@ -12,6 +12,8 @@ Covers:
 """
 
 # pylint: disable=protected-access  # tests exercise private internals
+# pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# directory or a child process open for the whole test body on purpose
 
 import itertools
 import json

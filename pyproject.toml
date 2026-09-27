@@ -140,6 +140,10 @@ enable = [
 # or duplicate checks owned by ruff/mypy. Revisit when the underlying cause
 # changes; do not extend this list to silence a one-off (use an inline,
 # scoped `# pylint: disable=<msg>` instead).
+# A repo-wide disable that only one directory needs belongs in that
+# directory's own modules instead, where the reason sits next to the code:
+# consider-using-with is scoped that way, to the test modules that hold a
+# temp file open across a whole test body on purpose.
 disable = [
     # Lazy imports are architecture, not accidents: the package is
     # import-light by design and CLI commands import heavy modules on use.
@@ -184,8 +188,6 @@ disable = [
     "missing-module-docstring",
     "missing-class-docstring",
     "missing-function-docstring",
-    # Tests hold temp files/dirs across the whole test body on purpose.
-    "consider-using-with",
 ]
 
 [tool.ruff.lint]
