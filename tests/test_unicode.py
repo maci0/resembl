@@ -108,16 +108,18 @@ class TestChecksumIdentity(unittest.TestCase):
         self.assertNotEqual(string_checksum(_NFC_CODE), string_checksum("mov rax, 1"))
 
 
-class TestSnippetRoundTrip(unittest.TestCase):
-    """Both spellings must reach the database as a single row."""
+class _InMemoryDbTestCase(unittest.TestCase):
+    """A session on a private in-memory database with the schema created."""
 
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
         SQLModel.metadata.create_all(engine)
         self.session = Session(engine)
+        self.addCleanup(self.session.close)
 
-    def tearDown(self):
-        self.session.close()
+
+class TestSnippetRoundTrip(_InMemoryDbTestCase):
+    """Both spellings must reach the database as a single row."""
 
     def test_adding_both_spellings_stores_one_snippet(self):
         first = snippet_add(self.session, "nfc", _NFC_CODE)
@@ -193,16 +195,8 @@ class TestSafeFilenameSurrogates(unittest.TestCase):
         self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
 
 
-class TestCollectionIdentity(unittest.TestCase):
+class TestCollectionIdentity(_InMemoryDbTestCase):
     """A collection name is a primary key, so its form is part of its identity."""
-
-    def setUp(self):
-        engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-        SQLModel.metadata.create_all(engine)
-        self.session = Session(engine)
-
-    def tearDown(self):
-        self.session.close()
 
     def test_nfd_create_finds_the_existing_nfc_collection(self):
         """The lookup runs on the normalized name, so it cannot miss the row."""
@@ -216,16 +210,8 @@ class TestCollectionIdentity(unittest.TestCase):
         )
 
 
-class TestNameSearch(unittest.TestCase):
+class TestNameSearch(_InMemoryDbTestCase):
     """A name search looks stored text up, so it must run on the stored form."""
-
-    def setUp(self):
-        engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-        SQLModel.metadata.create_all(engine)
-        self.session = Session(engine)
-
-    def tearDown(self):
-        self.session.close()
 
     def test_nfd_pattern_finds_the_nfc_name(self):
         """The pattern macOS and a copy-paste hand over: the base letter plus

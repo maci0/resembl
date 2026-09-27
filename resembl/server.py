@@ -438,39 +438,24 @@ def _find_one(
     """
     params = params if params is not None else _DEFAULT_FIND_PARAMS
     request = _parse_find_request(body, params)
-    top_n = request.top_n
-    threshold = request.threshold
-    normalize = request.normalize
-    ngram_size = request.ngram_size
-    num_permutations = request.num_permutations
-    jaccard_weight = request.jaccard_weight
     # The masked URL identifies the served database without retaining
     # credentials in the long-lived cache keys.
     db_id = str(_session_engine(session).url)
     key = (
         _query_cache_key(query),
-        top_n,
-        threshold,
-        normalize,
-        ngram_size,
-        num_permutations,
-        jaccard_weight,
+        request.top_n,
+        request.threshold,
+        request.normalize,
+        request.ngram_size,
+        request.num_permutations,
+        request.jaccard_weight,
         db_id,
     )
     version = _db_version(session)
     if version is None:
         # No version counter for this backend: the cache cannot tell a stale
         # entry from a current one, so the find always runs.
-        return _find_uncached(
-            session,
-            query,
-            top_n,
-            threshold,
-            normalize,
-            ngram_size,
-            num_permutations,
-            jaccard_weight,
-        )
+        return _find_uncached(session, query, request)
     cached = _result_cache_get(key, version)
     if cached is not None:
         return cached
@@ -482,53 +467,26 @@ def _find_one(
         # describe rows the database has since changed.
         version = _db_version(session)
         if version is None:  # pragma: no cover - the dialect cannot change mid-call
-            return _find_uncached(
-                session,
-                query,
-                top_n,
-                threshold,
-                normalize,
-                ngram_size,
-                num_permutations,
-                jaccard_weight,
-            )
+            return _find_uncached(session, query, request)
         cached = _result_cache_get(key, version)
         if cached is not None:
             return cached
-        payload = _find_uncached(
-            session,
-            query,
-            top_n,
-            threshold,
-            normalize,
-            ngram_size,
-            num_permutations,
-            jaccard_weight,
-        )
+        payload = _find_uncached(session, query, request)
         _result_cache_put(key, version, payload)
         return payload
 
 
-def _find_uncached(
-    session: Session,
-    query: str,
-    top_n: int,
-    threshold: float | None,
-    normalize: bool,
-    ngram_size: int,
-    num_permutations: int,
-    jaccard_weight: float,
-) -> dict:
+def _find_uncached(session: Session, query: str, request: _FindRequest) -> dict:
     """Run one find and serialize it, bypassing the result cache."""
     num_candidates, matches = snippet_find_matches(
         session,
         query,
-        top_n=top_n,
-        threshold=threshold,
-        normalize=normalize,
-        ngram_size=ngram_size,
-        num_permutations=num_permutations,
-        jaccard_weight=jaccard_weight,
+        top_n=request.top_n,
+        threshold=request.threshold,
+        normalize=request.normalize,
+        ngram_size=request.ngram_size,
+        num_permutations=request.num_permutations,
+        jaccard_weight=request.jaccard_weight,
     )
     return snippet_matches_payload(num_candidates, matches)
 

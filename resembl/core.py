@@ -616,7 +616,6 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     existing_snippet = Snippet.get_by_checksum(session, checksum)
 
     if existing_snippet:
-        # Code exists, add new name as an alias
         name_list = existing_snippet.name_list
         if name and name not in name_list:
             name_list.append(name)
@@ -626,7 +625,6 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
             session.refresh(existing_snippet)
         return existing_snippet
 
-    # Snippet with this code does not exist, create a new one
     minhash_bytes = minhash_pack(minhash_from_tokens(token_list, ngram_size))
 
     # Detect an empty database with an O(1) ``LIMIT 1`` probe instead of a

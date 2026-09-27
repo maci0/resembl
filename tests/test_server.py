@@ -66,19 +66,28 @@ def _capturing_create() -> tuple[object, dict]:
     return capturing_create, created
 
 
-class TestServerMode(unittest.TestCase):
-    """The server serves find queries equivalent to the in-process path."""
+class _ServeTestCase(unittest.TestCase):
+    """A real database, a private cache dir and a warm server per test.
+
+    :attr:`snippet_count` is the only thing a subclass varies; the fixture
+    and its teardown are the same for every server suite.
+    """
+
+    snippet_count = 10
 
     def setUp(self):
         self._db = tempfile.mktemp(suffix=".db")
         cache = tempfile.TemporaryDirectory()
         self.addCleanup(cache.cleanup)
         self._cache_dir = cache.name
+        self.addCleanup(self._remove_db)
         self._engine = create_engine(f"sqlite:///{self._db}")
         SQLModel.metadata.create_all(self._engine)
         self._session = Session(self._engine)
+        self.addCleanup(self._session.close)
         items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(100)
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+            for i in range(self.snippet_count)
         ]
         snippet_add_batch(self._session, [x for x in items if x])
         self._env = patch.dict(
@@ -89,15 +98,15 @@ class TestServerMode(unittest.TestCase):
             },
         )
         self._env.start()
+        self.addCleanup(self._env.stop)
 
-    def tearDown(self):
-        self._env.stop()
-        self._session.close()
+    def _remove_db(self):
         for path in (self._db, self._db + "-wal", self._db + "-shm"):
             if os.path.exists(path):
                 os.remove(path)
 
     def _start_server(self):
+        """Serve the fixture database on a background thread; return the port."""
         from resembl.server import serve
 
         httpd = serve(f"sqlite:///{self._db}", port=0)
@@ -105,6 +114,12 @@ class TestServerMode(unittest.TestCase):
         thread.start()
         self.addCleanup(httpd.server_close)
         return httpd.server_address[1]
+
+
+class TestServerMode(_ServeTestCase):
+    """The server serves find queries equivalent to the in-process path."""
+
+    snippet_count = 100
 
     def test_startup_skips_current_index_rebuild(self):
         """serve does not rebuild an already-current index on restart.
@@ -423,8 +438,6 @@ class TestServerMode(unittest.TestCase):
 
     def test_load_config_parses_toml(self):
         """find_client reads lsh_threshold/ngram_size from config.toml."""
-        import tempfile
-
         from resembl.find_client import _load_config
 
         cfg_dir = tempfile.mkdtemp()
@@ -443,7 +456,6 @@ class TestServerMode(unittest.TestCase):
         with a different result set than `resembl find` on the same database.
         """
         import io
-        import tempfile
         from contextlib import redirect_stderr
 
         from resembl.find_client import _load_config
@@ -1737,45 +1749,8 @@ class TestServerMode(unittest.TestCase):
         port_file_cleanup(port_file, 1111)
 
 
-class TestServerObservability(unittest.TestCase):
+class TestServerObservability(_ServeTestCase):
     """Health, metrics and the per-request trail a served query leaves."""
-
-    def setUp(self):
-        self._db = tempfile.mktemp(suffix=".db")
-        cache = tempfile.TemporaryDirectory()
-        self.addCleanup(cache.cleanup)
-        self._engine = create_engine(f"sqlite:///{self._db}")
-        SQLModel.metadata.create_all(self._engine)
-        self._session = Session(self._engine)
-        self.addCleanup(self._session.close)
-        snippet_add_batch(
-            self._session,
-            [
-                snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
-                for i in range(10)
-            ],
-        )
-        self._env = patch.dict(
-            os.environ,
-            {"RESEMBL_CACHE_DIR": cache.name, "DATABASE_URL": f"sqlite:///{self._db}"},
-        )
-        self._env.start()
-        self.addCleanup(self._env.stop)
-        self.addCleanup(self._remove_db)
-
-    def _remove_db(self):
-        for path in (self._db, self._db + "-wal", self._db + "-shm"):
-            if os.path.exists(path):
-                os.remove(path)
-
-    def _start_server(self):
-        from resembl.server import serve
-
-        httpd = serve(f"sqlite:///{self._db}", port=0)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(httpd.server_close)
-        return httpd
 
     def _get(self, port: int, path: str) -> tuple[int, str, str]:
         """GET *path* and return ``(status, content_type, body)``."""
@@ -1783,7 +1758,7 @@ class TestServerObservability(unittest.TestCase):
             return response.status, response.headers["Content-Type"], response.read().decode()
 
     def test_health_reports_ready_against_a_live_database(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         status, content_type, body = self._get(port, "/health")
         self.assertEqual(status, 200)
         self.assertEqual(content_type, "application/json")
@@ -1793,7 +1768,7 @@ class TestServerObservability(unittest.TestCase):
         self.assertGreaterEqual(payload["uptime_seconds"], 0.0)
 
     def test_health_reports_degraded_when_the_database_answers_no_query(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         # Standing in for a database that stopped answering: every probe
         # session fails, the way a dropped connection or a locked file does.
         with patch("resembl.server.Session", side_effect=RuntimeError("pool is closed")):
@@ -1809,7 +1784,7 @@ class TestServerObservability(unittest.TestCase):
         self.assertNotIn("pool is closed", json.dumps(payload))
 
     def test_metrics_expose_requests_latency_and_cache_outcome(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         _post_json(port, "/find", {"query": "push ebx\nmov eax, 5\npop ebx\nret"})
         status, content_type, body = self._get(port, "/metrics")
         self.assertEqual(status, 200)
@@ -1823,7 +1798,7 @@ class TestServerObservability(unittest.TestCase):
         self.assertIn('resembl_server_result_cache_total{result="miss"}', body)
 
     def test_metrics_fold_an_unbounded_path_into_one_series(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         series = 'resembl_server_requests_total{path="other",status="404"}'
         before = self._series_total(self._get(port, "/metrics")[2], series)
         for i in range(5):
@@ -1844,7 +1819,7 @@ class TestServerObservability(unittest.TestCase):
         return 0
 
     def test_a_bad_request_is_counted_by_status(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         status, _ = _post_json_status(port, "/find", {"query": "   "})
         self.assertEqual(status, 400)
         _, _, body = self._get(port, "/metrics")
@@ -1853,7 +1828,7 @@ class TestServerObservability(unittest.TestCase):
     def test_slow_request_is_reported_without_verbose(self):
         from resembl import server as server_mod
 
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         with self.assertLogs("resembl.server", level="WARNING") as captured:
             with patch.object(server_mod, "_SLOW_REQUEST_SECONDS", 0.0):
                 _post_json(port, "/find", {"query": "push ebx\nmov eax, 5\npop ebx\nret"})
@@ -1863,7 +1838,7 @@ class TestServerObservability(unittest.TestCase):
         )
 
     def test_error_records_carry_the_request_id(self):
-        port = self._start_server().server_address[1]
+        port = self._start_server()
         with self.assertLogs("resembl.server", level="DEBUG") as captured:
             with patch("resembl.server._find_uncached", side_effect=RuntimeError("boom")):
                 status, _ = _post_json_status(port, "/find", {"query": "push ebx"})
@@ -1945,8 +1920,6 @@ class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""
 
     def setUp(self):
-        import tempfile
-
         self._db = tempfile.mktemp(suffix=".db")
         cache = tempfile.TemporaryDirectory()
         self.addCleanup(cache.cleanup)
@@ -2124,7 +2097,7 @@ class TestLazyPackageInit(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-class TestServerConcurrency(unittest.TestCase):
+class TestServerConcurrency(_ServeTestCase):
     """The warm server is shared by one handler thread per request.
 
     The tests drive the real HTTP endpoint against a real database: a mocked
@@ -2132,41 +2105,7 @@ class TestServerConcurrency(unittest.TestCase):
     mid-query.
     """
 
-    def setUp(self):
-        self._db = tempfile.mktemp(suffix=".db")
-        cache = tempfile.TemporaryDirectory()
-        self.addCleanup(cache.cleanup)
-        self._engine = create_engine(f"sqlite:///{self._db}")
-        SQLModel.metadata.create_all(self._engine)
-        self._session = Session(self._engine)
-        items = [
-            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(100)
-        ]
-        snippet_add_batch(self._session, [x for x in items if x])
-        self._env = patch.dict(
-            os.environ,
-            {
-                "RESEMBL_CACHE_DIR": cache.name,
-                "DATABASE_URL": f"sqlite:///{self._db}",
-            },
-        )
-        self._env.start()
-
-    def tearDown(self):
-        self._env.stop()
-        self._session.close()
-        for path in (self._db, self._db + "-wal", self._db + "-shm"):
-            if os.path.exists(path):
-                os.remove(path)
-
-    def _start_server(self):
-        from resembl.server import serve
-
-        httpd = serve(f"sqlite:///{self._db}", port=0)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(httpd.server_close)
-        return httpd.server_address[1]
+    snippet_count = 100
 
     def _bucket_row_count(self) -> int:
         from sqlmodel import func, select

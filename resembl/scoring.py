@@ -1069,7 +1069,6 @@ def cfg_extract(code: str) -> dict:
         if not line:
             continue
 
-        # Detect label (line starts with a label token ending in ':')
         stripped = line.lstrip()
         first_word = stripped.split(None, 1)[0] if stripped else ""
         # A NASM label is an identifier at the start of the line immediately
@@ -1077,14 +1076,10 @@ def cfg_extract(code: str) -> dict:
         # operands with segment overrides (e.g. ``mov eax, [fs:0]``) from
         # being misread as labels and needlessly splitting the block.
         is_label = len(first_word) > 1 and first_word.endswith(":")
-        label_name = None
         if is_label:
             label_name = first_word[:-1]
-            # If there's content after the label on the same line, treat as
-            # part of the new block
             remainder = stripped[len(first_word) :].strip()
 
-            # Start a new block at every label
             if current_block:
                 blocks.append(current_block)
                 current_block = []
@@ -1095,18 +1090,15 @@ def cfg_extract(code: str) -> dict:
 
         current_block.append(stripped)
 
-        # Check if this instruction is a branch (terminates the block)
         words = stripped.split()
         mnemonic = words[0].upper() if words else ""
         if mnemonic in BRANCH_INSTRUCTIONS:
             blocks.append(current_block)
             current_block = []
 
-    # Don't forget the final block
     if current_block:
         blocks.append(current_block)
 
-    # Build adjacency list
     # A label whose basic block never materialized (e.g. the code ends with
     # ``label:`` and no instruction follows) maps one past the last block;
     # such targets are dropped so the graph never contains edges to
@@ -1132,17 +1124,14 @@ def cfg_extract(code: str) -> dict:
         mnemonic = words[0].upper() if words else ""
 
         if mnemonic in {"RET", "RETN", "RETF"}:
-            # No successor — function exit
             pass
         elif mnemonic == "JMP":
-            # Unconditional jump — try to resolve target
             if len(words) > 1:
                 target_block = _resolve(words[-1].strip())
                 if target_block is not None:
                     adj[i].append(target_block)
             # No fallthrough for unconditional jumps
         elif mnemonic in BRANCH_INSTRUCTIONS:
-            # Conditional branch — both fallthrough and target
             if i + 1 < len(blocks):
                 adj[i].append(i + 1)
             if len(words) > 1:
@@ -1150,7 +1139,6 @@ def cfg_extract(code: str) -> dict:
                 if target_block is not None:
                     adj[i].append(target_block)
         else:
-            # Non-branch — fallthrough to next block
             if i + 1 < len(blocks):
                 adj[i].append(i + 1)
 

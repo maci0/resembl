@@ -46,9 +46,9 @@ The search process is a two-step pipeline designed for both speed and accuracy:
 
 To avoid the slow process of comparing a query against every single entry in the database, we first perform a fast filtering step to find a small number of likely candidates.
 
-- **Normalization:** The assembly code is first "normalized" by a lexer. This process simplifies the code to its core structure, making the comparison robust against simple register or value changes. This behavior can be disabled with the `--no-normalization` flag on the `find` command.
+- **Normalization:** The assembly code is first "normalized" by a lexer, which reduces it to a canonical token representation focused on structure rather than on specific registers or immediate values. This behavior can be disabled with the `--no-normalization` flag on the `find` command.
 
-- **Normalization Details:** The normalization process is designed to create a canonical representation of the assembly code, focusing on the structural logic rather than specific register choices or immediate values. Here’s what it does:
+    Here’s what it does:
     - **Generalizes Registers:** All general-purpose registers (e.g., `EAX`, `RBX`, `RDI`) are replaced with the generic token `REG`.
     - **Generalizes Immediate Values:** All numerical values (e.g., `0x10`, `42`) are replaced with the token `IMM`.
     - **Generalizes Labels:** All labels (e.g., `loc_123:`, `?_0001:`) are replaced with the token `LABEL`.
