@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import socket
+import socketserver
 import sys
 import threading
 import time
@@ -1329,6 +1330,24 @@ class _FindServer(ThreadingHTTPServer):
         outside the class.
         """
         self._atexit_cleanup = cleanup
+
+    def server_bind(self) -> None:
+        """Bind the socket without the reverse-DNS lookup ``HTTPServer`` makes.
+
+        ``http.server.HTTPServer.server_bind`` fills ``server_name`` from
+        ``socket.getfqdn(self.server_address[0])``, and that resolver call is
+        not bounded: on a host whose resolver is slow or unreachable answered
+        it took 35 s on the macOS CI runners, and the port file, which is what
+        a ``find`` client waits for, is written only after the bind returns.
+        Nothing here reads the field — ``_FindHandler`` answers JSON on the
+        bound address and :func:`serve` derives the allowed ``Host`` values
+        from the bind host and port itself — so the address the socket is
+        bound to is what belongs in these stdlib attributes.
+        """
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
 
     def server_close(self) -> None:
         super().server_close()

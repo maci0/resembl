@@ -8,6 +8,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `serve` no longer waits on a reverse-DNS lookup of the address it binds
+  before it advertises its port. `http.server` filled `server_name` with
+  `socket.getfqdn(...)`, an unbounded resolver call that took 35 seconds on
+  a host with a slow resolver, and a `find` client that reads the port file
+  saw a server that had not started yet. Nothing reads `server_name`; the
+  bound address is what it holds now.
 - `export` no longer lets two snippets whose names differ only by case write
   to one file. The guard compared the file names with `os.path.normcase`,
   which only folds case on Windows, while macOS' default volume is
