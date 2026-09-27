@@ -7,12 +7,31 @@ from resembl import (
     snippet_add, snippet_add_batch, snippet_find_matches, snippet_compare,
     snippet_delete, snippet_get, snippet_list, snippet_prepare,
     code_tokenize, code_create_minhash, code_create_minhash_batch,
-    string_checksum, string_normalize,
+    string_checksum, string_normalize, normalize_unicode,
     Collection, Snippet, SnippetVersion,
 )
 ```
 
+## Text encoding
+
+Snippet code, names and tags are stored in Unicode Normalization Form C, and
+every checksum, fingerprint and query is taken over that same form. The same
+string can reach resembl in two compositions (`café` as one code point, or
+`café` as a base letter plus a combining acute), which are the same text to a
+reader and different values to `str`; macOS hands back the second spelling for
+any filename containing an accent. Without one form applied at ingestion those
+spellings are stored as two snippets that no query can tell apart.
+
+`normalize_unicode` is that form, exposed for callers comparing against stored
+values themselves. Compatibility normalization (NFKC/NFKD) is deliberately
+not used: it folds superscripts, fullwidth digits and roman numerals into
+their ASCII equivalents, which changes the text rather than its spelling.
+
 ## Core Functions
+
+### `normalize_unicode(text: str) → str`
+Return *text* in Normalization Form C. The identity on ASCII, so it is safe to
+apply to any string on the import hot path.
 
 ### `code_tokenize(code_snippet: str, normalize: bool = True) → list[str]`
 Tokenize assembly code using the Pygments NASM lexer. When `normalize=True`, registers become `REG`, immediates become `IMM`, labels become `LABEL`, and memory sizes become `MEM_SIZE`. Supports x86, ARM, MIPS, and RISC-V register sets.

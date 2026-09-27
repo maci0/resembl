@@ -68,6 +68,18 @@ project follows [Semantic Versioning](https://semver.org/).
   contributor when `pyproject.toml` has drifted.  Plain `uv run` gated the
   code against a lockfile no CI run and no other contributor ever saw;
   `uv lock` (or `make install`) is now the way forward.
+- **Breaking:** Snippet code, names and tags are stored in Unicode
+  Normalization Form C, and every checksum, fingerprint and query is taken
+  over that same form.  The same string could previously arrive in two
+  compositions (`café` as one code point, or `café` as a base letter plus
+  a combining acute) and be stored as two snippets that no query could
+  tell apart, or as two aliases on one snippet.  macOS is the usual
+  source: it hands back NFD filenames.  A database whose snippets contain
+  non-ASCII text must be re-imported, because their checksums are now
+  taken over the normalized form; ASCII text is unaffected, since NFC is
+  the identity on ASCII and the stored checksum of such a snippet does not
+  change.  `normalize_unicode` is exported for callers that compare
+  against the stored form themselves.
 - The `Test Suite` and `Pylint` workflows run on pull requests to `main` and
   on pushes to `main`, not on every push to every branch.  The two events carry
   different refs and so are different concurrency groups, which meant every
@@ -261,6 +273,13 @@ project follows [Semantic Versioning](https://semver.org/).
   and SBOM workflows gained the concurrency group the other five have.
 
 ### Fixed
+
+- `resembl export` no longer aborts on a filename that contains a byte no
+  encoding can decode.  POSIX filenames are byte strings, so importing a
+  directory whose entries carry one produced a name with a lone surrogate
+  in it, and encoding that name to measure its length raised
+  `UnicodeEncodeError` and killed the whole export.  Such a name now
+  exports like any other name with an unportable character in it.
 
 - A process that drives the CLI repeatedly in one interpreter (a test
   harness, an embedding script) no longer leaks a database session and a

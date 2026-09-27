@@ -28,6 +28,7 @@ import hashlib
 import operator
 import struct
 import threading
+import unicodedata
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
@@ -840,6 +841,33 @@ def _token_type_flags(ttype: object) -> int:
     return flags
 
 
+def normalize_unicode(text: str) -> str:
+    """Return *text* in Unicode Normalization Form C.
+
+    Snippet text reaches resembl from files, argv and JSON bodies, and the
+    same grapheme can arrive in either composition.  A string literal spelled
+    ``cafe\\u0301`` (NFD) and one spelled ``caf\\u00e9`` (NFC) are the same text
+    to a reader, but they are different ``str`` values, so they lexed to
+    different token streams, hashed to different checksums, and were stored as
+    two snippets that no query can tell apart.  macOS is the common source: it
+    hands back NFD filenames.
+
+    NFC is the storage form because it composes, so ``"café"`` is 5 code
+    points rather than 6, and it is what a user typing into a terminal
+    produces.  NFKC/NFKD are deliberately not used: they fold compatibility
+    characters, turning a superscript or a fullwidth digit into its ASCII
+    equivalent, which changes the text rather than its spelling.
+
+    Every path that lexes raw text (checksum, fingerprint, query) goes through
+    here, so hashing and comparison always see the same form.
+    """
+    if text.isascii():
+        # Fast path: NFC is the identity on ASCII, and snippet lexing is the
+        # import hot path.
+        return text
+    return unicodedata.normalize("NFC", text)
+
+
 def string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
     """Normalize a lexer token stream to a canonical string (no lexing).
 
@@ -852,7 +880,7 @@ def string_normalize_lexed(tokens: Iterable[tuple[object, str]]) -> str:
 
 def string_normalize(code_snippet: str) -> str:
     """Normalize an assembly snippet and return a canonical string."""
-    return string_normalize_lexed(get_lexer().get_tokens(code_snippet))
+    return string_normalize_lexed(get_lexer().get_tokens(normalize_unicode(code_snippet)))
 
 
 def string_checksum(code_snippet: str) -> str:
@@ -952,7 +980,7 @@ def code_tokenize_normalize_lexed(
 
 def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     """Return a list of tokens from a code snippet."""
-    return code_tokenize_lexed(get_lexer().get_tokens(code_snippet), normalize)
+    return code_tokenize_lexed(get_lexer().get_tokens(normalize_unicode(code_snippet)), normalize)
 
 
 # ---------------------------------------------------------------------------

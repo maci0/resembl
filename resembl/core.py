@@ -75,6 +75,7 @@ from .scoring import (
     minhash_jaccard_batch,
     minhash_num_perm,
     minhash_pack,
+    normalize_unicode,
     require_same_num_perm,
     score_hybrid,
 )
@@ -146,6 +147,7 @@ def snippet_name_add(
             logger.error("Snippet with checksum %s not found.", checksum)
         return None
 
+    new_name = normalize_unicode(new_name)
     name_list = snippet.name_list
     if new_name in name_list:
         return snippet  # Idempotent: already named
@@ -168,6 +170,10 @@ def snippet_name_remove(
             logger.error("Snippet with checksum %s not found.", checksum)
         return None
 
+    # Names are stored in NFC, so the argument is normalized too: passing the
+    # NFD spelling macOS hands back for a file whose name has an accent must
+    # still find the row.
+    name_to_remove = normalize_unicode(name_to_remove)
     name_list = snippet.name_list
     if name_to_remove not in name_list:
         if not quiet:
@@ -191,7 +197,7 @@ def snippet_tag_add(
     session: Session, checksum: str, tag: str, quiet: bool = False
 ) -> Snippet | None:
     """Add a tag to a snippet (idempotent — adding an existing tag is a no-op)."""
-    tag = tag.strip()
+    tag = normalize_unicode(tag.strip())
     if not tag:
         if not quiet:
             logger.error("Tag cannot be empty.")
@@ -219,7 +225,7 @@ def snippet_tag_remove(
     session: Session, checksum: str, tag: str, quiet: bool = False
 ) -> Snippet | None:
     """Remove a tag from a snippet (idempotent — removing a missing tag is a no-op)."""
-    tag = tag.strip()
+    tag = normalize_unicode(tag.strip())
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
         if not quiet:
@@ -257,7 +263,11 @@ def snippet_lex(code: str) -> tuple[str, list[str]] | None:
     # Materialize the token stream: it is consumed twice (once for the
     # normalized checksum string, once for the MinHash tokens), and the fused
     # pass derives both from one iteration instead of two.
-    tokens = list(get_lexer().get_tokens(code))
+    #
+    # NFC first: the checksum is the snippet's primary key, so the same string
+    # in two composition forms would have to be stored twice and neither
+    # query could find the other.
+    tokens = list(get_lexer().get_tokens(normalize_unicode(code)))
     token_list, normalized = code_tokenize_normalize_lexed(tokens)
     checksum = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
     return checksum, token_list
@@ -281,7 +291,14 @@ def snippet_prepare(
     if lexed is None:
         return None
     checksum, token_list = lexed
-    return checksum, name, code, minhash_pack(minhash_from_tokens(token_list, ngram_size))
+    # Stored in the same form the checksum was taken over, so what the
+    # database holds is exactly what was hashed.
+    return (
+        checksum,
+        normalize_unicode(name),
+        normalize_unicode(code),
+        minhash_pack(minhash_from_tokens(token_list, ngram_size)),
+    )
 
 
 #: Checksums per SQL ``IN`` clause (and the merge chunk size that feeds one).
@@ -476,6 +493,10 @@ def snippet_add_batch(
     # entry strongly typed for the hot loop below.
     by_checksum: dict[str, tuple[str, bytes, list[str]]] = {}
     for checksum, name, code, minhash_bytes in prepared_items:
+        # Names reach the database as filenames (NFD on macOS) and as CLI
+        # argv, so the alias merge below would otherwise keep both spellings
+        # of the same name as two entries.
+        name = normalize_unicode(name)
         entry = by_checksum.get(checksum)
         if entry is None:
             entry = (code, minhash_bytes, [])
@@ -578,6 +599,8 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     if lexed is None:
         return None
     checksum, token_list = lexed
+    name = normalize_unicode(name)
+    code = normalize_unicode(code)
 
     existing_snippet = Snippet.get_by_checksum(session, checksum)
 
@@ -1563,7 +1586,16 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
 #: Characters invalid in filenames on at least one major filesystem:
 #: Windows forbids ``< > : " / \ | ? *`` plus control characters, and the
 #: others break round-trips between platforms.
-_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+#:
+#: The surrogate range is here for a reason POSIX needs: a filename is a byte
+#: string there, and ``os.fsdecode`` surfaces an undecodable byte as a lone
+#: surrogate.  Importing a directory whose entries carry such a byte produced
+#: the name ``"bad\udcff"``, and encoding that to UTF-8 for the length check
+#: below raised ``UnicodeEncodeError`` and aborted the whole export.  A lone
+#: surrogate has no UTF-8 encoding at all, so it can never be part of a
+#: portable filename: substituting it with the same ``_`` as every other
+#: illegal character is the only answer that keeps the export running.
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\ud800-\udfff]')
 
 #: Windows reserves these stems (case-insensitive, extension ignored):
 #: writing "con.asm" targets the console device instead of a file.
@@ -1585,16 +1617,21 @@ def _export_safe_filename(name: str) -> str:
     """Sanitize a snippet name into a portable filename stem.
 
     Replaces characters that are illegal on Windows (and problematic
-    elsewhere), blocks directory traversal, bounds the UTF-8 encoded length
-    (filesystems cap filenames at 255 *bytes*; Windows MAX_PATH much lower),
-    strips trailing dots/spaces (Windows silently drops them), and prefixes
-    Windows reserved device names so ``con`` cannot target a device.
+    elsewhere, including lone surrogates from an undecodable filename byte),
+    blocks directory traversal, bounds the UTF-8 encoded length (filesystems
+    cap filenames at 255 *bytes*; Windows MAX_PATH much lower), strips trailing
+    dots/spaces (Windows silently drops them), and prefixes Windows reserved
+    device names so ``con`` cannot target a device.
     """
     cleaned = _INVALID_FILENAME_CHARS.sub("_", name.replace("..", "_"))
     cleaned = os.path.basename(cleaned)
     if len(cleaned.encode("utf-8")) > _EXPORT_STEM_MAX_BYTES:
         # Cut by bytes, then drop any partial multi-byte character left at
-        # the end ("ignore") so the stem stays a valid string.
+        # the end ("ignore") so the stem stays a valid string.  The truncation
+        # can land inside a grapheme cluster (a base character separated from
+        # its combining mark); that costs a combining mark at the very end of
+        # a 230-byte stem, and dropping the mark would mangle the character
+        # before it, so the boundary is left where the byte count falls.
         cleaned = cleaned.encode("utf-8")[:_EXPORT_STEM_MAX_BYTES].decode("utf-8", errors="ignore")
     cleaned = cleaned.rstrip(" .")
     if not cleaned:
@@ -1779,6 +1816,10 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     untouched rather than overwritten, so re-running a create cannot rewrite
     a description a human has since edited.
     """
+    # The name is the primary key, so it is normalized before the lookup: a
+    # create with the NFD spelling of a name stored in NFC would miss the
+    # existing row and then collide with it on insert.
+    name = normalize_unicode(name)
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing
@@ -1955,9 +1996,15 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # are created so duplicates stay impossible without re-querying.
         local_collections = {col.name: col for col in Collection.get_all(session)}
         for col in source_session.exec(select(Collection).order_by(Collection.name)).all():
-            if col.name not in local_collections:
+            # The name is the collection's primary key on both sides, so the
+            # comparison has to be on the form both stores: a source row whose
+            # name arrived in a different composition would otherwise miss the
+            # local row and be inserted as a second collection under a name
+            # that is the same to any reader.
+            merged_name = normalize_unicode(col.name)
+            if merged_name not in local_collections:
                 new_col = Collection(
-                    name=col.name,
+                    name=merged_name,
                     description=col.description,
                     # A source row with no readable timestamp (a NULL column in
                     # a hand-built or older database) still has to land in a
@@ -1967,7 +2014,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     created_at=timestamp_normalize(col.created_at) or timestamp_now(),
                 )
                 session.add(new_col)
-                local_collections[col.name] = new_col
+                local_collections[merged_name] = new_col
 
         # Source snippets that already exist locally are merged; new ones are
         # bulk-inserted.  Existence is decided by one chunked IN query per
