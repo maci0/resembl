@@ -545,27 +545,12 @@ def fingerprint_stamps_reconcile(
     permanently invisible until a manual ``reindex --force``.
     """
 
-    for get, set_, clear, expected in (
-        (
-            lambda: fingerprint_version_get(session),
-            lambda: fingerprint_version_set(session, FINGERPRINT_VERSION),
-            lambda: fingerprint_version_clear(session),
-            FINGERPRINT_VERSION,
-        ),
-        (
-            lambda: fingerprint_ngram_get(session),
-            lambda: fingerprint_ngram_set(session, ngram_size),
-            lambda: fingerprint_ngram_clear(session),
-            ngram_size,
-        ),
-        (
-            lambda: fingerprint_perm_get(session),
-            lambda: fingerprint_perm_set(session, num_perm),
-            lambda: fingerprint_perm_clear(session),
-            num_perm,
-        ),
+    for key, expected in (
+        (_VERSION_STAMP_KEY, FINGERPRINT_VERSION),
+        (_NGRAM_STAMP_KEY, ngram_size),
+        (_PERM_STAMP_KEY, num_perm),
     ):
-        current = get()
+        current = _stamp_get(session, key)
         if current == expected:
             continue
         if current is not None:
@@ -573,10 +558,10 @@ def fingerprint_stamps_reconcile(
             # the population is now mixed, so the stamp must go — keeping
             # it would tell ``find`` everything matches and silently hide
             # the old rows.
-            clear()
+            _stamp_clear(session, key)
         elif fresh_database:
             # No pre-existing rows: the rows just written ARE the population.
-            set_()
+            _stamp_set(session, key, expected)
         # else: stamp absent with pre-existing rows (legacy database, or a
         # merge cleared it) — leave it absent; publishing a value here would
         # vouch for rows this write never saw.
