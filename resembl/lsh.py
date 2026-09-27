@@ -601,14 +601,26 @@ def band_buckets(packed: bytes, num_perm: int, b: int, r: int) -> list[str]:
     cannot be part of a primary key on MySQL/MariaDB; the ``lsh_bucket``
     column is sized for the widest realistic key (see ``LSHBucket``).
 
-    Malformed blobs (bad header, wrong permutation count) raise
-    ``ValueError`` rather than low-level ``struct`` errors.
+    Malformed blobs (bad header, wrong permutation count) and a banding that
+    does not fit the fingerprint (``b * r > num_perm``) raise ``ValueError``
+    rather than low-level ``struct`` errors.
     """
     if len(packed) < 8 or not packed.startswith(MINHASH_MAGIC):
         raise ValueError("Corrupt MinHash payload: missing RMLH magic.")
     if minhash_num_perm(packed) != num_perm:
         raise ValueError(
             f"Corrupt MinHash payload: permutation count does not match the expected {num_perm}."
+        )
+    # The last band must fit inside the fingerprint.  Slicing past the end of
+    # the blob yields a short — or empty — slice, whose hex key no longer
+    # identifies the band: every over-long band would share the key "", so
+    # every snippet in the index would answer every query.  ``banding_params``
+    # never produces such a split (``b * r`` is a divisor search bounded by
+    # ``num_perm``), but ``b``/``r`` are arguments a caller supplies.
+    if b < 1 or r < 1 or b * r > num_perm:
+        raise ValueError(
+            f"Corrupt banding: {b} bands of {r} values need {b * r} of "
+            f"{num_perm} permutation values."
         )
     step = 4 * r
     base = 8

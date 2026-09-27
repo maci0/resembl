@@ -71,12 +71,15 @@ the server's configured default", exactly like an omitted field):
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
 | `query` | string | required |
-| `top_n` | integer | at most 1000, else `400`. The default is the server's config |
+| `top_n` | integer | at most 1000, else `400`. A fractional value is rejected, not truncated. The default is the server's config |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must match the server's configured `lsh_threshold` (compared with a `1e-6` tolerance, since MySQL and DuckDB store it single-precision) |
 | `normalize` | boolean | default `true` |
-| `ngram_size` | integer | at least `1`. Must equal the server's configured `ngram_size` |
-| `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM`. Must equal the server's configured `num_permutations` |
+| `ngram_size` | integer | at least `1`, whole. Must equal the server's configured `ngram_size` |
+| `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM`, whole. Must equal the server's configured `num_permutations` |
 | `jaccard_weight` | number | `0.0` to `1.0` |
+
+The three integer fields accept a JSON integer, an integral number
+(`3.0`) or a decimal string (`"3"`); a fractional one is a `400`.
 
 The LSH index is built once, at startup, for the server's configured
 `threshold`, `ngram_size` and `num_permutations`, and is shared by every

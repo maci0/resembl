@@ -169,6 +169,32 @@ class _FindRequest:
     effective_threshold: float
 
 
+def _as_int(value: object, name: str) -> int:
+    """Return *value* as an exact integer, or raise :class:`BadRequestError`.
+
+    A count has to be a whole number, and ``int()`` alone does not check
+    that: it truncates ``5.9`` to 5 and turns a client's ``2.9`` permutations
+    into a valid 2, so the request is answered as though it had said
+    something it did not.  Integral floats and numeric strings stay legal
+    (``128.0``, ``"128"``); a fractional value, a boolean, NaN or infinity is
+    a bad request.
+    """
+    if isinstance(value, bool):
+        raise BadRequestError(f"{name} must be a whole number, got a boolean")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise BadRequestError(f"{name} must be a whole number, got {value!r}")
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise BadRequestError(f"{name} must be a whole number, got {value!r}") from exc
+    raise BadRequestError(f"{name} must be a whole number, got {value!r}")
+
+
 def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     """Validate *body*'s find parameters, or raise :class:`BadRequestError`.
 
@@ -182,7 +208,7 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # the configured default.
     provided = {k: v for k, v in body.items() if v is not None}
     try:
-        top_n = int(provided.get("top_n", params.top_n))
+        top_n = _as_int(provided.get("top_n", params.top_n), "top_n")
         # Coerce inside the same guard as the numeric fields: a JSON string
         # threshold ("0.9") must answer the clean bad-request payload, not
         # raise TypeError at the range check below and surface as a 500
@@ -190,9 +216,15 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
         threshold_raw = provided.get("threshold", params.lsh_threshold)
         threshold = float(threshold_raw) if threshold_raw is not None else None
         normalize = bool(provided.get("normalize", True))
-        ngram_size = int(provided.get("ngram_size", params.ngram_size))
-        num_permutations = int(provided.get("num_permutations", params.num_permutations))
+        ngram_size = _as_int(provided.get("ngram_size", params.ngram_size), "ngram_size")
+        num_permutations = _as_int(
+            provided.get("num_permutations", params.num_permutations), "num_permutations"
+        )
         jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
+    except BadRequestError:
+        # A whole-number count already failed :func:`_as_int`; its message
+        # names the value, so keep it instead of the generic one below.
+        raise
     except (TypeError, ValueError, OverflowError) as exc:
         # A non-numeric parameter is a bad request, answered with a clean 400
         # instead of letting int()/float() raise inside the handler, which
@@ -201,7 +233,7 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
         # those raises OverflowError (not TypeError/ValueError) — without it
         # in this tuple such a request leaked a 500 with internal error text.
         raise BadRequestError(
-            "top_n, ngram_size, num_permutations must be integers; "
+            "top_n, ngram_size, num_permutations must be whole numbers; "
             "threshold and jaccard_weight must be numbers"
         ) from exc
     # Range-check the threshold up front: :class:`ResemblLSH` rejects values

@@ -202,7 +202,9 @@ A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, mi
 ### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[str]`
 Compute the canonical bucket key for each band of a packed fingerprint
 (fixed-width lowercase hex), matching datasketch's banding math. Malformed
-blobs raise `ValueError`.
+blobs raise `ValueError`, as does a banding that does not fit the fingerprint
+(`b * r > num_perm`, which would slice past the end of the blob and collapse
+the over-long bands into one empty key).
 
 ### `lsh_index_build(session, threshold: float, num_perm: int, progress=None) → ResemblLSH | None`
 Build (or replace) the database-backed index in `resembl.cache`. Band-major sorted inserts, periodic commits, a deferred `checksum` index, and a raised page cache keep a 500k-snippet build near-linear (~1.8 min on a busy machine). `progress(done, total)` is invoked as snippets are processed. Rebuilding an index is also the lazy path taken by the first `find` on a fresh database.

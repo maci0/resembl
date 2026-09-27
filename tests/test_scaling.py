@@ -1459,6 +1459,24 @@ class TestFingerprintVersion(BaseScalingTest):
         # also surface as a stale-index issue (which exits `verify` non-zero).
         self.assertEqual(report["issues"], [])
 
+    def test_verify_reports_unusable_stored_banding(self):
+        """verify reports stored LSH parameters no index can be built from.
+
+        A hand-edited or corrupt ``lsh_meta`` row (here a zero permutation
+        count) used to reach the banding search, which raises numpy's
+        "need at least one array to concatenate" out of a health check.
+        """
+        from resembl.core import db_verify
+        from resembl.models import LSHMeta
+
+        self._add(3)
+        self.session.add(LSHMeta(id=1, threshold=0.5, num_perm=0))
+        self.session.commit()
+        report = db_verify(self.session)
+        self.assertIsNone(report["expected_buckets"])
+        self.assertEqual(report["num_buckets"], 0)
+        self.assertTrue(any("banding" in issue for issue in report["issues"]), report["issues"])
+
     def test_merge_clears_stamp(self):
         """Merge copies source blobs verbatim — the stamp must be cleared."""
         import os

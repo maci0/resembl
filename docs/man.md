@@ -167,7 +167,8 @@ The `compare` command also reports control-flow graph similarity.
 **verify**
 :   Check database health: snippet/bucket counts, fingerprint format
     version, and any pending work (a missing index or stale fingerprints
-    are healed by the next `find`; a bucket/snippet mismatch means
+    are healed by the next `find`; a bucket/snippet mismatch, or LSH
+    metadata naming parameters no index can be built from, means
     `reindex --force` should run).  Exits 1 when issues are found.
 
 **clean**

@@ -279,6 +279,23 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `resembl verify` no longer crashes on an `lsh_meta` row naming parameters no
+  index can be built from (a permutation count below 2, a threshold outside
+  `[0.0, 1.0]`).  The stored values went straight into the banding search,
+  which raised numpy's "need at least one array to concatenate" out of a
+  health check; the row is now reported as an issue, so the command still
+  exits 1 and still points at `reindex --force`.
+- `resembl.lsh.band_buckets` refuses a banding that does not fit the
+  fingerprint (`b * r > num_perm`).  Slicing past the end of the blob returned
+  a short, or empty, slice, so every over-long band hashed to the same empty
+  bucket key and an index built that way would answer every query with every
+  snippet.  No index built by `banding_params` was ever affected.
+- `serve` answers `400` for a fractional `top_n`, `ngram_size` or
+  `num_permutations` instead of truncating it: `2.9` permutations used to
+  become a valid 2 and `5.9` results became 5, so the response answered as if
+  the client had sent a number it did not.  An integral float (`3.0`) and a
+  decimal string (`"3"`) are still accepted.
+
 - `resembl export` no longer aborts on a filename that contains a byte no
   encoding can decode.  POSIX filenames are byte strings, so importing a
   directory whose entries carry one produced a name with a lone surrogate

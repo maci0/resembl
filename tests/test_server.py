@@ -1063,6 +1063,24 @@ class TestServerMode(unittest.TestCase):
             self.assertIn("error", payload)
             self.assertIn("must be", payload["error"])
 
+    def test_find_rejects_fractional_count_params(self):
+        """A fractional ``top_n`` / ``ngram_size`` / ``num_permutations`` is a 400.
+
+        ``int()`` truncates: ``2.9`` permutations became a valid 2 and
+        ``5.9`` results became 5, so the server answered as if the client
+        had sent a number it did not.  An integral float stays legal.
+        """
+        from resembl.server import _find_one
+
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        port = self._start_server()
+        for bad in ({"top_n": 5.9}, {"ngram_size": 2.5}, {"num_permutations": 2.9}):
+            status, payload = _post_json_status(port, "/find", {"query": query, **bad})
+            self.assertEqual(status, 400, bad)
+            self.assertIn("whole number", payload["error"])
+        # ``3.0`` is the same value as ``3`` and must still be accepted.
+        self.assertIn("matches", _find_one(self._session, {"query": query, "top_n": 3.0}, query))
+
     def test_find_treats_explicit_null_params_as_absent(self):
         """An explicit JSON null for a find parameter uses the configured default.
 

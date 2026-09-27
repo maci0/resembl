@@ -1706,6 +1706,21 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     }
 
 
+def _usable_band_count(threshold: float, num_perm: int) -> int | None:
+    """Return the band count *threshold* / *num_perm* bands into, else None.
+
+    None when :class:`~resembl.lsh.ResemblLSH` would refuse those parameters
+    (a threshold outside ``[0.0, 1.0]``, fewer than two permutations, or a
+    banding left with a single band), so a caller reading stored LSH metadata
+    can tell "this index is unusable" from "this index has N bands" without
+    running a numerical search on values no index can be built from.
+    """
+    if not 0.0 <= threshold <= 1.0 or num_perm < 2:
+        return None
+    bands, _rows = banding_params(threshold, num_perm)
+    return bands if bands >= 2 else None
+
+
 def db_verify(session: Session) -> dict:
     """Report the database's health: index, fingerprints, and pending work.
 
@@ -1732,36 +1747,49 @@ def db_verify(session: Session) -> dict:
         warnings.append("no LSH index — the next `find` builds it")
     else:
         threshold, num_perm = meta
-        b, _r = banding_params(threshold, num_perm)
-        expected_buckets = num_snippets * b
-        table_missing = False
-        try:
-            # Count only band 0: every snippet contributes exactly one row
-            # per band, and staleness (missing or extra rows) affects all
-            # bands uniformly — so band0 * b is the exact total for a
-            # consistent index, and the scan is 1/b of the full count
-            # (~100ms -> ~4ms at 500k, minutes -> seconds at billions).
-            band0 = session.exec(
-                select(func.count(LSHBucket.checksum)).where(  # type: ignore[arg-type]
-                    LSHBucket.band == 0
-                )
-            ).one()
-            num_buckets = band0 * b
-        except OperationalError:
-            # lsh_bucket missing while its meta row says an index exists —
-            # e.g. a crash inside the drop/recreate window, or a manual drop.
-            # The next `find` rebuilds, so this is a warning, not an issue;
-            # the bucket-count comparison below must not run either (a zero
-            # count against a nonzero expectation would raise exactly the
-            # stale-index issue this state never produces).
-            warnings.append("lsh_bucket table is missing — the next `find` rebuilds the index")
-            num_buckets = 0
-            table_missing = True
-        if not table_missing and num_snippets > 0 and num_buckets != expected_buckets:
+        b = _usable_band_count(threshold, num_perm)
+        if b is None:
+            # The metadata names parameters no index can be built from (a
+            # hand-edited or corrupt row: a permutation count below 2, a
+            # threshold outside [0.0, 1.0], or a banding that collapses to a
+            # single band).  ``banding_params`` is not a safe way to find that
+            # out — a zero permutation count raises numpy's "need at least
+            # one array to concatenate" — and no bucket count derived from it
+            # would mean anything, so report the row instead of the rows.
             issues.append(
-                f"index may be stale ({num_buckets} bucket rows, expected "
-                f"{expected_buckets}) — run `resembl reindex --force`"
+                f"stored LSH parameters (threshold {threshold}, {num_perm} permutations) "
+                f"have no usable banding — run `resembl reindex --force`"
             )
+        else:
+            expected_buckets = num_snippets * b
+            table_missing = False
+            try:
+                # Count only band 0: every snippet contributes exactly one row
+                # per band, and staleness (missing or extra rows) affects all
+                # bands uniformly — so band0 * b is the exact total for a
+                # consistent index, and the scan is 1/b of the full count
+                # (~100ms -> ~4ms at 500k, minutes -> seconds at billions).
+                band0 = session.exec(
+                    select(func.count(LSHBucket.checksum)).where(  # type: ignore[arg-type]
+                        LSHBucket.band == 0
+                    )
+                ).one()
+                num_buckets = band0 * b
+            except OperationalError:
+                # lsh_bucket missing while its meta row says an index exists —
+                # e.g. a crash inside the drop/recreate window, or a manual drop.
+                # The next `find` rebuilds, so this is a warning, not an issue;
+                # the bucket-count comparison below must not run either (a zero
+                # count against a nonzero expectation would raise exactly the
+                # stale-index issue this state never produces).
+                warnings.append("lsh_bucket table is missing — the next `find` rebuilds the index")
+                num_buckets = 0
+                table_missing = True
+            if not table_missing and num_snippets > 0 and num_buckets != expected_buckets:
+                issues.append(
+                    f"index may be stale ({num_buckets} bucket rows, expected "
+                    f"{expected_buckets}) — run `resembl reindex --force`"
+                )
 
     return {
         "num_snippets": num_snippets,

@@ -119,7 +119,10 @@ class TestPropertyBandBuckets(unittest.TestCase):
     @given(
         perm=st.sampled_from([64, 128]),
         seed=st.integers(min_value=0, max_value=2**32 - 1),
-        br=st.sampled_from([(8, 16), (25, 5), (64, 2), (128, 1)]),
+        # Splits whose bands fit inside the smaller of the two permutation
+        # counts; a split wider than the fingerprint is refused outright
+        # (see ``test_banding_past_the_fingerprint_raises``).
+        br=st.sampled_from([(8, 4), (8, 8), (16, 4), (25, 2), (32, 2), (64, 1)]),
     )
     @settings(max_examples=40, deadline=10000)
     def test_bucket_keys_match_reference(self, perm: int, seed: int, br: tuple[int, int]) -> None:
@@ -155,6 +158,24 @@ class TestPropertyBandBuckets(unittest.TestCase):
             band_buckets(b"not-a-blob", 128, 25, 5)
         with self.assertRaises(ValueError):
             band_buckets(b"RMLH" + b"\x00" * 4, 128, 25, 5)  # bad perm count
+
+    def test_banding_past_the_fingerprint_raises(self) -> None:
+        """A banding needing more values than the blob holds is refused.
+
+        Slicing past the end of the blob would return a short, or empty,
+        slice, and every over-long band would share the empty bucket key, so
+        the index would answer every query with every snippet.
+        """
+        from resembl.lsh import band_buckets
+        from resembl.models import minhash_new, minhash_pack
+
+        packed = minhash_pack(minhash_new(128))
+        with self.assertRaises(ValueError):
+            band_buckets(packed, 128, 100, 64)  # 6400 values out of 128
+        with self.assertRaises(ValueError):
+            band_buckets(packed, 128, 0, 5)
+        with self.assertRaises(ValueError):
+            band_buckets(packed, 128, 25, 0)
 
 
 class TestPropertyJaccardBatch(unittest.TestCase):
