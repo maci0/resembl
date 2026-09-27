@@ -82,9 +82,10 @@ fix: answer 400 with one JSON error envelope on the serve endpoints
 ```
 
 Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `perf`,
-`ci`, `build`, `chore`. A breaking change is either a `!` after the
-type/scope or a `BREAKING CHANGE:` footer; release-drafter resolves either to
-the next major, never to a patch. `.pre-commit-config.yaml`
+`ci`, `build`, `chore`. A breaking change carries a `!` after the type/scope
+in the subject (`fix(server)!: ...`), which is what release-drafter's
+autolabeler reads to resolve the next major; a `BREAKING CHANGE:` footer
+alone leaves the version on a patch. `.pre-commit-config.yaml`
 carries a header explaining why the hooks run through `uv run` rather than
 pinned mirror hooks; keep that reasoning in sync with any change there.
 

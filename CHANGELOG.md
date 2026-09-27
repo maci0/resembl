@@ -6,6 +6,27 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl --version` prints the installed version and exits `0`; it is
+  answered before the database is opened, so it works against a missing or
+  unreachable database URL.
+- `resembl find` reads its query from stdin when neither `--query` nor
+  `--file` is given, so a snippet can be piped in.
+- DuckDB is reachable by users through a new `duckdb` extra
+  (`uv pip install "resembl[duckdb]"`).  The compiled driver used to be a
+  development dependency only, so a `duckdb:///file.db` URL needed a manual
+  install.
+- `resembl config set` refuses a value outside the range its setting works
+  in, and names the range it wanted.
+- `docs/http_api.md` documents the `serve` endpoints: the request fields of
+  `/find` and `/find-batch`, the `200` response shapes, and the
+  `400`/`404`/`405`/`415`/`500` error envelope.
+- Two fuzz harnesses cover the surfaces that parse untrusted input:
+  `fuzzers/fuzz_minhash_blob.py` for the stored-fingerprint byte format, and
+  `fuzzers/fuzz_find_request.py` for the `serve` request body and find
+  parameters.
+
 ### Changed
 
 - The sdist and wheel are now built by `make dist`, which pins the build clock
@@ -24,7 +45,47 @@ project follows [Semantic Versioning](https://semver.org/).
   the thin find client resolve these through the shared module instead of
   keeping copies, so a change to the override rules can no longer leave the
   client looking for a port file the server never wrote.
-
+- **Breaking:** `resembl serve` now answers `400` to a request whose
+  `threshold`, `ngram_size` or `num_permutations` is not the value the
+  running server's index was built for.  Before, the request rebuilt the
+  shared `lsh_bucket` table inside a handler thread while other requests read
+  it, which could leave `lsh_meta` advertising a complete index over missing
+  rows and silently return a fraction of the matches.  A `threshold` too high
+  to leave 2 bands is refused the same way, instead of answering with zero
+  matches.  Migration: send the fields the server is configured with, or
+  leave them out so they default to the server's `config.toml`, or restart
+  the server with the settings the client sends.  The three fields come from
+  the same `config.toml` the CLI and `resembl-find` read, so a matching
+  client needs no change.
+- **Breaking:** a configuration value outside the range its setting works in
+  is now reported on stderr and ignored, and the default is used.  Before it
+  was used as written, so a hand-edited `lsh_threshold = 0.995` queried with
+  that threshold and now queries with the `0.5` default; a `top_n = 0` that
+  returned nothing now falls back to `5`.  The accepted ranges are in the
+  README table.  Move an out-of-range value inside its range.
+- `DATABASE_URL` is namespaced: `RESEMBL_DATABASE_URL` is read first and the
+  unprefixed name next, so an existing deployment keeps working and an
+  unrelated `DATABASE_URL` in the environment no longer picks the backend.
+- A rejected command line exits `2`, not `1`, matching what typer already
+  returned for its own parse errors: a bad `--threshold`, `--num-perm`,
+  `--ngram-size` or `--format` value, a missing query, or a bare `resembl`
+  with no subcommand.  A script that treated `1` as "you typed it wrong"
+  has to read `2` now; `1` still means the command failed.
+- An unsupported `--format` value, and an unsupported `format` in the config
+  file, are refused instead of falling through to an unknown renderer.
+- Log records go to stderr rather than stdout, so a warning raised mid-run
+  (a config key ignored, a parallel import falling back) no longer
+  interleaves into the JSON or CSV a script is parsing.
+- A `--format csv` result set with no rows now writes nothing, instead of a
+  JSON `[]` in the CSV stream.
+- The `pg8000` and `pymysql` DBAPI drivers are runtime dependencies, so a
+  plain install can use the `postgresql+pg8000://` and `mysql+pymysql://`
+  URLs the CLI advertises.
+- Package metadata declares the SPDX expression `GPL-3.0-only` and ships
+  the license text through `license-files`; `GPLv3` was not a valid SPDX id,
+  so indexers and scanners could not match the license.
+- The terminal UI is drawn from a single brand-green palette rather than per
+  element colors.
 - **Breaking:** a refused find parameter on `resembl serve` now answers `400`
   with a `{"error": "..."}` body, on `POST /find` and `POST /find-batch`
   alike.  Before, `POST /find` answered `200` and put the error in the
@@ -42,21 +103,24 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `snippet_delete` purges the checksum's `lsh_bucket` rows in the same
+  transaction as the snippet row.  Committing the two separately left bucket
+  rows for a snippet that no longer existed whenever the process died in
+  between, and `lsh_meta` still marked the index complete, so no later find
+  repaired it.
+- A snippet whose `created_at` is `NULL` no longer breaks `merge` or its
+  timestamp rendering.
+- The served result cache's version guard is read through the pooled
+  connection the request uses, so a rebuild under one connection is no longer
+  invisible to a request holding another.
+- `resembl-find` reports a mistyped number in `config.toml` and falls back to
+  the default instead of dying with a `ValueError` traceback before the query
+  is sent.
 - A `POST /find` or `POST /find-batch` body nested deeper than the JSON
   decoder's recursion limit is now answered with `400` and the standard
   error envelope.  It used to raise `RecursionError`, which escaped the
   body's parse guard and the handler's own error handling, so the
   connection died with no response at all.
-
-### Added
-
-- `docs/http_api.md` documents the `serve` endpoints: the request fields of
-  `/find` and `/find-batch`, the `200` response shapes, and the
-  `400`/`404`/`405`/`415`/`500` error envelope.
-- Two fuzz harnesses cover the surfaces that parse untrusted input:
-  `fuzzers/fuzz_minhash_blob.py` for the stored-fingerprint byte format, and
-  `fuzzers/fuzz_find_request.py` for the `serve` request body and find
-  parameters.
 
 ## [2.0.0] - 2026-09-15
 
@@ -67,8 +131,10 @@ project follows [Semantic Versioning](https://semver.org/).
   `numpy` 2.5) already require.
 - Dependencies refreshed to their latest releases: `pylint` 4, `datasketch`
   2, `mypy` 2, plus the rest of the locked tree.
-- Removed two dead names (`code_tokenize_lexed`, `string_normalize_lexed`)
-  from the `resembl.core` re-export block.
+- Removed three names from the `resembl.core` re-export block:
+  `code_tokenize_lexed` and `string_normalize_lexed` (both dead) and
+  `minhash_jaccard`, which is still public and is importable from
+  `resembl.models` and documented in `docs/api_reference.md`.
 
 ## [1.2.0] - 2026-09-15
 

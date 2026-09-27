@@ -1,8 +1,11 @@
 # .github/release-drafter.yml
 # The project releases by hand (a `release X.Y.Z` commit bumps the manifest
 # and writes the CHANGELOG section) but drafts and tags here, so the version
-# resolver has to follow SemVer: a `!` in the commit subject, or a
-# `BREAKING CHANGE:` footer, has to land on a major, never on a patch.
+# resolver has to follow SemVer: a `!` after the Conventional Commit
+# type/scope has to land on a major, never on a patch.  The autolabeler below
+# matches commit subjects, which is also all `change-template` prints, so the
+# `!` has to be in the subject; a `BREAKING CHANGE:` footer in the body
+# reaches neither and does not move the version.
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
 version-resolver:
@@ -51,11 +54,14 @@ categories:
       - 'chore'
       - 'refactor'
       - 'style'
+# The `!` marker is a Conventional Commits convention for every type, not
+# just feat and fix, so `refactor!:`, `build!:` and `chore!:` resolve to a
+# major too.  The three patterns stay disjoint: only the `major` one admits a
+# `!` before the colon, so a plain `feat(x):` is never labeled breaking.
 autolabeler:
   - label: 'major'
     title:
-      - '/^feat(\(.+\))?!:/'
-      - '/^fix(\(.+\))?!:/'
+      - '/^\w+(\(.+\))?!:/'
   - label: 'minor'
     title:
       - '/^feat(\(.+\))?:/'
