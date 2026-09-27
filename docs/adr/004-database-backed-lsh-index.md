@@ -25,9 +25,13 @@ Replace the in-memory `datasketch.MinHashLSH` + pickle cache with a
 **database-backed banded LSH index**:
 
 - A `lsh_bucket` table holds one row per (band, bucket, checksum) triple —
-  the bucket key being the canonical big-endian uint32 encoding of each band
-  of hash values, computed directly from the packed fingerprint bytes and
-  stored as fixed-width lowercase hex (20 bytes -> 40 chars).
+  the bucket key being the canonical big-endian uint32 run of one band, sliced
+  directly out of the packed fingerprint bytes and stored as lowercase hex of
+  `8 * r` chars (40 chars at `r=5`, the default 128-permutation / threshold-0.5
+  band width). The column is bounded by `LSH_BUCKET_KEY_MAX`; a configuration
+  whose keys would be wider is refused at index construction, before any row
+  is written, because a raw BLOB key cannot be part of a MySQL/MariaDB primary
+  key.
 - A single-row `lsh_meta` table records the `(threshold, num_perm)` the index
   was built with; a mismatch (or absence) triggers a rebuild.
 - Banding parameters are derived by the in-tree `resembl.minhash.optimal_param`

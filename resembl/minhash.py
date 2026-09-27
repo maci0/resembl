@@ -7,9 +7,10 @@ runtime dependency tree no longer pulls in ``datasketch`` and, through it,
 integral.  It also removes the coupling to ``datasketch.lsh._optimal_param``,
 a private API.
 
-The behavior is pinned to datasketch 1.x by the test suite
+The behavior is pinned by the test suite
 (``tests/test_minhash_equivalence.py``), which cross-checks fingerprints,
-Jaccard values and banding parameters against the real library:
+Jaccard values and banding parameters against datasketch's ``legacy`` scheme
+(the 1.x family, still selectable in datasketch 2.x):
 
 - Permutations come from ``numpy.random.RandomState(seed)`` draws in the
   same order as datasketch's ``_init_permutations``.  The legacy MT19937
