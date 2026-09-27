@@ -6,6 +6,28 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A snippet name, alias or collection name containing a non-ASCII character
+  is now findable. The `names` column is written by `json.dumps`, which
+  stores `é` as `é`, so the lookup probe built from the raw
+  character matched nothing: `resembl find --name`, `name remove` and
+  `collection` operations on an accented name silently reported the name as
+  absent. The probe is now built from the column's own encoding, and the
+  fetched rows are verified against the decoded names, so `%` and `_` in a
+  search pattern no longer match rows that do not contain them.
+- Names are stored and compared in one normalization form (NFC). macOS
+  hands out decomposed (NFD) spellings of a filename while Linux and Windows
+  compose them, so the same `café.asm` reached a database as two aliases
+  under `resembl add`/`import`, was exported under two filenames, and merged
+  from a macOS database into a duplicate collection. Names written before
+  this still resolve: a lookup probes both canonical spellings.
+- `export-yara` escapes control characters in a snippet's name and code as
+  `\xNN`. A snippet carrying a NUL byte (or ESC, BEL, ...) wrote a raw
+  control byte into the rule file, where YARA's C-string literal truncated
+  the pattern, so the exported rule matched something the snippet never
+  contained. A tab is escaped too.
+
 ### Added
 
 - `resembl serve` answers `GET /health` (readiness, one `SELECT 1` against

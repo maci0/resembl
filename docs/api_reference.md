@@ -142,6 +142,18 @@ Remove a snippet from its collection.
 ### `Snippet`
 SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes), `tags` (JSON), `collection` (optional collection name; a soft reference to `Collection.name`, not an enforced FK).
 
+### `name_normalize(name: str) → str`
+Return *name* in NFC, the form every name is stored and compared in. A name
+is identity (a collection's primary key, a snippet alias, an exported file
+stem), and the text it comes from is a filesystem entry, a command-line
+argument or a file read as UTF-8. macOS yields decomposed spellings and Linux
+yields composed ones, so the two platforms spell one file differently. The
+ingestion paths (`snippet_add`, `snippet_prepare`, `collection_create`) and the
+lookup paths (`Snippet.get_by_name`, `Collection.get_by_name`,
+`Snippet.get_by_collection`) both normalize; lookups probe both canonical
+spellings, so a row written before normalization still resolves.
+
+
 ### `Collection`
 SQLModel with fields: `name` (PK), `description`, `created_at`. `created_at` is
 an aware-UTC ISO 8601 string, written by `timestamp_now()`. `db_merge`

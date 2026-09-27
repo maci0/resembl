@@ -58,6 +58,7 @@ from .models import (
     Snippet,
     SnippetVersion,
     name_json_escape,
+    name_normalize,
     timestamp_normalize,
     timestamp_now,
 )
@@ -140,6 +141,26 @@ def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
     return max(1, min(cpu_count, num_items // 100 + 1))
 
 
+def _merge_names(existing: list[str], incoming: list[str]) -> list[str]:
+    """Union two alias lists, comparing and storing names in NFC.
+
+    Order is preserved (the first entry is the primary name, which drives
+    display, export filenames and YARA rule names), and a name already
+    present under the other canonical spelling is not appended again: a
+    macOS-derived name and the composed spelling of the same file are one
+    alias.
+    """
+    merged = list(existing)
+    seen = {name_normalize(name) for name in existing}
+    for name in incoming:
+        normalized = name_normalize(name)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return merged
+
+
 def snippet_name_add(
     session: Session, checksum: str, new_name: str, quiet: bool = False
 ) -> Snippet | None:
@@ -158,7 +179,10 @@ def snippet_name_add(
 
     new_name = normalize_unicode(new_name)
     name_list = snippet.name_list
-    if new_name in name_list:
+    # Compare in NFC: a name typed here and the same name imported from a
+    # macOS filesystem (NFD) are one alias, not two.
+    new_name = name_normalize(new_name)
+    if new_name in [name_normalize(name) for name in name_list]:
         return snippet  # Idempotent: already named
 
     name_list.append(new_name)
@@ -184,7 +208,11 @@ def snippet_name_remove(
     # still find the row.
     name_to_remove = normalize_unicode(name_to_remove)
     name_list = snippet.name_list
-    if name_to_remove not in name_list:
+    # A name may have been stored before normalization, or arrived from a
+    # filesystem that spells it decomposed; remove the stored spelling.
+    target = name_normalize(name_to_remove)
+    match = next((n for n in name_list if name_normalize(n) == target), None)
+    if match is None:
         if not quiet:
             logger.error("Name '%s' not found for this snippet.", name_to_remove)
         return None
@@ -194,7 +222,7 @@ def snippet_name_remove(
             logger.error("Cannot remove the last name from a snippet.")
         return None
 
-    name_list.remove(name_to_remove)
+    name_list.remove(match)
     snippet.names = json.dumps(name_list)
     session.add(snippet)
     session.commit()
@@ -295,7 +323,13 @@ def snippet_prepare(
     checksum) and the token list (for the MinHash) are both derived from the
     same token stream.  Lexing with Pygments is the dominant per-snippet
     cost, so this halves it on the import hot path.
+
+    *name* is normalized to NFC here, the ingestion point every other name
+    path normalizes at too, so a directory walked on macOS (which spells
+    names decomposed) and the same directory walked on Linux (composed)
+    yield one alias rather than two.
     """
+    name = name_normalize(name)
     lexed = snippet_lex(code)
     if lexed is None:
         return None
@@ -535,7 +569,7 @@ def snippet_add_batch(
         snippet = existing_map.get(checksum)
         if snippet is not None:
             name_list = snippet.name_list
-            merged = list(dict.fromkeys(name_list + names))
+            merged = _merge_names(name_list, names)
             if len(merged) > len(name_list):
                 snippet.names = json.dumps(merged)
                 session.add(snippet)
@@ -608,7 +642,12 @@ def snippet_add_batch(
 
 
 def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> Snippet | None:
-    """Add a new snippet or alias to the database."""
+    """Add a new snippet or alias to the database.
+
+    *name* is stored in NFC, so the alias a caller types and the same alias
+    arriving from a decomposed filename are one name.
+    """
+    name = name_normalize(name)
     # Lex once: the checksum is enough to decide the alias path, and only a
     # new snippet needs the fingerprint.  Calling ``string_checksum`` and
     # ``code_create_minhash`` separately lexed the same code twice, doubling
@@ -997,9 +1036,17 @@ def _yara_string_escape(text: str) -> str:
 
     User-controlled names and code are embedded in generated rules, so a
     name cannot be allowed to break out of the string literal (or the rule).
+    Control characters are escaped as ``\\xNN`` rather than written through:
+    YARA reads a string literal as a C string, so a literal NUL truncates the
+    pattern where it lands and the rule then matches something the snippet
+    never contained, while the other C0 controls (ESC, BEL, ...) survive into
+    the rule file as raw bytes.
     """
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
-    return escaped.replace("\r", "\\r").replace("\n", "\\n")
+    escaped = escaped.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return "".join(
+        ch if ord(ch) >= 0x20 and ord(ch) != 0x7F else f"\\x{ord(ch):02x}" for ch in escaped
+    )
 
 
 def snippet_export_yara(session: Session, output_file: str) -> dict:
@@ -1421,16 +1468,23 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     large database returns a useful page instead of everything.  The page is
     ordered by the checksum primary key, so two runs over the same database
     return the same rows in the same order.
+
+    The probe is built from the JSON-encoded pattern, because that is the
+    form the column holds: ``json.dumps`` writes a non-ASCII character as a
+    ``\\uXXXX`` escape, so a probe carrying the raw character never matches
+    an accented name.  The fetched rows are then verified against the
+    decoded names, so ``%``/``_`` in a pattern cannot pull in rows that do
+    not contain it.
     """
-    query_pattern = f"%{name_json_escape(normalize_unicode(pattern))}%"
-    return list(
-        session.exec(
-            select(Snippet)
-            .where(Snippet.names.ilike(query_pattern))  # type: ignore[attr-defined]
-            .order_by(Snippet.checksum)
-            .limit(limit)
-        ).all()
-    )
+    target = name_normalize(pattern)
+    probe = name_json_escape(target)
+    rows = session.exec(
+        select(Snippet)
+        .where(Snippet.names.ilike(f"%{probe}%"))  # type: ignore[attr-defined]
+        .order_by(Snippet.checksum)
+        .limit(limit)
+    ).all()
+    return [row for row in rows if any(target in name_normalize(n) for n in row.name_list)]
 
 
 #: Characters invalid in filenames on at least one major filesystem:
@@ -1806,7 +1860,7 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing
-    collection = Collection(name=name, description=description)
+    collection = Collection(name=name_normalize(name), description=description)
     session.add(collection)
     session.commit()
     session.refresh(collection)
@@ -1817,7 +1871,7 @@ def collection_delete(session: Session, name: str, quiet: bool = False) -> bool:
     """Delete a collection and unassign all its snippets."""
     # Normalized for the same reason as ``collection_add_snippet``: the row
     # is stored NFC, and the bulk UPDATE below matches on that same form.
-    name = normalize_unicode(name)
+    name = name_normalize(name)
     collection = Collection.get_by_name(session, name)
     if not collection:
         if not quiet:
@@ -1876,7 +1930,7 @@ def collection_add_snippet(
     # The name is the primary key and is stored NFC by ``collection_create``,
     # so it is normalized before the lookup: the NFD spelling macOS hands
     # back for an accented name would otherwise miss the row.
-    collection_name = normalize_unicode(collection_name)
+    collection_name = name_normalize(collection_name)
     collection = Collection.get_by_name(session, collection_name)
     if not collection:
         if not quiet:
@@ -1985,7 +2039,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # imported collection); new names are added to the snapshot as they
         # are created so duplicates stay impossible without re-querying.
         local_collections = {
-            normalize_unicode(col.name): col for col in Collection.get_all(session)
+            name_normalize(col.name): col for col in Collection.get_all(session)
         }
         for col in source_session.exec(select(Collection).order_by(Collection.name)).all():
             # The name is the collection's primary key on both sides, so the
@@ -1993,7 +2047,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             # name arrived in a different composition would otherwise miss the
             # local row and be inserted as a second collection under a name
             # that is the same to any reader.
-            merged_name = normalize_unicode(col.name)
+            merged_name = name_normalize(col.name)
             if merged_name not in local_collections:
                 new_col = Collection(
                     name=merged_name,
@@ -2106,7 +2160,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 # ``snippet_add_batch``'s alias merge; a sorted union would
                 # silently reassign the primary name on every merge.
                 existing_names = existing.name_list
-                merged_names = list(dict.fromkeys(existing_names + src_names))
+                merged_names = _merge_names(existing_names, src_names)
                 if merged_names != existing_names:
                     existing.names = json.dumps(merged_names)
                     changed = True
