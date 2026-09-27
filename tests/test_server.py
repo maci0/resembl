@@ -1059,6 +1059,28 @@ class TestServerMode(unittest.TestCase):
         self.assertIsNotNone(last_payload)
         self.assertIn("matches", last_payload)
 
+    def test_version_probe_is_released_with_the_server(self):
+        """A closed server no longer holds the cache's version-probe engine.
+
+        The probe is a second engine over the served database.  It was only
+        weakly referenced from the served engine, so disposing the server
+        left its connection open until the process collected both: a process
+        cycling servers (embedded callers, this test module) accumulated one
+        handle and pool per generation.
+        """
+        from resembl import server as server_mod
+        from resembl.server import _VERSION_PROBES
+
+        httpd = server_mod.serve(f"sqlite:///{self._db}", port=0)
+        engine = httpd.engine
+        with Session(engine) as session:
+            # Reading the counter is what creates the probe.
+            self.assertIsNotNone(server_mod._db_version(session))
+        self.assertIn(engine, _VERSION_PROBES)
+
+        httpd.server_close()
+        self.assertNotIn(engine, _VERSION_PROBES)
+
     def test_thin_client_unreadable_file_errors_cleanly(self):
         """resembl-find --file with an unreadable file exits 1 without a traceback."""
         from resembl.find_client import _main

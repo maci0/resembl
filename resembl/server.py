@@ -124,6 +124,26 @@ def _db_version(session: Session) -> int | None:
             return int(conn.execute(text("PRAGMA data_version")).scalar() or 0)
 
 
+def _version_probe_release(engine: Engine) -> None:
+    """Drop and dispose the version probe cached for *engine*, if any.
+
+    The probe is a second engine over the same database, holding its own
+    SQLite connection (see :func:`_db_version`).  :class:`_FindServer`'s
+    ``server_close`` disposes the engine it owns, but the probe is only
+    weakly referenced from the engine, so it survived that dispose and kept
+    the handle open until the process collected both.  A process that
+    starts and stops servers repeatedly — an embedded caller, a test
+    harness — then accumulated one open handle and pool per generation, and
+    on Windows the last handle keeps the database file from being removed
+    or replaced.  Releasing the probe where the engine is released makes
+    the handle's lifetime the engine's lifetime.
+    """
+    with _VERSION_PROBE_LOCK:
+        probe = _VERSION_PROBES.pop(engine, None)
+    if probe is not None:
+        probe.dispose()
+
+
 class BadRequestError(ValueError):
     """A caller-supplied parameter is unusable; answered as 400 by handlers.
 
@@ -617,6 +637,11 @@ class _FindServer(ThreadingHTTPServer):
         super().server_close()
         engine = getattr(self, "engine", None)
         if engine is not None:
+            # The result cache's per-database version probe holds a second
+            # connection to this same database; releasing it with the engine
+            # it was created for keeps the handle from outliving the
+            # generation that opened it (see :func:`_version_probe_release`).
+            _version_probe_release(engine)
             # Checked-out connections still finish their request and are
             # closed on return; idle pooled connections close now.
             engine.dispose()

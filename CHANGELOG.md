@@ -138,9 +138,15 @@ project follows [Semantic Versioning](https://semver.org/).
   repaired it.
 - A snippet whose `created_at` is `NULL` no longer breaks `merge` or its
   timestamp rendering.
-- The served result cache's version guard is read through the pooled
-  connection the request uses, so a rebuild under one connection is no longer
+- The served result cache's version guard is read through one shared probe
+  connection per database, so a rebuild under one connection is no longer
   invisible to a request holding another.
+- Closing a `serve` generation now releases the result cache's version probe
+  for its database.  The probe was only weakly referenced from the served
+  engine, so its connection stayed open until the process collected both: a
+  process starting and stopping servers repeatedly accumulated one open
+  handle and connection pool per generation, and on Windows the last handle
+  kept the database file from being removed or replaced.
 - `resembl-find` reports a mistyped number in `config.toml` and falls back to
   the default instead of dying with a `ValueError` traceback before the query
   is sent.
