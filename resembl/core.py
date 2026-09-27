@@ -2058,7 +2058,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         if added:
             _fingerprint_stamps_clear(session)
     except Exception as e:
-        logger.error("Merge failed: %s", e, exc_info=True)
+        logger.exception("Merge failed: %s", e)
         # Chunks already through ``flush_new_rows`` are committed (it commits
         # as each chunk fills), so a failure can leave a partial merge behind.
         # End the aborted transaction so the caller's session stays usable,

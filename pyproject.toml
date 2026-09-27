@@ -133,11 +133,12 @@ disable = [
     "broad-exception-caught",
     # Module-level engine/config singletons need module globals.
     "global-statement",
-    # Interface-conformance signatures (SQLAlchemy listeners, hypothesis
-    # @given, http.server overrides) must keep their named parameters. Only
-    # two such stubs exist in the tree; both scope the message inline in
-    # tests/test_server.py instead of disabling it here.
-    # Parallel test/fuzzer boilerplate is intentional.
+    # R0801 fires on parallel test/fuzzer fixture boilerplate (temp-file
+    # databases, `import resembl.models` for table registration) spread over
+    # several test modules. Interface-conformance signatures (SQLAlchemy
+    # listeners, hypothesis @given, http.server overrides) keep their named
+    # parameters instead: they scope their message inline, and the two stubs
+    # that need it live in tests/test_server.py.
     "duplicate-code",
     # astroid cannot see through SQLModel's dynamic field proxies or the
     # package's lazy __getattr__ exports; these fire only on false positives.
@@ -199,8 +200,11 @@ select = [
     # Commented-out code left behind after a refactor.
     "ERA",
     # Logging misuse: f-strings and eager %-formatting in logger calls, which
-    # cost formatting work even when the record is filtered out.
+    # cost formatting work even when the record is filtered out, plus the
+    # logging-format (G) rules that reject an f-string or an interpolation
+    # the call does not actually perform.
     "LOG",
+    "G",
     # pygrep-hooks: bad type: ignore / noqa spellings, exec/eval warnings.
     "PGH",
     # Full ruff group (includes RUF100, which keeps `# noqa` honest):
@@ -229,6 +233,9 @@ warn_unused_ignores = true
 warn_unused_configs = true
 strict_equality = true
 warn_unreachable = true
+# A function whose declared return type is not `None` that can still fall off
+# its end returns None at runtime; the whole tree already passes this.
+warn_no_return = true
 disallow_subclassing_any = true
 # bytes stays bytes: passing a bytearray/memoryview where bytes is declared is
 # a type error, not a silent copy.
