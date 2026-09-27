@@ -16,6 +16,9 @@ venv/
 build/
 dist/
 *.egg-info/
+# `make dist-verify` writes this between its two builds and removes it itself;
+# a failed comparison leaves it behind for the next run to overwrite.
+.dist-first.sha256
 
 # Other
 .DS_Store

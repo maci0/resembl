@@ -52,11 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
+      # No actions/setup-python step: uv manages the interpreter, so a second
+      # copy of CPython on the runner is downloaded and then never used.
       - uses: ./.github/actions/setup-uv
         with:
           python-version: '3.13'

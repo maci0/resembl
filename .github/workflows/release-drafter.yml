@@ -8,6 +8,13 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+# The drafter edits one shared draft release, so two runs finishing together
+# would race on the same release; the newer run wins and the older one is
+# dropped, as on the other workflows.
+concurrency:
+  group: release-drafter-${{ github.ref }}
+  cancel-in-progress: true
+
 # The drafter edits the draft release on main and comments the changelog
 # preview on the PR, so it needs exactly these two write scopes.
 permissions:

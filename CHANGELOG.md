@@ -115,6 +115,13 @@ project follows [Semantic Versioning](https://semver.org/).
 - An unknown path answers the JSON error envelope with `404` instead of the
   stdlib's HTML 404 page, and a method other than `POST` answers `405`
   instead of the stdlib's HTML 501.
+- The shared `setup-uv` composite action now exports the `python-version` it
+  is given as `UV_PYTHON`, which is what its input documents and what the
+  pylint matrix leg was setting by hand, so a workflow that asks for an
+  interpreter gets it instead of only naming it in the cache key.  The test
+  and coverage workflows dropped their `actions/setup-python` step, which
+  downloaded a second CPython that uv never used, and the release-drafter
+  and SBOM workflows gained the concurrency group the other five have.
 
 ### Fixed
 

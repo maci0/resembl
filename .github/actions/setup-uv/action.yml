@@ -5,7 +5,9 @@
 # silently pulls the newest uv otherwise, so the tool that reads uv.lock
 # drifts between runs. The cache key is keyed on uv.lock and the interpreter,
 # because uv keys its wheel cache by Python version, so the 3.14 pylint leg
-# never serves 3.13 wheels.
+# never serves 3.13 wheels. A non-empty python-version is also exported as
+# UV_PYTHON, so the interpreter a workflow asks for is the one uv builds the
+# environment from and not only the one the cache is keyed on.
 name: Set up uv
 description: Install the pinned uv release and cache its download and wheel caches.
 
@@ -30,4 +32,13 @@ runs:
 
     - name: Install uv
       shell: bash
-      run: curl -LsSf https://astral.sh/uv/install.sh | env UV_VERSION=0.12.13 sh
+      # The input reaches the script through the environment, never spliced
+      # into it, so a caller cannot turn a version string into shell code.
+      env:
+        UV_VERSION: "0.12.13"
+        UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        if [ -n "$UV_PYTHON_REQUESTED" ]; then
+          echo "UV_PYTHON=$UV_PYTHON_REQUESTED" >> "$GITHUB_ENV"
+        fi
