@@ -25,12 +25,27 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Restore the uv cache
+    # uv's cache root is platform-specific: the XDG roots on Linux and macOS,
+    # %LOCALAPPDATA%\uv on Windows.  One step per platform, because
+    # actions/cache validates that every listed path exists and fails the
+    # step on a missing one, so a combined list would break the runners that
+    # do not have the other's directory.
+    - name: Restore the uv cache (posix)
+      if: runner.os != 'Windows'
       uses: actions/cache@v4
       with:
         path: |
           ~/.cache/uv
           ~/.local/share/uv
+        key: uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-${{ hashFiles('uv.lock') }}
+        restore-keys: |
+          uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-
+
+    - name: Restore the uv cache (windows)
+      if: runner.os == 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: ~\AppData\Local\uv
         key: uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-${{ hashFiles('uv.lock') }}
         restore-keys: |
           uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-

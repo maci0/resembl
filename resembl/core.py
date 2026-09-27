@@ -986,7 +986,9 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
         dir=os.path.dirname(os.path.abspath(output_file)), suffix=".tmp"
     )
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        # ``newline="\n"`` for the same reason as the .asm export: the
+        # generated rule file must be byte-identical on every platform.
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             for snippet in Snippet.stream_all(session):
                 primary_name = _snippet_primary_name(snippet)
                 rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
@@ -1659,7 +1661,12 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             used_key = os.path.normcase(file_path)
         used_paths.add(used_key)
 
-        with open(file_path, "w", encoding="utf-8") as f:
+        # ``newline="\n"``: the default text-mode translate rewrites every
+        # "\n" to ``os.linesep``, so the same database would export CRLF on
+        # Windows and LF elsewhere, and the two exports would diff against
+        # each other.  Assembly sources are LF by convention and re-import
+        # identically either way.
+        with open(file_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(snippet.code)
         num_exported += 1
 

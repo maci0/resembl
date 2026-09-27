@@ -74,3 +74,34 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -q
+
+  # README.md, CONTRIBUTING.md and docs/tutorial.md all document Windows
+  # (and macOS is implied by the POSIX install path), so those platforms are
+  # claimed.  The `test` job above runs the static checks and the database
+  # integration suite, which need the two Linux service containers; this job
+  # runs the same suite on every claimed OS without them, where the
+  # PostgreSQL and MySQL modules skip themselves.  The portability surface it
+  # covers is exactly the one Linux cannot see: path separators and reserved
+  # filenames in the export path, `spawn` process pools, msvcrt file
+  # locking, text-mode line endings, and the subprocess-free server port
+  # file's `os.replace` publication.
+  portability:
+    name: portability (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-uv
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Run tests
+        run: uv run pytest -q

@@ -214,6 +214,15 @@ def _format_created_at(value: object, fmt: str, tz: tzinfo | None = None) -> str
 #: exported cells must be neutralized before they reach such an application.
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
+#: Record terminator every CSV writer uses.  ``csv`` defaults to ``"\r\n"``,
+#: but the writers here target ``sys.stdout``, which is a text stream with
+#: ``newline=None`` and therefore rewrites every ``"\n"`` to ``os.linesep``.
+#: On Windows that turns the default terminator into ``"\r\r\n"``, and a
+#: spreadsheet or ``csv.reader`` reads the stray ``\r`` as a field.  ``"\n"``
+#: is what every other renderer here emits and is byte-identical on all
+#: platforms.
+_CSV_LINETERMINATOR = "\n"
+
 
 def _csv_safe(value: object) -> object:
     """Return *value* made safe for one CSV cell.
@@ -247,12 +256,16 @@ def _echo_format(data: object) -> None:
             # server-side find-batch gains an "error" column): a first-row-
             # only header made DictWriter raise on the differing rows.
             fieldnames = list(dict.fromkeys(k for row in data for k in row))
-            writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
+            writer = csv.DictWriter(
+                sys.stdout, fieldnames=fieldnames, lineterminator=_CSV_LINETERMINATOR
+            )
             writer.writeheader()
             writer.writerows([{k: _csv_safe(v) for k, v in row.items()} for row in data])
         elif isinstance(data, dict):
             data = {k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}
-            writer = csv.DictWriter(sys.stdout, fieldnames=data.keys())
+            writer = csv.DictWriter(
+                sys.stdout, fieldnames=data.keys(), lineterminator=_CSV_LINETERMINATOR
+            )
             writer.writeheader()
             writer.writerow({k: _csv_safe(v) for k, v in data.items()})
         else:
@@ -1163,7 +1176,9 @@ def _stream_list(session: Session) -> None:
             for checksum, raw in batch
         )
     elif state.format == "csv":
-        writer = csv.DictWriter(sys.stdout, fieldnames=["checksum", "names"])
+        writer = csv.DictWriter(
+            sys.stdout, fieldnames=["checksum", "names"], lineterminator=_CSV_LINETERMINATOR
+        )
         writer.writeheader()
         for batch in snippet_names_stream(session):
             for checksum, raw in batch:

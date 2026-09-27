@@ -8,6 +8,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The test suite runs on macOS and Windows, not only Linux.  Both are
+  documented install platforms, and the portability surface they cover
+  (path separators and reserved filenames in `export`, `spawn` process
+  pools, `msvcrt` config locking, text-mode line endings, the `os.replace`
+  port-file publication) was previously asserted in the docs and exercised
+  by no CI job at all.
 - `resembl import` takes a single `.asm` / `.txt` file as readily as a
   directory, so pointing it at one file no longer answers "Directory not
   found".
@@ -43,6 +49,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `make lint` is green again.  `tests/test_asmatch.py` reached into
+  `resembl.core._FIND_CANDIDATE_CHUNK` without the module-level
+  `protected-access` disable the other private-internals test modules carry,
+  so `pylint` exited 4 and `make check` stopped at the lint step.
 - `docs/THREAT_MODEL.md` and `SECURITY.md` re-verified against the current
   tree: every file reference now resolves in `resembl/`, the environment
   overrides are documented where they are read (`resembl/paths.py`), and two
@@ -221,6 +231,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `--format csv` output no longer carries a stray carriage return on Windows.
+  The `csv` module terminates records with `\r\n` and the writers target
+  `sys.stdout`, a text stream that rewrites every `\n` to `os.linesep`, so
+  each record ended `\r\r\n` there and every CSV reader parsed the extra `\r`
+  as a field.  Records now end in a bare `\n` on every platform, matching the
+  `json` renderer.
+- `resembl export` and `resembl export --yara` write LF on every platform.
+  Text mode rewrote each `\n` to `os.linesep`, so the same database exported
+  CRLF on Windows and LF elsewhere and the two trees diffed against each
+  other; the generated rule file and the `.asm` files are now byte-identical
+  wherever they are produced.
+- `make dist-verify` works on macOS, which ships `shasum -a 256` instead of
+  coreutils' `sha256sum`.  `make hygiene` no longer needs ripgrep, which is
+  not a system tool there.
 - `resembl verify` exits 1 on a stale index in every output format.  The
   documented exit status was only applied to the table render, so
   `verify --format json` reported the same issues and still exited 0, and a

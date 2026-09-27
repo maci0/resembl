@@ -1,5 +1,7 @@
 """Unit tests for the resembl core module."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import os
 import tempfile

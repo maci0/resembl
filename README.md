@@ -215,7 +215,12 @@ ranges afresh instead and can produce an environment CI never tested.
 On Windows, activate the environment with `.venv\Scripts\Activate.ps1`
 (PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe) in place of
 `source .venv/bin/activate`; every other command in this README runs
-unchanged on PowerShell and cmd.exe.
+unchanged on PowerShell and cmd.exe. macOS uses the POSIX commands verbatim.
+
+The test suite runs on Linux, macOS and Windows, so all three are covered
+rather than assumed. The PostgreSQL and MySQL integration tests only run on
+the Linux job, which is the one with the two database services; on the other
+two they skip themselves.
 
 ### 2. Configuration
 

@@ -68,12 +68,14 @@ HYGIENE_FILES = $(shell git ls-files '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.
 # single documented verification step covers the commit as well as CI.
 # check-yaml stays hook-only: it needs the mirror env pre-commit builds, and
 # the workflows it would validate are parsed by every CI run anyway.
+# The whitespace scan uses POSIX grep -E rather than ripgrep: `make check` is
+# the documented entry point on macOS, where ripgrep is not a system tool.
 hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing whitespace, final newline)
 	@if [ -z "$(HYGIENE_FILES)" ]; then \
 		echo "make hygiene needs git: 'git ls-files' returned nothing, so there is"; \
 		echo "nothing to check and the target would pass vacuously."; exit 1; \
 	fi; \
-	whitespace=$$(rg -n ' +$$' $(HYGIENE_FILES) || true); \
+	whitespace=$$(grep -nE ' +$$' $(HYGIENE_FILES) || true); \
 	if [ -n "$$whitespace" ]; then \
 		echo "trailing whitespace, which the pre-commit trailing-whitespace hook refuses to commit:"; \
 		echo "$$whitespace"; exit 1; \
@@ -153,11 +155,23 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 # Proves the claim above instead of asserting it: build twice, compare.  The
 # second build gets no help from the first: `uv build` keeps no artifact cache
 # and `dist` removes the output directory, so nothing but the source tree
-# carries over, which is exactly what the comparison has to measure.  The
-# scratch sums file is removed on failure too, so a red run leaves the tree as
-# clean as a green one.
+# carries over, which is exactly what the comparison has to measure.  Touching
+# `pyproject.toml` moves its mtime so the second build cannot be served by
+# anything that keys on it.  `sha256sum` is coreutils; macOS ships
+# `shasum -a 256` instead.  Each recipe line is its own shell, so the choice is
+# repeated rather than exported.
 dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-identical
 	@$(MAKE) --no-print-directory dist
-	@sha256sum dist/* > .dist-first.sha256
-	@trap 'rm -f .dist-first.sha256' EXIT; \
-	$(MAKE) --no-print-directory dist && sha256sum --check .dist-first.sha256
+	@if command -v sha256sum >/dev/null 2>&1; then \
+		sha256sum dist/* > .dist-first.sha256; \
+	else \
+		shasum -a 256 dist/* > .dist-first.sha256; \
+	fi
+	@touch pyproject.toml
+	@$(MAKE) --no-print-directory dist
+	@if command -v sha256sum >/dev/null 2>&1; then \
+		sha256sum --check .dist-first.sha256; \
+	else \
+		shasum -a 256 --check .dist-first.sha256; \
+	fi
+	@rm -f .dist-first.sha256

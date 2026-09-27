@@ -427,6 +427,30 @@ class TestCLIFormatFlag(BaseCLITest):
         lines = result.stdout.strip().split("\n")
         self.assertGreaterEqual(len(lines), 1)
 
+    def test_csv_records_terminate_with_lf_only(self):
+        """CSV records end in a bare LF, never a CR, on any platform.
+
+        ``csv`` defaults to ``"\r\n"`` and the writers target ``sys.stdout``,
+        a text stream that rewrites every ``"\n"`` to ``os.linesep``.  On
+        Windows that stacks into ``"\r\r\n"``, and every CSV reader then
+        parses the stray ``\r`` as a field of its own.  Pinning the absence
+        of ``\r`` keeps the fix from being reverted on a Linux-only run,
+        where the bug is invisible.
+        """
+        import csv
+        import io
+
+        for command in ("--format csv list", "--format csv stats"):
+            with self.subTest(command=command):
+                result = self.run_command(command)
+                self.assertEqual(result.returncode, 0)
+                self.assertNotIn("\r", result.stdout)
+                rows = list(csv.reader(io.StringIO(result.stdout)))
+                self.assertGreaterEqual(len(rows), 1)
+                # Every record carries exactly the header's fields: a stray
+                # terminator would show up here as an extra empty field.
+                self.assertTrue(all(len(row) == len(rows[0]) for row in rows))
+
     def test_find_json(self):
         """find --format json should produce valid JSON with matches key."""
         result = self.run_command("--format json find --query 'MOV EAX, 1'")

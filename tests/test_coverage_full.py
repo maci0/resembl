@@ -299,6 +299,24 @@ class TestSnippetExport(BaseDBTest):
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith(".asm"))
 
+    def test_export_writes_lf_regardless_of_platform(self):
+        """Exported .asm files are LF on every platform, not os.linesep.
+
+        Text mode rewrites "\\n" to ``os.linesep``, so the same database
+        would export CRLF on Windows and LF elsewhere and the two trees
+        would diff against each other forever.  The file is read in binary
+        here because reading it in text mode is what hides the difference.
+        """
+        snippet_add(self.session, "func_lf", "MOV EAX, 1\nXOR EBX, EBX\nRET")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = snippet_export(self.session, tmpdir)
+            self.assertEqual(result["num_exported"], 1)
+            exported = os.path.join(tmpdir, os.listdir(tmpdir)[0])
+            with open(exported, "rb") as handle:
+                raw = handle.read()
+        self.assertNotIn(b"\r\n", raw)
+        self.assertEqual(raw.count(b"\n"), 2)
+
     def test_export_empty_db(self):
         """Exporting from empty DB should write no files."""
         with tempfile.TemporaryDirectory() as tmpdir:

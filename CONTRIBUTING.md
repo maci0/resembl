@@ -110,6 +110,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     `make check` prints a note naming the skipped modules when either variable is unset, so the gap is never silent.
 
+- **Platforms:** the test suite runs on `ubuntu-latest`, `macos-latest` and `windows-latest`, so the portability surface the docs claim (path separators and Windows-reserved filenames in `export`, `spawn` process pools, `msvcrt` config locking, text-mode line endings, the `os.replace` port-file publication) is exercised rather than assumed. A change that only works on the machine you wrote it on fails here, not in a user's report. Output that a user consumes (CSV records, exported `.asm` and YARA files) is written with LF on every platform, so a diff between two exports is a real change and not a line-ending one.
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
     uv run pytest --cov=resembl --cov-report=term-missing
@@ -289,7 +290,7 @@ You are now ready to open a pull request on GitHub.
 ### The Review Process
 Once your pull request is submitted, it will go through a review process. Here is what to expect:
 
-- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite (with PostgreSQL and MySQL integration tests), coverage measurement, lint, type, and style checks (pylint runs on Python 3.13–3.14), and building the release artifacts twice to confirm the two builds are byte-identical. The PR cannot be merged if these checks fail.
+- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite on Linux, macOS and Windows (with PostgreSQL and MySQL integration tests on the Linux job, which is the one carrying the two database services), coverage measurement, lint, type, and style checks (pylint runs on Python 3.13–3.14), and building the release artifacts twice to confirm the two builds are byte-identical. The PR cannot be merged if these checks fail.
 - **Human Review:** A project maintainer will review your code for correctness, architectural soundness, and adherence to project standards.
 - **Responding to Feedback:** It is common for reviewers to request changes. This is a normal and healthy part of the collaborative process. Please engage in the discussion and address the feedback by pushing new commits to your branch. The pull request will update automatically.
 - **Approval and Merge:** Once all automated checks are passing and a maintainer has approved the changes, your pull request will be merged.
