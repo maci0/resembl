@@ -1106,6 +1106,12 @@ def _db_reindex(
             "avg_time_per_snippet": 0,
         }
 
+    def reindex_sequentially() -> None:
+        """Recompute and apply every batch on this thread, in keyset order."""
+        for batch in Snippet.iter_batches(session, batch_size):
+            codes = [snippet.code for snippet in batch]
+            apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
+
     if parallel:
         ctx = _mp.get_context("spawn")
         try:
@@ -1144,13 +1150,9 @@ def _db_reindex(
             session.rollback()
             reindexed = 0
             batches_since_commit = 0
-            for batch in Snippet.iter_batches(session, batch_size):
-                codes = [snippet.code for snippet in batch]
-                apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
+            reindex_sequentially()
     else:
-        for batch in Snippet.iter_batches(session, batch_size):
-            codes = [snippet.code for snippet in batch]
-            apply_batch(batch, _reindex_prepare((codes, ngram_size, num_perm)))
+        reindex_sequentially()
     session.commit()
     # Fingerprints are now current — stamp the format version, n-gram size,
     # and permutation count so `find` does not reindex again.
@@ -1763,6 +1765,13 @@ def snippet_version_list(session: Session, checksum: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _fingerprint_stamps_clear(session: Session) -> None:
+    """Drop all three fingerprint stamps so the next ``find`` reindexes once."""
+    fingerprint_version_clear(session)
+    fingerprint_ngram_clear(session)
+    fingerprint_perm_clear(session)
+
+
 def db_merge(session: Session, source_db_path: str) -> dict:
     """Merge snippets from a source database into the current one.
 
@@ -1957,9 +1966,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # (added == 0) leaves every fingerprint untouched, and clearing the
         # stamps there would force a pointless full reindex on the next find.
         if added:
-            fingerprint_version_clear(session)
-            fingerprint_ngram_clear(session)
-            fingerprint_perm_clear(session)
+            _fingerprint_stamps_clear(session)
     except Exception as e:
         logger.error("Merge failed: %s", e, exc_info=True)
         # Chunks already through ``flush_new_rows`` are committed (it commits
@@ -1971,9 +1978,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # stale instead of healing them with one reindex.
         session.rollback()
         if added:
-            fingerprint_version_clear(session)
-            fingerprint_ngram_clear(session)
-            fingerprint_perm_clear(session)
+            _fingerprint_stamps_clear(session)
         return {"error": str(e)}
     finally:
         source_session.close()

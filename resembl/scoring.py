@@ -1329,11 +1329,14 @@ def minhash_jaccard_batch(
     """
     if not packed_list:
         return []
-    if not query_packed.startswith(MINHASH_MAGIC):
+    # Either side not being in the compact format rules out the vectorized
+    # pass: hand every pair to the scalar path, which handles those blobs
+    # (or reports the precise error) per pair.
+    if not query_packed.startswith(MINHASH_MAGIC) or any(
+        not p.startswith(MINHASH_MAGIC) for p in packed_list
+    ):
         return [minhash_jaccard(query_packed, p) for p in packed_list]
     num_perm = minhash_num_perm(query_packed)
-    if any(not p.startswith(MINHASH_MAGIC) for p in packed_list):
-        return [minhash_jaccard(query_packed, p) for p in packed_list]
 
     import numpy as np
 

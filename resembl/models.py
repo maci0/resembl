@@ -60,7 +60,7 @@ class Collection(SQLModel, table=True):
 
     name: str = Field(primary_key=True, max_length=128)
     description: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    created_at: str = Field(default_factory=timestamp_now)
 
     @classmethod
     def get_all(cls, session: Session) -> Sequence[Collection]:
@@ -90,7 +90,7 @@ class SnippetVersion(SQLModel, table=True):
     snippet_checksum: str = Field(index=True, max_length=64)
     code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    created_at: str = Field(default_factory=timestamp_now)
 
     @classmethod
     def get_by_checksum(cls, session: Session, checksum: str) -> Sequence[SnippetVersion]:

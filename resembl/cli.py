@@ -368,6 +368,28 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     return payload
 
 
+def _find_body_params(
+    top_n: int,
+    threshold: float | None,
+    normalize: bool,
+    ngram_size: int,
+) -> dict:
+    """Return the find parameters shared by the ``/find`` and ``/find-batch`` bodies.
+
+    ``num_permutations`` and ``jaccard_weight`` are sent explicitly (like the
+    thin client does) so a server started under a different config still
+    answers exactly what the in-process path would have.
+    """
+    return {
+        "top_n": top_n,
+        "threshold": threshold,
+        "normalize": normalize,
+        "ngram_size": ngram_size,
+        "num_permutations": state.config.num_permutations,
+        "jaccard_weight": state.config.jaccard_weight,
+    }
+
+
 def _find_via_server(
     query: str,
     top_n: int,
@@ -380,15 +402,7 @@ def _find_via_server(
         "/find",
         {
             "query": query,
-            "top_n": top_n,
-            "threshold": threshold,
-            "normalize": normalize,
-            "ngram_size": ngram_size,
-            # Sent explicitly (like the thin client does) so a server that
-            # was started under a different config still answers exactly
-            # what the in-process path would have.
-            "num_permutations": state.config.num_permutations,
-            "jaccard_weight": state.config.jaccard_weight,
+            **_find_body_params(top_n, threshold, normalize, ngram_size),
         },
         timeout=5,
     )
@@ -409,22 +423,11 @@ def _find_batch_via_server(
     """
     from .server import _MAX_BATCH_QUERIES
 
+    params = _find_body_params(top_n, threshold, normalize, ngram_size)
     results: list[dict] = []
     for start in range(0, len(queries), _MAX_BATCH_QUERIES):
         chunk = queries[start : start + _MAX_BATCH_QUERIES]
-        payload = _server_request(
-            "/find-batch",
-            {
-                "queries": chunk,
-                "top_n": top_n,
-                "threshold": threshold,
-                "normalize": normalize,
-                "ngram_size": ngram_size,
-                "num_permutations": state.config.num_permutations,
-                "jaccard_weight": state.config.jaccard_weight,
-            },
-            timeout=60,
-        )
+        payload = _server_request("/find-batch", {"queries": chunk, **params}, timeout=60)
         if payload is None:
             return None
         results.extend(payload["results"])
