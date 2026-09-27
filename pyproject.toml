@@ -125,6 +125,16 @@ line-length = 100
 max-line-length = 100
 
 [tool.pylint."messages control"]
+# Pylint ships these refactor checks disabled by default because they were
+# noisy in 2013; the tree passes all of them, so a regression in any one is now
+# a real defect that would otherwise merge unseen.  unnecessary-dict-index-lookup
+# is a double `.get()` where the key was already known to be present.
+enable = [
+    "use-dict-literal",
+    "use-list-literal",
+    "use-yield-from",
+    "unnecessary-dict-index-lookup",
+]
 # Pylint is the defect gate (error-level checks stay on). The messages below
 # are disabled with cause: they conflict with deliberate project conventions
 # or duplicate checks owned by ruff/mypy. Revisit when the underlying cause
@@ -224,6 +234,13 @@ select = [
     # ambiguous-unicode docstring/comment checks are enabled and the tree
     # is kept free of confusable characters.
     "RUF",
+    # NumPy-specific correctness: resembl.minhash does its bit-packing on
+    # arrays, where an int/unsigned mixup or a ragged input is silent.
+    "NPY",
+    # Tidy imports: a banned-api list is the point, so the modules that must
+    # not reach for a stdlib name directly (a vendored replacement, a
+    # subprocess) say so here instead of in review comments.
+    "TID",
 ]
 
 [tool.ruff.lint.flake8-bugbear]
@@ -260,8 +277,13 @@ extra_checks = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 
 # Ratchet: the library package must stay fully annotated; tests remain gradual.
+# The pattern is listed twice on purpose: mypy reads `resembl.*` as the
+# submodules of the package and does not match the package module itself, so
+# `resembl/__init__.py` (the `__all__` and the PEP 562 `__getattr__` every
+# consumer's `from resembl import X` goes through) would otherwise be the one
+# module in the package held to no annotation rule at all.
 [[tool.mypy.overrides]]
-module = "resembl.*"
+module = ["resembl", "resembl.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_globals = true
