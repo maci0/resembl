@@ -16,7 +16,10 @@ make install   # uv sync --locked --extra dev, then the git hooks; same as CI
 ```
 
 `uv.lock` is the source of truth. Never hand-edit it; only `uv add` / `uv lock`
-write it.
+write it. Every `uv run` in the hooks and the `Makefile` passes `--locked`, so a
+check that needs a re-resolution fails instead of silently rewriting the lockfile
+under the contributor; plain `uv run` re-resolves whenever `pyproject.toml` has
+drifted and then gates the code against a lockfile nobody else has.
 
 ## Quality gates
 
@@ -25,10 +28,10 @@ The pre-commit hooks run, over the project rather than the staged files
 
 | Hook   | Command            | Scope                      |
 | ------ | ------------------ | -------------------------- |
-| black  | `uv run black`     | project                    |
-| ruff   | `uv run ruff check --fix --exit-non-zero-on-fix` | project |
-| mypy  | `uv run mypy`      | `files` in `pyproject.toml` |
-| pylint | `uv run pylint`    | `resembl/ tests/ fuzzers/` |
+| black  | `uv run --locked black`     | project                    |
+| ruff   | `uv run --locked ruff check --fix --exit-non-zero-on-fix` | project |
+| mypy  | `uv run --locked mypy`      | `files` in `pyproject.toml` |
+| pylint | `uv run --locked pylint`    | `resembl/ tests/ fuzzers/` |
 
 The same config also runs three mirror hooks: `check-yaml`,
 `end-of-file-fixer` and `trailing-whitespace`. No CI workflow runs them, so

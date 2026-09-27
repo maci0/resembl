@@ -13,6 +13,13 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
+# Every uv invocation runs with --locked, so no target can resolve the
+# environment against anything but uv.lock.  Plain `uv run` re-resolves and
+# rewrites uv.lock in the working tree when pyproject.toml has drifted, which
+# would let a local gate pass against a lockfile CI never sees; --locked fails
+# instead, and `uv lock` (or `make install`) is the deliberate way to move the
+# lockfile forward.
+
 .DEFAULT_GOAL := help
 
 .PHONY: help install format lint types hygiene test db-test fuzz check dist dist-verify
@@ -43,15 +50,15 @@ install:  ## Create .venv from uv.lock and install the git hooks
 	uv run pre-commit install
 
 format:  ## Apply the auto-fixes black and ruff can make
-	uv run black .
-	uv run ruff check --fix .
+	uv run --locked black .
+	uv run --locked ruff check --fix .
 
 lint:  ## Run ruff and pylint
-	uv run ruff check .
-	uv run pylint resembl/ tests/ fuzzers/
+	uv run --locked ruff check .
+	uv run --locked pylint resembl/ tests/ fuzzers/
 
 types:  ## Run mypy over resembl/, tests/ and fuzzers/
-	uv run mypy
+	uv run --locked mypy
 
 # The tracked text files the pre-commit hygiene hooks rewrite.  The pathspecs
 # mirror what the hooks see (files git tracks), which is why they are listed
@@ -89,7 +96,7 @@ hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing white
 	fi
 
 test:  ## Run the test suite (pass args through: make test PYTEST_ARGS="-k cache")
-	uv run pytest -q $(PYTEST_ARGS)
+	uv run --locked pytest -q $(PYTEST_ARGS)
 
 db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URLs set)
 	@if [ -z "$$RESEMBL_TEST_PG_URL" ] || [ -z "$$RESEMBL_TEST_MYSQL_URL" ]; then \
@@ -99,7 +106,7 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 		echo "  RESEMBL_TEST_MYSQL_URL=mysql+pymysql://user:pass@host/db make db-test"; \
 		exit 1; \
 	fi
-	uv run pytest -q $(DB_TESTS) $(PYTEST_ARGS)
+	uv run --locked pytest -q $(DB_TESTS) $(PYTEST_ARGS)
 
 # atheris lives in the `fuzz` extra, so the target asks uv for it instead of
 # failing on an import the contributor has to guess at.  Naming one script
@@ -120,9 +127,9 @@ fuzz:  ## Fuzz every entry point for FUZZ_SECONDS, or one via FUZZER=<name> (ins
 check:  ## Run every check CI runs, plus the commit-gate file checks
 	$(MAKE) hygiene
 	$(MAKE) types
-	uv run ruff check .
-	uv run black --check .
-	uv run pylint resembl/ tests/ fuzzers/
+	uv run --locked ruff check .
+	uv run --locked black --check .
+	uv run --locked pylint resembl/ tests/ fuzzers/
 	$(MAKE) test
 	@if [ -z "$$RESEMBL_TEST_PG_URL" ] || [ -z "$$RESEMBL_TEST_MYSQL_URL" ]; then \
 		echo "note: the PostgreSQL and MySQL integration tests were skipped (unset"; \
@@ -135,13 +142,22 @@ check:  ## Run every check CI runs, plus the commit-gate file checks
 # header's wall clock, so two runs of the same commit produce different bytes.
 # The tar normalization below pins all four (reproducible-builds.org), so
 # `make dist` twice from the same commit yields identical sha256 sums.
+#
+# `build/` and `resembl.egg-info/` go first because setuptools stages the
+# wheel in `build/lib` and would otherwise zip whatever an earlier build left
+# there: a module deleted from the source tree survives in the artifact until
+# someone cleans the directory by hand.  Both are gitignored build output, and
+# uv build rewrites them.  The sdist is unpacked under `.scratch/` rather than
+# `mktemp -d`'s default, which is a tmpfs on Linux: the normalization of a
+# full source tree then costs page cache, not RAM.
 dist:  ## Build the sdist and wheel into dist/ reproducibly
 	@tar --sort=name --help >/dev/null 2>&1 || { \
 		echo "make dist needs GNU tar (--sort=name); on macOS install gnu-tar"; exit 1; }
 	rm -rf dist
+	rm -rf build resembl.egg-info
 	SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" LC_ALL=C TZ=UTC uv build --out-dir dist
-	@set -e; for sdist in dist/*.tar.gz; do \
-		unpack=$$(mktemp -d); \
+	@set -e; mkdir -p .scratch; for sdist in dist/*.tar.gz; do \
+		unpack=$$(mktemp -d .scratch/sdist-XXXXXX); \
 		tar --extract --file "$$sdist" --directory "$$unpack"; \
 		root=$$(ls "$$unpack"); \
 		tar --create --sort=name \

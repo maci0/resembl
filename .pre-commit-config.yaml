@@ -6,7 +6,11 @@
 # fails remotely, or the reverse, and the local result stops predicting CI.
 # `pass_filenames: false` keeps each tool on the scope its own config declares
 # (ruff: the project; black: the project; mypy: `files` in pyproject.toml),
-# which is also the scope CI runs.
+# which is also the scope CI runs.  `--locked` on every entry is what makes
+# "the project's own locked environment" true: plain `uv run` re-resolves and
+# rewrites uv.lock in the working tree when pyproject.toml has drifted, so the
+# hook would then check the code against a lockfile no other contributor, and
+# no CI run, ever sees.
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -19,14 +23,14 @@ repos:
     hooks:
     -   id: black
         name: black
-        entry: uv run black
+        entry: uv run --locked black
         language: system
         types: [python]
         pass_filenames: false
 
     -   id: ruff
         name: ruff
-        entry: uv run ruff check
+        entry: uv run --locked ruff check
         language: system
         types: [python]
         pass_filenames: false
@@ -34,7 +38,7 @@ repos:
 
     -   id: mypy
         name: mypy
-        entry: uv run mypy
+        entry: uv run --locked mypy
         language: system
         types: [python]
         pass_filenames: false
@@ -43,7 +47,7 @@ repos:
 
     -   id: pylint
         name: pylint
-        entry: uv run pylint
+        entry: uv run --locked pylint
         language: system
         types: [python]
         pass_filenames: false

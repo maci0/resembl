@@ -49,6 +49,16 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `make dist` clears `build/` and `resembl.egg-info/` before building.
+  setuptools stages the wheel in `build/lib`, so a module deleted from the
+  source tree survived in the artifact until someone cleaned the directory by
+  hand; the sdist is also unpacked under `.scratch/` rather than `mktemp -d`'s
+  tmpfs.
+- Every `uv run` in the `Makefile` and in the `pre-commit` hooks passes
+  `--locked`, so no check re-resolves `uv.lock` and rewrites it under the
+  contributor when `pyproject.toml` has drifted.  Plain `uv run` gated the
+  code against a lockfile no CI run and no other contributor ever saw;
+  `uv lock` (or `make install`) is now the way forward.
 - The `Test Suite` and `Pylint` workflows run on pull requests to `main` and
   on pushes to `main`, not on every push to every branch.  The two events carry
   different refs and so are different concurrency groups, which meant every
