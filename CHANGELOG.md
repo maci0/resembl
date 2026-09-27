@@ -23,6 +23,11 @@ project follows [Semantic Versioning](https://semver.org/).
   pools, `msvcrt` config locking, text-mode line endings, the `os.replace`
   port-file publication) was previously asserted in the docs and exercised
   by no CI job at all.
+- The wheel and sdist now declare the operating systems they run on
+  (Linux, macOS, Windows) and Python 3.14 in their package metadata, the
+  platforms the docs describe installing on and the CI matrix runs, so an
+  indexer reading the metadata reports what is actually tested instead of
+  nothing at all.
 - `resembl import` takes a single `.asm` / `.txt` file as readily as a
   directory, so pointing it at one file no longer answers "Directory not
   found".

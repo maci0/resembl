@@ -10,8 +10,19 @@ license = "GPL-3.0-only"
 # NOTICE ships too: resembl.minhash / resembl.lsh derive from MIT-licensed
 # datasketch, and those terms require the grant to travel with every copy.
 license-files = ["LICENSE", "NOTICE"]
+# The operating systems named here are the three the docs tell a user how to
+# install on (README.md, CONTRIBUTING.md, docs/tutorial.md) and the three the
+# `portability` job in .github/workflows/tests.yml runs the suite on, so an
+# indexer reading this metadata reports what is actually tested.  3.14 is
+# listed for the same reason: the pylint matrix runs it.  Nothing claims
+# OS Independent: the package writes into a cache directory, locks a config
+# file and spawns a process pool, all of which are platform behavior.
 classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 readme = "README.md"
 requires-python = ">=3.13"
