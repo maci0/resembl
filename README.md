@@ -183,6 +183,7 @@ resembl/
 ├── tests/
 ├── .gitignore
 ├── CONTRIBUTING.md
+├── Makefile
 ├── README.md
 ├── SECURITY.md
 └── pyproject.toml
@@ -320,6 +321,17 @@ To ensure everything is working correctly, you can run the test suite:
 ```bash
 uv run pytest
 ```
+
+The suite takes several minutes. While editing, run only what you touched:
+```bash
+uv run pytest tests/test_cli.py                    # one file
+uv run pytest tests/test_cli.py -k config_set      # by name
+uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
+```
+
+`make help` lists the shortcuts (`make test`, `make lint`, `make types`,
+`make format`). `make check` runs exactly what CI runs: mypy, ruff, black,
+pylint, then the test suite.
 
 #### Code Coverage
 

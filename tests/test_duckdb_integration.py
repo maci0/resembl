@@ -176,7 +176,11 @@ class TestDuckDBIntegration(unittest.TestCase):
             blob=st.binary(max_size=64),
             col=st.none() | arbitrary,
         )
-        @settings(max_examples=60)
+        # No deadline: each example is a real DuckDB commit round-trip, so
+        # wall-clock speed is a property of the machine and its load, not of
+        # the escaping under test.  Under load the default 200ms deadline
+        # failed the run at 396ms.
+        @settings(max_examples=60, deadline=None)
         def _roundtrip(code, name, checksum, blob, col):
             # Hypothesis shrinks toward degenerate values (e.g. an all-zeros
             # checksum), which can repeat across examples — clear any prior

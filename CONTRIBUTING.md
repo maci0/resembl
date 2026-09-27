@@ -99,6 +99,14 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     The pre-commit hooks run formatting, linting, and type checks, but no tests, so it is good practice to run the entire suite before submitting your work to catch any unintended side effects.
 
+    The full suite takes several minutes. While editing, run only what you touched:
+    ```bash
+    uv run pytest tests/test_cli.py                                    # one file
+    uv run pytest tests/test_cli.py -k config_set                      # by name
+    uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
+    ```
+    `make help` lists the shortcuts: `make test`, `make lint`, `make types`, `make format`, `make check`.
+
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
     uv run pytest --cov=resembl --cov-report=term-missing
@@ -121,7 +129,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     If a crash is found, the fuzzer will stop and create a `crash-<hash>` file in the root directory containing the input that caused the failure. This file is crucial for debugging and should be included in any bug report.
 
-- **Code Style and Quality:** As configured during setup, our pre-commit hooks will automatically run `black` for formatting, `ruff` for linting, and `mypy` for static type checking before each commit. You do not need to run these tools manually. If a hook fails, the commit will be aborted, and you will see an error message indicating what needs to be fixed. Simply correct the issue and attempt the commit again.  
+- **Code Style and Quality:** As configured during setup, our pre-commit hooks will automatically run `black` for formatting, `ruff` and `pylint` for linting, and `mypy` for static type checking before each commit. You do not need to run these tools manually. If a hook fails, the commit will be aborted, and you will see an error message indicating what needs to be fixed. Simply correct the issue and attempt the commit again.  
 
 ### Commit Your Changes
 Once your code and tests are ready, stage your changes and commit them. This action will trigger the pre-commit hooks.
@@ -243,9 +251,9 @@ This final part walks you through the process of getting your work reviewed and 
 ### Preparing Your Pull Request
 Before opening a pull request, please run through this pre-flight checklist to ensure your submission is in good shape.
 
-1.  **Run the Full Test Suite:** Ensure all tests pass locally.
+1.  **Run Everything CI Runs:** `make check` runs mypy, ruff, black, pylint, and the test suite, which is exactly the pipeline a pull request must pass.
     ```bash
-    uv run pytest
+    make check
     ```
 2.  **Update Your Branch:** Make sure your branch is up-to-date with the latest changes from the `resembl` main branch. This helps avoid merge conflicts.
     ```bash
