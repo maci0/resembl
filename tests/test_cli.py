@@ -841,6 +841,9 @@ class TestResolveChecksum(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.engine = create_engine(f"sqlite:///{tmp.name}/test.db")
+        # After tmp.cleanup, so it runs first: Windows refuses to remove a
+        # directory holding a database file whose handle is still open.
+        self.addCleanup(self.engine.dispose)
         SQLModel.metadata.create_all(self.engine)
 
     def test_wildcard_prefix_matches_nothing(self):

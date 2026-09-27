@@ -1561,14 +1561,17 @@ class TestFingerprintVersion(BaseScalingTest):
         self._add()
         fingerprint_version_set(self.session, FINGERPRINT_VERSION)
         src = tempfile.mktemp(suffix=".db")
+        source_engine = create_db_engine(f"sqlite:///{src}")
         try:
-            source_engine = create_db_engine(f"sqlite:///{src}")
             SQLModel.metadata.create_all(source_engine)
             with _Session(source_engine) as source_session:
                 snippet_add(source_session, "src", "mov eax, 1; ret")
             db_merge(self.session, src)
             self.assertIsNone(fingerprint_version_get(self.session))
         finally:
+            # Before the unlink: Windows refuses to remove a database file
+            # whose handle is still open.
+            source_engine.dispose()
             for path in (src, src + "-wal", src + "-shm"):
                 if os.path.exists(path):
                     os.remove(path)
@@ -1594,8 +1597,8 @@ class TestFingerprintVersion(BaseScalingTest):
         code = "mov eax, 1; ret"
         code_create_minhash(code)
         src = tempfile.mktemp(suffix=".db")
+        source_engine = create_engine(f"sqlite:///{src}")
         try:
-            source_engine = create_engine(f"sqlite:///{src}")
             SQLModel.metadata.create_all(source_engine)
             with _Session(source_engine) as source_session:
                 source_session.add(
@@ -1615,6 +1618,9 @@ class TestFingerprintVersion(BaseScalingTest):
             # The stored fingerprint was recomputed into the packed format.
             self.assertTrue(stored.minhash.startswith(b"RMLH"))
         finally:
+            # Before the removal: Windows refuses to unlink a database file
+            # whose handle is still open.
+            source_engine.dispose()
             for path in (src, src + "-wal", src + "-shm"):
                 if os.path.exists(path):
                     os.remove(path)
@@ -1634,8 +1640,8 @@ class TestFingerprintVersion(BaseScalingTest):
 
         self._add(5)
         src = tempfile.mktemp(suffix=".duckdb")
+        source_engine = create_engine(f"duckdb:///{src}")
         try:
-            source_engine = create_engine(f"duckdb:///{src}")
             SQLModel.metadata.create_all(source_engine)
             with _Session(source_engine) as source_session:
                 snippet_add(source_session, "src", "mov eax, 1; ret")
@@ -1644,6 +1650,9 @@ class TestFingerprintVersion(BaseScalingTest):
             self.assertNotIn("error", result)
             self.assertEqual(result["added"], 2)
         finally:
+            # Before the removal: Windows refuses to unlink a database file
+            # whose handle is still open.
+            source_engine.dispose()
             if os.path.exists(src):
                 os.remove(src)
 
@@ -1827,14 +1836,17 @@ class TestFingerprintPermStamp(BaseScalingTest):
 
         self._add()
         src = tempfile.mktemp(suffix=".db")
+        source_engine = create_engine(f"sqlite:///{src}")
         try:
-            source_engine = create_engine(f"sqlite:///{src}")
             SQLModel.metadata.create_all(source_engine)
             with _Session(source_engine) as source_session:
                 snippet_add(source_session, "src", "mov eax, 1; ret")
             db_merge(self.session, src)
             self.assertIsNone(fingerprint_perm_get(self.session))
         finally:
+            # Before the removal: Windows refuses to unlink a database file
+            # whose handle is still open.
+            source_engine.dispose()
             for path in (src, src + "-wal", src + "-shm"):
                 if os.path.exists(path):
                     os.remove(path)

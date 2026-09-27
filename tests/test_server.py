@@ -84,6 +84,11 @@ class _ServeTestCase(unittest.TestCase):
         self._cache_dir = cache.name
         self.addCleanup(self._remove_db)
         self._engine = create_engine(f"sqlite:///{self._db}")
+        # Dispose before ``_remove_db`` runs: cleanups are last-in-first-out,
+        # and Windows refuses to unlink a database file whose SQLite handle is
+        # still open (WinError 32), which failed this suite's teardown there.
+        # POSIX unlinks it happily, which is why the leak stayed invisible.
+        self.addCleanup(self._engine.dispose)
         SQLModel.metadata.create_all(self._engine)
         self._session = Session(self._engine)
         self.addCleanup(self._session.close)
@@ -177,6 +182,29 @@ class TestServerMode(_ServeTestCase):
             httpd = server_mod.serve(f"sqlite:///{self._db}", port=0)
             httpd.server_close()
         mock_build.assert_called_once()
+
+    def test_startup_does_not_resolve_the_bind_address(self):
+        """serve must not block on a reverse-DNS lookup to fill server_name.
+
+        ``http.server.HTTPServer.server_bind`` sets ``server_name`` from
+        ``socket.getfqdn(...)``.  That call is unbounded, and on the macOS CI
+        runners it took 35 s, so the port file (what a find client waits for)
+        appeared long after the serve lifecycle tests gave up.  Nothing in the
+        server reads the field.
+        """
+        from unittest.mock import patch
+
+        from resembl.server import serve as serve_start
+
+        with patch("socket.getfqdn") as resolve:
+            httpd = serve_start(f"sqlite:///{self._db}", port=0)
+        try:
+            resolve.assert_not_called()
+            self.assertGreater(httpd.server_address[1], 0)
+            self.assertEqual(httpd.server_name, "127.0.0.1")
+            self.assertEqual(httpd.server_port, httpd.server_address[1])
+        finally:
+            httpd.server_close()
 
     def test_server_close_disposes_engine_pool(self):
         """server_close releases the engine's pooled DB connections.
@@ -1583,12 +1611,14 @@ class TestServerMode(_ServeTestCase):
 
         db_b = tempfile.mktemp(suffix=".db")
         engine_b = create_engine(f"sqlite:///{db_b}")
-        self.addCleanup(engine_b.dispose)
         self.addCleanup(
             lambda: [
                 os.remove(p) for p in (db_b, db_b + "-wal", db_b + "-shm") if os.path.exists(p)
             ]
         )
+        # Registered after the removal so it runs before it: a cleanup that
+        # unlinks a database file Windows still has open fails with WinError 32.
+        self.addCleanup(engine_b.dispose)
         SQLModel.metadata.create_all(engine_b)
         # Database A (setUp) holds 100 snippets; database B is empty.  Both
         # were built with the same operation sequence, so their
@@ -1623,8 +1653,10 @@ class TestServerMode(_ServeTestCase):
         db_b = tempfile.mktemp(suffix=".db")
         for db_path in (db_a, db_b):
             engine = create_engine(f"sqlite:///{db_path}")
-            self.addCleanup(engine.dispose)
             SQLModel.metadata.create_all(engine)
+            # Registered after the removal below, so it runs before it: Windows
+            # refuses to unlink a database file whose handle is still open.
+            self.addCleanup(engine.dispose)
         self.addCleanup(
             lambda: [
                 os.remove(p)
@@ -1718,6 +1750,8 @@ class TestServerMode(_ServeTestCase):
             ]
         )
         engine = create_engine(f"sqlite:///{db_path}")
+        # After the removal cleanup, so it runs first (see above).
+        self.addCleanup(engine.dispose)
 
         barrier = threading.Barrier(8)
         errors: list[Exception] = []
@@ -1969,6 +2003,9 @@ class TestResultCacheCoherence(unittest.TestCase):
         self._db = tempfile.mktemp(suffix=".db")
         self.addCleanup(lambda: os.path.exists(self._db) and os.remove(self._db))
         self._engine = create_engine(f"sqlite:///{self._db}", pool_size=4)
+        # Runs before the file removal above (last-in-first-out cleanups):
+        # Windows refuses to unlink a database file whose handle is still open.
+        self.addCleanup(self._engine.dispose)
         SQLModel.metadata.create_all(self._engine)
         self._session = Session(self._engine)
         self.addCleanup(self._session.close)

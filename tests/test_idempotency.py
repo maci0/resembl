@@ -224,8 +224,11 @@ class TestIndexSyncAtomicity(unittest.TestCase):
     def tearDown(self):
         event.remove(self.session, "after_commit", self._snapshot)
         self.session.close()
-        self.engine.dispose()
+        # drop_all first, dispose after: a disposed engine still opens a
+        # connection for the next statement, and the handle it leaves would
+        # make the unlink below fail on Windows.
         SQLModel.metadata.drop_all(self.engine)
+        self.engine.dispose()
         os.unlink(self.db_path)
 
     def _snapshot(self, _session: Session) -> None:
