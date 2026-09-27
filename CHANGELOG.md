@@ -160,22 +160,26 @@ project follows [Semantic Versioning](https://semver.org/).
   `stats`, `export` and `merge` all read rows in one defined order, where
   before the row order was whatever plan the backend picked, so output and
   float sums could differ between two runs over the same database.
-- `resembl import` on a directory that holds no `.asm` / `.txt` file now
-  exits `1` and says so, instead of reporting a successful import of zero
-  snippets.  A script that imported a directory that had been emptied now
-  sees a failure; point it at a directory that holds snippets.
+- **Breaking:** `resembl import` on a directory that holds no `.asm` / `.txt`
+  file now exits `1` and says so, instead of exiting `0` and reporting a
+  successful import of zero snippets.  A script that imported a directory that
+  had been emptied now sees a failure; point it at a directory that holds
+  snippets, or tolerate exit `1`.
 - `resembl list` on an empty database, a `--range` past the last snippet,
   and a `resembl search` that matches no name each say what happened and
   what to run next, where the listing used to print nothing or a bare
   count.
-- `resembl collection create` on a name that already exists now reports the
-  collection as already there and exits 0, instead of failing with the
-  database's `IntegrityError` and its SQL text. The stored description is
-  left alone, so re-running a create never rewrites a collection.
-- `resembl name add` on a name the snippet already carries is now a no-op
-  that exits 0, like `resembl tag add` already was. A script that re-ran
-  the command after a failure used to see exit 1 for an end state it had
-  already produced.
+- **Breaking:** `resembl collection create` on a name that already exists now
+  reports the collection as already there and exits `0`, where it failed with
+  the database's `IntegrityError` and its SQL text at exit `1`. The stored
+  description is left alone, so re-running a create never rewrites a
+  collection. A caller that treated exit `1` as "the create failed" now has to
+  read the collection back to tell the two apart.
+- **Breaking:** `resembl name add` on a name the snippet already carries is now
+  a no-op that exits `0`, where it exited `1`, like `resembl tag add` already
+  was. A script that re-ran the command after a failure used to see exit 1 for
+  an end state it had already produced, and a script that branched on that exit
+  code now has to.
 - The sdist and wheel are now built by `make dist`, which pins the build clock
   to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
   metadata. Two builds of one commit produce identical bytes; `make dist-verify`
@@ -244,18 +248,25 @@ project follows [Semantic Versioning](https://semver.org/).
 - `DATABASE_URL` is namespaced: `RESEMBL_DATABASE_URL` is read first and the
   unprefixed name next, so an existing deployment keeps working and an
   unrelated `DATABASE_URL` in the environment no longer picks the backend.
-- A rejected command line exits `2`, not `1`, matching what typer already
-  returned for its own parse errors: a bad `--threshold` or `--format` value, a
-  missing query, or a bare `resembl`
+- **Breaking:** a rejected command line exits `2`, not `1`, matching what
+  typer already returned for its own parse errors: a bad `--threshold` or
+  `--format` value, a missing query, or a bare `resembl`
   with no subcommand.  A script that treated `1` as "you typed it wrong"
   has to read `2` now; `1` still means the command failed.
-- An unsupported `--format` value, and an unsupported `format` in the config
-  file, are refused instead of falling through to an unknown renderer.
-- Log records go to stderr rather than stdout, so a warning raised mid-run
-  (a config key ignored, a parallel import falling back) no longer
-  interleaves into the JSON or CSV a script is parsing.
-- A `--format csv` result set with no rows now writes nothing, instead of a
-  JSON `[]` in the CSV stream.
+- **Breaking:** an unsupported `--format` value, and an unsupported `format`
+  in the config file, are refused instead of falling through to an unknown
+  renderer. A `format` a hand-edited `config.toml` carried used to be written
+  through to the writer; a config naming a renderer that no longer exists now
+  exits `2` at startup, so the value has to be one of the documented names.
+- **Breaking:** log records go to stderr rather than stdout, so a warning
+  raised mid-run (a config key ignored, a parallel import falling back) no
+  longer interleaves into the JSON or CSV a script is parsing. A consumer that
+  captured stdout and parsed it as one document has to read stderr for the
+  warnings and keep stdout for the result.
+- **Breaking:** a `--format csv` result set with no rows now writes nothing,
+  instead of writing a JSON `[]` into the CSV stream. A reader that parsed the
+  empty result as a one-line file has to treat a zero-byte file as the empty
+  result.
 - The `pg8000` and `pymysql` DBAPI drivers are runtime dependencies, so a
   plain install can use the `postgresql+pg8000://` and `mysql+pymysql://`
   URLs the CLI advertises.
@@ -427,9 +438,11 @@ project follows [Semantic Versioning](https://semver.org/).
   builds its writer inline rather than through the shared CSV helper, so it
   kept the `csv` module's `\r\n` default and was the one CSV render that still
   differed across platforms.
-- `resembl clean` reports the LSH index it dropped instead of a cache it never
-  touched.  `clean` drops the index rows and vacuums; the legacy pickle cache
-  is removed by the next index write, not by `clean`.
+- **Breaking:** `resembl clean` reports the LSH index it dropped instead of a
+  cache it never touched.  `clean` drops the index rows and vacuums; the legacy
+  pickle cache is removed by the next index write, not by `clean`.  A script
+  that read the dropped cache path out of the report, or that ran `clean` to
+  reclaim the cache directory's disk, has to run an index write instead.
 - `resembl export` and `resembl export-yara` write LF on every platform.
   Text mode rewrote each `\n` to `os.linesep`, so the same database exported
   CRLF on Windows and LF elsewhere and the two trees diffed against each
@@ -503,10 +516,14 @@ project follows [Semantic Versioning](https://semver.org/).
   `numpy` 2.5) already require.
 - Dependencies refreshed to their latest releases: `pylint` 4, `datasketch`
   2, `mypy` 2, plus the rest of the locked tree.
-- Removed three names from the `resembl.core` re-export block:
-  `code_tokenize_lexed` and `string_normalize_lexed` (both dead) and
-  `minhash_jaccard`, which is still public and is importable from
-  `resembl.models` and documented in `docs/api_reference.md`.
+- **Breaking:** three names are gone from the `resembl.core` re-export block:
+  `code_tokenize_lexed` and `string_normalize_lexed` (both dead; the live
+  lexing pipeline behind them is `resembl.scoring.code_tokenize_lexed` and
+  `resembl.scoring.string_normalize_lexed`), and `minhash_jaccard`, which is
+  still public and is importable from `resembl.models` and documented in
+  `docs/api_reference.md`. A caller that reached it through `resembl.core`
+  has to import it from `resembl.models` (or `resembl.scoring`); the function
+  and its signature are unchanged, only the name it was re-exported under.
 
 ## [1.2.0] - 2026-09-15
 

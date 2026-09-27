@@ -34,6 +34,24 @@ _CURRENT_RELEASE_RE = re.compile(r"The current release is (?P<version>\d+\.\d+\.
 #: One row of the SECURITY.md supported-versions table, e.g. ``| 2.x (...) | yes |``.
 _SUPPORTED_ROW_RE = re.compile(r"^\| (?P<major>\d+)\.x[^|]*\| yes \|\s*$", re.MULTILINE)
 
+#: A phrase in a ``### Changed`` / ``### Fixed`` / ``### Removed`` note that
+#: means the note changes a contract an existing caller depends on: a process
+#: exit code, the stream a record is written to, a name that was dropped, a
+#: name that moved, or a minimum version a running install no longer meets.
+_CONTRACT_CHANGE_RE = re.compile(
+    r"exits `[012]`"
+    r"|exit `?[012]`?"
+    r"|to stderr rather than stdout"
+    r"|are gone from"
+    r"|is gone\."
+    r"|`resembl\.[a-z_.]+` is removed"
+    r"|are removed\b"
+    r"|is removed\b"
+    r"|is renamed"
+    r"|moved to the new"
+    r"|are no longer supported"
+)
+
 
 def project_root() -> Path:
     """Return the repository root, located by walking up for pyproject.toml."""
@@ -76,6 +94,69 @@ def breaking_major_violations(sections: list[tuple[str, str, str]]) -> list[str]
             violations.append(
                 f"[{version}] documents a breaking change but is not a major "
                 f"bump over [{previous}]"
+            )
+    return violations
+
+
+def unreleased_body(text: str) -> str:
+    """Return the body of ``## [Unreleased]``, up to the next release heading."""
+    match = re.search(r"^## \[Unreleased\]\s*$", text, re.MULTILINE)
+    if match is None:
+        raise ValueError("no [Unreleased] section")
+    rest = text[match.end() :]
+    end = rest.find("\n## ")
+    return rest if end == -1 else rest[:end]
+
+
+def parse_bullets(body: str) -> list[tuple[str, str]]:
+    """Return ``(bullet, category)`` for each bullet under a ``###`` heading.
+
+    A bullet is the ``- `` line plus every continuation line up to the next
+    bullet or heading, so a phrase on a wrapped line is read with the bullet it
+    belongs to.  The category is the heading the bullet sits under, or the
+    empty string for a bullet written before the first heading.
+    """
+    bullets: list[tuple[str, str]] = []
+    category = ""
+    current: list[str] = []
+    for line in body.splitlines():
+        if line.startswith("### "):
+            category = line[4:].strip()
+        elif line.startswith("- "):
+            if current:
+                bullets.append(("\n".join(current), category))
+            current = [line]
+        elif current and line.strip():
+            current.append(line)
+    if current:
+        bullets.append(("\n".join(current), category))
+    return bullets
+
+
+def unmarked_break_violations(sections: list[tuple[str, str, str]]) -> list[str]:
+    """Return a complaint per released section that hides a break from a consumer.
+
+    ``breaking_major_violations`` reads the ``**Breaking:**`` markers, so a
+    section that changes an exit code, a stream or a name without one is
+    invisible to it, and the release it describes can be cut as a patch.  This
+    reads the notes themselves: a bullet that changes a contract and carries
+    no marker, in a section that is not a major bump over the one below it,
+    is a break a 1.x caller was never told about.
+    """
+    violations: list[str] = []
+    for (version, _, body), (previous, _, _) in pairwise(sections):
+        current_major = int(version.split(".")[0])
+        previous_major = int(previous.split(".")[0])
+        if current_major == previous_major + 1:
+            continue
+        for bullet, category in parse_bullets(body):
+            if category == "Added" or "**Breaking:**" in bullet:
+                continue
+            if _CONTRACT_CHANGE_RE.search(bullet) is None:
+                continue
+            violations.append(
+                f"[{version}] changes a contract under '### {category}' with no "
+                f"**Breaking:** marker, and is not a major bump over [{previous}]"
             )
     return violations
 
@@ -126,6 +207,60 @@ class TestChangelog(unittest.TestCase):
         """
         self.assertTrue(len(self.sections) > 1, "no released sections parsed")
         self.assertEqual(breaking_major_violations(self.sections), [])
+
+    def test_unmarked_contract_change_ships_only_in_a_major(self):
+        """A contract change with no marker still requires a major bump.
+
+        The marker check above reads the markers, so a note that drops an exit
+        code, moves a record to another stream or removes an export while
+        describing none of them as a break passes it.  This reads the notes,
+        which is the half that was unguarded.
+        """
+        self.assertEqual(unmarked_break_violations(self.sections), [])
+
+    def test_unmarked_break_check_reads_a_break_in_any_position(self):
+        """The unmarked check is the one a release leans on, so pin its edges.
+
+        A synthetic changelog carries the note the real file has to reject: a
+        patch release whose ``### Fixed`` bullet changes an exit code with no
+        marker.  A change that hides under ``### Added`` is a first appearance,
+        not a break to an existing contract, so it is left alone; a marked
+        bullet in a major is the case that is already allowed.
+        """
+        unmarked = "- `resembl list` exits `1` where it exited `0`.\n"
+        under_added = "- `resembl list --count` exits `0`, and the count is printed.\n"
+        marked = "- **Breaking:** `resembl list` exits `1` where it exited `0`.\n"
+        cases = [
+            (
+                [
+                    ("1.2.0", "2026-09-15", f"### Fixed\n\n{unmarked}"),
+                    ("1.1.0", "2026-09-13", "### Fixed\n\n- A.\n"),
+                ],
+                [
+                    (
+                        "[1.2.0] changes a contract under '### Fixed' with no "
+                        "**Breaking:** marker, and is not a major bump over [1.1.0]"
+                    )
+                ],
+            ),
+            (
+                [
+                    ("1.2.0", "2026-09-15", f"### Added\n\n{under_added}"),
+                    ("1.1.0", "2026-09-13", "### Added\n\n- A.\n"),
+                ],
+                [],
+            ),
+            (
+                [
+                    ("2.0.0", "2026-09-15", f"### Changed\n\n{marked}"),
+                    ("1.2.0", "2026-09-15", "### Fixed\n\n- A.\n"),
+                ],
+                [],
+            ),
+        ]
+        for sections, expected in cases:
+            with self.subTest(sections=sections[0][0]):
+                self.assertEqual(unmarked_break_violations(sections), expected)
 
     def test_breaking_major_check_reads_a_break_in_any_position(self):
         """The check is what makes the next release honest, so pin its edges.
@@ -197,6 +332,31 @@ class TestChangelog(unittest.TestCase):
         for line in body.splitlines():
             if re.match(r"^\s*-\s+\*?\*?Breaking", line):
                 self.assertIn("**Breaking:**", line)
+
+    def test_behavior_change_bullets_are_marked_breaking(self):
+        """A bullet that changes a contract a caller already relies on is marked.
+
+        ``test_unreleased_section_is_grouped_by_impact`` only checks the
+        bullets that already carry a marker, so a note can state an exit-code,
+        stream or export change with no marker and pass.  Those are the breaks
+        a consumer is least likely to notice, because the command still runs
+        and the wrong answer comes out somewhere else, so each phrase in
+        ``_CONTRACT_CHANGE_RE`` has to be introduced by ``**Breaking:**``.
+
+        Only the impact headings a behavior change can hide under are read: a
+        bullet under ``### Added`` names a first appearance, which is not a
+        change to an existing contract.  The phrases are a list rather than a
+        derivation because there is no mechanical way to tell a note that
+        changes a contract from one that only describes it.
+        """
+        for bullet, category in parse_bullets(unreleased_body(self.text)):
+            if category == "Added" or _CONTRACT_CHANGE_RE.search(bullet) is None:
+                continue
+            self.assertIn(
+                "**Breaking:**",
+                bullet,
+                f"a bullet under '### {category}' that changes a contract is not marked",
+            )
 
 
 if __name__ == "__main__":
