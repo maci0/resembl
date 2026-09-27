@@ -568,7 +568,19 @@ def snippet_add_batch(
         ]
         _insert_snippet_rows(session, rows, batch_size)
     if new_snippets or aliased:
+        # The index rows join the snippet rows' transaction: a commit that
+        # publishes a snippet must publish the buckets that make it findable.
+        # Committing the snippets first left a window in which a crash (or a
+        # database lock on the sync) stranded them unindexed while lsh_meta
+        # still advertised a complete index, and a retried import never
+        # repaired that — the re-run saw the checksums already present, took
+        # the alias path, and indexed nothing.
+        index_threshold = lsh_index_add_batch(
+            session, [(s.checksum, s.minhash) for s in new_snippets], commit=False
+        )
         session.commit()
+        if index_threshold is not None:
+            lsh_pickle_cache_remove(index_threshold)
         if new_snippets:
             fingerprint_stamps_reconcile(
                 session,
@@ -576,9 +588,6 @@ def snippet_add_batch(
                 num_perm=NUM_PERMUTATIONS,
                 fresh_database=fresh_database,
             )
-
-    # Keep the DB-backed LSH index in sync if one is already built.
-    lsh_index_add_batch(session, [(s.checksum, s.minhash) for s in new_snippets])
 
     elapsed = time.monotonic() - start_time
     return {
@@ -632,7 +641,14 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
         minhash=minhash_bytes,
     )
     session.add(new_snippet)
+    # Keep the DB-backed LSH index in sync, in the snippet row's transaction:
+    # see ``snippet_add_batch`` for why the two must commit together.
+    index_threshold = lsh_index_add(
+        session, new_snippet.checksum, new_snippet.minhash, commit=False
+    )
     session.commit()
+    if index_threshold is not None:
+        lsh_pickle_cache_remove(index_threshold)
     session.refresh(new_snippet)
     fingerprint_stamps_reconcile(
         session,
@@ -640,8 +656,6 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
         num_perm=NUM_PERMUTATIONS,
         fresh_database=fresh_database,
     )
-    # Keep the DB-backed LSH index in sync if one is already built.
-    lsh_index_add(session, new_snippet.checksum, new_snippet.minhash)
     return new_snippet
 
 
@@ -2065,8 +2079,13 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             if not new_rows:
                 return
             _insert_snippet_rows(session, new_rows)
+            # Same atomicity as ``snippet_add_batch``: the new snippets and
+            # the buckets that make them findable commit together, so a merge
+            # interrupted between the two cannot leave either half behind.
+            index_threshold = lsh_index_add_batch(session, added_minhashes, commit=False)
             session.commit()
-            lsh_index_add_batch(session, added_minhashes)
+            if index_threshold is not None:
+                lsh_pickle_cache_remove(index_threshold)
             new_rows.clear()
             added_minhashes.clear()
 

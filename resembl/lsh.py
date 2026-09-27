@@ -682,16 +682,20 @@ class ResemblLSH:
 
     # -- mutation ----------------------------------------------------------
 
-    def insert(self, key: str, value: bytes | MinHash) -> None:
+    def insert(self, key: str, value: bytes | MinHash, *, commit: bool = True) -> None:
         """Insert one fingerprint under *key* (MinHash or packed bytes).
 
         A blob that cannot be banded against this index (corrupt, or written
         at a different permutation count) is skipped with a warning instead
-        of raising — the same tolerance as a full index build.  Callers run
-        inserts *after* their snippet rows are already committed; a crash
-        here would turn an add/import/merge into a partial, error-reported
-        write and leave the new snippets invisible until the next rebuild.
-        A reindex recomputes skipped fingerprints from their code.
+        of raising — the same tolerance as a full index build.  A reindex
+        recomputes skipped fingerprints from their code.
+
+        Pass ``commit=False`` to join the caller's transaction: a caller that
+        writes a snippet row and its bucket rows together then has both
+        become visible in the same commit, and a process that dies between the
+        two cannot leave a committed snippet that no find can reach.
+        Re-inserting the rows is free either way, the ``(band, bucket,
+        checksum)`` primary key making the write naturally idempotent.
         """
         packed = self._as_packed(value)
         try:
@@ -703,15 +707,23 @@ class ResemblLSH:
             {"band": band, "bucket": bucket, "checksum": key} for band, bucket in enumerate(buckets)
         ]
         self.session.execute(text(_insert_sql(self.session)), params=params)
-        self.session.commit()
+        if commit:
+            self.session.commit()
 
-    def insert_batch(self, items: Sequence[tuple[str, bytes | MinHash]]) -> int:
+    def insert_batch(
+        self, items: Sequence[tuple[str, bytes | MinHash]], *, commit: bool = True
+    ) -> int:
         """Insert many ``(key, fingerprint)`` pairs; returns the row count.
 
         Items whose fingerprint cannot be banded against this index (corrupt,
         or written at a different permutation count) are skipped with a
         warning — same tolerance as :meth:`insert` and the index build — and
         do not contribute to the returned row count.
+
+        With ``commit=False`` the chunks join the caller's transaction
+        instead of committing each one, which keeps the write atomic with
+        whatever the caller is persisting; the transaction then spans the
+        whole batch, not one chunk of it.
         """
         rows: list[dict[str, object]] = []
         for key, value in items:
@@ -733,7 +745,8 @@ class ResemblLSH:
             # incremental syncs (importing into an indexed database) fast.
             chunk.sort(key=lambda row: (row["band"], row["bucket"]))
             insert_rows(self.session, _insert_sql(self.session), chunk)
-            self.session.commit()
+            if commit:
+                self.session.commit()
         return len(rows)
 
     def remove(self, checksum: str) -> None:

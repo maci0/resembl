@@ -11,8 +11,11 @@ import os
 import tempfile
 import unittest
 
+from sqlalchemy import event, func
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from resembl.cache import lsh_index_build
 from resembl.core import (
     collection_add_snippet,
     collection_create,
@@ -29,7 +32,9 @@ from resembl.core import (
     snippet_tag_add,
     snippet_tag_remove,
 )
-from resembl.models import Collection, Snippet
+from resembl.lsh import banding_params
+from resembl.models import Collection, LSHBucket, Snippet
+from resembl.scoring import NUM_PERMUTATIONS
 
 
 def _state(session: Session) -> dict:
@@ -184,6 +189,94 @@ class TestReindexWrites(BaseDBTest):
         self.assertNotIn("error", db_reindex(self.session, jobs=1))
         second = dict(self.session.exec(select(Snippet.checksum, Snippet.minhash)).all())
         self.assertEqual(second, first)
+
+
+class TestIndexSyncAtomicity(unittest.TestCase):
+    """A snippet and its LSH bucket rows become visible in the same commit.
+
+    The bucket rows are unique by ``(band, bucket, checksum)``, so writing
+    them twice is free; what a second *write* cannot repair is a snippet
+    published without them.  Committing the snippet row first and the index
+    rows second leaves a gap in which the process can die, and because a
+    retried import of the same files takes the already-present alias path it
+    never re-indexes them: ``lsh_meta`` still advertises a complete index
+    while those snippets are invisible to every find, until someone runs a
+    manual rebuild.  Each snapshot below is what a *separate* connection sees
+    at one of the writer's commit boundaries, so it pins the boundary itself.
+    """
+
+    BANDS = banding_params(0.5, NUM_PERMUTATIONS)[0]
+
+    def setUp(self):
+        handle = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        handle.close()
+        self.db_path = handle.name
+        self.url = f"sqlite:///{self.db_path}"
+        self.engine = create_engine(self.url)
+        SQLModel.metadata.create_all(self.engine)
+        self.session = Session(self.engine)
+        self.snapshots: list[tuple[int, int]] = []
+        event.listen(self.session, "after_commit", self._snapshot)
+
+    def tearDown(self):
+        event.remove(self.session, "after_commit", self._snapshot)
+        self.session.close()
+        self.engine.dispose()
+        SQLModel.metadata.drop_all(self.engine)
+        os.unlink(self.db_path)
+
+    def _snapshot(self, _session: Session) -> None:
+        """Record (snippets, buckets) as an outside connection sees them."""
+        probe_engine = create_engine(self.url)
+        try:
+            with Session(probe_engine) as probe:
+                try:
+                    buckets = probe.exec(
+                        select(func.count(LSHBucket.checksum))  # type: ignore[arg-type]
+                    ).one()
+                except OperationalError:
+                    # No index has been built yet, so there is nothing to lag.
+                    return
+                snippets = probe.exec(
+                    select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+                ).one()
+                self.snapshots.append((snippets, buckets))
+        finally:
+            probe_engine.dispose()
+
+    def _assert_index_never_lags(self) -> None:
+        self.assertTrue(self.snapshots, "the write never committed")
+        for snippets, buckets in self.snapshots:
+            self.assertEqual(
+                buckets,
+                snippets * self.BANDS,
+                f"{snippets} committed snippet(s) with {buckets} bucket row(s)",
+            )
+
+    def _seed_and_build(self) -> None:
+        """One snippet plus a built index, so the incremental sync runs."""
+        snippet_add(self.session, "seed", "MOV EBX, 2")
+        lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        self.snapshots.clear()
+
+    def test_add_commits_the_snippet_with_its_bucket_rows(self):
+        self._seed_and_build()
+        snippet_add(self.session, "proc", "MOV EAX, 1")
+        self._assert_index_never_lags()
+
+    def test_add_batch_commits_the_snippets_with_their_bucket_rows(self):
+        self._seed_and_build()
+        snippet_add_batch(
+            self.session,
+            [
+                item
+                for item in (
+                    snippet_prepare(f"p{i}", "MOV EAX, 1\n" * (i + 1), 3) for i in range(3)
+                )
+                if item
+            ],
+        )
+        self._assert_index_never_lags()
 
 
 class TestMergeWrites(BaseDBTest):

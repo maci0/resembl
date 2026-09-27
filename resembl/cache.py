@@ -255,26 +255,43 @@ def _build_once(
     fingerprint_version_set(session, FINGERPRINT_VERSION)
 
 
-def lsh_index_add(session: Session, checksum: str, minhash_bytes: bytes) -> bool:
-    """Incrementally add one snippet to the DB-backed index, if one is built."""
+def lsh_index_add(
+    session: Session, checksum: str, minhash_bytes: bytes, *, commit: bool = True
+) -> float | None:
+    """Incrementally add one snippet to the DB-backed index, if one is built.
+
+    Returns the index's threshold when the bucket rows were written, else
+    ``None`` (no index built yet).  With ``commit=False`` the rows join the
+    caller's transaction and the caller drops the legacy pickle cache itself,
+    once its own commit is durable — same contract as
+    :func:`lsh_index_purge`.
+    """
     meta = lsh_meta_get(session)
     if meta is None:
-        return False
+        return None
     lsh = ResemblLSH(session, meta[0], meta[1])
-    lsh.insert(checksum, minhash_bytes)
-    lsh_pickle_cache_remove(meta[0])
-    return True
+    lsh.insert(checksum, minhash_bytes, commit=commit)
+    if commit:
+        lsh_pickle_cache_remove(meta[0])
+    return meta[0]
 
 
-def lsh_index_add_batch(session: Session, items: list[tuple[str, bytes]]) -> int:
-    """Incrementally add many snippets to the DB-backed index, if one is built."""
+def lsh_index_add_batch(
+    session: Session, items: list[tuple[str, bytes]], *, commit: bool = True
+) -> float | None:
+    """Incrementally add many snippets to the DB-backed index, if one is built.
+
+    Returns the index's threshold when bucket rows were written, else
+    ``None``; see :func:`lsh_index_add` for the ``commit`` contract.
+    """
     meta = lsh_meta_get(session)
     if meta is None or not items:
-        return 0
+        return None
     lsh = ResemblLSH(session, meta[0], meta[1])
-    added = lsh.insert_batch(items)
-    lsh_pickle_cache_remove(meta[0])
-    return added
+    lsh.insert_batch(items, commit=commit)
+    if commit:
+        lsh_pickle_cache_remove(meta[0])
+    return meta[0]
 
 
 def lsh_index_purge(session: Session, checksum: str) -> float | None:

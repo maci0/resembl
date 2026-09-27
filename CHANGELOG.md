@@ -387,6 +387,14 @@ project follows [Semantic Versioning](https://semver.org/).
   rows for a snippet that no longer existed whenever the process died in
   between, and `lsh_meta` still marked the index complete, so no later find
   repaired it.
+- `add`, `import`, and `merge` write a snippet's `lsh_bucket` rows in the same
+  transaction as the snippet row itself.  Committing the rows separately left
+  a window in which a killed process (or a database lock on the index sync)
+  stranded committed snippets outside the index while `lsh_meta` still
+  advertised a complete one, so every find silently missed them.  Re-running
+  the import did not repair it either: the checksums were already present, so
+  the retry took the alias path and indexed nothing, leaving a permanently
+  under-indexed database until someone ran `reindex --force`.
 - A snippet whose `created_at` is `NULL` no longer breaks `merge` or its
   timestamp rendering.
 - The served result cache's version guard is read through one shared probe
