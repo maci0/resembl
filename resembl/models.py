@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -35,6 +36,22 @@ if TYPE_CHECKING:
 #: the same inputs never produce the same rows or the same output.  Setting
 #: this variable is what makes a recorded run replay byte-for-byte.
 CLOCK_ENV_VAR = "RESEMBL_NOW"
+
+
+def name_normalize(name: str) -> str:
+    """Return *name* in NFC, the one form names are stored and compared in.
+
+    A name is identity: it is the primary key of a collection, the alias a
+    user types back into ``resembl name``/``collection``, and the stem of an
+    exported file.  macOS hands out decomposed (NFD) spellings of the names
+    it is given while Linux and Windows compose them (NFC), so the same
+    ``café.asm`` reaches a database as two different strings and every
+    byte-wise lookup against it misses.  Normalizing at ingestion and again
+    at lookup keeps the two platforms talking about one name; rows written
+    before this existed still resolve, because the lookup compares
+    normalized spellings.
+    """
+    return unicodedata.normalize("NFC", name)
 
 
 def timestamp_now() -> str:
@@ -95,7 +112,7 @@ class Collection(SQLModel, table=True):
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> Collection | None:
         """Retrieve a collection by name."""
-        return session.get(cls, name)
+        return session.get(cls, name_normalize(name))
 
 
 class SnippetVersion(SQLModel, table=True):
@@ -162,22 +179,35 @@ class Snippet(SQLModel, table=True):
         # The winner's full row is fetched via the identity map afterwards.
         #
         # The probe must reproduce the stored (JSON-encoded) spelling of
-        # *name*, or a name containing ``"`` or ``\`` can never match its own
-        # row: first encode like ``json.dumps`` does, then LIKE-escape the
-        # result ('\\' is the escape character, so every stored backslash —
-        # including the ones JSON just introduced — must be doubled) and
-        # protect ``%`` / ``_`` so they match themselves instead of widening
-        # the probe.
-        encoded = name.replace("\\", "\\\\").replace('"', '\\"')
-        literal = encoded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        candidates = session.exec(
-            select(cls.checksum, cls.names).where(
-                cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]
-            )
-        ).all()
-        for checksum, names in candidates:
-            if name in json.loads(names):
-                return session.get(cls, checksum)
+        # *name*, or a name containing ``"``, ``\`` or any non-ASCII
+        # character can never match its own row.  ``json.dumps`` is what
+        # writes the column and it escapes backslash, quote and everything
+        # outside ASCII as ``\uXXXX``, so the probe is built from its own
+        # output rather than a hand-rolled subset: the hand-rolled version
+        # handled ``"`` and ``\`` but left ``é`` as a literal while the row
+        # held ``é``, so every accented name was unfindable.  The
+        # LIKE-escaping that follows doubles the backslashes JSON just
+        # introduced and protects ``%`` / ``_`` so they match themselves
+        # instead of widening the probe.
+        #
+        # A name is probed in both canonical forms, because a row written
+        # before names were normalized (or imported from a macOS filesystem,
+        # which hands out NFD) stores the other one.
+        for spelling in dict.fromkeys((name_normalize(name), unicodedata.normalize("NFD", name))):
+            encoded = json.dumps(spelling)[1:-1]
+            literal = encoded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            candidates = session.exec(
+                select(cls.checksum, cls.names).where(
+                    cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]
+                )
+            ).all()
+            for checksum, names in candidates:
+                # Compare normalized spellings, so either probe above can
+                # reach a row stored in the form the other one used.
+                if name_normalize(spelling) in [
+                    name_normalize(stored) for stored in json.loads(names)
+                ]:
+                    return session.get(cls, checksum)
         return None
 
     @classmethod
@@ -238,7 +268,9 @@ class Snippet(SQLModel, table=True):
     @classmethod
     def get_by_collection(cls, session: Session, collection_name: str) -> Sequence[Snippet]:
         """Return all snippets in a given collection."""
-        return session.exec(select(cls).where(cls.collection == collection_name)).all()
+        return session.exec(
+            select(cls).where(cls.collection == name_normalize(collection_name))
+        ).all()
 
     def get_minhash_obj(self) -> MinHash:
         """Return the stored MinHash object for this snippet."""

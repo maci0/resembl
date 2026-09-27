@@ -170,6 +170,10 @@ The `compare` command also reports control-flow graph similarity.
 
 ### Naming & Tags
 
+Names are stored and matched in one normalization form (NFC), so a name
+reached from macOS (which spells it decomposed) and the same name typed on
+Linux or Windows are one name.
+
 **name add** *CHECKSUM* *NAME*
 :   Add an alias to a snippet.  Accepts checksum prefixes.  A name the
     snippet already carries is a no-op, so a re-run exits 0.
