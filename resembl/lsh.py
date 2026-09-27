@@ -722,9 +722,13 @@ class ResemblLSH:
         return len(rows)
 
     def remove(self, checksum: str) -> None:
-        """Remove all index rows for *checksum*."""
+        """Remove all index rows for *checksum*, leaving the commit to the caller.
+
+        The delete deliberately stays in the caller's transaction so it can
+        commit together with the snippet row it belongs to; see
+        :func:`resembl.cache.lsh_index_purge`.
+        """
         self.session.execute(text("DELETE FROM lsh_bucket WHERE checksum = :c"), {"c": checksum})
-        self.session.commit()
 
     # -- query -------------------------------------------------------------
 

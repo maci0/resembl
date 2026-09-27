@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from sqlalchemy import text
 from sqlmodel import create_engine
 
 from resembl.cache import (
@@ -541,6 +542,54 @@ class TestSnippetDeleteEdge(BaseDBTest):
         result = snippet_delete(self.session, snippet.checksum)
         self.assertTrue(result)
         self.assertIsNone(snippet_get(self.session, snippet.checksum))
+
+    def test_delete_purges_lsh_buckets(self):
+        """A delete leaves no ``lsh_bucket`` row behind for the checksum.
+
+        The snippet row and its index rows share one transaction, so a
+        committed delete can never leave the index pointing at a checksum
+        that no longer exists (nothing would repair it: ``lsh_meta`` still
+        marks the index complete).
+        """
+        snippet = snippet_add(self.session, "func", "MOV EAX, 1; RET")
+        self.assertIsNotNone(snippet)
+        lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        kept = snippet_add(self.session, "other", "XOR EBX, EBX")
+        self.assertIsNotNone(kept)
+        self.assertTrue(self._bucket_count(snippet.checksum) > 0)
+
+        self.assertTrue(snippet_delete(self.session, snippet.checksum))
+
+        self.assertEqual(self._bucket_count(snippet.checksum), 0)
+        self.assertTrue(self._bucket_count(kept.checksum) > 0)
+
+    def test_failed_purge_keeps_snippet(self):
+        """A purge that fails must not leave the snippet deleted.
+
+        The two tables share one transaction, so a failure anywhere in the
+        operation rolls the whole thing back.  With the delete committed
+        first, this left the snippet gone and its bucket rows behind.
+        """
+        snippet = snippet_add(self.session, "func", "MOV EAX, 1; RET")
+        self.assertIsNotNone(snippet)
+        lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
+        self.assertTrue(self._bucket_count(snippet.checksum) > 0)
+
+        with patch("resembl.core.lsh_index_purge", side_effect=RuntimeError("index gone")):
+            with self.assertRaises(RuntimeError):
+                snippet_delete(self.session, snippet.checksum, quiet=True)
+        self.session.rollback()
+
+        self.assertIsNotNone(snippet_get(self.session, snippet.checksum))
+        self.assertTrue(self._bucket_count(snippet.checksum) > 0)
+
+    def _bucket_count(self, checksum: str) -> int:
+        """Return how many ``lsh_bucket`` rows reference *checksum*."""
+        row = self.session.execute(
+            text("SELECT count(*) FROM lsh_bucket WHERE checksum = :checksum"),
+            {"checksum": checksum},
+        ).one()
+        return int(row[0])
 
 
 # ---------------------------------------------------------------------------

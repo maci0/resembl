@@ -33,7 +33,8 @@ from .cache import (
     lsh_index_add_batch,
     lsh_index_build,
     lsh_index_clear,
-    lsh_index_remove,
+    lsh_index_purge,
+    lsh_pickle_cache_remove,
 )
 from .lsh import (
     banding_params,
@@ -881,13 +882,21 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
             logger.error("Snippet with checksum %s not found.", checksum)
         return False
 
+    # The snippet row and its ``lsh_bucket`` rows go in one transaction.
+    # Committing the snippet first and purging the index in a second one left
+    # bucket rows for a checksum that no longer existed whenever the process
+    # died in between, and ``lsh_meta`` still marked the index complete, so
+    # no later find would repair it.  The index metadata is read before the
+    # writes because an unbuilt index has nothing to purge.
+    purge_threshold = lsh_index_purge(session, checksum)
     session.delete(snippet)
     session.commit()
     if not quiet:
         logger.info("Snippet with checksum %s deleted.", checksum)
 
-    # Keep the DB-backed LSH index in sync if one is already built.
-    lsh_index_remove(session, checksum)
+    # The legacy pickle cache is only dropped once the purge is durable.
+    if purge_threshold is not None:
+        lsh_pickle_cache_remove(purge_threshold)
     return True
 
 
@@ -1600,7 +1609,7 @@ def db_clean(session: Session) -> dict:
     """Drop the LSH index and vacuum the database.
 
     Legacy pickle cache files are not touched here; they are removed by the
-    next index write (:func:`resembl.cache._remove_pickle_cache`), not by
+    next index write (:func:`resembl.cache.lsh_pickle_cache_remove`), not by
     ``clean``.
     """
     start_time = time.monotonic()

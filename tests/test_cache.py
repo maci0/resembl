@@ -97,7 +97,7 @@ class TestCache(unittest.TestCase):
         """
         import stat
 
-        from resembl.cache import _remove_pickle_cache
+        from resembl.cache import lsh_pickle_cache_remove
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
@@ -124,7 +124,7 @@ class TestCache(unittest.TestCase):
                     self.skipTest("filesystem does not enforce directory write permissions")
                 try:
                     with self.assertLogs("resembl.cache", level="WARNING"):
-                        _remove_pickle_cache(0.5)  # must not raise
+                        lsh_pickle_cache_remove(0.5)  # must not raise
                 finally:
                     os.chmod(tmpdir, stat.S_IRWXU)
                 self.assertTrue(os.path.exists(cache_file))

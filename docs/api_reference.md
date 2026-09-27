@@ -153,7 +153,7 @@ fingerprint primitives below are defined in `resembl.scoring` and re-exported
 by `resembl.models`.
 
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
-A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `resembl.minhash.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the numpy banding search would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip.
+A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed)`, `insert_batch(items)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `resembl.minhash.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the numpy banding search would otherwise add ~13 ms per construction), and `query` issues all band lookups in a single `UNION ALL` round trip. `remove` does not commit: the caller owns the transaction, which is what lets `snippet_delete` commit the bucket purge together with the snippet row (via `lsh_index_purge` in `resembl.cache`).
 
 ### `band_buckets(packed: bytes, num_perm: int, b: int, r: int) → list[str]`
 Compute the canonical bucket key for each band of a packed fingerprint

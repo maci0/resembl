@@ -814,6 +814,7 @@ class TestResemblLSH(BaseScalingTest):
         lsh.insert("k2", minhash_pack(code_create_minhash("XOR EBX, EBX")))
         self.assertIn("k1", lsh.query(m))
         lsh.remove("k1")
+        self.session.commit()
         self.assertNotIn("k1", lsh.query(m))
         self.assertEqual(len(lsh.query(m)), 0)
 

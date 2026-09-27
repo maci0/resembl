@@ -272,7 +272,7 @@ def lsh_index_add(session: Session, checksum: str, minhash_bytes: bytes) -> bool
         return False
     lsh = ResemblLSH(session, meta[0], meta[1])
     lsh.insert(checksum, minhash_bytes)
-    _remove_pickle_cache(meta[0])
+    lsh_pickle_cache_remove(meta[0])
     return True
 
 
@@ -283,22 +283,30 @@ def lsh_index_add_batch(session: Session, items: list[tuple[str, bytes]]) -> int
         return 0
     lsh = ResemblLSH(session, meta[0], meta[1])
     added = lsh.insert_batch(items)
-    _remove_pickle_cache(meta[0])
+    lsh_pickle_cache_remove(meta[0])
     return added
 
 
-def lsh_index_remove(session: Session, checksum: str) -> bool:
-    """Incrementally remove one snippet from the DB-backed index, if built."""
+def lsh_index_purge(session: Session, checksum: str) -> float | None:
+    """Stage one snippet's index rows for deletion inside the caller's transaction.
+
+    Returns the built index's threshold, or ``None`` when no index is built
+    (nothing to purge).  The delete is left uncommitted so the caller can
+    commit it together with the snippet row it belongs to: committing the two
+    separately leaves ``lsh_bucket`` rows for a snippet that no longer exists
+    whenever the process dies in between, and ``lsh_meta`` still marks the
+    index complete, so no later find would repair it.  The caller drops the
+    legacy pickle cache with :func:`lsh_pickle_cache_remove` after committing.
+    """
     meta = lsh_meta_get(session)
     if meta is None:
-        return False
+        return None
     lsh = ResemblLSH(session, meta[0], meta[1])
     lsh.remove(checksum)
-    _remove_pickle_cache(meta[0])
-    return True
+    return meta[0]
 
 
-def _remove_pickle_cache(threshold: float) -> None:
+def lsh_pickle_cache_remove(threshold: float) -> None:
     """Delete the legacy pickle cache file for *threshold* (if any).
 
     Best-effort: callers run this after their database writes are already
@@ -330,7 +338,7 @@ def lsh_cache_save(
     cache content is ever written to disk.
     """
     lsh_meta_set(session, threshold, num_perm)
-    _remove_pickle_cache(threshold)
+    lsh_pickle_cache_remove(threshold)
 
 
 def lsh_cache_load(
