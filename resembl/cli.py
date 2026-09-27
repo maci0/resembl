@@ -272,28 +272,31 @@ def _echo_format(data: object) -> None:
             # An empty result set has no columns to name: CSV's "no rows" is
             # no output, not a JSON array smuggled into a CSV stream.
             return
+        # One writer for both shapes: a list of row dicts keeps its keys, a
+        # single dict becomes one row.  ``fieldnames`` is collected from the
+        # rows rather than read off the first one, because rows may carry
+        # heterogeneous keys (e.g. one failed query in a server-side
+        # find-batch gains an "error" column) and DictWriter raises on a row
+        # the first-row-only header does not name.
+        rows: list[dict]
+        fieldnames: list[str]
         if isinstance(data, list) and isinstance(data[0], dict):
             for row in data:
-                if "names" in row and isinstance(row["names"], list):
+                if isinstance(row.get("names"), list):
                     row["names"] = ", ".join(row["names"])
-            # Rows may carry heterogeneous keys (e.g. one failed query in a
-            # server-side find-batch gains an "error" column): a first-row-
-            # only header made DictWriter raise on the differing rows.
-            fieldnames = list(dict.fromkeys(k for row in data for k in row))
-            writer = csv.DictWriter(
-                sys.stdout, fieldnames=fieldnames, lineterminator=_CSV_LINETERMINATOR
-            )
-            writer.writeheader()
-            writer.writerows([{k: _csv_safe(v) for k, v in row.items()} for row in data])
+            rows = data
+            fieldnames = list(dict.fromkeys(k for row in rows for k in row))
         elif isinstance(data, dict):
-            data = {k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}
-            writer = csv.DictWriter(
-                sys.stdout, fieldnames=data.keys(), lineterminator=_CSV_LINETERMINATOR
-            )
-            writer.writeheader()
-            writer.writerow({k: _csv_safe(v) for k, v in data.items()})
+            rows = [{k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}]
+            fieldnames = list(rows[0])
         else:
             console.print(json.dumps(data, indent=2))
+            return
+        writer = csv.DictWriter(
+            sys.stdout, fieldnames=fieldnames, lineterminator=_CSV_LINETERMINATOR
+        )
+        writer.writeheader()
+        writer.writerows({k: _csv_safe(v) for k, v in row.items()} for row in rows)
     else:
         # Reached only for "json": every caller guards on
         # `format in ("json", "csv")`.

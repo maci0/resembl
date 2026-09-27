@@ -363,22 +363,24 @@ def _snippet_minhashes_by_checksums(session: Session, checksums: list[str]) -> d
     return result
 
 
+#: Column order every snippet insert below shares, from the parameterized
+#: statement to the SQLite driver-level tuple to the DuckDB literal list.
+_SNIPPET_COLUMNS = ("checksum", "names", "code", "minhash", "tags", "collection")
+_SNIPPET_COLUMN_LIST = ", ".join(_SNIPPET_COLUMNS)
+
 #: Parameterized template for one snippet row (the executemany path).
 _SNIPPET_INSERT_SQL = (
-    "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
-    "VALUES (:checksum, :names, :code, :minhash, :tags, :collection)"
+    f"INSERT INTO snippet ({_SNIPPET_COLUMN_LIST}) "
+    f"VALUES ({', '.join(':' + c for c in _SNIPPET_COLUMNS)})"
 )
 
 #: SQLite driver-level variant of ``_SNIPPET_INSERT_SQL`` (qmark placeholders).
 #: Handing the DBAPI cursor the executemany directly skips SQLAlchemy's
 #: per-row parameter construction, measured 1.9x faster (397k -> 754k rows/s).
 _SNIPPET_INSERT_SQL_SQLITE = (
-    "INSERT INTO snippet (checksum, names, code, minhash, tags, collection) "
-    "VALUES (?, ?, ?, ?, ?, ?)"
+    f"INSERT INTO snippet ({_SNIPPET_COLUMN_LIST}) "
+    f"VALUES ({', '.join('?' * len(_SNIPPET_COLUMNS))})"
 )
-
-#: Column order for the SQLite driver-level snippet insert.
-_SNIPPET_COLUMNS = ("checksum", "names", "code", "minhash", "tags", "collection")
 
 
 def _duckdb_sql_literal(value: object) -> str:
@@ -435,30 +437,16 @@ def _insert_snippet_rows(
             session.execute(text(_SNIPPET_INSERT_SQL), params=rows[i : i + batch_size])
         return
     for i in range(0, len(rows), batch_size):
-        chunk = rows[i : i + batch_size]
         values = ",".join(
-            "("
-            + ", ".join(
-                _duckdb_sql_literal(v)
-                for v in (
-                    row["checksum"],
-                    row["names"],
-                    row["code"],
-                    row["minhash"],
-                    row["tags"],
-                    row["collection"],
-                )
-            )
-            + ")"
-            for row in chunk
+            "(" + ", ".join(_duckdb_sql_literal(row[c]) for c in _SNIPPET_COLUMNS) + ")"
+            for row in rows[i : i + batch_size]
         )
         # exec_driver_sql, not text(): the generated statement has no bind
         # parameters, and text()'s marker scan cannot tell a literal ``$1``
         # or ``:0`` inside user content from a real bind placeholder — a
         # snippet containing either would otherwise raise StatementError.
         session.connection().exec_driver_sql(
-            "INSERT INTO snippet (checksum, names, code, minhash, tags, "
-            f"collection) VALUES {values}"
+            f"INSERT INTO snippet ({_SNIPPET_COLUMN_LIST}) VALUES {values}"
         )
 
 
