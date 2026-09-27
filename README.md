@@ -235,8 +235,14 @@ same fallback applies to the cache directory via `RESEMBL_CACHE_DIR` /
 The database backend is selected with the `DATABASE_URL` environment
 variable: SQLite (default, `sqlite:///assembly.db`), PostgreSQL
 (`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+pymysql://…`), or
-DuckDB (`duckdb:///file.db` via `duckdb-engine`).  See
-[Using a Custom Database](docs/custom_database.md) for details.
+DuckDB (`duckdb:///file.db`).  The `pg8000` and `pymysql` drivers ship with
+the package; the compiled DuckDB driver is opt-in, so install the extra first:
+
+```bash
+uv pip install "resembl[duckdb]"
+```
+
+See [Using a Custom Database](docs/custom_database.md) for details.
 
 **Example `config.toml`:**
 ```toml

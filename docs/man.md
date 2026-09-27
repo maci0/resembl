@@ -231,7 +231,9 @@ The `compare` command also reports control-flow graph similarity.
 **DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
     Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)
-    for team use.
+    for team use.  The `pg8000` and `pymysql` drivers are installed with the
+    package; a `duckdb:///` URL needs the extra: `uv pip install
+    "resembl[duckdb]"`.
 
 ## CONFIGURATION
 

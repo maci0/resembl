@@ -1385,7 +1385,9 @@ class TestResultCacheCoherence(unittest.TestCase):
         """Commit a snippet on a connection the serving engine does not own."""
         import sqlite3
 
-        checksum, name, snippet_code, minhash = snippet_prepare("ext", code, 3)
+        prepared = snippet_prepare("ext", code, 3)
+        assert prepared is not None, "test fixtures pass non-empty code"
+        checksum, name, snippet_code, minhash = prepared
         raw = sqlite3.connect(self._db)
         try:
             raw.execute(

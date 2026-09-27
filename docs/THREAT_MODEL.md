@@ -231,7 +231,7 @@ those credentials to the named host. The URL is masked for display
 | `LIKE` metacharacter escaping | `resembl/cli.py:571` | A checksum prefix like `%` resolving to an arbitrary snippet |
 | Password masking | `resembl/database.py:30`, `resembl/find_client.py:33` | Credentials in a printed URL |
 | Config file lock | `resembl/config.py:127` | Lost updates between concurrent CLI processes |
-| Dependency CVE floor | `pyproject.toml:14` | The Pygments ReDoS advisory |
+| Dependency CVE floor | `pyproject.toml:21` | The Pygments ReDoS advisory |
 | CI security analysis | `.github/workflows/codeql.yml`, `.github/workflows/dependency-review.yml`, `.github/workflows/sbom.yml` | Static analysis, dependency review, and an SBOM of every release |
 
 ### Threats with no mitigation

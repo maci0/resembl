@@ -3,7 +3,14 @@ name = "resembl"
 version = "2.0.0"
 description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
-license = { text = "GPLv3" }
+# SPDX expression, not free text: "GPLv3" is not an SPDX id, so indexers and
+# scanners could not match it.  The tree ships the plain GPLv3 text with no
+# "or later" grant, so the accurate expression is GPL-3.0-only.
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3.13",
+]
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -17,6 +24,12 @@ dependencies = [
     "tomli_w>=1.2.0",
     "typer>=0.9.0",
     "numpy>=1.24.0",
+    # DBAPI drivers for the non-SQLite backends the CLI advertises in its
+    # DATABASE_URL help text and docs (postgresql+pg8000://, mysql+pymysql://).
+    # Both are pure Python and small, so a plain install can use them; only
+    # the compiled DuckDB driver needs the opt-in extra below.
+    "pg8000>=1.31.0",
+    "pymysql>=1.1.0",
 ]
 
 [project.urls]
@@ -35,10 +48,9 @@ dev = [
     # inline in resembl.database / resembl.scoring).  Do not lower.
     "pylint>=4",
     "hypothesis>=6.0.0",
-    "pg8000>=1.31.0",
-    "duckdb>=1.0.0",
-    "duckdb-engine>=0.13.0",
-    "pymysql>=1.1.0",
+    # The DuckDB driver (compiled, tens of MB) is opt-in for users via the
+    # `duckdb` extra; the test suite needs it, so dev pulls the same extra.
+    "resembl[duckdb]",
     "pytest-benchmark>=4.0.0",
     "pytest-cov>=5.0.0",
     # Test oracle only: resembl.minhash vendors a bit-compatible MinHash, and
@@ -47,6 +59,12 @@ dev = [
     # tests pin datasketch's `scheme="legacy"` family explicitly, a 2.0-only
     # keyword, so resolving 1.x fails the suite at collection.
     "datasketch>=2",
+]
+duckdb = [
+    # Compiled DuckDB driver plus its SQLAlchemy dialect.  Needed only for a
+    # `duckdb:///file.db` DATABASE_URL, so it is not a runtime dependency.
+    "duckdb>=1.0.0",
+    "duckdb-engine>=0.13.0",
 ]
 fuzz = [
     "atheris>=2.3.0",
@@ -57,7 +75,9 @@ resembl = "resembl.cli:main"
 resembl-find = "resembl.find_client:main"
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
+# setuptools 77 is the floor for PEP 639 metadata (the SPDX `license` string
+# and `license-files` above); older setuptools rejects both.
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
