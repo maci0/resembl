@@ -23,7 +23,8 @@ from __future__ import annotations
 import logging
 import threading
 import weakref
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -294,6 +295,39 @@ def _ensure_tables_once(session: Session) -> None:
         if engine not in _TABLES_ENSURED:
             table_ensure(session)
             _TABLES_ENSURED.add(engine)
+
+
+#: One lock per database, serializing the index rebuilds a process performs
+#: against it (a full build and a fingerprint reindex, which clears the index
+#: up front).  Keyed by engine, like ``_TABLES_ENSURED``, so two databases in
+#: one process do not block each other; the registry is weak so a disposed
+#: engine (and its pool) stays collectable.  ``_BUILD_LOCKS_GUARD`` is held
+#: only for the registry lookup, never across a build.
+_BUILD_LOCKS: weakref.WeakKeyDictionary[object, threading.RLock] = weakref.WeakKeyDictionary()
+_BUILD_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def index_build_lock(session: Session) -> Iterator[None]:
+    """Hold the per-database index-rebuild lock for *session*'s database.
+
+    A rebuild is destructive by design: it drops ``lsh_bucket`` and repopulates
+    it.  Two rebuilds running at once in the same process interleave their
+    clears and inserts, and whichever finishes last stamps ``lsh_meta`` — so
+    the metadata advertises a complete index while the other build's rows are
+    missing, and every later find silently answers with a fraction of its
+    matches.  ``serve`` runs one handler thread per request, so this is
+    reachable there; holding the lock for the whole rebuild removes the
+    interleaving.  Reentrant so a build that needs another locked step does
+    not deadlock against itself.
+    """
+    bind = session.get_bind()
+    with _BUILD_LOCKS_GUARD:
+        lock = _BUILD_LOCKS.get(bind)
+        if lock is None:
+            lock = _BUILD_LOCKS[bind] = threading.RLock()
+    with lock:
+        yield
 
 
 def lsh_meta_get(session: Session) -> tuple[float, int] | None:

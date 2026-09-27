@@ -143,9 +143,9 @@ class _FindRequest:
     ngram_size: int
     num_permutations: int
     jaccard_weight: float
-    #: ``threshold`` when the caller sent one, else the configured LSH
-    #: threshold.  Range-checked and passed to the banding feasibility test;
-    #: ``threshold`` itself stays ``None`` so scoring keeps its own default.
+    #: ``threshold`` when the caller sent one, else the server's configured
+    #: LSH threshold — the index the server built at startup.  Range-checked
+    #: and passed to the banding feasibility test.
     effective_threshold: float
 
 
@@ -167,7 +167,7 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
         # threshold ("0.9") must answer the clean bad-request payload, not
         # raise TypeError at the range check below and surface as a 500
         # echoing internal error text.
-        threshold_raw = provided.get("threshold")
+        threshold_raw = provided.get("threshold", params.lsh_threshold)
         threshold = float(threshold_raw) if threshold_raw is not None else None
         normalize = bool(provided.get("normalize", True))
         ngram_size = int(provided.get("ngram_size", params.ngram_size))
@@ -215,6 +215,43 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # match every other one (all shingles collapse to the empty token tuple).
     if ngram_size < 1:
         raise BadRequestError("ngram_size must be at least 1")
+    # Reject an unbuildable threshold up front: the banding needs b >= 2
+    # bands, and an unbuildable one would make the find return zero matches
+    # silently.  (The thin client cannot run the banding search without
+    # losing its ~50 ms startup, so the server is the right place.)
+    from .lsh import banding_params
+
+    try:
+        bands, _ = banding_params(effective_threshold, num_permutations)
+    except ValueError:
+        bands = 1
+    if bands < 2:
+        raise BadRequestError(
+            f"threshold {effective_threshold} is too high for "
+            f"{num_permutations} permutations (fewer than 2 bands)"
+        )
+    # The served index is built once, at startup, for a single
+    # (threshold, ngram_size, num_permutations) triple; a request naming a
+    # different one cannot be answered from it.  Honouring it would rebuild
+    # the whole index from inside a request thread — dropping the shared
+    # ``lsh_bucket`` table and repopulating it, or reindexing every
+    # fingerprint — while the other handler threads query that same table.
+    # Two such requests interleave into an index that ``lsh_meta`` advertises
+    # as complete while most of its rows are missing, so every later find
+    # silently returns a fraction of its matches and nothing ever rebuilds
+    # it.  Answering 400 keeps the warm process read-only; the parameters
+    # change with a restart.
+    from .lsh import lsh_meta_matches
+
+    if ngram_size != params.ngram_size or not lsh_meta_matches(
+        (params.lsh_threshold, params.num_permutations), effective_threshold, num_permutations
+    ):
+        raise BadRequestError(
+            "this server searches with threshold "
+            f"{params.lsh_threshold}, ngram_size {params.ngram_size} and "
+            f"num_permutations {params.num_permutations}; restart it with "
+            "those settings to search differently"
+        )
     return _FindRequest(
         top_n=top_n,
         threshold=threshold,
@@ -245,7 +282,6 @@ def _find_one(
     ngram_size = request.ngram_size
     num_permutations = request.num_permutations
     jaccard_weight = request.jaccard_weight
-    effective_threshold = request.effective_threshold
     # The masked URL identifies the served database without retaining
     # credentials in the long-lived cache keys.
     db_id = str(_session_engine(session).url)
@@ -266,21 +302,6 @@ def _find_one(
             if entry is not None and entry[0] == version:
                 _RESULT_CACHE.move_to_end(key)
                 return entry[1]
-    # Reject unbuildable thresholds up front: the banding needs b >= 2
-    # bands, and an unbuildable one would make the find return zero matches
-    # silently.  (The thin client cannot run the banding search without
-    # losing its ~50 ms startup, so the server is the right place.)
-    from .lsh import banding_params
-
-    try:
-        bands, _ = banding_params(effective_threshold, num_permutations)
-    except ValueError:
-        bands = 1
-    if bands < 2:
-        raise BadRequestError(
-            f"threshold {effective_threshold} is too high for "
-            f"{num_permutations} permutations (fewer than 2 bands)"
-        )
     num_candidates, matches = snippet_find_matches(
         session,
         query,

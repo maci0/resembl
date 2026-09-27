@@ -1569,3 +1569,159 @@ class TestLazyPackageInit(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class TestServerConcurrency(unittest.TestCase):
+    """The warm server is shared by one handler thread per request.
+
+    The tests drive the real HTTP endpoint against a real database: a mocked
+    session cannot show what a second thread sees while the first one is
+    mid-query.
+    """
+
+    def setUp(self):
+        self._db = tempfile.mktemp(suffix=".db")
+        cache = tempfile.TemporaryDirectory()
+        self.addCleanup(cache.cleanup)
+        self._engine = create_engine(f"sqlite:///{self._db}")
+        SQLModel.metadata.create_all(self._engine)
+        self._session = Session(self._engine)
+        items = [
+            snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3) for i in range(100)
+        ]
+        snippet_add_batch(self._session, [x for x in items if x])
+        self._env = patch.dict(
+            os.environ,
+            {
+                "RESEMBL_CACHE_DIR": cache.name,
+                "DATABASE_URL": f"sqlite:///{self._db}",
+            },
+        )
+        self._env.start()
+
+    def tearDown(self):
+        self._env.stop()
+        self._session.close()
+        for path in (self._db, self._db + "-wal", self._db + "-shm"):
+            if os.path.exists(path):
+                os.remove(path)
+
+    def _start_server(self):
+        from resembl.server import serve
+
+        httpd = serve(f"sqlite:///{self._db}", port=0)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        return httpd.server_address[1]
+
+    def _bucket_row_count(self) -> int:
+        from sqlmodel import func, select
+
+        from resembl.models import LSHBucket
+
+        return self._session.exec(select(func.count(LSHBucket.checksum))).one()  # type: ignore[arg-type]
+
+    def test_request_cannot_rebuild_the_served_index(self):
+        """Parameters the served index was not built for are refused, not built.
+
+        Honouring them would drop the shared ``lsh_bucket`` table and rebuild
+        it from a request thread while the other handler threads query that
+        same table; two such requests interleave into an index that
+        ``lsh_meta`` advertises as complete while most of its rows are gone,
+        and every later find silently answers with a fraction of its matches.
+        """
+        from resembl.lsh import lsh_meta_get
+
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        expected_meta = lsh_meta_get(self._session)
+        expected_rows = self._bucket_row_count()
+        self.assertGreater(expected_rows, 0)
+
+        for field, value in (
+            ("threshold", 0.6),
+            ("ngram_size", 2),
+            ("num_permutations", 64),
+        ):
+            with self.subTest(field=field):
+                status, payload = _post_json_status(port, "/find", {"query": query, field: value})
+                self.assertEqual(status, 400)
+                self.assertIn(field, payload["error"])
+                # The refusal is not cosmetic: the index other requests read
+                # is byte-for-byte the one they were served.
+                self.assertEqual(lsh_meta_get(self._session), expected_meta)
+                self.assertEqual(self._bucket_row_count(), expected_rows)
+
+        # The parameters the server does serve keep answering normally.
+        self.assertEqual(_post_json(port, "/find", {"query": query})["lsh_candidates"], 100)
+
+    def test_concurrent_finds_return_the_serial_result(self):
+        """Concurrent requests answer exactly like one serial find."""
+        port = self._start_server()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        expected = _post_json(port, "/find", {"query": query, "top_n": 5})
+
+        results: list[dict] = []
+        errors: list[BaseException] = []
+        lock = threading.Lock()
+
+        def worker() -> None:
+            try:
+                payload = _post_json(port, "/find", {"query": query, "top_n": 5})
+            except BaseException as exc:
+                with lock:
+                    errors.append(exc)
+                return
+            with lock:
+                results.append(payload)
+
+        threads = [threading.Thread(target=worker) for _ in range(12)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            self.assertFalse(thread.is_alive(), "request thread did not finish")
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 12)
+        for payload in results:
+            self.assertEqual(payload, expected)
+
+    def test_concurrent_index_builds_leave_a_complete_index(self):
+        """Two builds racing in one process cannot publish a partial index.
+
+        Each build drops the bucket table and repopulates it, then stamps
+        ``lsh_meta``.  Interleaved, the last stamp to land describes rows the
+        other build's ``DROP`` removed: the index looks complete and returns
+        a fraction of its matches forever, with nothing left to rebuild it.
+        """
+        from sqlmodel import func, select
+
+        from resembl.cache import lsh_index_build
+        from resembl.lsh import banding_params, lsh_meta_get
+        from resembl.models import Snippet
+
+        def build(threshold: float) -> None:
+            with Session(self._engine) as session:
+                self.assertIsNotNone(lsh_index_build(session, threshold, 128))
+
+        threads = [
+            threading.Thread(target=build, args=(threshold,)) for threshold in (0.5, 0.6, 0.7)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=120)
+            self.assertFalse(thread.is_alive(), "index build did not finish")
+
+        meta = lsh_meta_get(self._session)
+        self.assertIsNotNone(meta)
+        bands, _r = banding_params(meta[0], meta[1])
+        num_snippets = self._session.exec(
+            select(func.count(Snippet.checksum))  # type: ignore[arg-type]
+        ).one()
+        # Every snippet contributes exactly one row per band, and the rows
+        # are unique by (band, bucket, checksum) — so the count is exact.
+        self.assertEqual(self._bucket_row_count(), bands * num_snippets)
+        self.assertEqual(num_snippets, 100)

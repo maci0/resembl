@@ -26,6 +26,7 @@ from .lsh import (
     band_buckets,
     build_insert_sql,
     fingerprint_version_set,
+    index_build_lock,
     insert_rows,
     lsh_index_clear,
     lsh_meta_get,
@@ -145,7 +146,8 @@ def lsh_index_build(
 
     for attempt in range(_BUILD_RETRIES):
         try:
-            _build_once(lsh, threshold, num_perm, progress)
+            with index_build_lock(session):
+                _build_once(lsh, threshold, num_perm, progress)
             return lsh
         except OperationalError:
             session.rollback()  # abort the failed transaction before retrying

@@ -46,6 +46,7 @@ from .lsh import (
     fingerprint_version_clear,
     fingerprint_version_get,
     fingerprint_version_set,
+    index_build_lock,
     lsh_meta_get,
     sql_text_literal,
 )
@@ -1001,7 +1002,26 @@ def db_reindex(
     at commit.  PostgreSQL segments its own WAL and pays an fsync per
     commit, so it keeps a single final commit.  If *progress* is given it is
     called as ``progress(done, total)`` with snippets processed so far.
+
+    The whole run holds the database's index-rebuild lock: a reindex clears
+    the LSH index up front and rewrites every fingerprint, so two of them at
+    once (the ``serve`` process runs one handler thread per request) would
+    interleave their clears and leave ``lsh_meta`` advertising a complete
+    index over half-written rows.  See :func:`resembl.lsh.index_build_lock`.
     """
+    with index_build_lock(session):
+        return _db_reindex(session, ngram_size, batch_size, jobs, num_perm, progress)
+
+
+def _db_reindex(
+    session: Session,
+    ngram_size: int,
+    batch_size: int,
+    jobs: int,
+    num_perm: int,
+    progress: Callable[[int, int], None] | None,
+) -> dict:
+    """Run one reindex under the caller's index-rebuild lock."""
     import multiprocessing as _mp
     from collections import deque
     from concurrent.futures import Future, ProcessPoolExecutor

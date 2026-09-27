@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 
 from sqlalchemy import Engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
@@ -88,6 +89,13 @@ def create_db_engine(
 # Mutable lazy singleton, not a constant: pylint's const-rgx would have it
 # UPPER_CASE because the initializer is a literal.
 _engine: Engine | None = None  # pylint: disable=invalid-name
+#: Serializes first-time construction: the ``serve`` process runs one handler
+#: thread per request, and an unsynchronized check-then-act let two threads
+#: each build an engine.  The loser's pool (up to ``pool_size +
+#: max_overflow`` SQLite handles) had no owner left to dispose it, so the
+#: process leaked one pool per race.  The steady state (the engine exists)
+#: stays lock-free.
+_engine_lock = threading.Lock()
 
 
 def get_engine() -> Engine:
@@ -99,7 +107,9 @@ def get_engine() -> Engine:
     """
     global _engine
     if _engine is None:
-        _engine = create_db_engine()
+        with _engine_lock:
+            if _engine is None:  # double-checked: loser re-probes before building
+                _engine = create_db_engine()
     return _engine
 
 

@@ -55,11 +55,19 @@ the server's configured default", exactly like an omitted field):
 | ----- | ---- | ---------- |
 | `query` | string | required |
 | `top_n` | integer | default from the server's config. No upper bound is enforced: a large value with a low `threshold` returns the matching corpus in one response |
-| `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations` |
+| `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must equal the server's configured `lsh_threshold` |
 | `normalize` | boolean | default `true` |
-| `ngram_size` | integer | at least `1` |
-| `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM` |
+| `ngram_size` | integer | at least `1`. Must equal the server's configured `ngram_size` |
+| `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM`. Must equal the server's configured `num_permutations` |
 | `jaccard_weight` | number | `0.0` to `1.0` |
+
+The LSH index is built once, at startup, for the server's configured
+`threshold`, `ngram_size` and `num_permutations`, and is shared by every
+request. A request naming different values answers `400`: serving it would
+mean rebuilding that shared index inside a request thread while other
+requests read it. Restart the server with the wanted settings (they come
+from the same `config.toml` the CLI and the thin client read, so a matching
+client needs no changes).
 
 Unknown fields are ignored. `Content-Type` must be `application/json` when
 present, and the body must be a JSON object no larger than 8 MiB.
@@ -103,7 +111,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 
 | Status | When |
 | ------ | ---- |
-| `400` | Unparseable body, a missing or wrongly typed required field, or a parameter outside its documented range. The message names the field. |
+| `400` | Unparseable body, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `404` | Unknown path. |
 | `405` | A method other than `POST`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
