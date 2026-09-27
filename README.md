@@ -271,7 +271,11 @@ Global options:
 --verbose    Increase output verbosity
 --no-color   Disable colored output
 --format     Output format: table, json, or csv (overrides config)
+--version    Print the resembl version and exit
 ```
+
+Exit codes: `0` success, `1` the command failed, `2` the command line was
+rejected (unknown flag, bad flag value, missing query).
 
 For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
 ```bash
@@ -296,6 +300,11 @@ uv run resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH];
 ```bash
 # search for a function
 uv run resembl find --file tests/test_data/1000A0A0.asm
+```
+
+```bash
+# or pipe the query in (stdin is read when --query/--file are absent)
+cat tests/test_data/1000A0A0.asm | uv run resembl find
 ```
 
 ```bash

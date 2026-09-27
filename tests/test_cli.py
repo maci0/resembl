@@ -2,6 +2,7 @@
 
 # pylint: disable=protected-access  # tests exercise private internals
 
+import json
 import os
 import shlex
 import subprocess
@@ -357,6 +358,17 @@ class TestCLIConfig(BaseCLITest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid configuration key", result.stderr)
 
+    def test_config_get_invalid_key(self):
+        """`config get` on an unknown key fails instead of printing `None`.
+
+        Printing the string "None" with exit 0 made a typo'd key look like a
+        stored value to any script reading the output.
+        """
+        result = self.run_command("config get not_a_key")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Invalid configuration key", result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
+
     def test_config_set_invalid_value(self):
         """`config set` should reject values that don't fit the key's type."""
         result = self.run_command("config set top_n abc")
@@ -444,6 +456,53 @@ class TestCLIOptions(BaseCLITest):
         self.assertEqual(result.returncode, 0)
         self.assertNotIn("\033[1m", result.stdout)
 
+    def test_version_flag_needs_no_subcommand(self):
+        """`--version` answers on its own, before the database is opened."""
+        result = self.run_command("--version", extra_env={"DATABASE_URL": "not-a-url"})
+        self.assertEqual(result.returncode, 0)
+        self.assertRegex(result.stdout.strip(), r"^resembl \S+")
+
+    def test_unknown_format_is_a_usage_error(self):
+        """An unrenderable --format must not fall through to a table render."""
+        result = self.run_command("--format yaml stats")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("table, json, csv", result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
+
+    def test_invalid_range_is_a_usage_error(self):
+        """A malformed --range reports the flag and exits 2, not 1."""
+        result = self.run_command("list --range 5")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--range", result.stderr)
+
+    def test_find_reads_a_piped_query(self):
+        """A redirected stdin is the query when --query/--file are absent."""
+        result = self.run_command("find", input_data="MOV EAX, 1")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Top Matches", result.stdout)
+        self.assertIn("test_snippet", result.stdout)
+
+    def test_find_without_a_query_is_a_usage_error(self):
+        """No query anywhere exits 2 (the command line is wrong, not the run)."""
+        result = self.run_command("find", input_data="")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("No query provided", result.stderr)
+
+    def test_logs_stay_off_stdout(self):
+        """A warning raised mid-run must not corrupt a machine-readable stream.
+
+        The config loader warns about values it ignores; with the log on
+        stdout that warning landed inside the JSON a script parses.
+        """
+        with tempfile.TemporaryDirectory() as cfgdir:
+            with open(os.path.join(cfgdir, "config.toml"), "w", encoding="utf-8") as f:
+                f.write('lsh_threshold = "nonsense"\n')
+            env = {"RESEMBL_CONFIG_DIR": cfgdir}
+            result = self.run_command("--format json stats", extra_env=env)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("lsh_threshold", result.stderr)
+        self.assertIn("num_snippets", json.loads(result.stdout))
+
 
 class TestCLIImport(BaseCLITest):
     """Tests for the import command."""
@@ -522,8 +581,8 @@ class TestCLIImport(BaseCLITest):
         """`--range start-end` with start > end errors instead of a
         backend-dependent negative LIMIT."""
         result = self.run_command("list --range 4-2")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Invalid range", result.stderr)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Invalid --range", result.stderr)
 
     def test_unresolved_checksum_exits_nonzero(self):
         """Commands taking a checksum must fail loudly when it doesn't resolve.

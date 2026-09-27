@@ -136,6 +136,16 @@ class State:
 state = State()
 
 
+def _package_version() -> str:
+    """Return the installed distribution version, or ``unknown``."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("resembl")
+    except PackageNotFoundError:  # running from a source tree without metadata
+        return "unknown"
+
+
 def _echo(message: object, **kwargs: Any) -> None:
     """Print a message unless ``--quiet`` is set."""
     if not state.quiet:
@@ -187,7 +197,11 @@ def _echo_format(data: object) -> None:
     if state.format == "csv":
         if isinstance(data, dict) and "matches" in data:
             data = data["matches"]
-        if isinstance(data, list) and data and isinstance(data[0], dict):
+        if isinstance(data, list) and not data:
+            # An empty result set has no columns to name: CSV's "no rows" is
+            # no output, not a JSON array smuggled into a CSV stream.
+            return
+        if isinstance(data, list) and isinstance(data[0], dict):
             for row in data:
                 if "names" in row and isinstance(row["names"], list):
                     row["names"] = ", ".join(row["names"])
@@ -502,6 +516,13 @@ def serve(
         httpd.server_close()
 
 
+#: Exit code for a rejected command line: a bad flag value, a malformed
+#: argument, an unusable setting.  Matches what click/typer already return for
+#: their own parse errors, so a script can tell "you typed it wrong" (2) from
+#: "the command failed" (1).
+USAGE_ERROR = 2
+
+
 def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> None:
     """Exit with a clean error if *threshold* / *num_perm* / *ngram* are unusable.
 
@@ -520,16 +541,16 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
     """
     if not 0.0 <= threshold < 0.99:
         err_console.print("[red]Error:[/red] --threshold must be between 0.0 and 0.99 (exclusive).")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
     if not 2 <= num_perm <= MAX_NUM_PERM:
         err_console.print(
             f"[red]Error:[/red] num_permutations must be between 2 and {MAX_NUM_PERM} "
             f"(got {num_perm})."
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
     if ngram_size < 1:
         err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
     try:
         bands, _ = banding_params(threshold, num_perm)
     except ValueError:
@@ -540,7 +561,7 @@ def _validate_find_params(threshold: float, num_perm: int, ngram_size: int) -> N
             f"{num_perm} permutations (it would leave fewer than 2 bands).  "
             "Lower the threshold or raise num_permutations."
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
 
 
 def _resolve_checksum(prefix: str) -> str | None:
@@ -623,17 +644,40 @@ def _apply_snippet_field_mutation(
         )
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def app_callback(
+    ctx: typer.Context,
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational output."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Increase output verbosity."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored output."),
     format_opt: str | None = typer.Option(
-        None, "--format", help="Output format: table, json, csv. Overrides config."
+        None,
+        "--format",
+        metavar="{" + "|".join(FORMATS) + "}",
+        help="Output format: " + ", ".join(FORMATS) + ". Overrides config.",
+    ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        is_eager=True,
+        help="Show the resembl version and exit.",
     ),
 ) -> None:
     """Set up logging and shared state."""
     global console, err_console
+
+    if version:
+        # Eager: answer before the database is opened, so `resembl --version`
+        # works against an unreachable or missing DATABASE_URL.
+        console.print(f"resembl {_package_version()}")
+        raise typer.Exit(code=0)
+
+    if ctx.invoked_subcommand is None:
+        # Bare `resembl` is a request for the command list, not a command;
+        # print it the way `--help` does and keep the nonzero exit a missing
+        # subcommand has always had.
+        console.print(ctx.get_help())
+        raise typer.Exit(code=2)
 
     state.quiet = quiet
 
@@ -646,10 +690,21 @@ def app_callback(
         log_level = logging.WARNING
     elif verbose:
         log_level = logging.DEBUG
-    logging.basicConfig(level=log_level, stream=sys.stdout)
+    # stderr, not stdout: a warning raised mid-run (a config key ignored, a
+    # parallel import falling back) would otherwise be interleaved into the
+    # JSON/CSV array a script is parsing.
+    logging.basicConfig(level=log_level, stream=sys.stderr)
 
     state.config = load_config()
     state.format = format_opt or state.config.format
+    if state.format not in FORMATS:
+        # An unknown format is a usage error, not a silent fallback: the
+        # renderers branch on this value, so an unrecognized one used to
+        # print a table the caller had asked not to get, with exit 0.
+        err_console.print(
+            f"[red]Error:[/red] --format must be one of {', '.join(FORMATS)}, got '{state.format}'."
+        )
+        raise typer.Exit(code=2)
     try:
         db_create()
     except SQLAlchemyError as e:
@@ -962,15 +1017,16 @@ def list_cmd(
         parts = range_str.split("-")
         if len(parts) != 2 or not all(part.isdigit() for part in parts):
             err_console.print(
-                "[red]Error:[/red] Invalid range format. Use start-end (e.g., 10-30)."
+                "[red]Error:[/red] Invalid --range: use start-end (e.g., 10-30), "
+                f"got '{range_str}'."
             )
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=USAGE_ERROR)
         start, end = map(int, parts)
         if end < start:
             err_console.print(
-                f"[red]Error:[/red] Invalid range '{range_str}': start must not exceed end."
+                f"[red]Error:[/red] Invalid --range '{range_str}': start must not exceed end."
             )
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=USAGE_ERROR)
 
     if start == 0 and end == 0:
         # Unbounded list: stream in batches so a large database never loads
@@ -1199,7 +1255,11 @@ def find(
         False, "--no-normalization", help="Disable token normalization for this query."
     ),
 ) -> None:
-    """Find similar snippets."""
+    """Find similar snippets.
+
+    The query comes from --query, from --file ('-' reads stdin), or from
+    stdin itself when neither is given and stdin is not a terminal.
+    """
     effective_top_n = top_n if top_n is not None else state.config.top_n
     effective_threshold = threshold if threshold is not None else state.config.lsh_threshold
 
@@ -1219,10 +1279,16 @@ def find(
         query_string = _query_inline_statements(query)
     elif file:
         query_string = file.read()
+    elif not sys.stdin.isatty():
+        # A piped or redirected query: `resembl find < snippet.asm`.  Only
+        # when neither --query nor --file was given, and only off a TTY, so an
+        # interactive run is never left waiting on a terminal.
+        piped = sys.stdin.read()
+        query_string = _query_inline_statements(piped) if piped.strip() else None
 
     if not query_string:
         err_console.print("[red]Error:[/red] No query provided. Use --query, --file, or stdin.")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
 
     # Fast path: if a `serve` process is running for this database, ask it
     # (~ms) instead of paying interpreter startup (~450 ms).  Falls back to
@@ -1302,7 +1368,7 @@ def find_batch(
     queries = [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]
     if not queries:
         err_console.print("[red]Error:[/red] No queries found in the file.")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
 
     results: list[dict] = []
     # Same convenience as `find --query`: single-line ';' separates
@@ -1624,12 +1690,15 @@ def collection_delete_cmd(
 def collection_list_cmd() -> None:
     """List all collections."""
     cols = collection_list(state.session)
-    if not cols:
-        _echo("[dim]No collections found.[/dim]")
+    if state.format != "table":
+        # An empty list is still a document: `[]` (json) or a bare header
+        # (csv), never the human "No collections found." line, which a parser
+        # would choke on.
+        _echo_format(cols)
         return
 
-    if state.format != "table":
-        _echo_format(cols)
+    if not cols:
+        _echo("[dim]No collections found.[/dim]")
         return
 
     table = Table(title="Collections", title_style="bold cyan")
@@ -1663,7 +1732,11 @@ def collection_show_cmd(
     batches = snippet_collection_names_stream(state.session, name)
     first_batch = next(batches, None)
     if first_batch is None:
-        _echo(f"[dim]No snippets in collection '{name}'.[/dim]")
+        if state.format != "table":
+            # Keep the structured forms a document even when empty.
+            _echo_format([])
+        else:
+            _echo(f"[dim]No snippets in collection '{name}'.[/dim]")
         return
 
     def rows() -> Iterator[tuple[str, str]]:
@@ -1752,12 +1825,13 @@ def version_cmd(
     if not resolved:
         raise typer.Exit(code=1)
     versions = snippet_version_list(state.session, resolved)
-    if not versions:
-        _echo("[dim]No version history for this snippet.[/dim]")
-        return
 
     if state.format != "table":
         _echo_format(versions)
+        return
+
+    if not versions:
+        _echo("[dim]No version history for this snippet.[/dim]")
         return
 
     table = Table(title="Version History", title_style="bold cyan")
@@ -1797,6 +1871,12 @@ def config_get_cmd(
     key: str = typer.Argument(help="The configuration key to get."),
 ) -> None:
     """Get a configuration value."""
+    if key not in DEFAULTS:
+        err_console.print(
+            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"Valid keys: {', '.join(DEFAULTS)}."
+        )
+        raise typer.Exit(code=USAGE_ERROR)
     cfg = load_config()
     value = getattr(cfg, key, None)
     if state.format in ("json", "csv"):
@@ -1812,8 +1892,11 @@ def config_set_cmd(
 ) -> None:
     """Set a configuration value."""
     if key not in DEFAULTS:
-        err_console.print(f"[red]Error:[/red] Invalid configuration key: '{key}'")
-        raise typer.Exit(code=1)
+        err_console.print(
+            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"Valid keys: {', '.join(DEFAULTS)}."
+        )
+        raise typer.Exit(code=USAGE_ERROR)
     default_value = DEFAULTS[key]
     try:
         typed_value: int | float | str = type(default_value)(value)
@@ -1822,7 +1905,7 @@ def config_set_cmd(
             f"[red]Error:[/red] Invalid value for '{key}': expected "
             f"{type(default_value).__name__}, got '{value}'."
         )
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(code=USAGE_ERROR) from exc
     if isinstance(typed_value, float) and not math.isfinite(typed_value):
         # "nan"/"inf" coerce to a float cleanly but would poison every
         # downstream calculation (a NaN jaccard_weight makes every similarity
@@ -1831,13 +1914,13 @@ def config_set_cmd(
             f"[red]Error:[/red] Invalid value for '{key}': expected a finite "
             f"{type(default_value).__name__}, got '{value}'."
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
     if key == "format" and typed_value not in FORMATS:
         err_console.print(
             f"[red]Error:[/red] Invalid value for 'format': expected one of "
             f"{', '.join(FORMATS)}, got '{value}'."
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=USAGE_ERROR)
     try:
         new_config = update_config(key, typed_value)
     except OSError as e:
@@ -1852,6 +1935,12 @@ def config_unset_cmd(
     key: str = typer.Argument(help="The configuration key to unset."),
 ) -> None:
     """Unset a configuration value."""
+    if key not in DEFAULTS:
+        err_console.print(
+            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"Valid keys: {', '.join(DEFAULTS)}."
+        )
+        raise typer.Exit(code=USAGE_ERROR)
     try:
         new_config = remove_config_key(key)
     except OSError as e:

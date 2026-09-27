@@ -24,7 +24,26 @@ The `compare` command also reports control-flow graph similarity.
 :   Disable colored output.
 
 **--format** *table|json|csv*
-:   Output format (overrides config).
+:   Output format (overrides config).  Any other value is rejected (exit 2);
+    an unrecognized format cannot be rendered.
+
+**--version**
+:   Print the resembl version and exit.  Read before the database is
+    opened, so it works with an unreachable `DATABASE_URL`.
+
+## EXIT STATUS
+
+**0**
+:   Success.
+
+**1**
+:   The command failed: a missing snippet or collection, an unreadable
+    file, an unopenable database, or health issues reported by `verify`.
+
+**2**
+:   The command line was rejected: an unknown command or flag, a bad flag
+    value (`--format`, `--range`, `--threshold`, a `config` key or value),
+    a missing query, or a bare `resembl` with no subcommand.
 
 ## COMMANDS
 
@@ -53,7 +72,8 @@ The `compare` command also reports control-flow graph similarity.
 **find** [--query *QUERY*] [--file *FILE*] [--top-n *N*] [--threshold *T*]
 [--no-normalization]
 :   Find snippets similar to the given query string (`--query`, `--file`,
-    or stdin; `-` reads stdin).
+    or stdin; `-` reads stdin, and so does a redirected stdin when
+    neither `--query` nor `--file` is given).
     Single-line `--query` strings use `;` as a statement separator
     (e.g., `find --query "push eax; pop ebx"`); multi-line input and
     `--file` keep normal NASM semantics where `;` starts a comment.
@@ -170,6 +190,7 @@ The `compare` command also reports control-flow graph similarity.
 
 **version** *CHECKSUM*
 :   Show the version history for a snippet.  Accepts checksum prefixes.
+    (The tool's own version comes from the global `--version` option.)
 
 ### Configuration
 
@@ -232,6 +253,9 @@ resembl add "memcpy" "mov ecx, [esp+8]"
 
 # Find similar snippets
 resembl find --query "mov ecx, [esp+8]" --top-n 10
+
+# Or pipe the query in
+cat routine.asm | resembl find --format json
 
 # Import a directory of .asm files
 resembl import ./samples --jobs 4

@@ -226,6 +226,25 @@ class TestCLICollections(BaseCLITest):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "")
 
+    def test_empty_collection_output_stays_machine_readable(self):
+        """An empty result set renders as an empty document, not prose.
+
+        "No collections found." on stdout is not JSON; a script piping
+        `--format json` into a parser had to special-case it.
+        """
+        result = self.run_command("--format json collection list")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [])
+
+        result = self.run_command("--format json collection show absent")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [])
+
+        # CSV's "no rows" is no output: there are no columns to name.
+        result = self.run_command("--format csv collection list")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), "")
+
 
 class TestCLIMerge(BaseCLITest):
     """Integration tests for the merge command."""

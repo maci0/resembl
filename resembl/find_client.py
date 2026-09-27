@@ -73,7 +73,7 @@ def _main(argv: list[str] | None = None) -> int:
         prog="resembl-find", description="Query a running resembl server."
     )
     parser.add_argument("--query", help="Query string (single-line ';' = separator).")
-    parser.add_argument("--file", help="Path to a file containing the query.")
+    parser.add_argument("--file", help="Path to a file containing the query ('-' for stdin).")
     parser.add_argument("--top-n", type=int, default=None)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--no-normalization", action="store_true")
@@ -81,17 +81,23 @@ def _main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     query = args.query
-    if query and ";" in query and "\n" not in query:
-        query = query.replace(";", "\n")
-    if query is None and args.file:
+    if query is None and args.file == "-":
+        query = sys.stdin.read()
+    elif query is None and args.file:
         try:
             with open(args.file, encoding="utf-8") as f:
                 query = f.read()
         except (OSError, UnicodeDecodeError) as exc:
             print(f"error: cannot read {args.file}: {exc}", file=sys.stderr)
             return 1
+    elif query is None and not sys.stdin.isatty():
+        # Same piping contract as `resembl find`: with neither --query nor
+        # --file, a redirected stdin is the query.
+        query = sys.stdin.read()
+    if query and ";" in query and "\n" not in query:
+        query = query.replace(";", "\n")
     if not query:
-        print("error: no query provided (--query or --file)", file=sys.stderr)
+        print("error: no query provided (--query, --file, or stdin)", file=sys.stderr)
         return 2
 
     db_url = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
