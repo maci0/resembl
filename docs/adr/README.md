@@ -11,6 +11,7 @@ decisions get a new record that supersedes the old one.
 | [ADR 003](003-checksum-as-pk.md) | SHA256 checksum as primary key | Accepted |
 | [ADR 004](004-database-backed-lsh-index.md) | Database-backed LSH index | Accepted |
 | [ADR 005](005-vendored-minhash.md) | Vendored MinHash, no datasketch runtime dependency | Accepted |
+| [ADR 006](006-paths-module-owns-environment.md) | One module owns every environment-derived path | Accepted |
 
 ADR 004 supersedes ADR 001's "the LSH index must be cached to disk"
 consequence; ADR 005 supersedes ADR 001's "datasketch is a runtime

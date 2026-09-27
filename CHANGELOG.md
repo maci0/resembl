@@ -167,7 +167,8 @@ project follows [Semantic Versioning](https://semver.org/).
   `resembl.paths.server_port_path(db_url, cache_dir)`.  The CLI, `serve` and
   the thin find client resolve these through the shared module instead of
   keeping copies, so a change to the override rules can no longer leave the
-  client looking for a port file the server never wrote.
+  client looking for a port file the server never wrote.  Recorded as
+  [ADR 006](docs/adr/006-paths-module-owns-environment.md).
 - **Breaking:** `resembl.database.DATABASE_URL` is gone.  It was read once at
   import and only from the unprefixed `DATABASE_URL`, so a process that set
   the variable after importing resembl kept querying the first URL it saw,

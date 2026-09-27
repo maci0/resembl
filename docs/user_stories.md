@@ -57,8 +57,7 @@ Last reviewed: 2026-09-27.
 - With neither `--query` nor `--file`, `find` reads the query from stdin when stdin is not a terminal, so `resembl find < snippet.asm` works.
 - The output can be formatted as JSON with `--format json`.
 - Results are ranked by a hybrid score combining Jaccard and Levenshtein similarity.
-- A database-backed LSH index speeds up searches (built lazily, kept in sync incrementally).
-- The user can disable normalization with `--no-normalization`.
+- A search reads the database-backed banded index of [ADR 004](adr/004-database-backed-lsh-index.md) instead of comparing against every snippet; the index is built on the first `find` and kept in step by `add`, `import`, `merge` and `rm`.
 
 ---
 
@@ -294,6 +293,12 @@ Last reviewed: 2026-09-27.
 **I want to** use the `version` command to see recorded history for a snippet,
 **so that** I can audit how an entry came to be.
 
+**Status:** scaffold only.  No code path writes a `SnippetVersion` row (the
+`version` command is its sole reader), so the command reports
+"No version history for this snippet." for every snippet until one does; see
+[ADR 003](adr/003-checksum-as-pk.md).  The criteria below are what the
+command does with the rows it would read.
+
 **Acceptance Criteria:**
 - `resembl version <checksum>` lists recorded versions (id and timestamp); checksum prefixes are accepted.
 - When no history exists, the tool says so instead of erroring.
@@ -337,6 +342,9 @@ Last reviewed: 2026-09-27.
 - `resembl config list` displays the current settings.
 - `resembl config get <key>` prints the effective value of a single setting.
 - `resembl config set <key> <value>` sets a new default value.
+- A value outside the range its setting works in, or one that does not parse as
+  that setting's type, is refused with the accepted range named; the stored
+  value is left as it was.
 - The tool reads user overrides for `lsh_threshold`, `top_n`, and other keys from `~/.config/resembl/config.toml`. `$XDG_CONFIG_HOME` is honored when set, and `RESEMBL_CONFIG_DIR` overrides both.
 
 ---
@@ -351,6 +359,29 @@ Last reviewed: 2026-09-27.
 - `resembl config unset <key>` removes the key from the config file.
 - The setting reverts to its default value.
 - `resembl config list` confirms the default is restored.
+
+---
+
+### Title: Check the version and the timezone of printed timestamps
+
+**As a** database maintainer (Chris),
+**I want to** ask the tool which build I am running and in which zone it prints
+its timestamps,
+**so that** a bug report carries both, and a timestamp I read is not one the
+host's `TZ` moved under me.
+
+**Acceptance Criteria:**
+- `resembl --version` prints the installed version and exits `0`. It is answered
+  before the database is opened, so it works against a missing or unreachable
+  database URL.
+- `resembl --tz <ZONE>` names the zone `collection list` and
+  `version <checksum>` render their timestamps in; the default is the host's
+  local zone.
+- The zone is stored in UTC and only the display converts, so `json` and `csv`
+  output still carries the stored UTC string.
+- A fixed offset (`+02:00`) is refused, naming one instant of the year rather
+  than a zone that follows daylight saving; an unknown zone name is refused
+  the same way.
 
 ---
 
