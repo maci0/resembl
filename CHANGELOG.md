@@ -8,6 +8,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Every command writes LF-terminated output on Windows too. The output streams
+  were switched to UTF-8 but kept `newline=None`, which rewrites each `"\n"` to
+  `os.linesep`, so the same report arrived CRLF-terminated there and
+  LF-terminated everywhere else; a script reading it had to know the platform.
+- `serve` releases the version probe it keeps per database when the engine
+  behind it is disposed. The probe is a second connection, and it used to
+  outlive the engine until collection, keeping the database file open: on
+  Windows the file could then not be removed or replaced, and an embedded
+  caller leaked one handle per server generation.
+- Styled output reaches a redirected stream on Windows. rich renders a legacy
+  Windows console through the Win32 API whenever its file is a standard stream,
+  which a piped stdout is, so the escapes went to the console's screen buffer
+  and a log, a file or a test's captured output carried no color at all, even
+  with `FORCE_COLOR=1`. The Win32 path is now used only for a console.
 - `serve` no longer waits on a reverse-DNS lookup of the address it binds
   before it advertises its port. `http.server` filled `server_name` with
   `socket.getfqdn(...)`, an unbounded resolver call that took 35 seconds on

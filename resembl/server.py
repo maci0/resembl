@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
@@ -210,6 +211,13 @@ def _db_version(session: Session) -> int | None:
             probe = create_engine(
                 url, poolclass=StaticPool, connect_args={"check_same_thread": False}
             )
+            # Tie the probe to the engine it probes: disposing that engine
+            # (a server generation, an embedded caller, a test fixture) has to
+            # release this handle, not leave it to collection.  The weak key
+            # only keeps the probe reachable while the engine is; without this
+            # the handle outlived the dispose and kept the database file open,
+            # which is a removal failure on Windows and a leak everywhere else.
+            event.listen(engine, "engine_disposed", _on_engine_disposed)
             _VERSION_PROBES[engine] = probe
         with probe.connect() as conn:
             return int(conn.execute(text("PRAGMA data_version")).scalar() or 0)
@@ -233,6 +241,16 @@ def _version_probe_release(engine: Engine) -> None:
         probe = _VERSION_PROBES.pop(engine, None)
     if probe is not None:
         probe.dispose()
+
+
+def _on_engine_disposed(engine: Engine) -> None:
+    """Release *engine*'s version probe when that engine is disposed.
+
+    Registered when the probe is created (see :func:`_db_version`), so every
+    caller that disposes an engine releases the probe it caused — not only
+    :class:`_FindServer`, which does it explicitly in ``server_close``.
+    """
+    _version_probe_release(engine)
 
 
 class BadRequestError(ValueError):
