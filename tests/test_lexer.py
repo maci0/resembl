@@ -16,11 +16,14 @@ the speedup, but should still be visible).
 # pylint: disable=protected-access  # the test pins private Pygments layout
 
 import os
+import sys
+import threading
 import unittest
 
 from pygments.lexers.asm import NasmLexer
-from pygments.token import Comment, Whitespace
+from pygments.token import Comment, Token, Whitespace
 
+from resembl import scoring
 from resembl.scoring import get_lexer
 
 _TEST_DATA = os.path.join(os.path.dirname(__file__), "test_data")
@@ -63,6 +66,88 @@ class TestReorderedLexerEquivalence(unittest.TestCase):
         self.assertEqual(
             len(fast._tokens["instruction-args"]), len(stock._tokens["instruction-args"])
         )
+
+
+class TestTokenTypeFlagsConcurrency(unittest.TestCase):
+    """The classification cache is published, never mutated in place.
+
+    ``serve`` runs one handler thread per request and every request lexes, so
+    this cache is written from several threads while others read it.  Writers
+    publish a fresh dict and rebind the name rather than inserting into the
+    dict readers hold, so a reader that looked the name up before a
+    publication keeps answering from a complete snapshot and can never observe
+    one mid-update.  Mutating in place instead would put every reader's lookup
+    in a data race with every other thread's insert.
+    """
+
+    #: Racers enough to exercise the publication path from several threads at
+    #: once; each asks for a type no other racer asks for, so every one of them
+    #: takes the publish branch.
+    _THREADS = 8
+
+    def setUp(self):
+        saved = scoring._type_flags
+        self.addCleanup(setattr, scoring, "_type_flags", saved)
+        # A thread switch per bytecode, so the racers genuinely interleave
+        # rather than happening to run one at a time.
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        self.addCleanup(sys.setswitchinterval, previous)
+        # A private, empty starting snapshot, so the test neither depends on
+        # nor disturbs the process-wide cache.
+        scoring._type_flags = {}
+
+    def test_publication_leaves_the_previous_snapshot_intact(self):
+        """A reader holding the old dict must not see the new entry appear."""
+        held = scoring._type_flags
+        scoring._token_type_flags(Token.Name.First)
+        self.assertIsNot(scoring._type_flags, held, "the cache was mutated in place")
+        self.assertNotIn(
+            Token.Name.First,
+            held,
+            "a publication wrote into a dict another thread may be reading",
+        )
+        self.assertIn(Token.Name.First, scoring._type_flags)
+
+    def test_cap_holds_when_threads_publish_together(self):
+        """Racing publishers must not push the cache past its bound."""
+        for i in range(scoring._TYPE_FLAGS_MAX - 1):
+            scoring._token_type_flags(getattr(Token.Name, f"Probe{i}"))
+        self.assertEqual(len(scoring._type_flags), scoring._TYPE_FLAGS_MAX - 1)
+
+        barrier = threading.Barrier(self._THREADS)
+
+        def publish(index: int) -> None:
+            barrier.wait()
+            scoring._token_type_flags(getattr(Token.Name, f"Racer{index}"))
+
+        threads = [
+            threading.Thread(target=publish, args=(i,), name=f"type-flags-{i}")
+            for i in range(self._THREADS)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            self.assertFalse(thread.is_alive(), f"{thread.name} did not finish")
+
+        self.assertLessEqual(len(scoring._type_flags), scoring._TYPE_FLAGS_MAX)
+        # The pre-filled entries stay readable: publication copies, it never
+        # drops what a snapshot already held.
+        self.assertEqual(
+            scoring._token_type_flags(Token.Name.Probe0),
+            scoring._type_flags[Token.Name.Probe0],
+        )
+
+    def test_every_racer_still_gets_its_own_answer(self):
+        """A publication that finds the cache full must not cost the answer."""
+        for i in range(scoring._TYPE_FLAGS_MAX):
+            scoring._token_type_flags(getattr(Token.Name, f"Filler{i}"))
+        flags = {}
+        for index in range(self._THREADS):
+            flags[index] = scoring._token_type_flags(getattr(Token.Name, f"Racer{index}"))
+        for index, value in flags.items():
+            self.assertEqual(value, scoring._TT_NAME, f"racer{index} was misclassified")
 
 
 if __name__ == "__main__":

@@ -118,6 +118,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The token-type classification cache is published instead of mutated in
+  place.  `serve` runs one handler thread per request and every request
+  lexes, so the cache was written by several threads while others read it,
+  with no lock on either side.  Writers now build a fresh dict and rebind the
+  name, so a reader that loaded the old one keeps answering from a complete
+  snapshot.  Nothing observable changes for a single-threaded caller.
 - `snippet_delete` purges the checksum's `lsh_bucket` rows in the same
   transaction as the snippet row.  Committing the two separately left bucket
   rows for a snippet that no longer existed whenever the process died in

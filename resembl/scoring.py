@@ -785,12 +785,33 @@ _TT_WS = 128  # in Text (NasmLexer yields Text.Whitespace for runs and newlines)
 #: Bound on the cache so a caller-supplied lexer emitting synthetic token
 #: types cannot grow it without limit.  NasmLexer emits a few dozen types.
 _TYPE_FLAGS_MAX = 4096
+
+#: The published snapshot of the classification cache.  Writers never mutate
+#: it: they build a copy carrying one more entry and rebind the name, so every
+#: reader holds a dict no one else can change.  A reader that looked the name
+#: up before a publication keeps answering from the older snapshot, which is
+#: a complete set of answers, never one being written.  The lookup on the hot
+#: path is unchanged: one global load and one ``dict.get``.  See
+#: :func:`_token_type_flags`.
 _type_flags: dict[object, int] = {}
+
+#: Serializes publication of a new :data:`_type_flags` snapshot.  The serve
+#: process runs one handler thread per request and every request tokenizes, so
+#: the miss path below runs on several threads at once, and the cap is a
+#: check-then-act: measure the length, then insert.  Under the lock the two
+#: steps cannot interleave, so the bound is exact and exactly one racer builds
+#: any given type.  It is held for the copy and the rebind only, never across
+#: the classification work, so concurrent tokenizing still overlaps.
+_TYPE_FLAGS_LOCK = threading.Lock()
 
 
 def _token_type_flags(ttype: object) -> int:
     """Return the cached classification bitmask for a token type."""
-    flags = _type_flags.get(ttype)
+    global _type_flags
+    # Read the name once: every thread shares the one snapshot it loaded, and
+    # a publication mid-lookup cannot change the dict this lookup reads.
+    cache = _type_flags
+    flags = cache.get(ttype)
     if flags is None:
         flags = 0
         if ttype in Comment:
@@ -809,8 +830,13 @@ def _token_type_flags(ttype: object) -> int:
             flags |= _TT_TEXT
         if ttype in Text:
             flags |= _TT_WS
-        if len(_type_flags) < _TYPE_FLAGS_MAX:
-            _type_flags[ttype] = flags
+        with _TYPE_FLAGS_LOCK:
+            # Re-probe the current snapshot: another thread may have published
+            # this very type, and it is the current one whose length the bound
+            # has to be measured against.
+            current = _type_flags
+            if ttype not in current and len(current) < _TYPE_FLAGS_MAX:
+                _type_flags = {**current, ttype: flags}
     return flags
 
 
