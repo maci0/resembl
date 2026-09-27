@@ -35,6 +35,9 @@ ret"
 
 # Bulk import from .asm files (subdirectories are included)
 resembl import ./known_functions/ --jobs 4
+
+# A single file imports on its own
+resembl import ./known_functions/strlen.asm
 ```
 
 ## Step 2: Organize with Collections

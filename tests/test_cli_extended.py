@@ -359,6 +359,48 @@ class TestCLISearch(BaseCLITest):
         result = self.run_command("search mem --limit 10")
         self.assertIn("Found 5 snippets", result.stdout)
 
+    def test_search_no_match_names_the_next_step(self):
+        """A search that matches nothing says what to try, not just how many."""
+        result = self.run_command("search zzz_no_such_name")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Found 0 snippets", result.stdout)
+        self.assertIn("shorter pattern", result.stdout)
+        self.assertIn("resembl list", result.stdout)
+
+
+class TestCLIEmptyResults(BaseCLITest):
+    """Empty results say so, and point at the command that fills them."""
+
+    def setUp(self):
+        super().setUp()
+        from sqlmodel import select
+
+        from resembl.models import Snippet
+
+        with Session(self.engine) as session:
+            for snippet in session.exec(select(Snippet)).all():
+                session.delete(snippet)
+            session.commit()
+
+    def test_list_on_empty_database_says_so(self):
+        """`list` on an empty database used to print nothing at all."""
+        result = self.run_command("list")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("No snippets found.", result.stdout)
+        self.assertIn("resembl add", result.stdout)
+
+    def test_list_empty_json_is_still_a_document(self):
+        """The empty-state line is table output only; JSON stays a document."""
+        result = self.run_command("--format json list")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_list_range_past_the_end_says_so(self):
+        """An out-of-window --range names the range, not a bare empty table."""
+        result = self.run_command("list --range 5-10")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("No snippets in range 5-10.", result.stdout)
+
 
 class TestCLIFormatFlag(BaseCLITest):
     """Integration tests for --format json/csv."""

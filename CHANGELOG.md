@@ -8,6 +8,9 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `resembl import` takes a single `.asm` / `.txt` file as readily as a
+  directory, so pointing it at one file no longer answers "Directory not
+  found".
 - `resembl --tz <ZONE>` picks the zone printed timestamps are rendered in
   (`collection list`, `version <checksum>`), e.g. `--tz Europe/Warsaw`.
   Timestamps are stored in UTC and only the display converts, so the printed
@@ -52,6 +55,14 @@ project follows [Semantic Versioning](https://semver.org/).
   `stats`, `export` and `merge` all read rows in one defined order, where
   before the row order was whatever plan the backend picked, so output and
   float sums could differ between two runs over the same database.
+- `resembl import` on a directory that holds no `.asm` / `.txt` file now
+  exits `1` and says so, instead of reporting a successful import of zero
+  snippets.  A script that imported a directory that had been emptied now
+  sees a failure; point it at a directory that holds snippets.
+- `resembl list` on an empty database, a `--range` past the last snippet,
+  and a `resembl search` that matches no name each say what happened and
+  what to run next, where the listing used to print nothing or a bare
+  count.
 - `resembl collection create` on a name that already exists now reports the
   collection as already there and exits 0, instead of failing with the
   database's `IntegrityError` and its SQL text. The stored description is

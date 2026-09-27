@@ -601,6 +601,34 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(data["num_imported"], 2)
             self.assertNotIn("skipped", data)
 
+    def test_import_directory_without_snippets_fails_loudly(self):
+        """A directory holding no .asm/.txt files is a wrong path, not a 0-snippet import."""
+        with tempfile.TemporaryDirectory() as import_dir:
+            with open(os.path.join(import_dir, "readme.md"), "w", encoding="utf-8") as f:
+                f.write("not assembly")
+
+            result = self.run_command(f"--format json import --force {import_dir}")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("No .asm or .txt files found", result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_import_single_file(self):
+        """A single .asm file is importable directly, not answered with 'Directory not found'."""
+        import json
+
+        with tempfile.TemporaryDirectory() as import_dir:
+            file_path = os.path.join(import_dir, "one.asm")
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("PUSH EBP; MOV EBP, ESP; POP EBP; RET")
+
+            result = self.run_command(f"--format json import --force {file_path}")
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(result.stdout)["num_imported"], 1)
+
+            listed = self.run_command("--format json list")
+            names = [name for row in json.loads(listed.stdout) for name in row["names"]]
+            self.assertIn("one", names)
+
     def test_list_reversed_range_fails_cleanly(self):
         """`--range start-end` with start > end errors instead of a
         backend-dependent negative LIMIT."""

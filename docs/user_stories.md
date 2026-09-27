@@ -123,7 +123,8 @@ Last reviewed: 2026-09-27.
 **so that I can** quickly build a searchable library from my existing collection.
 
 **Acceptance Criteria:**
-- `resembl import <directory>` imports all `.asm` and `.txt` files.
+- `resembl import <directory>` imports all `.asm` and `.txt` files;
+  a single file path imports that one snippet.
 - The filename (without extension) is used as the snippet name.
 - The user is prompted for confirmation before the import begins.
 - The user can bypass the confirmation prompt with the `--force` flag.

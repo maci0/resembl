@@ -73,12 +73,15 @@ The `compare` command also reports control-flow graph similarity.
 :   List all stored snippets.  An unbounded listing streams in bounded
     memory (only checksum and names are read, in batches), so it is safe
     on databases of any size; use `--range` to page a specific window.
+    An empty result says so and names the command that fills it.
 
 **search** *PATTERN* [--limit N]
-:   Search for snippets by matching their names.  A broad pattern over a
+:   Search for snippets by matching their names (a substring of any name,
+    case-insensitive).  A broad pattern over a
     large database could otherwise return hundreds of thousands of rows,
     so results are bounded (default 50; ``N``+ is printed when the limit
-    truncates the output).
+    truncates the output).  A pattern that matches nothing suggests what
+    to try next.
 
 **find** [--query *QUERY*] [--file *FILE*] [--top-n *N*] [--threshold *T*]
 [--no-normalization]
@@ -106,11 +109,13 @@ The `compare` command also reports control-flow graph similarity.
 ### Bulk Operations
 
 **import** *PATH* [--jobs N] [--force]
-:   Import `.asm` / `.txt` files from a directory (subdirectories are
-    included automatically).  The default worker count is adaptive — one
-    worker per ~100 files, capped at the CPU count — so small directories
-    stay single-process (spawning each worker costs ~450 ms of interpreter
-    startup) while large ones parallelize fully.
+:   Import `.asm` / `.txt` files from a single file or a directory
+    (subdirectories are included automatically).  A directory holding no
+    such file is an error, not an import of zero snippets.  The default
+    worker count is adaptive — one worker per ~100 files, capped at the
+    CPU count — so small directories stay single-process (spawning each
+    worker costs ~450 ms of interpreter startup) while large ones
+    parallelize fully.
 
 **export** *DIRECTORY* [--force]
 :   Export all snippets to a directory as `.asm` files (one per snippet,

@@ -142,6 +142,12 @@ class State:
 
 state = State()
 
+#: Next step shown whenever a listing comes back empty.  An empty result
+#: printed nothing at all, or a bare "No snippets found.", which reads as a
+#: finished answer: the user has no way to tell an empty database from a
+#: wrong query, and no command to try next.  Kept to one terminal line.
+_NO_SNIPPETS_HINT = "Add one with 'resembl add <name> <code>'."
+
 
 def _package_version() -> str:
     """Return the installed distribution version, or ``unknown``."""
@@ -878,7 +884,9 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
 
 @app.command("import")
 def import_cmd(
-    directory: str = typer.Argument(help="The directory containing .asm or .txt files."),
+    path: str = typer.Argument(
+        help="A .asm or .txt file, or a directory containing them (searched recursively)."
+    ),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
     jobs: int | None = typer.Option(
         None,
@@ -888,36 +896,59 @@ def import_cmd(
         "per ~100 files, capped at the CPU count).",
     ),
 ) -> None:
-    """Bulk import snippets from a directory."""
-    if not os.path.isdir(directory):
-        err_console.print(f"[red]Error:[/red] Directory not found: {directory}")
+    """Bulk import snippets from a file or directory.
+
+    Takes a single .asm/.txt file as readily as a directory tree: pointing
+    the command at one file used to be answered with "Directory not found",
+    which names the wrong kind of object as the problem.
+    """
+    file_paths: list[str]
+    if os.path.isfile(path):
+        file_paths = [path]
+    elif os.path.isdir(path):
+        # Case-insensitive extension match so a directory imports identically
+        # on every platform: glob patterns are folded by os.path.normcase on
+        # Windows but matched verbatim on Linux/macOS, so "*.asm" silently
+        # skipped FOO.ASM there.
+        #
+        # The list is sorted because ``os.walk`` yields directory entries in
+        # readdir order, which is not stable across runs of the same tree.  Rows
+        # are written in this order, so an unsorted list made the resulting
+        # database's row order (and every later score tie, which is broken by
+        # insertion order) depend on the filesystem.
+        file_paths = []
+        for root, _dirs, files in os.walk(path):
+            file_paths.extend(
+                os.path.join(root, fname)
+                for fname in files
+                if fname.lower().endswith((".asm", ".txt"))
+            )
+        file_paths.sort()
+    else:
+        err_console.print(f"[red]Error:[/red] Directory not found: {path}")
+        raise typer.Exit(code=1)
+
+    if not file_paths:
+        # Reported before the confirmation prompt and before the run: a
+        # directory of the wrong files used to answer "Snippets imported: 0"
+        # and exit 0, which reads as a successful import of a directory the
+        # user meant to load.  The same error the missing-directory case
+        # gives, with the reason spelled out.
+        err_console.print(
+            f"[red]Error:[/red] No .asm or .txt files found in {path} "
+            "(searched recursively, case-insensitive)."
+        )
         raise typer.Exit(code=1)
 
     if not force:
+        target = "snippet" if len(file_paths) == 1 else "all snippets"
         typer.confirm(
-            f"Are you sure you want to import all snippets from '{directory}'?",
+            f"Are you sure you want to import {target} from '{path}'?",
             abort=True,
         )
 
     start_time = time.monotonic()
     ngram_size = state.config.ngram_size
-
-    # Case-insensitive extension match so a directory imports identically
-    # on every platform: glob patterns are folded by os.path.normcase on
-    # Windows but matched verbatim on Linux/macOS, so "*.asm" silently
-    # skipped FOO.ASM there.
-    #
-    # The list is sorted because ``os.walk`` yields directory entries in
-    # readdir order, which is not stable across runs of the same tree.  Rows
-    # are written in this order, so an unsorted list made the resulting
-    # database's row order (and every later score tie, which is broken by
-    # insertion order) depend on the filesystem.
-    file_paths: list[str] = []
-    for root, _dirs, files in os.walk(directory):
-        file_paths.extend(
-            os.path.join(root, fname) for fname in files if fname.lower().endswith((".asm", ".txt"))
-        )
-    file_paths.sort()
 
     if jobs is None:
         jobs = adaptive_worker_count(len(file_paths), os.cpu_count() or 1)
@@ -1106,8 +1137,10 @@ def list_cmd(
     snippets = snippet_list(state.session, start, end)
     if state.format in ("json", "csv"):
         _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
-    else:
+    elif snippets:
         _echo(_snippet_table(((s.checksum, s.name_list) for s in snippets), "Snippets"))
+    else:
+        _echo(f"[dim]No snippets in range {start}-{end}. {_NO_SNIPPETS_HINT}[/dim]")
 
 
 def _stream_list(session: Session) -> None:
@@ -1117,7 +1150,8 @@ def _stream_list(session: Session) -> None:
     ``snippet_names_stream``).  JSON output is written as a single array,
     CSV as a header plus streamed rows — byte-for-byte the same shape as
     the in-memory render — and table output is printed per batch so a huge
-    listing never builds one giant table.
+    listing never builds one giant table.  In table mode an empty database
+    says so, instead of printing nothing at all.
     """
     if state.quiet:
         return
@@ -1145,6 +1179,8 @@ def _stream_list(session: Session) -> None:
             rows = [(checksum, json.loads(raw)) for checksum, raw in batch]
             _echo(_snippet_table(rows, "Snippets", offset + 1))
             offset += len(batch)
+        if not offset:
+            _echo(f"[dim]No snippets found. {_NO_SNIPPETS_HINT}[/dim]")
 
 
 @app.command()
@@ -1508,6 +1544,11 @@ def search(
         _echo(f"[dim]Found {found} snippets matching '{pattern}'.[/dim]")
         if snippets:
             _echo(_snippet_table(((s.checksum, s.name_list) for s in snippets), "Search Results"))
+        elif not found.endswith("+"):
+            # Names are matched as a substring, so a miss is usually a pattern
+            # the user has to shorten.  Say what to try next rather than
+            # leaving a bare count as the end of the interaction.
+            _echo("[dim]Try a shorter pattern, or 'resembl list' to see every snippet.[/dim]")
 
 
 @app.command()
