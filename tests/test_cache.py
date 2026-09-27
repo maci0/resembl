@@ -99,14 +99,29 @@ class TestCache(unittest.TestCase):
 
         from resembl.cache import _remove_pickle_cache
 
-        if os.geteuid() == 0:  # root ignores directory write bits
-            self.skipTest("running as root")
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"RESEMBL_CACHE_DIR": tmpdir}):
                 cache_file = lsh_cache_path_get(0.5)
                 with open(cache_file, "wb") as f:
                     f.write(b"stale")
+                # Canary deletion is the capability the test needs: root and
+                # Windows both remove from the directory after the chmod
+                # (Windows maps the mode to a read-only attribute that does
+                # not deny writes), so the premise only holds where the
+                # filesystem enforces the write bit.
+                canary = os.path.join(tmpdir, "canary")
+                with open(canary, "wb") as f:
+                    f.write(b"x")
                 os.chmod(tmpdir, stat.S_IRUSR | stat.S_IXUSR)
+                denied = True
+                try:
+                    os.remove(canary)
+                    denied = False
+                except OSError:
+                    pass
+                if not denied:
+                    os.chmod(tmpdir, stat.S_IRWXU)
+                    self.skipTest("filesystem does not enforce directory write permissions")
                 try:
                     with self.assertLogs("resembl.cache", level="WARNING"):
                         _remove_pickle_cache(0.5)  # must not raise

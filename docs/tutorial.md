@@ -14,6 +14,9 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+On Windows, use `.venv\Scripts\Activate.ps1` (PowerShell) or
+`.venv\Scripts\activate.bat` (cmd.exe) to activate the environment.
+
 ## Step 1: Build Your Reference Library
 
 Start by importing known functions from your collection of analyzed samples:

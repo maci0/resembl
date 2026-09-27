@@ -206,6 +206,11 @@ if that lockfile has drifted from `pyproject.toml`, so a checkout builds the
 same way locally and in CI. `uv pip install -e .[dev]` resolves the dependency
 ranges afresh instead and can produce an environment CI never tested.
 
+On Windows, activate the environment with `.venv\Scripts\Activate.ps1`
+(PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe) in place of
+`source .venv/bin/activate`; every other command in this README runs
+unchanged on PowerShell and cmd.exe.
+
 ### 2. Configuration
 
 You can create a configuration file at `~/.config/resembl/config.toml` to set

@@ -107,14 +107,23 @@ class TestConfig(unittest.TestCase):
         """An unreadable config file runs on defaults instead of crashing."""
         import stat
 
-        if os.geteuid() == 0:  # root ignores directory/file write bits
-            self.skipTest("running as root")
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = os.path.join(temp_dir, "config.toml")
             with open(config_path, "w", encoding="utf-8") as f:
                 f.write("top_n = 9\n")
             os.chmod(config_path, 0)
             try:
+                # Capability probe, not an OS or uid check: root and Windows
+                # both keep the file readable after a mode 0 chmod (Windows
+                # has no mode bits, only a read-only attribute), and the
+                # test's premise then does not hold.
+                try:
+                    with open(config_path, encoding="utf-8"):
+                        readable = True
+                except OSError:
+                    readable = False
+                if readable:
+                    self.skipTest("filesystem does not enforce read permissions")
                 with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
                     with self.assertLogs("resembl.config", level="ERROR"):
                         config = load_config()
