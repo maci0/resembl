@@ -892,13 +892,13 @@ class TestServerMode(unittest.TestCase):
 
     def test_find_batch_caps_query_count(self):
         """A batch larger than the documented cap answers 400."""
-        from resembl.server import _MAX_BATCH_QUERIES
+        from resembl.server import MAX_BATCH_QUERIES
 
         port = self._start_server()
-        queries = ["mov eax, 5"] * (_MAX_BATCH_QUERIES + 1)
+        queries = ["mov eax, 5"] * (MAX_BATCH_QUERIES + 1)
         status, payload = _post_json_status(port, "/find-batch", {"queries": queries})
         self.assertEqual(status, 400)
-        self.assertIn(str(_MAX_BATCH_QUERIES), payload["error"])
+        self.assertIn(str(MAX_BATCH_QUERIES), payload["error"])
 
     def test_find_rejects_degenerate_ngram_size(self):
         """An ngram_size below 1 answers a clean error, never garbage results.

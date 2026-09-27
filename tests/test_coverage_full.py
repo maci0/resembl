@@ -24,9 +24,7 @@ from resembl.core import (
     collection_create,
     collection_delete,
     collection_remove_snippet,
-    db_calculate_average_similarity,
     db_merge,
-    db_stats,
     snippet_add,
     snippet_delete,
     snippet_export,
@@ -39,6 +37,7 @@ from resembl.core import (
     snippet_tag_remove,
 )
 from resembl.database import db_create
+from resembl.diagnostics import db_calculate_average_similarity, db_stats
 from resembl.minhash import MinHash
 from tests.test_collections_merge import BaseDBTest
 

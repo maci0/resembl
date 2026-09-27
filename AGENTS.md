@@ -141,7 +141,7 @@ Non-obvious, and cheap to break without noticing:
   by design, so do not hoist those imports to module scope.
 - `resembl/__init__.py` resolves exports through a lazy `__getattr__` (PEP 562)
   so `import resembl` stays cheap. A new public symbol goes in `__all__` and in
-  the `_CORE_EXPORTS` or `_MODEL_EXPORTS` set it dispatches through, never at
+  the `CORE_EXPORTS` or `MODEL_EXPORTS` set it dispatches through, never at
   module top level. `resembl/core.py` and
   `resembl/models.py` keep re-export blocks for external compatibility; treat
   them as the compatibility surface, not as the internal call path.

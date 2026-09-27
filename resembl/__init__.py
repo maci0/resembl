@@ -33,7 +33,7 @@ __all__ = [
     "string_normalize",
 ]
 
-_CORE_EXPORTS = frozenset(
+CORE_EXPORTS = frozenset(
     (
         "code_create_minhash",
         "code_create_minhash_batch",
@@ -50,14 +50,18 @@ _CORE_EXPORTS = frozenset(
         "string_normalize",
     )
 )
-_MODEL_EXPORTS = frozenset(("Collection", "Snippet", "SnippetVersion"))
-_SUBMODULES = frozenset(
+MODEL_EXPORTS = frozenset(("Collection", "Snippet", "SnippetVersion"))
+#: Every importable module in the package.  Listing all of them is what makes
+#: ``resembl.<name>`` resolve after a bare ``import resembl``; an omission is
+#: a silently missing attribute rather than an import error.
+SUBMODULES = frozenset(
     (
         "cache",
         "cli",
         "config",
         "core",
         "database",
+        "diagnostics",
         "find_client",
         "lsh",
         "minhash",
@@ -65,6 +69,7 @@ _SUBMODULES = frozenset(
         "paths",
         "scoring",
         "server",
+        "theme",
     )
 )
 
@@ -73,10 +78,10 @@ def __getattr__(name: str) -> Any:
     """Resolve public exports (and submodules) lazily."""
     import importlib
 
-    if name in _CORE_EXPORTS:
+    if name in CORE_EXPORTS:
         return getattr(importlib.import_module(".core", __name__), name)
-    if name in _MODEL_EXPORTS:
+    if name in MODEL_EXPORTS:
         return getattr(importlib.import_module(".models", __name__), name)
-    if name in _SUBMODULES:
+    if name in SUBMODULES:
         return importlib.import_module(f".{name}", __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

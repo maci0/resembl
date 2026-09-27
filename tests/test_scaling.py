@@ -42,6 +42,12 @@ from resembl.core import (
     snippet_get,
     snippet_prepare,
 )
+from resembl.diagnostics import (
+    SEED_ENV_VAR,
+    _sample_key,
+    db_calculate_average_similarity,
+    db_stats,
+)
 from resembl.lsh import lsh_index_clear, lsh_meta_get
 from resembl.models import (
     Snippet,
@@ -990,7 +996,6 @@ class TestIndexBuild(BaseScalingTest):
         unseeded offset made every number move between two runs over the same
         database.  ``RESEMBL_SEED`` pins the offset.
         """
-        from resembl.core import SEED_ENV_VAR, _sample_key, db_stats
 
         self._add(30, "seeded")
         with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
@@ -1007,7 +1012,6 @@ class TestIndexBuild(BaseScalingTest):
 
     def test_stats_survives_corrupt_fingerprint(self):
         """A corrupt blob in the similarity sample must not crash `stats`."""
-        from resembl.core import db_calculate_average_similarity, db_stats
         from resembl.models import Snippet as SnippetModel
 
         self._add(30, "st")
@@ -1030,7 +1034,6 @@ class TestIndexBuild(BaseScalingTest):
         calls; the per-pair values (equal-count / num_perm) must stay
         identical, so the returned mean matches the direct loop exactly.
         """
-        from resembl.core import db_calculate_average_similarity
         from resembl.models import minhash_jaccard
 
         self._add(12, "avg")

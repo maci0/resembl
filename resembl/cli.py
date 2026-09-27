@@ -442,15 +442,15 @@ def _find_batch_via_server(
     """Query a running ``serve`` process with a batch (one round trip per chunk).
 
     The endpoint caps ``queries`` per request (see
-    ``resembl.server._MAX_BATCH_QUERIES``), so a longer file is sent in
+    ``resembl.server.MAX_BATCH_QUERIES``), so a longer file is sent in
     chunks; results keep the input order.
     """
-    from .server import _MAX_BATCH_QUERIES
+    from .server import MAX_BATCH_QUERIES
 
     params = _find_body_params(top_n, threshold, normalize, ngram_size)
     results: list[dict] = []
-    for start in range(0, len(queries), _MAX_BATCH_QUERIES):
-        chunk = queries[start : start + _MAX_BATCH_QUERIES]
+    for start in range(0, len(queries), MAX_BATCH_QUERIES):
+        chunk = queries[start : start + MAX_BATCH_QUERIES]
         payload = _server_request("/find-batch", {"queries": chunk, **params}, timeout=60)
         if payload is None:
             return None

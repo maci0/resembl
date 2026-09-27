@@ -9,13 +9,10 @@ from rapidfuzz import fuzz
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.core import (
-    _random_snippet_rows,
     code_create_minhash,
     code_tokenize,
-    db_calculate_average_similarity,
     db_clean,
     db_reindex,
-    db_stats,
     score_hybrid,
     snippet_add,
     snippet_compare,
@@ -28,6 +25,11 @@ from resembl.core import (
     snippet_name_remove,
     snippet_names_stream,
     string_checksum,
+)
+from resembl.diagnostics import (
+    _random_snippet_rows,
+    db_calculate_average_similarity,
+    db_stats,
 )
 from resembl.models import (
     Snippet,
