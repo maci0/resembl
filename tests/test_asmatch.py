@@ -4,11 +4,13 @@
 
 import json
 import os
+import shutil
 import tempfile
+import threading
 import unittest
 
 from rapidfuzz import fuzz
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select, text
 
 from resembl.core import (
     _random_snippet_rows,
@@ -31,6 +33,7 @@ from resembl.core import (
     snippet_names_stream,
     string_checksum,
 )
+from resembl.lsh import index_build_lock
 from resembl.models import (
     Snippet,
     minhash_jaccard,
@@ -358,6 +361,52 @@ class TestDBCoreFunctions(_IsolatedDBTest):
         """Test cleaning the database."""
         result = db_clean(self.session)
         self.assertTrue(result["vacuum_success"])
+
+    def test_db_clean_waits_for_a_running_index_rebuild(self):
+        """A clean must not interleave with a rebuild of the same index.
+
+        ``db_clean`` drops every ``lsh_bucket`` row, so one landing between a
+        rebuild's own clear and its final ``lsh_meta`` stamp deletes rows the
+        rebuild already inserted, and the rebuild then advertises a complete
+        index over the holes.  It therefore runs under the same per-database
+        lock ``db_reindex`` takes: while a rebuild holds it, the clean blocks
+        and only proceeds once the rebuild is done.
+        """
+        snippet_add(self.session, "test", "MOV EAX, 1")
+        cleaned = threading.Event()
+        errors: list[BaseException] = []
+        # A file-backed database of this test's own: the default pool for
+        # ``:memory:`` hands every thread its own private (empty) database, so
+        # the worker would clean a database the test never wrote to.
+        tmp_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_dir, True)
+        engine = create_engine(f"sqlite:///{os.path.join(tmp_dir, 'clean.db')}")
+        self.addCleanup(engine.dispose)
+        SQLModel.metadata.create_all(engine)
+        session = Session(engine)
+        self.addCleanup(session.close)
+
+        def run_clean() -> None:
+            try:
+                db_clean(Session(engine))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                cleaned.set()
+
+        with index_build_lock(session):
+            worker = threading.Thread(target=run_clean, daemon=True)
+            worker.start()
+            # A clean that ignored the lock would finish while the rebuild
+            # still held it; the join with a timeout is what turns that into a
+            # failed assertion instead of a hang.
+            worker.join(timeout=2)
+            self.assertFalse(cleaned.is_set())
+        self.assertTrue(cleaned.wait(timeout=30))
+        worker.join(timeout=30)
+        self.assertEqual(errors, [])
+        # The index really was wiped, once the rebuild slot was free.
+        self.assertEqual(session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0], 0)
 
     def test_db_reindex_empty_db(self):
         """Test reindexing an empty database."""

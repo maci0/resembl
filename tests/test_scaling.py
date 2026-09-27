@@ -17,8 +17,11 @@ import itertools
 import json
 import os
 import pickle
+import random
 import struct
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -1044,6 +1047,69 @@ class TestIndexBuild(BaseScalingTest):
         self.assertIsInstance(seed, int)
         self.assertIn(f"{SEED_ENV_VAR}={seed}", "\n".join(logs.output))
         self.assertNotEqual(first, second)
+
+    def test_concurrent_sampling_shares_one_reproducible_generator(self):
+        """Sampling from several threads draws the one seeded stream.
+
+        The process-wide generator is built on first use.  Built without a
+        lock, two threads arriving together each construct one, and the
+        threads that kept the loser draw from a stream that never advances:
+        a seeded run then stops being reproducible and two of its estimates
+        are computed from the same offsets.  The draws must therefore be the
+        one seeded sequence, whoever asks for them and in whatever order.
+        """
+        from resembl import core
+        from resembl.core import SEED_ENV_VAR, _sample_key
+
+        threads, per_thread = 8, 10
+        saved = (core._SAMPLE_RNG, core._SAMPLE_SEED)
+        try:
+            with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
+                core._SAMPLE_RNG = None
+                core._SAMPLE_SEED = None
+                expected = [_sample_key() for _ in range(threads * per_thread)]
+
+                core._SAMPLE_RNG = None
+                core._SAMPLE_SEED = None
+                drawn: list[str] = []
+                lock = threading.Lock()
+                start = threading.Barrier(threads)
+
+                def draw() -> None:
+                    start.wait(timeout=30)
+                    local = [_sample_key() for _ in range(per_thread)]
+                    with lock:
+                        drawn.extend(local)
+
+                # A slow construction is what makes the race observable: an
+                # unsynchronized first use lets every thread that arrives
+                # before the first one publishes build its own generator.
+                real_random = random.Random
+                built: list[int] = []
+                build_lock = threading.Lock()
+
+                def slow_random(seed: int) -> random.Random:
+                    with build_lock:
+                        built.append(seed)
+                    time.sleep(0.02)
+                    return real_random(seed)
+
+                with patch.object(core.random, "Random", slow_random):
+                    workers = [threading.Thread(target=draw) for _ in range(threads)]
+                    for worker in workers:
+                        worker.start()
+                    for worker in workers:
+                        worker.join(timeout=30)
+                        self.assertFalse(worker.is_alive())
+        finally:
+            core._SAMPLE_RNG, core._SAMPLE_SEED = saved
+        # Exactly one generator for the whole run, whichever thread asked
+        # first.
+        self.assertEqual(built, [1234])
+        # Same seed, same draws: no thread lost its place in the stream, and
+        # none of them drew from a generator of its own.
+        self.assertEqual(sorted(drawn), sorted(expected))
+        self.assertEqual(len(set(drawn)), threads * per_thread)
 
     def test_reads_return_rows_in_checksum_order(self):
         """Every full-corpus read orders by the primary key.

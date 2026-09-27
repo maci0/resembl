@@ -17,6 +17,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
@@ -1336,6 +1337,19 @@ SEED_ENV_VAR = "RESEMBL_SEED"
 _SAMPLE_RNG: random.Random | None = None
 _SAMPLE_SEED: int | None = None
 
+#: Serializes construction of, replacement of, and draws from
+#: :data:`_SAMPLE_RNG`.  The lazy singleton was built, tested and published in
+#: one unsynchronized check-then-act, so two threads sampling at once could
+#: each build a generator and whichever published last silently discarded the
+#: other's draws (or kept drawing from a generator whose seed the other thread
+#: had already reported as the run's replay seed).  ``random.Random`` is not a
+#: thread-safe generator either — ``randbytes`` feeds ``getrandbits``, a
+#: multi-step Mersenne-Twister state update that two threads can interleave
+#: inside — so the draw itself is taken under the same lock.  Reentrant, so
+#: :func:`_sample_key` can hold it across ``sample_rng()``.  No I/O runs
+#: under it.
+_SAMPLE_LOCK = threading.RLock()
+
 
 def sample_rng() -> random.Random:
     """Return the process-wide generator every sampled value is drawn from.
@@ -1352,33 +1366,38 @@ def sample_rng() -> random.Random:
     global _SAMPLE_RNG, _SAMPLE_SEED  # pylint: disable=global-statement
 
     env_seed = os.environ.get(SEED_ENV_VAR)
-    if env_seed is None:
-        if _SAMPLE_RNG is None:
-            import secrets
+    with _SAMPLE_LOCK:
+        if env_seed is None:
+            if _SAMPLE_RNG is None:
+                import secrets
 
-            _SAMPLE_SEED = secrets.randbits(64)
-            _SAMPLE_RNG = random.Random(_SAMPLE_SEED)
-            logger.info(
-                "Sampling from an OS-drawn seed; replay this run with %s=%d",
-                SEED_ENV_VAR,
-                _SAMPLE_SEED,
-            )
+                _SAMPLE_SEED = secrets.randbits(64)
+                _SAMPLE_RNG = random.Random(_SAMPLE_SEED)
+                logger.info(
+                    "Sampling from an OS-drawn seed; replay this run with %s=%d",
+                    SEED_ENV_VAR,
+                    _SAMPLE_SEED,
+                )
+            return _SAMPLE_RNG
+
+        seed = int(env_seed, 0)  # an unparseable value aborts the command
+        if _SAMPLE_RNG is None or _SAMPLE_SEED != seed:
+            _SAMPLE_SEED = seed
+            _SAMPLE_RNG = random.Random(seed)
         return _SAMPLE_RNG
-
-    seed = int(env_seed, 0)  # an unparseable value aborts the command
-    if _SAMPLE_RNG is None or _SAMPLE_SEED != seed:
-        _SAMPLE_SEED = seed
-        _SAMPLE_RNG = random.Random(seed)
-    return _SAMPLE_RNG
 
 
 def _sample_key() -> str:
     """Return the 32-byte hex key a row sample starts from.
 
     The next draw from :func:`sample_rng`, so one seed reproduces the whole
-    run's sequence of samples.
+    run's sequence of samples.  Held under :data:`_SAMPLE_LOCK` so the draw
+    is atomic: two threads sampling concurrently would otherwise interleave
+    inside the generator's state update, and a seeded run would stop being
+    reproducible.
     """
-    return sample_rng().randbytes(32).hex()
+    with _SAMPLE_LOCK:
+        return sample_rng().randbytes(32).hex()
 
 
 def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
@@ -1827,15 +1846,23 @@ def db_clean(session: Session) -> dict:
     """
     start_time = time.monotonic()
 
-    # 1. Wipe the DB-backed index (bucket rows and the metadata row).
-    lsh_index_clear(session)
-
-    # 2. Vacuum the database to reclaim space (SQLite only).
     vacuum_success = False
-    if session.get_bind().dialect.name == "sqlite":
-        session.execute(text("VACUUM"))
-        session.commit()
-        vacuum_success = True
+    # The whole operation is destructive to the index, so it runs under the
+    # same per-database lock a rebuild takes (:func:`resembl.lsh.index_build_lock`).
+    # Without it a `clean` landing between a rebuild's clear and its final
+    # stamp deletes rows the rebuild already inserted: the rebuild then stamps
+    # `lsh_meta` as complete over an index that is missing them, and no later
+    # find ever repairs it.  The vacuum belongs inside the lock for the same
+    # reason — it rewrites the whole file the rebuild is writing into.
+    with index_build_lock(session):
+        # 1. Wipe the DB-backed index (bucket rows and the metadata row).
+        lsh_index_clear(session)
+
+        # 2. Vacuum the database to reclaim space (SQLite only).
+        if session.get_bind().dialect.name == "sqlite":
+            session.execute(text("VACUUM"))
+            session.commit()
+            vacuum_success = True
 
     end_time = time.monotonic()
     time_elapsed = end_time - start_time

@@ -341,7 +341,21 @@ project follows [Semantic Versioning](https://semver.org/).
   asked for with `end < start` reached SQLite as a negative `LIMIT`, which
   it reads as "unbounded" and answers with every row from the offset, and
   which PostgreSQL rejects outright.
-
+- `resembl clean` no longer races an index rebuild of the same database.
+  It dropped every `lsh_bucket` row without taking the per-database lock a
+  rebuild holds, so a clean landing between the rebuild's own clear and its
+  final `lsh_meta` stamp left it advertising a complete index over rows it
+  had already deleted: every later find answered with a fraction of its
+  matches and nothing rebuilt it.  The clean and its vacuum now run under
+  that lock, as a rebuild and an index build already do.
+- The sampled figures `resembl stats` reports (vocabulary, average
+  similarity) are reproducible again when several threads sample at once.
+  The process-wide generator was built, tested and published in one
+  unsynchronized check-then-act, so two callers arriving together could
+  each build one and the loser kept re-drawing the first values of a
+  generator whose seed the other had already reported as the run's replay
+  seed.  Construction, replacement and every draw now happen under one
+  lock.
 - `resembl export` no longer aborts on a filename that contains a byte no
   encoding can decode.  POSIX filenames are byte strings, so importing a
   directory whose entries carry one produced a name with a lone surrogate
