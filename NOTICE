@@ -1,0 +1,53 @@
+resembl
+Copyright (C) 2025 resembl contributors
+
+This product is licensed under the GNU General Public License, version 3
+only (GPL-3.0-only).  See LICENSE for the full grant.
+
+
+Third-party components
+======================
+
+datasketch
+----------
+
+Origin:  https://github.com/ekzhu/datasketch
+Version: 2.0.0
+License: MIT
+Files:   resembl/minhash.py, resembl/lsh.py
+
+resembl ships a bit-compatible reimplementation of two pieces of datasketch
+instead of depending on it: the `MinHash` fingerprint and the `_optimal_param`
+LSH banding search.  Dropping the dependency removes datasketch's own
+dependency on scipy (~60 MB installed) for one data structure and one
+numerical integral, and removes a coupling to `datasketch.lsh._optimal_param`,
+a private API.  `tests/test_minhash_equivalence.py` cross-checks fingerprints,
+Jaccard values and banding parameters against datasketch's `legacy` scheme so
+the two stay equivalent.
+
+MIT is compatible with GPL-3.0-only: resembl can combine the two and
+distribute the result under the GPL.  The MIT terms still require the notice
+below to travel with every copy, so it is reproduced here and shipped in the
+sdist and wheel alongside LICENSE.
+
+The MIT License (MIT)
+
+Copyright (c) 2015 ekzhu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

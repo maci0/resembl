@@ -142,7 +142,11 @@ Non-obvious, and cheap to break without noticing:
 - `resembl/minhash.py` is a vendored, bit-compatible MinHash. `datasketch` is a
   test oracle only: never import it from package code. The oracle tests pin
   `scheme="legacy"`, a 2.0-only keyword, so the `datasketch>=2` floor in
-  `pyproject.toml` must not be lowered.
+  `pyproject.toml` must not be lowered. The vendored pieces and
+  `resembl/lsh.py`'s band slicing derive from MIT-licensed datasketch, so
+  `NOTICE` carries that grant and is listed in `license-files`; any new
+  vendored or derived third-party code adds its notice to `NOTICE` in the same
+  change, or nothing downstream can trace the grant.
 - The `pygments>=2.20.0` floor clears CVE-2026-4539; `pylint>=4` is required
   because the tree is adapted to pylint 4's checks, including the two mutable
   module-level singletons in `resembl/database.py` and `resembl/scoring.py` that

@@ -16,6 +16,9 @@ error integrals, see ``resembl.minhash.optimal_param``), so recall
 behavior at a given threshold is equivalent.  Bucket keys are derived
 directly from the packed uint32 fingerprints (see ``scoring.minhash_pack``),
 which avoids constructing MinHash objects during index builds.
+
+The band-slicing behavior derived from datasketch is MIT-licensed
+(Copyright (c) 2015 ekzhu); see NOTICE for the full grant.
 """
 
 from __future__ import annotations

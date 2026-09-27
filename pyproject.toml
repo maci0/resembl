@@ -7,7 +7,9 @@ authors = [{ name = "N/A" }]
 # scanners could not match it.  The tree ships the plain GPLv3 text with no
 # "or later" grant, so the accurate expression is GPL-3.0-only.
 license = "GPL-3.0-only"
-license-files = ["LICENSE"]
+# NOTICE ships too: resembl.minhash / resembl.lsh derive from MIT-licensed
+# datasketch, and those terms require the grant to travel with every copy.
+license-files = ["LICENSE", "NOTICE"]
 classifiers = [
     "Programming Language :: Python :: 3.13",
 ]

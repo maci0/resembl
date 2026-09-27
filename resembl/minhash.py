@@ -7,6 +7,10 @@ runtime dependency tree no longer pulls in ``datasketch`` and, through it,
 integral.  It also removes the coupling to ``datasketch.lsh._optimal_param``,
 a private API.
 
+The upstream pieces are MIT-licensed (Copyright (c) 2015 ekzhu); MIT is
+compatible with this project's GPL-3.0-only grant, and NOTICE reproduces the
+required notice so it travels with every copy.
+
 The behavior is pinned by the test suite
 (``tests/test_minhash_equivalence.py``), which cross-checks fingerprints,
 Jaccard values and banding parameters against datasketch's ``legacy`` scheme

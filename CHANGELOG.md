@@ -56,6 +56,12 @@ project follows [Semantic Versioning](https://semver.org/).
   fingerprint, the whole vectorized array and the score list into memory at
   once; peak memory is now a function of the chunk size instead of the band
   population.  Rankings are unchanged.
+- The sdist and wheel now carry a `NOTICE` alongside `LICENSE`. `resembl`'s
+  MinHash and LSH banding code derives from MIT-licensed datasketch, whose
+  terms require the copyright and permission notice to travel with every
+  copy; nothing shipped it before, so a downstream consumer could not trace
+  that grant back to its origin. Nothing about installation, the CLI or the
+  `serve` responses changes.
 - `RESEMBL_SEED` now governs one generator for the whole run instead of one
   generator per draw. A seeded run used to replay its first sampling offset
   for every draw, so every `stats` estimate in that run was computed from the
