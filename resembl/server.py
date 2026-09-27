@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import atexit
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -26,6 +27,8 @@ import sys
 import threading
 import weakref
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
@@ -55,12 +58,90 @@ logger = logging.getLogger(__name__)
 #: process may run several servers for different databases (tests,
 #: embedded callers), and the version counter is per-database — without that
 #: final component a hit computed for database A could be served to database
-#: B whenever both counters happened to carry the same value.
+#: B whenever both counters happened to carry the same value.  It starts with
+#: :func:`_query_cache_key`, not the query itself, so the entry-count bound
+#: is also a memory bound.
 _RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
 _RESULT_CACHE_MAX = 128
 #: Serializes access to the shared cache: requests run in concurrent
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
+
+
+def _query_cache_key(query: str) -> str:
+    """Return the result-cache key component standing in for *query*.
+
+    A find's answer is a pure function of the query text and the find
+    parameters, so the query alone identifies the cached payload.  The query
+    is request-controlled and as large as the body cap (8 MiB), and retaining
+    it verbatim made ``_RESULT_CACHE_MAX`` an entry count rather than a
+    memory bound: 128 large requests pinned around a gigabyte of key
+    strings while their payloads stayed small, and every key stayed resident
+    until the LRU evicted it.  The digest is a fixed 64 characters, over the
+    exact text the find keys on (not its normalized form, which is a request
+    parameter in its own right), and it is the same content-addressing
+    primitive :func:`resembl.scoring.string_checksum` already uses for
+    snippet checksums.
+    """
+    return hashlib.sha256(query.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+class _InFlight:
+    """The compute lock for one cache key, plus the threads using it.
+
+    Reference-counted so the registry entry can be dropped by the last
+    thread to leave; see :func:`_inflight`.
+    """
+
+    __slots__ = ("lock", "users")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.users = 0
+
+
+#: Per-key compute locks, keyed exactly like :data:`_RESULT_CACHE`.  A
+#: miss is recomputed by every concurrent request for that key otherwise:
+#: ``serve`` runs one handler thread per connection, so a burst of identical
+#: queries (a triage loop fanning out, a client retrying after a slow
+#: response) pays the full find N times over and publishes N copies, the
+#: last of which wins and evicts the others.  Only the first thread to miss
+#: a key computes it; the rest wait here and read the entry it stored.  The
+#: registry is keyed the same way as the cache, so it tracks the keys
+#: currently being computed and is emptied as they finish, so it cannot
+#: outgrow the concurrency the server already allows.
+_INFLIGHT: dict[tuple, _InFlight] = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+@contextmanager
+def _inflight(key: tuple) -> Iterator[None]:
+    """Hold *key*'s compute lock, joining any thread already computing it.
+
+    The wait is also why the caller re-reads the database version once it
+    holds this: the previous request's find ran while we queued, and the
+    version sampled before the wait says nothing about the database as it is
+    now.
+    """
+    with _INFLIGHT_LOCK:
+        entry = _INFLIGHT.get(key)
+        if entry is None:
+            entry = _InFlight()
+            _INFLIGHT[key] = entry
+        entry.users += 1
+    entry.lock.acquire()
+    try:
+        yield
+    finally:
+        # Released before the count drops: a thread arriving after the
+        # registry entry is gone finds no holder to wait for, so the key it
+        # creates is genuinely free.
+        entry.lock.release()
+        with _INFLIGHT_LOCK:
+            entry.users -= 1
+            if entry.users == 0:
+                del _INFLIGHT[key]
+
 
 #: One single-connection probe engine per served database, used only by
 #: :func:`_db_version`.  Weakly keyed so a disposed engine takes its probe
@@ -343,7 +424,7 @@ def _find_one(
     # credentials in the long-lived cache keys.
     db_id = str(_session_engine(session).url)
     key = (
-        query,
+        _query_cache_key(query),
         top_n,
         threshold,
         normalize,
@@ -353,12 +434,68 @@ def _find_one(
         db_id,
     )
     version = _db_version(session)
-    if version is not None:
-        with _RESULT_CACHE_LOCK:
-            entry = _RESULT_CACHE.get(key)
-            if entry is not None and entry[0] == version:
-                _RESULT_CACHE.move_to_end(key)
-                return entry[1]
+    if version is None:
+        # No version counter for this backend: the cache cannot tell a stale
+        # entry from a current one, so the find always runs.
+        return _find_uncached(
+            session,
+            query,
+            top_n,
+            threshold,
+            normalize,
+            ngram_size,
+            num_permutations,
+            jaccard_weight,
+        )
+    cached = _result_cache_get(key, version)
+    if cached is not None:
+        return cached
+    with _inflight(key):
+        # Re-sampled, not carried over: the wait above let the thread ahead
+        # run a full find, and a write committed during it.  A payload
+        # computed for the older version would be filed under it and thrown
+        # away on the next read, and a cached payload for that version may
+        # describe rows the database has since changed.
+        version = _db_version(session)
+        if version is None:  # pragma: no cover - the dialect cannot change mid-call
+            return _find_uncached(
+                session,
+                query,
+                top_n,
+                threshold,
+                normalize,
+                ngram_size,
+                num_permutations,
+                jaccard_weight,
+            )
+        cached = _result_cache_get(key, version)
+        if cached is not None:
+            return cached
+        payload = _find_uncached(
+            session,
+            query,
+            top_n,
+            threshold,
+            normalize,
+            ngram_size,
+            num_permutations,
+            jaccard_weight,
+        )
+        _result_cache_put(key, version, payload)
+        return payload
+
+
+def _find_uncached(
+    session: Session,
+    query: str,
+    top_n: int,
+    threshold: float | None,
+    normalize: bool,
+    ngram_size: int,
+    num_permutations: int,
+    jaccard_weight: float,
+) -> dict:
+    """Run one find and serialize it, bypassing the result cache."""
     num_candidates, matches = snippet_find_matches(
         session,
         query,
@@ -369,14 +506,26 @@ def _find_one(
         num_permutations=num_permutations,
         jaccard_weight=jaccard_weight,
     )
-    payload = snippet_matches_payload(num_candidates, matches)
-    if version is not None:
-        with _RESULT_CACHE_LOCK:
-            _RESULT_CACHE[key] = (version, payload)
-            _RESULT_CACHE.move_to_end(key)
-            while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
-                _RESULT_CACHE.popitem(last=False)
-    return payload
+    return snippet_matches_payload(num_candidates, matches)
+
+
+def _result_cache_get(key: tuple, version: int) -> dict | None:
+    """Return the cached payload for *key* if it was built at *version*."""
+    with _RESULT_CACHE_LOCK:
+        entry = _RESULT_CACHE.get(key)
+        if entry is None or entry[0] != version:
+            return None
+        _RESULT_CACHE.move_to_end(key)
+        return entry[1]
+
+
+def _result_cache_put(key: tuple, version: int, payload: dict) -> None:
+    """Store *payload* for *key* at *version*, evicting past the cap."""
+    with _RESULT_CACHE_LOCK:
+        _RESULT_CACHE[key] = (version, payload)
+        _RESULT_CACHE.move_to_end(key)
+        while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
+            _RESULT_CACHE.popitem(last=False)
 
 
 #: Maximum accepted request body (8 MiB — orders of magnitude above any real

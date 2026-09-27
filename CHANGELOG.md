@@ -303,6 +303,17 @@ project follows [Semantic Versioning](https://semver.org/).
   `UnicodeEncodeError` and killed the whole export.  Such a name now
   exports like any other name with an unportable character in it.
 
+- `resembl serve` holds one copy of a query instead of the query itself, and
+  answers a burst of identical queries with one find rather than one per
+  request.  The in-process result cache kept the full request text as the
+  cache key, so its 128-entry cap was not a memory bound: a hundred and
+  twenty-eight large requests pinned about a gigabyte of key strings.  The
+  key is now a SHA-256 digest of the query, the same content addressing
+  snippet checksums use.  Concurrent requests for a key that is not cached
+  yet each ran the same find simultaneously, every one of them holding a
+  database connection and an LSH query for its full duration; the first
+  request to miss a key now computes it and the rest read what it stored.
+  A cached answer is still returned only while the database is unchanged.
 - A process that drives the CLI repeatedly in one interpreter (a test
   harness, an embedding script) no longer leaks a database session and a
   checked-out connection per invocation.  The main callback registered

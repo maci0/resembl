@@ -1111,7 +1111,12 @@ class TestServerMode(unittest.TestCase):
 
     def test_result_cache_evicts_oldest_beyond_max(self):
         """The version-guarded result cache evicts its oldest entry past the cap."""
-        from resembl.server import _RESULT_CACHE, _RESULT_CACHE_MAX, _find_one
+        from resembl.server import (
+            _RESULT_CACHE,
+            _RESULT_CACHE_MAX,
+            _find_one,
+            _query_cache_key,
+        )
 
         _RESULT_CACHE.clear()
         self.addCleanup(_RESULT_CACHE.clear)
@@ -1127,12 +1132,115 @@ class TestServerMode(unittest.TestCase):
 
         self.assertLessEqual(len(_RESULT_CACHE), _RESULT_CACHE_MAX)
         self.assertFalse(
-            any(k[0] == first_query for k in _RESULT_CACHE), "oldest entry must have been evicted"
+            any(k[0] == _query_cache_key(first_query) for k in _RESULT_CACHE),
+            "oldest entry must have been evicted",
         )
         newest = f"push ebx\nmov eax, {_RESULT_CACHE_MAX + 4}\npop ebx\nret"
-        self.assertTrue(any(k[0] == newest for k in _RESULT_CACHE), "newest entry must be retained")
+        self.assertTrue(
+            any(k[0] == _query_cache_key(newest) for k in _RESULT_CACHE),
+            "newest entry must be retained",
+        )
         self.assertIsNotNone(last_payload)
         self.assertIn("matches", last_payload)
+
+    def test_result_cache_key_does_not_retain_the_query(self):
+        """A cache key is a fixed-size digest, not the request's query text.
+
+        The body cap is 8 MiB, so keeping the query verbatim made the
+        128-entry cap an entry count rather than a memory bound: 128 large
+        requests pinned a gigabyte of key strings.  Two distinct queries
+        must still land on distinct entries.
+        """
+        from resembl.server import _query_cache_key
+
+        small = _query_cache_key("push ebx; ret")
+        large = _query_cache_key("mov eax, 1; " + "; nop\n" * 400_000)
+
+        self.assertEqual(small, _query_cache_key("push ebx; ret"))
+        self.assertNotEqual(small, large)
+        self.assertLessEqual(len(small.encode()), 64)
+        self.assertLessEqual(len(large.encode()), 64)
+        # A request the cache must never confuse with another: the key is
+        # the only thing separating their payloads.
+        self.assertNotEqual(_query_cache_key("push ebx; ret "), small)
+
+    def test_result_cache_computes_a_missed_key_once(self):
+        """Concurrent requests for one cold key never recompute at once.
+
+        ``serve`` runs a handler thread per connection, so without the
+        per-key compute lock every request in a burst of identical queries
+        ran the same find simultaneously, each holding its own database
+        connection and LSH query for the whole of it.
+        """
+        from resembl import server as server_mod
+        from resembl.server import _INFLIGHT, _RESULT_CACHE, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+        _INFLIGHT.clear()
+        self.addCleanup(_INFLIGHT.clear)
+
+        real_find = server_mod.snippet_find_matches
+        first_entered = threading.Semaphore(0)
+        release = threading.Event()
+        guard = threading.Lock()
+        calls = 0
+        in_flight = 0
+        peak = 0
+
+        def counting_find(*args, **kwargs):
+            nonlocal calls, in_flight, peak
+            with guard:
+                calls += 1
+                in_flight += 1
+                peak = max(peak, in_flight)
+            try:
+                first_entered.release()
+                # Long enough for every racer to reach the key if it is not
+                # serialized behind the first.
+                release.wait(10)
+                return real_find(*args, **kwargs)
+            finally:
+                with guard:
+                    in_flight -= 1
+
+        query = "push ebx\nmov edi, 99\npop ebx\nret"
+        workers = 8
+        payloads: list[dict] = []
+        errors: list[BaseException] = []
+
+        def run() -> None:
+            # A session per thread, as ``_handle_find`` gives each request.
+            with Session(self._session.get_bind()) as session:
+                try:
+                    payloads.append(_find_one(session, {"top_n": 5}, query))
+                except BaseException as exc:  # pragma: no cover - surfaced below
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=run) for _ in range(workers)]
+        with patch.object(server_mod, "snippet_find_matches", counting_find):
+            for t in threads:
+                t.start()
+            first_entered.acquire(timeout=10)
+            release.set()
+            for t in threads:
+                t.join(timeout=30)
+                self.assertFalse(t.is_alive())
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(payloads), workers)
+        # The property under test: the key's find ran alone.  (More than one
+        # call in total is correct — a find that has to build the index
+        # commits, which advances the version the next request re-samples,
+        # so the one request behind the lock legitimately recomputes once.)
+        self.assertEqual(peak, 1)
+        self.assertLess(calls, workers)
+        # Every request was answered the same way.
+        self.assertEqual(payloads.count(payloads[0]), workers)
+        self.assertEqual(len(_RESULT_CACHE), 1)
+        # The registry is emptied as the keys finish: it tracks the keys
+        # being computed, not every query ever asked for.
+        self.assertEqual(_INFLIGHT, {})
 
     def test_version_probe_is_released_with_the_server(self):
         """A closed server no longer holds the cache's version-probe engine.
