@@ -89,19 +89,22 @@ jobs:
   # README.md, CONTRIBUTING.md and docs/tutorial.md all document Windows
   # (and macOS is implied by the POSIX install path), so those platforms are
   # claimed.  The `test` job above runs the static checks and the database
-  # integration suite, which need the two Linux service containers; this job
-  # runs the same suite on every claimed OS without them, where the
-  # PostgreSQL and MySQL modules skip themselves.  The portability surface it
-  # covers is exactly the one Linux cannot see: path separators and reserved
+  # integration suite on Linux, which needs the two service containers; this
+  # job runs the same suite on the two platforms Linux cannot stand in for,
+  # where the PostgreSQL and MySQL modules skip themselves.  The portability
+  # surface it covers is exactly that: path separators and reserved
   # filenames in the export path, `spawn` process pools, msvcrt file
   # locking, text-mode line endings, and the subprocess-free server port
-  # file's `os.replace` publication.
+  # file's `os.replace` publication.  No Linux leg, because the `test` job
+  # already runs this suite there: a third runner bought no platform the
+  # matrix did not already have, and a second full suite on Linux only
+  # lengthened every push and pull request.
   portability:
     name: portability (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

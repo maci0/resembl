@@ -42,6 +42,11 @@ updates:
       day: monday
       time: "06:00"
       timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "ci"
     groups:
       actions:
         patterns:

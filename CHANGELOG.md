@@ -63,6 +63,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The portability CI job runs on macOS and Windows only.  The Linux job
+  already runs the same suite, so a third leg bought no platform while
+  lengthening every push and pull request.
+- Dependabot watches the GitHub Actions versions the workflows pin.  Each
+  action is pinned to a major tag on purpose, and nothing was proposing the
+  bump when the next major landed.
 - `make dist` clears `build/` and `resembl.egg-info/` before building.
   setuptools stages the wheel in `build/lib`, so a module deleted from the
   source tree survived in the artifact until someone cleaned the directory by
