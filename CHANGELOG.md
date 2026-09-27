@@ -51,6 +51,11 @@ project follows [Semantic Versioning](https://semver.org/).
   listing with no file-count cap. `SECURITY.md` also states the
   `RESEMBL_DATABASE_URL` precedence over `DATABASE_URL` and that the config
   directory is separate from the cache directory.
+- `find` and `serve` Jaccard-score their LSH candidates in bounded chunks, so
+  a query landing in a crowded band no longer pulls every candidate's
+  fingerprint, the whole vectorized array and the score list into memory at
+  once; peak memory is now a function of the chunk size instead of the band
+  population.  Rankings are unchanged.
 - `RESEMBL_SEED` now governs one generator for the whole run instead of one
   generator per draw. A seeded run used to replay its first sampling offset
   for every draw, so every `stats` estimate in that run was computed from the

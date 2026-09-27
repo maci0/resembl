@@ -245,6 +245,82 @@ class TestResembl(unittest.TestCase):
         self.assertEqual(sorted(got), sorted(expected))
         self.assertEqual(sorted(m[1] for m in matches), sorted(h for h, _ in scored[:5]))
 
+    def test_find_matches_bruteforce_across_candidate_chunks(self):
+        """find is chunk-independent: the shortlist never drops a top-n match.
+
+        The candidate prefilter walks the LSH candidates in bounded chunks
+        and keeps only those whose score upper bound can still reach the
+        top-n.  A candidate set larger than one chunk, with both distinct
+        and exactly tied bounds, must produce the same ranking as scoring
+        every candidate: the shortlist may be a superset of the answer, but
+        never a subset of it.
+        """
+        from resembl import core as core_module
+
+        for i in range(40):
+            snippet_add(
+                self.session,
+                f"chunk_{i}",
+                f"mov eax, {i}\npush ebx\ncall 0x{i:x}\nadd eax, ebx\nret",
+            )
+            snippet_add(self.session, f"near_{i}", f"mov eax, {i}\npush ebx\nret")
+
+        query = "mov eax, 999\npush ebx\ncall 0x3e7\nadd eax, ebx\nret"
+        brute = []
+        query_packed = minhash_pack(code_create_minhash(query))
+        for s in self.session.exec(select(Snippet)).all():
+            levenshtein = fuzz.ratio(query, s.code)
+            brute.append(
+                (
+                    score_hybrid(minhash_jaccard(query_packed, s.minhash), levenshtein),
+                    s.checksum,
+                )
+            )
+        brute.sort(key=lambda t: -t[0])
+        expected = sorted(c for _, c in brute[:5])
+
+        original = core_module._FIND_CANDIDATE_CHUNK
+        try:
+            for chunk_size in (1, 3, 7, original):
+                core_module._FIND_CANDIDATE_CHUNK = chunk_size
+                _, matches = snippet_find_matches(self.session, query, top_n=5, threshold=0.0)
+                self.assertEqual(sorted(m[0].checksum for m in matches), expected, chunk_size)
+        finally:
+            core_module._FIND_CANDIDATE_CHUNK = original
+
+    def test_find_candidate_jaccards_is_chunk_independent(self):
+        """Jaccard scoring gives the same answer whatever the chunk size is.
+
+        Candidates are Jaccard-scored in bounded chunks so a crowded band
+        does not have to fit in memory; the chunking must not be observable
+        in the result, and every candidate must be scored exactly once.
+        """
+        from resembl import core as core_module
+        from resembl.core import _find_candidate_jaccards
+
+        for i in range(60):
+            snippet_add(
+                self.session,
+                f"scored_{i}",
+                f"mov eax, {i}\npush ebx\ncall 0x{i:x}\nadd eax, ebx\nret",
+            )
+        query = "mov eax, 999\npush ebx\ncall 0x3e7\nadd eax, ebx\nret"
+        packed = minhash_pack(code_create_minhash(query))
+        candidates = [s.checksum for s in snippet_list(self.session)]
+
+        original = core_module._FIND_CANDIDATE_CHUNK
+        try:
+            reference = None
+            for chunk_size in (1, 5, 17, original):
+                core_module._FIND_CANDIDATE_CHUNK = chunk_size
+                keys, jaccards = _find_candidate_jaccards(self.session, candidates, packed, 128)
+                self.assertEqual(keys, candidates)
+                if reference is None:
+                    reference = jaccards
+                self.assertEqual(jaccards, reference)
+        finally:
+            core_module._FIND_CANDIDATE_CHUNK = original
+
 
 class _IsolatedDBTest(unittest.TestCase):
     """Shared per-test in-memory database."""

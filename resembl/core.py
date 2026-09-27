@@ -18,7 +18,7 @@ import os
 import random
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
@@ -753,22 +753,27 @@ def snippet_find_matches(
     if top_n <= 0:
         return len(candidate_keys), []
 
-    # Fetch only the fingerprint columns for every candidate first — the
-    # ``code`` column dominates the table, and most candidates are pruned
-    # before they are ever Levenshtein-scored, so loading full rows for all
-    # of them would move megabytes of text through the ORM per query.
-    keys = list(candidate_keys)
-    minhashes = _snippet_minhashes_by_checksums(session, keys)
-
     # Jaccard is computed directly from the packed fingerprints (no MinHash
-    # object construction), vectorized across all candidates in one numpy
-    # pass over the (N, 128) uint32 array — SIMD under the hood.  This is
+    # object construction), vectorized across candidates in one numpy pass
+    # over the (N, num_perm) uint32 array — SIMD under the hood.  This is
     # what keeps find fast when a query lands in a crowded band (thousands
     # of candidates at scale).
-    normalized, keys = _candidate_blobs_scorable(keys, minhashes, num_permutations)
+    #
+    # The candidates are walked in bounded chunks (:func:`_
+    # find_candidate_jaccards`), so peak memory is a function of the chunk
+    # size rather than of the band population: a band holding 100k snippets
+    # (routine on a large corpus, and every snippet at a low threshold) used
+    # to materialize every candidate's fingerprint, the whole
+    # (N, num_perm) vectorized array and the per-candidate Jaccard list at
+    # once.  Only the fingerprint columns are read: the ``code`` column
+    # dominates the table, and most candidates are pruned before they are
+    # ever Levenshtein-scored, so loading full rows for all of them would
+    # move megabytes of text through the ORM per query.
+    keys, jaccards = _find_candidate_jaccards(
+        session, candidate_keys, query_minhash_bytes, num_permutations
+    )
     if not keys:
         return 0, []
-    jaccards = minhash_jaccard_batch(query_minhash_bytes, normalized)
 
     # Hybrid score (Jaccard + Levenshtein) with an early exit: since
     # ``hybrid = 100 * w * jaccard + (1 - w) * levenshtein`` and
@@ -783,6 +788,7 @@ def snippet_find_matches(
     # ties evicting the largest index as a stable sort would, with a final
     # sort that replicates that stable sort, so the returned matches are
     # identical to scoring and fetching everything.
+
     order = sorted(range(len(keys)), key=lambda i: jaccards[i], reverse=True)
     scored: list[tuple[float, int, Snippet]] = []
     for start in range(0, len(order), 64):
@@ -823,6 +829,50 @@ def snippet_find_matches(
     top_matches = [(snippet, hybrid) for hybrid, _idx, snippet in scored[:top_n]]
 
     return len(candidate_keys), top_matches
+
+
+#: Candidates scored per round trip while Jaccard-scoring a find.  The
+#: fingerprints of a whole band do not fit in memory on a crowded query (a
+#: low threshold admits every snippet, and each stored fingerprint is ~520
+#: bytes, which the vectorized pass doubles into its own array), so the
+#: candidates are walked in chunks and only their Jaccard survives the round:
+#: the ranking pass needs the scores, not the blobs.  Large enough that the
+#: numpy pass still runs wide (SIMD pays off well past a few hundred rows),
+#: small enough that peak memory is a function of this constant rather than
+#: of the corpus.
+_FIND_CANDIDATE_CHUNK = 20_000
+
+
+def _find_candidate_jaccards(
+    session: Session,
+    candidate_keys: Sequence[str],
+    query_packed: bytes,
+    num_permutations: int,
+) -> tuple[list[str], list[float]]:
+    """Jaccard the query against every candidate, one bounded chunk at a time.
+
+    Returns ``(keys, jaccards)``, positionally aligned and in the order
+    *candidate_keys* arrived, so the caller's index-based tie-breaks are
+    unchanged by the chunking.
+
+    Chunks exist to bound memory, not to prune: the fingerprints of a chunk
+    are fetched, scored and released before the next one is read, so a find
+    holds one chunk of blobs (plus the same number of rows in the vectorized
+    array) rather than a multiple of the band population.  Candidates that
+    cannot be scored are dropped here, exactly as the ranking pass drops
+    rows that vanished, so the two halves agree on which candidates exist.
+    """
+    keys: list[str] = []
+    jaccards: list[float] = []
+    for start in range(0, len(candidate_keys), _FIND_CANDIDATE_CHUNK):
+        chunk = list(candidate_keys[start : start + _FIND_CANDIDATE_CHUNK])
+        minhashes = _snippet_minhashes_by_checksums(session, chunk)
+        blobs, chunk_keys = _candidate_blobs_scorable(chunk, minhashes, num_permutations)
+        if not chunk_keys:
+            continue
+        keys.extend(chunk_keys)
+        jaccards.extend(minhash_jaccard_batch(query_packed, blobs))
+    return keys, jaccards
 
 
 def _candidate_blobs_scorable(
