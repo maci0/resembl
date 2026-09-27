@@ -10,10 +10,16 @@ from resembl.core import (
     cfg_extract,
     cfg_similarity,
     code_create_minhash,
+    code_tokenize,
     score_hybrid,
     shingle_weight,
     snippet_add,
     snippet_compare,
+    snippet_find_matches,
+    snippet_lex,
+    snippet_matches_payload,
+    snippet_prepare,
+    string_checksum,
 )
 
 # Path to the real test ASM file
@@ -340,6 +346,93 @@ class TestSnippetCompareNewMetrics(unittest.TestCase):
         # CFG similarity should be within 0-1 range
         self.assertGreaterEqual(comp["cfg_similarity"], 0.0)
         self.assertLessEqual(comp["cfg_similarity"], 1.0)
+
+
+class TestSnippetLex(unittest.TestCase):
+    """``snippet_lex`` fuses one lexer pass; it must not drift from the helpers.
+
+    ``snippet_lex`` is the fused tokenizer every write path goes through
+    (``snippet_prepare`` and, through it, ``snippet_add``/``snippet_add_batch``
+    and the alias lookup).  It is the only place a stored checksum is
+    computed, so a divergence from ``string_checksum``/``code_tokenize``
+    would silently orphan every row an earlier version wrote.
+    """
+
+    def _sample(self):
+        return [
+            "push ebx\nmov eax, dword [esp+0x10]\npop ebx\nret",
+            "; only a comment\n",
+            "label:\n    jmp label\n    ret",
+        ]
+
+    def test_matches_the_separate_helpers(self):
+        """One fused pass must yield what the two helpers yield."""
+        for code in self._sample():
+            with self.subTest(code=code):
+                lexed = snippet_lex(code)
+                self.assertIsNotNone(lexed)
+                assert lexed is not None  # narrow for the type checker
+                checksum, tokens = lexed
+                self.assertEqual(checksum, string_checksum(code))
+                self.assertEqual(tokens, code_tokenize(code))
+
+    def test_empty_code_has_no_lexed_form(self):
+        """Blank and whitespace-only code has nothing to fingerprint."""
+        for code in ("", "   ", "\n\t\n"):
+            with self.subTest(code=code):
+                self.assertIsNone(snippet_lex(code))
+                self.assertIsNone(snippet_prepare("name", code, 3))
+
+    def test_prepare_agrees_with_standalone_fingerprint(self):
+        """The batch-import path must fingerprint what ``code_create_minhash`` does."""
+        for ngram in (2, 3, 5):
+            for code in self._sample():
+                with self.subTest(ngram=ngram, code=code):
+                    prepared = snippet_prepare("fn", code, ngram)
+                    expected = code_create_minhash(code, ngram_size=ngram)
+                    self.assertIsNotNone(prepared)
+                    assert prepared is not None  # narrow for the type checker
+                    from resembl.models import minhash_unpack
+
+                    self.assertEqual(prepared[0], string_checksum(code))
+                    self.assertAlmostEqual(
+                        minhash_unpack(prepared[3]).jaccard(expected), 1.0, places=6
+                    )
+
+
+class TestSnippetMatchesPayload(unittest.TestCase):
+    """``snippet_matches_payload`` is the one wire shape find, find-batch and serve share."""
+
+    def test_keys_and_match_records(self):
+        from sqlmodel import Session, SQLModel, create_engine
+
+        from resembl.core import snippet_add
+
+        engine = create_engine("sqlite:///:memory:")
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            snippet_add(session, "a", "MOV EAX, 1\nRET")
+            snippet_add(session, "b", "MOV EBX, 2\nRET")
+            num_candidates, matches = snippet_find_matches(session, "MOV EAX, 1\nRET", top_n=5)
+            payload = snippet_matches_payload(num_candidates, matches)
+        engine.dispose()
+
+        self.assertEqual(list(payload), ["lsh_candidates", "matches"])
+        self.assertEqual(payload["lsh_candidates"], num_candidates)
+        self.assertEqual(len(payload["matches"]), len(matches))
+        for record, (snippet, score) in zip(payload["matches"], matches, strict=True):
+            self.assertEqual(list(record), ["checksum", "names", "score"])
+            self.assertEqual(record["checksum"], snippet.checksum)
+            self.assertEqual(record["names"], snippet.name_list)
+            self.assertIsInstance(record["score"], float)
+            self.assertEqual(record["score"], score)
+        # The exact query ranks first, so the payload is not just well shaped.
+        self.assertEqual(payload["matches"][0]["names"], ["a"])
+
+    def test_no_matches_is_still_a_document(self):
+        """An empty result set keeps the keys, so clients can render it."""
+        payload = snippet_matches_payload(0, [])
+        self.assertEqual(payload, {"lsh_candidates": 0, "matches": []})
 
 
 class TestDbUrlMask(unittest.TestCase):

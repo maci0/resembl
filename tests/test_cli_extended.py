@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from sqlmodel import Session
 
-from resembl.core import collection_create, snippet_add
+from resembl.core import collection_create, snippet_add, string_checksum
 from tests.test_cli import BaseCLITest
 
 
@@ -406,26 +406,36 @@ class TestCLIFormatFlag(BaseCLITest):
     """Integration tests for --format json/csv."""
 
     def test_stats_json(self):
-        """stats --format json should produce valid JSON."""
+        """stats --format json reports the snippets the database holds."""
         result = self.run_command("--format json stats")
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertIn("num_snippets", data)
+        # setUp seeds exactly one snippet, so the count is pinned rather than
+        # merely "a key exists": a stats that always reported 0 or a constant
+        # would otherwise pass.
+        self.assertEqual(data["num_snippets"], 1)
 
     def test_list_json(self):
-        """list --format json should produce valid JSON."""
+        """list --format json streams one document per snippet."""
         result = self.run_command("--format json list")
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["names"], ["test_snippet"])
+        self.assertEqual(data[0]["checksum"], string_checksum("MOV EAX, 1"))
 
     def test_list_csv(self):
-        """list --format csv should produce CSV output."""
+        """list --format csv parses back into the rows it wrote."""
+        import csv
+        import io
+
         result = self.run_command("--format csv list")
         self.assertEqual(result.returncode, 0)
-        # CSV output should have header row
-        lines = result.stdout.strip().split("\n")
-        self.assertGreaterEqual(len(lines), 1)
+        rows = list(csv.DictReader(io.StringIO(result.stdout)))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(list(rows[0]), ["checksum", "names"])
+        self.assertEqual(rows[0]["names"], "test_snippet")
+        self.assertEqual(rows[0]["checksum"], string_checksum("MOV EAX, 1"))
 
     def test_csv_records_terminate_with_lf_only(self):
         """CSV records end in a bare LF, never a CR, on any platform.
@@ -502,6 +512,12 @@ class TestCLITagEdgeCases(BaseCLITest):
         # Second add (should be idempotent)
         result2 = self.run_command(f"tag add {checksum} 'crypto'")
         self.assertEqual(result2.returncode, 0)
+        # Idempotent means one stored tag, not a second append.
+        with Session(self.engine) as session:
+            from resembl.models import Snippet
+
+            stored = Snippet.get_by_name(session, "test_snippet")
+            self.assertEqual(stored.tag_list.count("crypto"), 1)
 
 
 class TestCLIShowCommand(BaseCLITest):
@@ -526,7 +542,10 @@ class TestCLIShowCommand(BaseCLITest):
             s = Snippet.get_by_name(session, "test_snippet")
             prefix = s.checksum[:8]
         result = self.run_command(f"show {prefix}")
-        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The prefix resolved to the snippet, not to an empty page.
+        self.assertIn("test_snippet", result.stdout)
+        self.assertIn("MOV EAX, 1", result.stdout)
 
     def test_show_nonexistent(self):
         """show with invalid checksum should fail."""

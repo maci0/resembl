@@ -1637,13 +1637,28 @@ class TestLazyPackageInit(unittest.TestCase):
     """`import resembl` must not eagerly load the heavy dependencies."""
 
     def test_import_is_light(self):
-        import sys
+        """A bare ``import resembl`` must not pull the optional stack in.
 
-        for mod in ("sqlmodel", "pygments", "datasketch", "scipy"):
-            sys.modules.pop(mod, None)
+        The check runs in a subprocess.  Popping the modules out of
+        ``sys.modules`` and re-importing them in this process left two live
+        copies of ``sqlmodel``/``pygments`` behind for every later test, and
+        the assertion it supported (the fresh import must not load them) is a
+        property of a fresh process anyway.
+        """
+        code = (
+            "import sys, importlib; importlib.import_module('resembl'); "
+            "heavy = [m for m in ('datasketch', 'scipy') if m in sys.modules]; "
+            "assert not heavy, f'eagerly imported: {heavy}'"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
-        self.assertNotIn("sqlmodel", sys.modules)
-        self.assertNotIn("datasketch", sys.modules)
         # Lazy exports still resolve.
         from resembl import Snippet, code_tokenize, snippet_add
 

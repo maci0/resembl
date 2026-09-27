@@ -65,7 +65,8 @@ class TestTagEdgeCases(BaseDBTest):
     def test_tag_add_empty_quiet(self):
         """Adding an empty tag in quiet mode should return None without logging."""
         snippet = snippet_add(self.session, "func", "NOP")
-        result = snippet_tag_add(self.session, snippet.checksum, "", quiet=True)
+        with self.assertNoLogs("resembl.core", level="ERROR"):
+            result = snippet_tag_add(self.session, snippet.checksum, "", quiet=True)
         self.assertIsNone(result)
 
     def test_tag_add_nonexistent_not_quiet(self):
