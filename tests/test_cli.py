@@ -57,8 +57,15 @@ class BaseCLITest(unittest.TestCase):
         # subprocess decode them with the locale (cp1252 on the Windows
         # runners) raised in its reader thread, which leaves ``stdout`` as
         # None instead of failing in the test that asked for it.
+        #
+        # The backslashes are doubled before the split for the same reason a
+        # Windows path reaches this helper at all: POSIX shlex reads ``\`` as
+        # an escape, so ``export --force C:\out`` arrived at the CLI as
+        # ``C:out`` and the export landed somewhere else.  No command here
+        # carries a backslash the CLI is meant to receive as an escape, and
+        # on Linux and macOS there are none to double.
         return subprocess.run(
-            [sys.executable, "-m", "resembl.cli", *shlex.split(command)],
+            [sys.executable, "-m", "resembl.cli", *shlex.split(command.replace("\\", "\\\\"))],
             shell=False,
             capture_output=True,
             text=True,
