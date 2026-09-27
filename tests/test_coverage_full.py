@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import create_engine
 
 from resembl.cache import (
     lsh_cache_load,
@@ -39,21 +39,7 @@ from resembl.core import (
 )
 from resembl.database import db_create
 from resembl.minhash import MinHash
-from resembl.models import Collection
-
-
-class BaseDBTest(unittest.TestCase):
-    """Base class providing an in-memory database session per test."""
-
-    def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
-        SQLModel.metadata.create_all(self.engine)
-        self.session = Session(self.engine)
-
-    def tearDown(self):
-        self.session.close()
-        SQLModel.metadata.drop_all(self.engine)
-
+from tests.test_collections_merge import BaseDBTest
 
 # ---------------------------------------------------------------------------
 # Tag edge cases — covers lines 300-302, 307, 328
@@ -412,28 +398,6 @@ class TestNameOperations(BaseDBTest):
 
 class TestMergeEdgeCases(BaseDBTest):
     """Additional merge tests for collection assignment and coverage."""
-
-    def _create_source_db(self, snippets, collections=None):
-        """Helper: create a source DB file and return its path."""
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        source_url = f"sqlite:///{tmp.name}"
-        source_engine = create_engine(source_url)
-        SQLModel.metadata.create_all(source_engine)
-        with Session(source_engine) as src_session:
-            if collections:
-                for name, desc in collections:
-                    src_session.add(Collection(name=name, description=desc))
-                    src_session.commit()
-            for name, code, tags, col in snippets:
-                s = snippet_add(src_session, name, code)
-                if tags:
-                    for t in tags:
-                        snippet_tag_add(src_session, s.checksum, t)
-                if col:
-                    collection_add_snippet(src_session, col, s.checksum)
-        source_engine.dispose()
-        return tmp.name
 
     def test_merge_assigns_collection_to_existing(self):
         """Merging should assign source collection to existing snippet without one."""

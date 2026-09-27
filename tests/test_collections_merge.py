@@ -41,6 +41,32 @@ class BaseDBTest(unittest.TestCase):
         self.session.close()
         SQLModel.metadata.drop_all(self.engine)
 
+    def _create_source_db(self, snippets, collections=None):
+        """Helper: create a source DB file and return its path.
+
+        *snippets* is a list of ``(name, code, tags, collection)`` tuples;
+        *collections* a list of ``(name, description)`` pairs.
+        """
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        source_url = f"sqlite:///{tmp.name}"
+        source_engine = create_engine(source_url)
+        SQLModel.metadata.create_all(source_engine)
+        with Session(source_engine) as src_session:
+            if collections:
+                for name, desc in collections:
+                    src_session.add(Collection(name=name, description=desc))
+                    src_session.commit()
+            for name, code, tags, col in snippets:
+                s = snippet_add(src_session, name, code)
+                if tags:
+                    for t in tags:
+                        snippet_tag_add(src_session, s.checksum, t)
+                if col:
+                    collection_add_snippet(src_session, col, s.checksum)
+        source_engine.dispose()
+        return tmp.name
+
 
 def _seed_current_stamps(session: Session) -> None:
     """Stamp *session*'s database as current-format, ngram 3, 128 perms.
@@ -252,27 +278,6 @@ class TestTimestampNormalize(unittest.TestCase):
 
 class TestDBMerge(BaseDBTest):
     """Tests for the db_merge function."""
-
-    def _create_source_db(self, snippets, collections=None):
-        """Helper: create a source DB file and return its path."""
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        source_url = f"sqlite:///{tmp.name}"
-        source_engine = create_engine(source_url)
-        SQLModel.metadata.create_all(source_engine)
-        with Session(source_engine) as src_session:
-            if collections:
-                for name, desc in collections:
-                    src_session.add(Collection(name=name, description=desc))
-            for name, code, tags, col in snippets:
-                s = snippet_add(src_session, name, code)
-                if tags:
-                    for t in tags:
-                        snippet_tag_add(src_session, s.checksum, t)
-                if col:
-                    collection_add_snippet(src_session, col, s.checksum)
-        source_engine.dispose()
-        return tmp.name
 
     def test_merge_normalizes_foreign_created_at(self):
         """Imported collection timestamps are re-expressed in UTC.

@@ -835,12 +835,6 @@ def string_checksum(code_snippet: str) -> str:
     return hashlib.sha256(normalized_string.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def token_is_label(token_type: object, value: str) -> bool:
-    """Check if a token is a label."""
-    flags = _token_type_flags(token_type)
-    return bool(flags & _TT_LABEL) or bool(flags & _TT_NAME and value.endswith(":"))
-
-
 def _lexed_pass(
     tokens: Iterable[tuple[object, str]],
     normalize: bool,
