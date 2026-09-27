@@ -15,6 +15,7 @@ from unittest.mock import patch
 from sqlmodel import Session
 
 from resembl.core import collection_create, snippet_add, string_checksum
+from tests import process_stop, serve_stop_flags
 from tests.test_cli import BaseCLITest
 
 
@@ -703,8 +704,9 @@ class TestCLIServeLifecycle(BaseCLITest):
 
     Unlike the in-process server tests, these exercise the actual CLI
     entry points: ``resembl serve`` starts, writes its port file, ``find``
-    and ``find-batch`` route through the thin client, and a SIGTERM (the
-    signal service managers send) shuts the process down cleanly.
+    and ``find-batch`` route through the thin client, and the stop signal a
+    service manager sends on this platform — SIGTERM, or CTRL_BREAK_EVENT on
+    Windows, which has no SIGTERM — shuts the process down cleanly.
     """
 
     def _serve_env(self, cache_dir):
@@ -723,6 +725,7 @@ class TestCLIServeLifecycle(BaseCLITest):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            **serve_stop_flags(),
         )
 
     def _wait_for_port_file(self, port_file, timeout=30):
@@ -791,15 +794,15 @@ class TestCLIServeLifecycle(BaseCLITest):
                 batch_payload = json.loads(batch.stdout)
                 self.assertEqual(len(batch_payload), 2)
             finally:
-                # SIGTERM — the signal a service manager sends — must shut the
-                # process down cleanly and remove the port file.
-                proc.terminate()
+                # The stop signal a service manager sends must shut the process
+                # down cleanly and remove the port file.
+                process_stop(proc)
                 try:
                     proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait(timeout=5)
-                    self.fail("serve did not exit after SIGTERM")
+                    self.fail("serve did not exit after the stop signal")
             self.assertFalse(os.path.exists(port_file), "stale port file left behind")
 
     def test_second_serve_refuses_to_double_start(self):
@@ -826,13 +829,13 @@ class TestCLIServeLifecycle(BaseCLITest):
                 self.assertNotEqual(second.returncode, 0)
                 self.assertIn("already running", second.stderr)
             finally:
-                first.terminate()
+                process_stop(first)
                 try:
                     first.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     first.kill()
                     first.wait(timeout=5)
-                    self.fail("first serve did not exit after SIGTERM")
+                    self.fail("first serve did not exit after the stop signal")
             self.assertFalse(os.path.exists(port_file))
 
     def test_serve_port_in_use_fails_cleanly(self):

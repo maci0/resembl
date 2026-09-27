@@ -21,6 +21,7 @@ from sqlmodel import Session, SQLModel, create_engine
 import resembl.models  # noqa: F401  (registers tables)
 from resembl.config import ResemblConfig
 from resembl.core import snippet_add_batch, snippet_find_matches, snippet_prepare
+from tests import process_stop, serve_stop_flags
 
 
 def _post_json(port: int, path: str, payload: dict, timeout: int = 10) -> dict:
@@ -1651,12 +1652,14 @@ class TestServerMode(_ServeTestCase):
 
         db_a = tempfile.mktemp(suffix=".db")
         db_b = tempfile.mktemp(suffix=".db")
+        engines = []
         for db_path in (db_a, db_b):
             engine = create_engine(f"sqlite:///{db_path}")
+            engines.append(engine)
             SQLModel.metadata.create_all(engine)
-            # Registered after the removal below, so it runs before it: Windows
-            # refuses to unlink a database file whose handle is still open.
-            self.addCleanup(engine.dispose)
+        # Registered before the disposes below: cleanups run
+        # last-in-first-out, so both handles are released first, which is what
+        # Windows requires to unlink a database file.
         self.addCleanup(
             lambda: [
                 os.remove(p)
@@ -1664,6 +1667,8 @@ class TestServerMode(_ServeTestCase):
                 if os.path.exists(p)
             ]
         )
+        for engine in engines:
+            self.addCleanup(engine.dispose)
 
         with patch("resembl.config.load_config", return_value=ResemblConfig(ngram_size=5)):
             httpd_a = server_mod.serve(f"sqlite:///{db_a}", port=0)
@@ -1784,6 +1789,9 @@ class TestServerMode(_ServeTestCase):
             ]
         )
         engine2 = create_engine(f"sqlite:///{db_path2}")
+        # After the removal cleanup above, so it runs before it: Windows
+        # refuses to unlink a database file whose handle is still open.
+        self.addCleanup(engine2.dispose)
         with Session(engine2) as session:
             lsh_mod._ensure_tables_once(session)
         self.assertIn(engine2, lsh_mod._TABLES_ENSURED)
@@ -2123,8 +2131,9 @@ class TestCLIServerEndToEnd(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            **serve_stop_flags(),
         )
-        self.addCleanup(server.terminate)
+        self.addCleanup(process_stop, server)
         try:
             # Wait for the port file.
             from resembl.paths import cache_dir_get, server_port_path
@@ -2165,7 +2174,9 @@ class TestCLIServerEndToEnd(unittest.TestCase):
             self.assertIn("matches", payload)
             self.assertGreater(payload["lsh_candidates"], 0)
         finally:
-            server.terminate()
+            # The platform's own stop signal, so the child runs its shutdown
+            # path and releases the database file this test's tearDown removes.
+            process_stop(server)
             server.wait(timeout=10)
 
 
