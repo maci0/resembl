@@ -12,8 +12,7 @@ under `[tool.uv] required-version`, so any other uv release fails at the first
 command instead of after it has rewritten the lockfile.
 
 ```bash
-uv sync --locked --extra dev   # installs .venv from the hash-pinned uv.lock, same as CI
-uv run pre-commit install      # git hooks, run on commit
+make install   # uv sync --locked --extra dev, then the git hooks; same as CI
 ```
 
 `uv.lock` is the source of truth. Never hand-edit it; only `uv add` / `uv lock`
@@ -46,9 +45,11 @@ make check                         # hygiene, mypy, ruff, black --check, pylint,
 uv run pytest --cov=resembl --cov-report=term-missing
 ```
 
-Coverage may rise, never fall. mypy's incremental cache is not safe against
-concurrent writers, which is why the mypy hook is `require_serial`; run these
-commands one at a time.
+Coverage may rise, never fall; CI reports the number to Codecov from
+`.github/workflows/coverage.yml`, so that file is the ratchet's record, not a
+local threshold. mypy's incremental cache is not safe against concurrent
+writers, which is why the mypy hook is `require_serial`; run these commands one
+at a time.
 
 `make check` covers the source tree, not the artifacts. The `Build` workflow
 (`.github/workflows/build.yml`) is what covers those: it runs
@@ -76,11 +77,11 @@ field, a written file). Re-doing the logic inside the test, feeding it a
 finished result, or asserting only exit code 0 is not a test. Do not delete a
 test to make a suite pass; change it so it still asserts the behavior.
 
-Fuzzers live in `fuzzers/` and need the `fuzz` extra:
+Fuzzers live in `fuzzers/`; `make fuzz` runs each for `FUZZ_SECONDS` (60 by
+default) and asks uv for the `fuzz` extra itself:
 
 ```bash
-uv sync --locked --extra dev --extra fuzz
-uv run ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
+make fuzz FUZZER=fuzz_code_tokenize.py
 ```
 
 A crash writes `crash-<hash>` in the repository root; attach it to the bug
