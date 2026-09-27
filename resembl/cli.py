@@ -651,6 +651,13 @@ def serve(
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
+    # Windows has no SIGTERM.  What a service manager sends there is
+    # CTRL_BREAK_EVENT, which arrives as SIGBREAK, and its default disposition
+    # ends the process without running the shutdown above — the same stale port
+    # file this handler exists to prevent.  SIGBREAK is the Windows spelling of
+    # the same request, so it takes the same handler.
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_sigterm)
 
     try:
         httpd.serve_forever()
