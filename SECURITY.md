@@ -29,6 +29,12 @@ and ranked risks for the code as it stands. Read it before reporting: it
 names the mitigations that already exist, so a report of a
 missing control is far more useful than a report of a known gap.
 
+The one gap to be aware of while using `resembl serve` is that `POST /find`
+accepts `top_n` without an upper bound, so a single request can return the
+whole corpus. On a loopback bind that is a concern for other processes on the
+same host, and on a non-loopback bind it is the same exposure as the bind
+itself.
+
 ## Deployment assumptions
 
 resembl is a single-user local tool. It has no authentication, no

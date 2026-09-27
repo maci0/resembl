@@ -1643,8 +1643,8 @@ class TestServerConcurrency(unittest.TestCase):
 
         from resembl.models import LSHBucket
 
-        rows = select(func.count(LSHBucket.checksum))
-        return self._session.exec(rows).one()  # type: ignore[arg-type]
+        rows = select(func.count(1)).select_from(LSHBucket)
+        return self._session.exec(rows).one()
 
     def test_request_cannot_rebuild_the_served_index(self):
         """Parameters the served index was not built for are refused, not built.
