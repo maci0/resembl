@@ -108,11 +108,28 @@ logger = logging.getLogger(__name__)
 
 # --- Rich Consoles ---
 
+
+def _legacy_windows_for(stream: object) -> bool | None:
+    """Return the ``legacy_windows`` setting for a Console over *stream*.
+
+    rich renders a legacy Windows console through the Win32 API, and only
+    when the Console's file is a standard stream (fd 1 or 2).  A *redirected*
+    stdout is one, so rich wrote the styles to the console's screen buffer and
+    the pipe received none of them: ``FORCE_COLOR=1`` could not put color into
+    a CI log, a file, or a test's captured output.  The Win32 path is for the
+    console, so auto detection (``None``) is kept only when the stream is one.
+    """
+    isatty = getattr(stream, "isatty", None)
+    if isatty is None or isatty():
+        return None
+    return False
+
+
 # highlighting=False keeps rich's stock highlighter from tinting quoted text
 # inside messages: a color in resembl's output is always one this module put
 # there (see ``theme``), never one the library guessed.
-console = Console(highlight=False)
-err_console = Console(stderr=True, highlight=False)
+console = Console(highlight=False, legacy_windows=_legacy_windows_for(sys.stdout))
+err_console = Console(stderr=True, highlight=False, legacy_windows=_legacy_windows_for(sys.stderr))
 
 # --- Typer apps ---
 
@@ -828,8 +845,15 @@ def app_callback(
     state.quiet = quiet
 
     if no_color:
-        console = Console(no_color=True, highlight=False)
-        err_console = Console(stderr=True, no_color=True, highlight=False)
+        console = Console(
+            no_color=True, highlight=False, legacy_windows=_legacy_windows_for(sys.stdout)
+        )
+        err_console = Console(
+            stderr=True,
+            no_color=True,
+            highlight=False,
+            legacy_windows=_legacy_windows_for(sys.stderr),
+        )
 
     log_level = logging.INFO
     if quiet:
