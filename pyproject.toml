@@ -69,6 +69,10 @@ include = ["resembl*"]
 
 [tool.black]
 line-length = 100
+# Pinned rather than inferred: black otherwise derives the target set from
+# `requires-python = ">=3.13"`, which is open ended, so the formatting a
+# given black version produces depends on how new the running interpreter is.
+target-version = ["py313"]
 
 [tool.ruff]
 line-length = 100
@@ -192,24 +196,6 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_globals = true
 disallow_untyped_decorators = true
-
-# numpy >= 2.5 ships stubs written in 3.12+ syntax (PEP 695 `type` aliases),
-# which this project's 3.11 target cannot parse — yet the package itself
-# runs fine against numpy 2.5 on every supported runtime, which is also what
-# the test suite validates.  `follow_imports = "skip"` alone does not help:
-# mypy's resolver forces stubs back to `"normal"` regardless
-# (`"Stubs are always normal"`, `mypy/build.py`), so the files are still
-# parsed.  The working combination is skip *plus* `follow_imports_for_stubs`
-# (its documented pair — "except when they aren't"), which skips even stub
-# modules; `resembl.minhash` then sees `np` names as `Any`.  Options were:
-# pin users to numpy < 2.5 (wrong — 2.5 is what ships and what the suite
-# validates), or raise the check target to 3.12 (that would weaken the 3.11
-# compatibility the tree promises).  The tree's *own* annotations stay
-# fully checked.  Revisit if mypy ever gains version-gated parsing.
-[[tool.mypy.overrides]]
-module = ["numpy", "numpy.*"]
-follow_imports = "skip"
-follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-disable"

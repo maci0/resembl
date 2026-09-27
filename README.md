@@ -192,16 +192,19 @@ resembl/
 This project is managed with [uv](https://github.com/astral-sh/uv). First, install uv if you haven't already. Then, from the root of the project, run:
 
 ```bash
-# 1. Create and activate the virtual environment
-uv venv
+# 1. Create and activate the virtual environment from the pinned interpreter
+#    (.python-version) and the committed lockfile
+uv sync --locked --extra dev
 source .venv/bin/activate
 
-# 2. Install dependencies
-uv pip install -e .[dev]
-
-# 3. (Recommended for developers) Install pre-commit hooks
+# 2. (Recommended for developers) Install pre-commit hooks
 uv run pre-commit install
 ```
+
+`uv sync --locked` installs the exact versions recorded in `uv.lock` and fails
+if that lockfile has drifted from `pyproject.toml`, so a checkout builds the
+same way locally and in CI. `uv pip install -e .[dev]` resolves the dependency
+ranges afresh instead and can produce an environment CI never tested.
 
 ### 2. Configuration
 
