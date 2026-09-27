@@ -20,7 +20,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 
 | # | Risk | Boundary | Impact | Control today |
 | - | ---- | -------- | ------ | ------------- |
-| R1 | `top_n` is accepted from the request with no upper bound, so one unauthenticated `POST /find` can return the entire corpus | B1 | Full corpus disclosure to any local process; memory pressure on the server | none (`resembl/server.py:185`, used at `resembl/server.py:328`; the same field is deliberately unbounded in `resembl/config.py:63`) |
+| R1 | `top_n` is accepted from the request with no upper bound, so one unauthenticated `POST /find` can return the entire corpus | B1 | Full corpus disclosure to any local process; memory pressure on the server | none (`resembl/server.py:192`, used at `resembl/server.py:342`; the same field is deliberately unbounded in `resembl/config.py:63`) |
 | R2 | The find server has no authentication, no `Host` check, and no rate limit; a non-loopback bind is a warning, not a block | B1 | R1 plus sustained exhaustion, and browser reachability via DNS rebinding | Loopback default only (`resembl/cli.py:510`, `resembl/cli.py:523`) |
 | R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | none (`resembl/find_client.py:118`, `resembl/cli.py:357`) |
 | R4 | The server logs nothing per request, so queries are unattributable after the fact | B1 | No way to investigate a suspected scrape or a hostile client | none (`resembl/server.py:596`) |
@@ -39,13 +39,14 @@ Every entry point below is present in the code at the cited location.
 
 | Entry point | Location | Notes |
 | ----------- | -------- | ----- |
-| `POST /find` | `resembl/server.py:444` | Unauthenticated, read-only. |
-| `POST /find-batch` | `resembl/server.py:444` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:356`). |
+| `POST /find` | `resembl/server.py:491` | Unauthenticated, read-only. |
+| `POST /find-batch` | `resembl/server.py:491` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:370`). |
 | `resembl serve` bind | `resembl/cli.py:508` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:523`). |
 
-No other method is served: `GET`, `PUT`, `DELETE`, and `PATCH` answer `405`
-(`resembl/server.py:460`). A `POST` to any other path answers `404`
-(`resembl/server.py:445`).
+No other method is served: every verb other than `POST` answers `405` with
+`Allow: POST` on a served path (`resembl/server.py:507`), including the ones
+the handler does not implement by name.  A request to any other path answers
+`404`, on every method.
 
 ### CLI surface
 
@@ -160,8 +161,8 @@ nothing in `resembl/` executes a network fetch at import.
 *Information disclosure.* Any process on the host can enumerate the corpus.
 A permissive `threshold` with a large `top_n` returns `lsh_candidates`
 worth of rows in one response. `top_n` is the only find parameter with no
-range check (`resembl/server.py:185`); every other one is bounded
-(`resembl/server.py:212` to `resembl/server.py:236`), and the config layer
+upper bound (`resembl/server.py:192`); every other one is bounded
+(`resembl/server.py:219` to `resembl/server.py:236`), and the config layer
 deliberately declines to bound it either (`resembl/config.py:63`), so this is
 a gap in a row of otherwise deliberate limits.
 
@@ -257,7 +258,7 @@ not a network one.
 | Request body cap, 8 MiB | `resembl/server.py:350` | B1 memory exhaustion |
 | JSON depth and shape guard | `resembl/server.py:430` | `RecursionError` from a nested body killing the handler thread with no response |
 | Batch query cap, 1000 | `resembl/server.py:356`, `resembl/server.py:523` | B1 work per request |
-| Find parameter range checks | `resembl/server.py:212` | NaN, out-of-range, and degenerate fingerprints. `top_n` is not covered |
+| Find parameter range checks | `resembl/server.py:219` | NaN, out-of-range, and degenerate fingerprints. `top_n` is bounded below only |
 | Index-parameter match check | `resembl/server.py:266` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:71` | An unbounded dict grown by cycling permutation counts |
 | Content-Type check, 415 | `resembl/server.py:434` | B1 request shape |
@@ -308,8 +309,8 @@ was executed or tested against a running server.
 `{"query": "", "threshold": 0.0, "top_n": 1000000}` to
 `127.0.0.1:<port>/find`, and receives the corpus. Nothing in the request
 path distinguishes this from `resembl find`. Enabled by
-`resembl/server.py:185` (no `top_n` bound) and `resembl/server.py:444` (no
-caller authentication).
+`resembl/server.py:192` (no `top_n` upper bound) and `resembl/server.py:491`
+(no caller authentication).
 
 **Query text capture.** The same process, or any process that can write the
 cache directory, replaces the port file's contents with a port it is

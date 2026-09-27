@@ -928,6 +928,106 @@ class TestServerMode(unittest.TestCase):
             self.assertEqual(status, 400)
             self.assertIn("query must be a string", payload["error"])
 
+    def test_find_rejects_zero_top_n(self):
+        """``top_n`` below 1 answers 400 instead of an empty match list.
+
+        Every other numeric parameter is range-checked, and the config layer
+        bounds ``top_n`` at 1 for the same reason: a zero or negative value
+        truncates every ranking to nothing, so the answer read as a working
+        search that found nothing.
+        """
+        port = self._start_server()
+        for bad_top_n in (0, -1):
+            status, payload = _post_json_status(
+                port, "/find", {"query": "push ebx\nret", "top_n": bad_top_n}
+            )
+            self.assertEqual(status, 400)
+            self.assertIn("top_n", payload["error"])
+
+    def test_find_rejects_non_boolean_normalize(self):
+        """A non-boolean ``normalize`` answers 400, it is not truthy-coerced.
+
+        ``bool("false")`` is True, so a client sending the string asked for
+        normalization off and silently searched the normalized corpus,
+        getting a 200 with the wrong matches.
+        """
+        port = self._start_server()
+        for bad in ("false", 0, 1, []):
+            status, payload = _post_json_status(
+                port, "/find", {"query": "push ebx\nret", "normalize": bad}
+            )
+            self.assertEqual(status, 400)
+            self.assertIn("normalize", payload["error"])
+        # The boolean itself still works, both ways.
+        for good in (True, False):
+            status, _payload = _post_json_status(
+                port, "/find", {"query": "push ebx\nret", "normalize": good}
+            )
+            self.assertEqual(status, 200)
+
+    def test_every_method_answers_the_json_envelope(self):
+        """Every verb answers the JSON error envelope, never the stdlib's HTML.
+
+        ``BaseHTTPRequestHandler`` answers an unhandled method with
+        ``send_error(501)``, an HTML page: a client parsing responses as JSON
+        got a decode error instead of the status, on exactly the methods
+        (``HEAD``, ``OPTIONS``) it probes first.
+        """
+        import http.client
+
+        port = self._start_server()
+        for method in ("HEAD", "OPTIONS", "PUT", "DELETE", "PATCH", "TRACE"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                conn.request(method, "/find")
+                response = conn.getresponse()
+                body = response.read()
+                self.assertEqual(response.status, 405, method)
+                self.assertEqual(response.getheader("Allow"), "POST", method)
+                self.assertEqual(response.getheader("Content-Type"), "application/json", method)
+                self.assertEqual(response.getheader("Cache-Control"), "no-store", method)
+                # HEAD carries the status and headers of the GET it stands
+                # for, and no body.
+                if method == "HEAD":
+                    self.assertEqual(body, b"")
+                else:
+                    self.assertIn("method not allowed", json.loads(body)["error"])
+            finally:
+                conn.close()
+
+    def test_unknown_path_is_404_on_every_method(self):
+        """An unknown path answers 404 whatever verb addressed it.
+
+        Answering 405 to ``GET /nope`` reported a method problem for a path
+        that does not exist, sending the client to debug its verb instead of
+        its URL.
+        """
+        import http.client
+
+        port = self._start_server()
+        for method in ("GET", "POST", "HEAD"):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            try:
+                conn.request(method, "/nope", body=b"{}" if method == "POST" else None)
+                response = conn.getresponse()
+                response.read()
+                self.assertEqual(response.status, 404, method)
+            finally:
+                conn.close()
+
+    def test_query_string_does_not_change_the_route(self):
+        """``/find?trace=1`` is the ``/find`` endpoint.
+
+        ``self.path`` carries the query string, so a client appending one (a
+        browser, a proxy, a logging library) addressed a path the server does
+        not serve and got a 404 for a request the documentation calls valid.
+        The find parameters are read from the body, so it is dropped.
+        """
+        port = self._start_server()
+        plain = _post_json(port, "/find", {"query": "push ebx\nret"})
+        with_query = _post_json(port, "/find?trace=1&top_n=1", {"query": "push ebx\nret"})
+        self.assertEqual(plain["lsh_candidates"], with_query["lsh_candidates"])
+
     def test_find_rejects_non_numeric_params_cleanly(self):
         """Non-numeric find parameters answer a clean error payload, not a 500.
 

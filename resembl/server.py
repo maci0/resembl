@@ -181,6 +181,13 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # crash int()/float() (and flip ``normalize`` to False) instead of using
     # the configured default.
     provided = {k: v for k, v in body.items() if v is not None}
+    if "normalize" in provided and not isinstance(provided["normalize"], bool):
+        # ``bool()`` is not a type check: a JSON string ``"false"`` is truthy
+        # and the request silently searched the normalized corpus, so a
+        # client asking for the opposite of what it sent got a 200 with the
+        # wrong matches.  The other typed fields reject a wrong type with the
+        # same clean 400; this one now does too.
+        raise BadRequestError("normalize must be a boolean")
     try:
         top_n = int(provided.get("top_n", params.top_n))
         # Coerce inside the same guard as the numeric fields: a JSON string
@@ -204,6 +211,13 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
             "top_n, ngram_size, num_permutations must be integers; "
             "threshold and jaccard_weight must be numbers"
         ) from exc
+    # Same rule as the other integer fields, and the same reason the config
+    # layer bounds ``top_n`` at 1 (``config.VALUE_BOUNDS``): a zero or
+    # negative value truncates every ranking to nothing, so the response says
+    # "no matches" where the caller asked for some.  Left unchecked, a typo
+    # read as a working search that found nothing.
+    if top_n < 1:
+        raise BadRequestError("top_n must be at least 1")
     # Range-check the threshold up front: :class:`ResemblLSH` rejects values
     # outside [0.0, 1.0] anyway, so without this every out-of-range request
     # surfaced as a 500 leaking that internal error instead of a clean one.
@@ -377,6 +391,10 @@ def port_file_cleanup(port_file: str, port: int) -> None:
         pass
 
 
+#: The paths this server serves, each POST-only.
+_FIND_PATHS = ("/find", "/find-batch")
+
+
 class _FindHandler(BaseHTTPRequestHandler):
     """Serves ``POST /find``; one session per request (concurrent reads)."""
 
@@ -388,6 +406,35 @@ class _FindHandler(BaseHTTPRequestHandler):
     # how long a keep-alive connection can hold its handler thread.
     protocol_version = "HTTP/1.1"
     timeout = 30
+
+    def __getattr__(self, name: str) -> Any:
+        """Answer every unhandled method with the JSON 405 envelope.
+
+        ``BaseHTTPRequestHandler`` dispatches on ``do_<METHOD>`` and falls back
+        to ``send_error(501)``, an *HTML* page, for any method without a
+        handler.  ``HEAD`` (every ``curl -I`` and health check) and ``OPTIONS``
+        (every CORS preflight) hit that fallback, so the documented contract
+        ("any other method answers 405", "every response is
+        ``Content-Type: application/json``") was false for exactly the methods
+        a client is most likely to send first.  Resolving any ``do_*`` name to
+        the shared not-allowed answer keeps the envelope uniform whatever verb
+        arrives; a non-``do_`` attribute still raises as usual.
+        """
+        if name.startswith("do_") and name[3:].isupper():
+            return self._method_not_allowed
+        raise AttributeError(name)
+
+    @property
+    def route(self) -> str:
+        """The request path with any query string removed.
+
+        ``self.path`` carries the query string, so a client appending one
+        (``/find?trace=1``, what a browser, proxy or logging library does)
+        addressed a path the server does not serve and got a 404 for a
+        request the documentation says is valid.  The parameters are read
+        from the body, so the query string is dropped.
+        """
+        return self.path.split("?", 1)[0]
 
     @property
     def engine(self) -> Any:
@@ -442,8 +489,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         return declared in ("", "application/json")
 
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
-        if self.path not in ("/find", "/find-batch"):
-            self._respond(404, {"error": f"unknown path: {self.path}"})
+        if self.route not in _FIND_PATHS:
+            self._respond(404, {"error": f"unknown path: {self.route}"})
             return
         if not self._content_type_ok():
             self._respond(415, {"error": "content type must be application/json"})
@@ -452,30 +499,28 @@ class _FindHandler(BaseHTTPRequestHandler):
         if body is None:
             self._respond(400, {"error": "bad request body"})
             return
-        if self.path == "/find":
+        if self.route == "/find":
             self._handle_find(body)
             return
         self._handle_find_batch(body)
 
     def _method_not_allowed(self) -> None:
-        """Answer a non-POST request with the same JSON error envelope."""
+        """Answer a non-POST request with the same JSON error envelope.
+
+        The path is checked first, on every method: an unknown path is a 404
+        whatever verb addressed it, as the documentation says.  Answering 405
+        to ``GET /nope`` instead reported a method problem for a path that
+        does not exist, which sends a client looking at its own verb rather
+        than at the URL it built.
+        """
+        if self.route not in _FIND_PATHS:
+            self._respond(404, {"error": f"unknown path: {self.route}"})
+            return
         self._respond(
             405,
             {"error": f"method not allowed: {self.command} (use POST)"},
             extra_headers={"Allow": "POST"},
         )
-
-    def do_GET(self) -> None:  # pylint: disable=invalid-name; http.server API
-        self._method_not_allowed()
-
-    def do_PUT(self) -> None:  # pylint: disable=invalid-name; http.server API
-        self._method_not_allowed()
-
-    def do_DELETE(self) -> None:  # pylint: disable=invalid-name; http.server API
-        self._method_not_allowed()
-
-    def do_PATCH(self) -> None:  # pylint: disable=invalid-name; http.server API
-        self._method_not_allowed()
 
     def _handle_find(self, body: dict) -> None:
         try:
@@ -575,23 +620,32 @@ class _FindHandler(BaseHTTPRequestHandler):
         extra_headers: dict[str, str] | None = None,
     ) -> None:
         data = json.dumps(payload).encode("utf-8")
+        # A HEAD response carries the headers of the GET it stands for and no
+        # body.  Announcing the body length without writing it would desync
+        # the keep-alive connection (the next request would start mid-payload),
+        # so the length is zero: a HEAD here only ever reports a status the
+        # caller already has, and nothing is lost by not sizing a body that
+        # is never sent.
+        body = b"" if self.command == "HEAD" else data
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         # The payload is always JSON; forbid content-type sniffing so a
         # response can never be reinterpreted as HTML/script by a browser
         # pointed at the endpoint.
         self.send_header("X-Content-Type-Options", "nosniff")
-        # Defense in depth for a browser pointed at the endpoint: deny
-        # framing and script/style/object sources outright, and keep cached
-        # copies of snippet-derived responses out of intermediary caches.
+        # Defense in depth for that browser: deny framing and script/style/
+        # object sources outright.
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        # Keep cached copies of snippet-derived responses out of browser and
+        # intermediary caches.
         self.send_header("Cache-Control", "no-store")
         for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(data)
+        if body:
+            self.wfile.write(body)
 
     def log_message(
         self,

@@ -42,9 +42,11 @@ curl -s "http://127.0.0.1:$port/find" \
 | `POST` | `/find` | Find matches for one query. |
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
 
-Both are read-only. Any other method on either path answers `405`; any other
-path answers `404`. Every response, success or error, is
-`Content-Type: application/json`.
+Both are read-only. Any other method on either path answers `405` with an
+`Allow: POST` header (`HEAD` gets the same status and headers but no body, as
+a `HEAD` response must); any other path answers `404`, on every method. A
+query string is ignored, so `/find?trace=1` is the `/find` endpoint. Every
+response, success or error, is `Content-Type: application/json`.
 
 ### `POST /find`
 
@@ -54,9 +56,9 @@ the server's configured default", exactly like an omitted field):
 | Field | Type | Constraint |
 | ----- | ---- | ---------- |
 | `query` | string | required |
-| `top_n` | integer | default from the server's config. No upper bound is enforced: a large value with a low `threshold` returns the matching corpus in one response |
+| `top_n` | integer | at least `1`. No upper bound is enforced: a large value with a low `threshold` returns the matching corpus in one response |
 | `threshold` | number | `0.0` to `1.0`, and high enough to leave at least 2 LSH bands for `num_permutations`. Must equal the server's configured `lsh_threshold` |
-| `normalize` | boolean | default `true` |
+| `normalize` | boolean | JSON `true` or `false`, default `true`. A string or number is a `400`, not a truthy value |
 | `ngram_size` | integer | at least `1`. Must equal the server's configured `ngram_size` |
 | `num_permutations` | integer | `2` to `resembl.scoring.MAX_NUM_PERM`. Must equal the server's configured `num_permutations` |
 | `jaccard_weight` | number | `0.0` to `1.0` |
@@ -101,7 +103,7 @@ key and the other queries still return results, so the response is always
 ```json
 {"results": [
   {"query": "push ebx", "lsh_candidates": 7, "matches": []},
-  {"query": "mov eax", "error": "query must be a string"}
+  {"query": 42, "error": "query must be a string"}
 ]}
 ```
 
@@ -112,8 +114,8 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | Status | When |
 | ------ | ---- |
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing or wrongly typed required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
-| `404` | Unknown path. |
-| `405` | A method other than `POST`. |
+| `404` | Unknown path, on any method. |
+| `405` | A method other than `POST` on a served path. Carries `Allow: POST`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
 

@@ -160,6 +160,23 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `serve` answers every HTTP method with its JSON error envelope.  A method
+  the handler did not implement (`HEAD`, `OPTIONS`, ...) fell through to
+  `BaseHTTPRequestHandler`'s `501`, an HTML page, so a client parsing
+  responses as JSON got a decode error instead of the status, on exactly the
+  methods it probes first.  `HEAD` on `/find` now answers `405` with the
+  headers and no body; every other verb answers `405` with `Allow: POST`.
+- `serve` answers `404`, not `405`, for an unknown path on any method.
+  `GET /nope` reported a method problem for a path that does not exist.
+- `serve` ignores a query string on the request path, so `/find?trace=1` is
+  the `/find` endpoint instead of a `404` for a documented request.
+- `serve` rejects a `top_n` below 1 with a `400`.  Every other numeric
+  parameter is range-checked and the config layer bounds `top_n` at 1; a zero
+  or negative value truncated the ranking to nothing, so the response read as
+  a working search that found nothing.
+- `serve` rejects a non-boolean `normalize` with a `400`.  A client sending
+  the string `"false"` asked for normalization off and got a `200` with the
+  matches for the normalized corpus, because `bool("false")` is true.
 - `resembl verify` exits 1 on a stale index in every output format.  The
   documented exit status was only applied to the table render, so
   `verify --format json` reported the same issues and still exited 0, and a
