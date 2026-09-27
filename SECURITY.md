@@ -1,14 +1,12 @@
 # Security policy
 
-Last reviewed: 2026-09-27, against the tree at version 2.0.0
+Last reviewed: 2026-09-27, against the tree at version 3.0.0
 (`pyproject.toml:3`).
 
-This describes the current tree, not the published 2.0.0 release. The `serve`
+This describes the current tree and the 3.0.0 release. The `serve`
 controls below (the loopback `Host` check, `serve -v` request logging, the
 `0700` cache directory, the `0600` port file, and the 1000-row `top_n` cap)
-are `[Unreleased]` work in `CHANGELOG.md`; a consumer running the published
-2.0.0 has none of them, and an unauthenticated `POST /find` there returns as
-many rows as it is asked for.
+are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
 
@@ -31,10 +29,10 @@ The repository is <https://github.com/maci0/resembl>.
 
 | Version | Supported |
 | ------- | --------- |
-| 2.x (current release line) | yes |
-| 1.x and earlier | no |
+| 3.x (current release line) | yes |
+| 2.x and earlier | no |
 
-The current release is 2.0.0. Older lines receive no fixes; upgrade to the
+The current release is 3.0.0. Older lines receive no fixes; upgrade to the
 current line before reporting an issue against them.
 
 ## Threat model
