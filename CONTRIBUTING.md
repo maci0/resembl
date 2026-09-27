@@ -132,6 +132,11 @@ The resembl project follows a test-driven approach to ensure quality and correct
     ```
     If a crash is found, the fuzzer will stop and create a `crash-<hash>` file in the root directory containing the input that caused the failure. This file is crucial for debugging and should be included in any bug report.
 
+    `make fuzz` wraps the same command: it runs every script in `fuzzers/` for `FUZZ_SECONDS` (60 by default) and asks uv for the `fuzz` extra itself, so there is no separate sync step to remember. Pass one script to fuzz only that entry point:
+    ```bash
+    make fuzz FUZZER=fuzz_code_tokenize.py FUZZ_SECONDS=300
+    ```
+
 - **Code Style and Quality:** As configured during setup, our pre-commit hooks will automatically run `black` for formatting, `ruff` and `pylint` for linting, and `mypy` for static type checking before each commit. You do not need to run these tools manually. If a hook fails, the commit will be aborted, and you will see an error message indicating what needs to be fixed. Simply correct the issue and attempt the commit again.  
 
 ### Commit Your Changes

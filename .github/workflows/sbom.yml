@@ -21,11 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install uv
-        # Pinned uv version, matching the other workflows: the installer
-        # script is fetched over the network and otherwise pulls the newest
-        # uv, so the tool that reads uv.lock drifts between runs.
-        run: curl -LsSf https://astral.sh/uv/install.sh | env UV_VERSION=0.12.13 sh
+      - uses: ./.github/actions/setup-uv
 
       - name: Export CycloneDX SBOM from uv.lock
         # Runtime dependencies only: this is the set that ships to users.
@@ -34,7 +30,7 @@ jobs:
         run: uv export --preview-features sbom-export --format cyclonedx1.5 --output-file sbom.cdx.json
 
       - name: Validate SBOM parses as JSON
-        run: python3 -c "import json; json.load(open('sbom.cdx.json'))"
+        run: jq empty sbom.cdx.json
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4

@@ -4,9 +4,13 @@
 #
 # `make help` lists the targets.
 
-.PHONY: help install format lint types test db-test check
+.PHONY: help install format lint types test db-test fuzz check
 
 PYTEST_ARGS ?=
+
+# Seconds atheris fuzzes for, per target.  A fuzzer run without a bound
+# never returns, so the duration is an argument rather than a constant.
+FUZZ_SECONDS ?= 60
 
 # The PostgreSQL and MySQL integration modules skip themselves unless
 # RESEMBL_TEST_PG_URL / RESEMBL_TEST_MYSQL_URL are set.  CI sets both, so a
@@ -45,6 +49,19 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 		exit 1; \
 	fi
 	uv run pytest -q $(DB_TESTS) $(PYTEST_ARGS)
+
+# atheris lives in the `fuzz` extra, so the target asks uv for it instead of
+# failing on an import the contributor has to guess at.  Naming one script
+# (make fuzz FUZZER=fuzz_code_tokenize.py) is the common case while working
+# on a single entry point; with no name, every fuzzer runs in turn.
+FUZZERS = $(notdir $(wildcard fuzzers/fuzz_*.py))
+FUZZER ?=
+
+fuzz:  ## Fuzz every entry point for FUZZ_SECONDS, or one via FUZZER=<name> (installs the fuzz extra)
+	@for f in $(if $(FUZZER),$(FUZZER),$(FUZZERS)); do \
+		echo "== fuzzers/$$f for $(FUZZ_SECONDS)s"; \
+		uv run --locked --extra fuzz ./fuzzers/$$f -max_total_time=$(FUZZ_SECONDS) || exit 1; \
+	done
 
 # The order mirrors .github/workflows/tests.yml and pylint.yml: static
 # checks first (cheap, fixable), then the suite.

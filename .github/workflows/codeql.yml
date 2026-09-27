@@ -37,9 +37,9 @@ jobs:
       with:
         languages: ${{ matrix.language }}
 
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v3
-
+    # No autobuild step: Python is extracted from source by CodeQL itself, so
+    # an autobuild pass only adds a way to fail for a compiler the project does
+    # not use.
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:

@@ -24,11 +24,9 @@ jobs:
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
     - uses: actions/checkout@v5
-    - name: Install uv
-      # Pinned uv version: the installer script is fetched over the network
-      # and silently pulls the newest uv otherwise, so the build tool drifts
-      # between runs. UV_VERSION selects an exact release.
-      run: curl -LsSf https://astral.sh/uv/install.sh | env UV_VERSION=0.12.13 sh
+    - uses: ./.github/actions/setup-uv
+      with:
+        python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       # Installs exactly the committed uv.lock (hash-verified, reproducible)
       # and fails if the lock has drifted from pyproject.toml.

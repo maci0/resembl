@@ -1,0 +1,33 @@
+# Installs the pinned uv release and caches what it downloads, so every
+# workflow shares one definition instead of repeating the installer script.
+#
+# UV_VERSION is pinned: the installer script is fetched over the network and
+# silently pulls the newest uv otherwise, so the tool that reads uv.lock
+# drifts between runs. The cache key is keyed on uv.lock and the interpreter,
+# because uv keys its wheel cache by Python version, so the 3.14 pylint leg
+# never serves 3.13 wheels.
+name: Set up uv
+description: Install the pinned uv release and cache its download and wheel caches.
+
+inputs:
+  python-version:
+    description: Interpreter uv should build the environment from, e.g. "3.14". Empty leaves uv to read .python-version.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the uv cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/uv
+          ~/.local/share/uv
+        key: uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-${{ hashFiles('uv.lock') }}
+        restore-keys: |
+          uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-
+
+    - name: Install uv
+      shell: bash
+      run: curl -LsSf https://astral.sh/uv/install.sh | env UV_VERSION=0.12.13 sh
