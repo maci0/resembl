@@ -13,7 +13,12 @@
 # no CI run, ever sees.
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    # Pinned to the commit, not the tag: a tag is a mutable ref, so whoever
+    # controls the upstream repository could repoint v5.0.0 and have every
+    # `git commit` and every CI run execute the new tree with the whole
+    # working copy in reach.  The comment is what `pre-commit autoupdate`
+    # reads back, so the release stays identifiable.
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
     hooks:
     -   id: check-yaml
     -   id: end-of-file-fixer

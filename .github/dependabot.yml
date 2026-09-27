@@ -1,0 +1,48 @@
+# Update monitoring.
+#
+# Nothing else in the tree watches the dependency graph: the SBOM workflow
+# records what shipped, dependency-review blocks a vulnerable version on a
+# pull request, and uv.lock pins exact versions with hashes, but none of them
+# opens the update.  Without this file a security fix in a runtime dependency
+# sits unnoticed until a scanner happens to flag it at release time.
+#
+# `uv.lock` is updated in place (uv 0.12 understands it as a lockfile, so no
+# manifest edit is generated), and every bump arrives as a pull request that
+# runs the normal gate, which is where it should be reviewed.
+#
+# A pull request that fails before the gate with a `required-version` error is
+# this file meeting the exact pin in pyproject.toml: Dependabot brings its own
+# uv, so bump `required-version` and `UV_VERSION` together in the same change
+# rather than dropping the pin.
+version: 2
+
+updates:
+  # Runtime and development dependencies, plus the build backend pin.  They
+  # share one lockfile, so they are grouped: separate pull requests would
+  # re-resolve against each other and conflict on every file.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+
+  # The workflows pin actions by tag, so an upstream release never reaches a
+  # run until it is reviewed here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    groups:
+      actions:
+        patterns:
+          - "*"
