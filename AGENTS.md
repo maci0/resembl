@@ -7,7 +7,9 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Requires Python 3.13 or newer and uv.
+Requires Python 3.13 or newer and uv exactly 0.12.13: `pyproject.toml` pins it
+under `[tool.uv] required-version`, so any other uv release fails at the first
+command instead of after it has rewritten the lockfile.
 
 ```bash
 uv sync --locked --extra dev   # installs .venv from the hash-pinned uv.lock, same as CI
@@ -115,7 +117,8 @@ touches the matching docs in the same change:
 - `README.md` when installation, a core concept, or basic usage changes. A new
   flag also lands in the tool's own `--help`.
 - The relevant file in `docs/` (`api_reference.md`, `http_api.md`,
-  `flowcharts.md`, `custom_database.md`, `user_stories.md`, `tutorial.md`).
+  `flowcharts.md`, `custom_database.md`, `user_stories.md`, `tutorial.md`,
+  `man.md`, `THREAT_MODEL.md`).
 - `CHANGELOG.md` under `## [Unreleased]`, grouped `Added` / `Changed` /
   `Fixed`, written for a consumer: what changed for you, and the migration step
   for anything breaking.
@@ -170,8 +173,9 @@ contributor.
 
 ## Releasing
 
-A release is one `release X.Y.Z` commit from `main`, followed by tag `vX.Y.Z`;
-the tag is what the published version is taken from. SemVer decides the
+A release is a maintainer's one `release X.Y.Z` commit on `main`, the single
+exception to "never commit on `main`", followed by tag `vX.Y.Z`; the tag is
+what the published version is taken from. SemVer decides the
 number: a removed or renamed public export, a changed signature, default,
 stored format (fingerprint, database, cache) or `serve` response, or a raised
 minimum Python version, is major; a new command, flag or config field is
