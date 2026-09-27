@@ -196,14 +196,14 @@ resembl/
 This project is managed with [uv](https://github.com/astral-sh/uv). First, install uv if you haven't already. Then, from the root of the project, run:
 
 ```bash
-# 1. Create and activate the virtual environment from the pinned interpreter
-#    (.python-version) and the committed lockfile
-uv sync --locked --extra dev
+# 1. Create .venv from the pinned interpreter (.python-version) and the
+#    committed lockfile, then install the pre-commit hooks
+make install
 source .venv/bin/activate
-
-# 2. (Recommended for developers) Install pre-commit hooks
-uv run pre-commit install
 ```
+
+Without `make`, the same two steps are `uv sync --locked --extra dev` and
+`uv run pre-commit install`.
 
 `uv sync --locked` installs the exact versions recorded in `uv.lock` and fails
 if that lockfile has drifted from `pyproject.toml`, so a checkout builds the
@@ -343,8 +343,14 @@ uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
 ```
 
 `make help` lists the shortcuts (`make test`, `make lint`, `make types`,
-`make format`). `make check` runs exactly what CI runs: mypy, ruff, black,
-pylint, then the test suite.
+`make format`, `make db-test`). `make check` runs exactly what CI runs: mypy,
+ruff, black, pylint, then the test suite.
+
+The PostgreSQL and MySQL integration tests skip themselves unless
+`RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is
+green without a database server. CI sets both. `make check` prints a note when
+they are unset, and `make db-test` runs just those two modules against servers
+you point it at. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the commands.
 
 #### Code Coverage
 

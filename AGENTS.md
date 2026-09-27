@@ -41,6 +41,11 @@ Coverage may rise, never fall. mypy's incremental cache is not safe against
 concurrent writers, which is why the mypy hook is `require_serial`; run these
 commands one at a time.
 
+`tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip
+themselves unless `RESEMBL_TEST_PG_URL` / `RESEMBL_TEST_MYSQL_URL` are set, so
+the commands above cover less than CI does. A change touching either dialect
+needs `make db-test` against real servers before it is handed over.
+
 Never silence a finding to get a gate green: fix the code, or scope a single
 inline `# noqa` / `# pylint: disable=` that names why. The global `disable` list
 in `pyproject.toml` is for checks owned by another tool or blocked by a

@@ -42,27 +42,22 @@ Follow these steps to create a local development environment. This workflow uses
     ```bash
     cd resembl
     ```
-4.  **Create and Activate the Virtual Environment**
-    This command creates a virtual environment in the `.venv` directory.
+4.  **Install the Development Environment**
+    This creates `.venv` from `.python-version` and `uv.lock`, then installs the Git hooks. Both steps are exactly what CI runs, in one command:
     ```bash
-    uv venv
+    make install
     ```
-    Activate the virtual environment. You will need to do this every time you open a new terminal session to work on the project.
+    Activate the environment. You will need to do this every time you open a new terminal session to work on the project.
     ```bash
     source .venv/bin/activate
     ```
-
-5.  **Install Dependencies**
-    This command creates `.venv`, then installs the exact versions recorded in `uv.lock`. Every locked artifact is hash-pinned, so the install is reproducible and verified, matching what CI runs.
+    On Windows, use `.venv\Scripts\Activate.ps1` (PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe). The manual equivalent, if you would rather not use `make`, is:
     ```bash
     uv sync --locked --extra dev
-    ```
-6.  **Install Pre-Commit Hooks**
-    This is a critical step for automating quality checks. This command sets up Git hooks that will automatically run formatters and linters on your code before each commit.
-    ```bash
     uv run pre-commit install
     ```
-This setup process is designed to "shift quality left," moving the responsibility for basic code health checks from the final review stage to the developer's local machine. The old way involved a contributor manually running a checklist of commands (pytest, mypy, black, etc.), which was error-prone and led to frustrating cycles of CI failures and fixes. The new, automated workflow using pre-commit hooks  ensures that every commit is already vetted for style, formatting, and common errors. This frees the contributor from remembering the checklist and allows the human reviewer to focus on the more important aspects of the change, such as its logic and architecture. This automation transforms quality assurance from a manual chore into an invisible, supportive guardrail, making the contribution process faster and more pleasant for everyone.  
+    `uv sync --locked` creates `.venv` itself, so `uv venv` beforehand is not needed. Every locked artifact is hash-pinned, so the install is reproducible and verified, matching what CI runs. The pre-commit hooks run `black`, `ruff`, `mypy` and `pylint` on each commit, so a hook failure is a fix-and-commit-again, not a surprise at review time.
+ 
 
 ## Part 3: The Development Lifecycle
 Once your environment is set up, you are ready to start contributing. This section outlines the typical workflow for making a change to resembl.
@@ -106,6 +101,14 @@ The resembl project follows a test-driven approach to ensure quality and correct
     uv run pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
     ```
     `make help` lists the shortcuts: `make test`, `make lint`, `make types`, `make format`, `make check`.
+
+- **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
+    ```bash
+    RESEMBL_TEST_PG_URL=postgresql+pg8000://user:pass@host/db \
+    RESEMBL_TEST_MYSQL_URL=mysql+pymysql://user:pass@host/db \
+    make db-test
+    ```
+    `make check` prints a note naming the skipped modules when either variable is unset, so the gap is never silent.
 
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
