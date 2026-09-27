@@ -151,9 +151,12 @@ def console_utf8_reconfigure() -> None:
     for stream in (sys.stdout, sys.stderr):
         if not isinstance(stream, io.TextIOWrapper):
             continue
-        if stream.closed:
+        try:
+            if _encoding_is_utf8(stream.encoding):
+                stream.reconfigure(newline="\n")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace", newline="\n")
+        except ValueError:
+            # A stream the caller already closed or detached cannot be
+            # reconfigured, and nothing will be written to it either.
             continue
-        if _encoding_is_utf8(stream.encoding):
-            stream.reconfigure(newline="\n")
-            continue
-        stream.reconfigure(encoding="utf-8", errors="replace", newline="\n")
