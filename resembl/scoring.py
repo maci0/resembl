@@ -61,6 +61,15 @@ MAX_NUM_PERM = 1 << 12
 #: so cloning a template produces identical fingerprints.
 _MINHASH_TEMPLATES: dict[int, MinHash] = {}
 
+#: Templates held at once.  A template carries 24 bytes per permutation, and
+#: *num_perm* is a request parameter (``/find`` accepts 2 to
+#: ``MAX_NUM_PERM`` = 4096), so an unbounded dict let a client that cycles
+#: permutation counts grow the warm server by hundreds of MB: every distinct
+#: count added a template that was never released.  Real configurations use one
+#: or two counts, so the cap only pays off for a hostile cycling client, which
+#: then pays a template rebuild on the counts it cycles back to.
+_MINHASH_TEMPLATES_MAX = 8
+
 #: Serializes first-time template construction for *minhash_new*: the serve
 #: process runs one handler thread per request, and the first concurrent
 #: finds at a new permutation count all miss the cache and race this
@@ -1192,6 +1201,11 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
                 # the property here means every clone deep-copies the ready
                 # arrays instead (~10 µs per fingerprint, ~30x faster).
                 _ = template.permutations
+                # Evict the oldest entry (dicts keep insertion order) before
+                # inserting, so the cache stays at ``_MINHASH_TEMPLATES_MAX``
+                # entries whatever permutation counts a caller cycles through.
+                if len(_MINHASH_TEMPLATES) >= _MINHASH_TEMPLATES_MAX:
+                    del _MINHASH_TEMPLATES[next(iter(_MINHASH_TEMPLATES))]
                 _MINHASH_TEMPLATES[num_perm] = template
     return copy.deepcopy(template)
 

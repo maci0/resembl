@@ -25,6 +25,7 @@ import os
 import socket
 import sys
 import threading
+import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,14 +53,21 @@ logger = logging.getLogger(__name__)
 #: ~1.4 ms, never stale.  Non-SQLite backends get no version counter and
 #: bypass the cache.  The key ends with the serving engine's URL: one
 #: process may run several servers for different databases (tests,
-#: embedded callers), and ``data_version`` is per-database — without that final
-#: component a hit computed for database A could be served to database B
-#: whenever both counters happened to carry the same value.
+#: embedded callers), and the version counter is per-database — without that
+#: final component a hit computed for database A could be served to database
+#: B whenever both counters happened to carry the same value.
 _RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
 _RESULT_CACHE_MAX = 128
 #: Serializes access to the shared cache: requests run in concurrent
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
+
+#: One single-connection probe engine per served database, used only by
+#: :func:`_db_version`.  Weakly keyed so a disposed engine takes its probe
+#: (and the SQLite handle behind it) with it.
+_VERSION_PROBES: weakref.WeakKeyDictionary[Engine, Engine] = weakref.WeakKeyDictionary()
+#: The probe is one shared connection, so reading it is serialized.
+_VERSION_PROBE_LOCK = threading.Lock()
 
 #: Find parameters used *only* when ``_find_one`` is called without a
 #: serving server (tests, direct API use): they mirror
@@ -77,12 +85,43 @@ def _session_engine(session: Session) -> Engine:
 
 
 def _db_version(session: Session) -> int | None:
-    """Return a DB-change counter for cache invalidation (SQLite only)."""
-    if session.get_bind().dialect.name != "sqlite":
-        return None
-    from sqlmodel import text
+    """Return a DB-change counter for cache invalidation (SQLite only).
 
-    return int(session.execute(text("PRAGMA data_version")).scalar() or 0)
+    ``PRAGMA data_version`` is a *per-connection* counter: every connection
+    starts its own count and only advances when it observes a commit made by
+    a different connection, so the same number means nothing across
+    connections.  Probing on the request's pooled connection therefore let a
+    connection that had already seen the last commit serve a cached payload
+    computed before it to a connection that had not — the guard silently
+    stopped guarding as soon as the pool held more than one live connection.
+    One shared probe connection per database (see :data:`_VERSION_PROBES`)
+    makes the counter advance in step with the file for the whole cache.
+
+    ``None`` means "no counter": callers bypass the cache.
+    """
+    engine = _session_engine(session)
+    if engine.dialect.name != "sqlite":
+        return None
+    url = engine.url
+    # A private in-memory database is per-connection, so a probe would read
+    # an empty database of its own and report a constant version.  Those
+    # engines (tests, embedded callers) go uncached rather than wrong.
+    if url.database in (None, "", ":memory:"):
+        return None
+    from sqlalchemy.pool import StaticPool
+    from sqlmodel import create_engine, text
+
+    with _VERSION_PROBE_LOCK:
+        probe = _VERSION_PROBES.get(engine)
+        if probe is None:
+            # StaticPool keeps every checkout on the same connection; the
+            # probe is threaded, so the sqlite3 handle must be shareable.
+            probe = create_engine(
+                url, poolclass=StaticPool, connect_args={"check_same_thread": False}
+            )
+            _VERSION_PROBES[engine] = probe
+        with probe.connect() as conn:
+            return int(conn.execute(text("PRAGMA data_version")).scalar() or 0)
 
 
 class BadRequestError(ValueError):

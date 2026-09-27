@@ -177,6 +177,36 @@ class TestMinHashStorage(BaseScalingTest):
         self.assertIsNotNone(snippet_get(self.session, row.checksum).get_minhash_obj())
 
 
+class TestMinHashTemplateBound(BaseScalingTest):
+    """The MinHash template cache stays bounded under cycling perm counts."""
+
+    def test_template_cache_is_bounded(self):
+        from resembl.scoring import _MINHASH_TEMPLATES, _MINHASH_TEMPLATES_MAX, minhash_new
+
+        counts = [_MINHASH_TEMPLATES_MAX + 10, *range(64, 64 + _MINHASH_TEMPLATES_MAX + 10)]
+        for num_perm in counts:
+            minhash_new(num_perm)
+        self.assertLessEqual(len(_MINHASH_TEMPLATES), _MINHASH_TEMPLATES_MAX)
+
+    def test_evicted_template_is_rebuilt_identically(self):
+        from resembl.scoring import (
+            _MINHASH_TEMPLATES,
+            _MINHASH_TEMPLATES_MAX,
+            minhash_new,
+        )
+
+        minhash_new(4096)
+        expected = minhash_new(64)
+        for num_perm in range(65, 65 + _MINHASH_TEMPLATES_MAX):
+            minhash_new(num_perm)
+        self.assertNotIn(64, _MINHASH_TEMPLATES, "the oldest template must have been evicted")
+        rebuilt = minhash_new(64)
+        rebuilt.update(b"push ebx; ret")
+        expected.update(b"push ebx; ret")
+        # Eviction costs a rebuild, never a different fingerprint.
+        self.assertEqual(rebuilt.hashvalues.tolist(), expected.hashvalues.tolist())
+
+
 class TestBatchConsistency(BaseScalingTest):
     """code_create_minhash_batch must agree with code_create_minhash."""
 

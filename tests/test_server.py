@@ -1342,6 +1342,67 @@ class TestServerMode(unittest.TestCase):
         port_file_cleanup(port_file, 1111)
 
 
+class TestResultCacheCoherence(unittest.TestCase):
+    """The version guard holds across the connections of a pool."""
+
+    def setUp(self):
+        self._db = tempfile.mktemp(suffix=".db")
+        self.addCleanup(lambda: os.path.exists(self._db) and os.remove(self._db))
+        self._engine = create_engine(f"sqlite:///{self._db}", pool_size=4)
+        SQLModel.metadata.create_all(self._engine)
+        self._session = Session(self._engine)
+        self.addCleanup(self._session.close)
+        snippet_add_batch(
+            self._session,
+            [
+                snippet_prepare(f"f{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+                for i in range(20)
+            ],
+        )
+
+    def _write_from_another_process(self, code: str) -> None:
+        """Commit a snippet on a connection the serving engine does not own."""
+        import sqlite3
+
+        checksum, name, snippet_code, minhash = snippet_prepare("ext", code, 3)
+        raw = sqlite3.connect(self._db)
+        try:
+            raw.execute(
+                "INSERT INTO snippet (checksum, names, code, minhash, tags) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (checksum, f'["{name}"]', snippet_code, minhash, "[]"),
+            )
+            raw.commit()
+        finally:
+            raw.close()
+
+    def test_stale_entry_not_served_by_a_second_pooled_connection(self):
+        from resembl.server import _RESULT_CACHE, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        body = {"top_n": 5}
+
+        # Two live pooled connections, as the serving pool holds under load.
+        first = Session(self._engine)
+        second = Session(self._engine)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+
+        _find_one(first, body, query)
+        self._write_from_another_process("push ecx\nmov eax, 250\npop ecx\nret")
+        cached = _find_one(first, body, query)
+        self.assertGreater(cached["lsh_candidates"], 0)
+
+        # A second write, observed by the first connection only.  The other
+        # connection still reports the counter value the payload was cached
+        # under, and would hand back that same stale object.
+        self._write_from_another_process("push edx\nmov eax, 251\npop edx\nret")
+        after = _find_one(second, body, query)
+        self.assertIsNot(after, cached, "a write from another connection must invalidate the entry")
+
+
 class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""
 
