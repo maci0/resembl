@@ -223,26 +223,33 @@ unset, `$XDG_CONFIG_HOME/resembl` is used if `XDG_CONFIG_HOME` is defined (the
 same fallback applies to the cache directory via `RESEMBL_CACHE_DIR` /
 `XDG_CACHE_HOME`).
 
-| Key               | Default | Description |
-|-------------------|--------:|-------------|
-| `lsh_threshold`   | `0.5`   | Minimum Jaccard similarity used when querying the LSH index. Lower values yield more candidates. |
-| `num_permutations`| `128`   | Number of permutations used when building MinHash fingerprints. |
-| `top_n`           | `5`     | Number of matches returned by the `find` command. |
-| `ngram_size`      | `3`     | Token n-gram size for shingling. |
-| `jaccard_weight`  | `0.4`   | Weight of Jaccard similarity in the hybrid score (0.0–1.0). |
-| `format`          | `table` | Default output format (`table`, `json`, or `csv`). |
+| Key               | Default | Range | Description |
+|-------------------|--------:|-------|-------------|
+| `lsh_threshold`   | `0.5`   | `0.0 <= v < 0.99` | Minimum Jaccard similarity used when querying the LSH index. Lower values yield more candidates. |
+| `num_permutations`| `128`   | `2 <= v <= 4096`  | Number of permutations used when building MinHash fingerprints. |
+| `top_n`           | `5`     | `v >= 1`          | Number of matches returned by the `find` command. |
+| `ngram_size`      | `3`     | `v >= 1`          | Token n-gram size for shingling. |
+| `jaccard_weight`  | `0.4`   | `0.0 <= v <= 1.0` | Weight of Jaccard similarity in the hybrid score. |
+| `format`          | `table` | `table`, `json`, `csv` | Default output format. |
 
-The database backend is selected with the `DATABASE_URL` environment
+`resembl config set` refuses a value outside its range. A hand-edited file
+holding one is reported on stderr and ignored (the default is used), so a
+bad value cannot quietly build a degenerate index or return nothing.
+
+The database backend is selected with the `RESEMBL_DATABASE_URL` environment
 variable: SQLite (default, `sqlite:///assembly.db`), PostgreSQL
 (`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+pymysql://…`), or
-DuckDB (`duckdb:///file.db`).  The `pg8000` and `pymysql` drivers ship with
-the package; the compiled DuckDB driver is opt-in, so install the extra first:
+DuckDB (`duckdb:///file.db` via `duckdb-engine`).  The `pg8000` and `pymysql`
+drivers ship with the package; the compiled DuckDB driver is opt-in, so
+install the extra first:
 
 ```bash
 uv pip install "resembl[duckdb]"
 ```
 
-See [Using a Custom Database](docs/custom_database.md) for details.
+An unprefixed `DATABASE_URL` is still honored when `RESEMBL_DATABASE_URL` is
+unset, so an existing deployment keeps working.  See
+[Using a Custom Database](docs/custom_database.md) for details.
 
 **Example `config.toml`:**
 ```toml
@@ -430,7 +437,7 @@ the optimization.
 
 ### Scaling: the pieces that keep it fast
 
-- **Backends** — `DATABASE_URL` selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
+- **Backends** — `RESEMBL_DATABASE_URL` (falling back to `DATABASE_URL`) selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
   the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
   [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
   in CI on every push; DuckDB runs locally in the suite.

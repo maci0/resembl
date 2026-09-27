@@ -22,7 +22,6 @@ import csv
 import difflib
 import json
 import logging
-import math
 import multiprocessing
 import operator
 import os
@@ -51,6 +50,7 @@ from .config import (
     load_config,
     remove_config_key,
     update_config,
+    validate_value,
 )
 from .core import (
     IndexBuildError,
@@ -85,7 +85,7 @@ from .core import (
     snippet_tag_remove,
     snippet_version_list,
 )
-from .database import db_create, db_url_mask, get_engine
+from .database import db_create, db_url_get, db_url_mask, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .scoring import MAX_NUM_PERM
 from .theme import ACCENT, score_color
@@ -718,10 +718,11 @@ def app_callback(
         db_create()
     except SQLAlchemyError as e:
         # The URL may carry credentials (DATABASE_URL=...://user:pass@host/db):
-        # mask them before the message reaches the terminal.
+        # mask them before the message reaches the terminal.  The URL comes
+        # from the same resolver the engine used, so the message names the
+        # database that actually failed.
         err_console.print(
-            f"[red]Error:[/red] cannot open the database "
-            f"({db_url_mask(os.environ.get('DATABASE_URL', 'sqlite:///assembly.db'))}): {e}"
+            f"[red]Error:[/red] cannot open the database ({db_url_mask(db_url_get())}): {e}"
         )
         raise typer.Exit(code=1) from e
     state.session = Session(get_engine())
@@ -1920,20 +1921,14 @@ def config_set_cmd(
             f"{type(default_value).__name__}, got '{value}'."
         )
         raise typer.Exit(code=USAGE_ERROR) from exc
-    if isinstance(typed_value, float) and not math.isfinite(typed_value):
-        # "nan"/"inf" coerce to a float cleanly but would poison every
-        # downstream calculation (a NaN jaccard_weight makes every similarity
-        # score NaN) — reject them like any other unparseable spelling.
-        err_console.print(
-            f"[red]Error:[/red] Invalid value for '{key}': expected a finite "
-            f"{type(default_value).__name__}, got '{value}'."
-        )
-        raise typer.Exit(code=USAGE_ERROR)
-    if key == "format" and typed_value not in FORMATS:
-        err_console.print(
-            f"[red]Error:[/red] Invalid value for 'format': expected one of "
-            f"{', '.join(FORMATS)}, got '{value}'."
-        )
+    # "nan"/"inf" coerce to a float cleanly but would poison every downstream
+    # calculation (a NaN jaccard_weight makes every similarity score NaN), and
+    # a value outside the range the code works in (ngram_size 0, threshold 5.0)
+    # is a silent misconfiguration rather than a setting: reject both here,
+    # with the same checker the config file is read through (config.validate_value).
+    problem = validate_value(key, typed_value)
+    if problem is not None:
+        err_console.print(f"[red]Error:[/red] Invalid value for '{key}': {problem}, got '{value}'.")
         raise typer.Exit(code=USAGE_ERROR)
     try:
         new_config = update_config(key, typed_value)

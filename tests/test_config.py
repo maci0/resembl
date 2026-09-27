@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from typing import ClassVar
 from unittest.mock import patch
 
 from resembl.config import (
@@ -15,7 +16,10 @@ from resembl.config import (
     remove_config_key,
     save_config,
     update_config,
+    validate_value,
 )
+from resembl.database import DEFAULT_DB_URL, create_db_engine, db_url_get
+from resembl.scoring import MAX_NUM_PERM
 
 
 class TestConfig(unittest.TestCase):
@@ -291,3 +295,112 @@ class TestConfig(unittest.TestCase):
             env = {"RESEMBL_CONFIG_DIR": override, "XDG_CONFIG_HOME": xdg}
             with patch.dict(os.environ, env):
                 self.assertEqual(config_dir_get(), override)
+
+
+class TestConfigValueRanges(unittest.TestCase):
+    """A value inside its field's type but outside its range is a fault.
+
+    Type coercion alone let ``ngram_size = 0`` through, and the reindex it
+    drives produces degenerate fingerprints (every shingle collapses to the
+    empty token, so every snippet matches every other) with no error at any
+    point.  ``lsh_threshold = 5.0`` and ``top_n = -1`` fail at use instead.
+    """
+
+    #: (key, value) pairs the range check must refuse.
+    OUT_OF_RANGE: ClassVar[list[tuple[str, float]]] = [
+        ("lsh_threshold", 5.0),
+        ("lsh_threshold", -0.1),
+        ("lsh_threshold", 0.99),
+        ("num_permutations", 1),
+        ("num_permutations", MAX_NUM_PERM + 1),
+        ("top_n", 0),
+        ("top_n", -3),
+        ("ngram_size", 0),
+        ("jaccard_weight", 1.5),
+        ("jaccard_weight", -0.5),
+    ]
+
+    def test_validate_value_refuses_out_of_range(self):
+        """Each out-of-range value comes back with a reason, not applied."""
+        for key, value in self.OUT_OF_RANGE:
+            with self.subTest(key=key, value=value):
+                self.assertIsNotNone(validate_value(key, value))
+
+    def test_validate_value_accepts_defaults(self):
+        """The shipped defaults are inside their own ranges."""
+        for key, value in DEFAULTS.items():
+            with self.subTest(key=key):
+                self.assertIsNone(validate_value(key, value))
+
+    def test_load_config_keeps_out_of_range_values_out(self):
+        """A hand-edited out-of-range value is warned about and ignored."""
+        for key, value in self.OUT_OF_RANGE:
+            with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = os.path.join(temp_dir, "config.toml")
+                with open(config_path, "w", encoding="utf-8") as f:
+                    f.write(f"{key} = {value!r}\n")
+                with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                    with self.assertLogs("resembl.config", level="WARNING"):
+                        config = load_config()
+                self.assertEqual(getattr(config, key), DEFAULTS[key])
+
+    def test_update_keeps_out_of_range_values_out(self):
+        """update() refuses a bad range instead of applying it."""
+        cfg = ResemblConfig()
+        with self.assertLogs("resembl.config", level="WARNING"):
+            cfg.update({"ngram_size": 0, "top_n": -1, "jaccard_weight": 2.0, "lsh_threshold": 0.8})
+        self.assertEqual(cfg.ngram_size, DEFAULTS["ngram_size"])
+        self.assertEqual(cfg.top_n, DEFAULTS["top_n"])
+        self.assertEqual(cfg.jaccard_weight, DEFAULTS["jaccard_weight"])
+        # An in-range value in the same update still applies.
+        self.assertEqual(cfg.lsh_threshold, 0.8)
+
+
+class TestDatabaseUrlEnv(unittest.TestCase):
+    """Which environment variable names the database, and in what order."""
+
+    def test_namespaced_name_wins(self):
+        """RESEMBL_DATABASE_URL beats the unprefixed DATABASE_URL."""
+        env = {
+            "RESEMBL_DATABASE_URL": "sqlite:///namespaced.db",
+            "DATABASE_URL": "sqlite:///generic.db",
+        }
+        with patch.dict(os.environ, env):
+            self.assertEqual(db_url_get(), "sqlite:///namespaced.db")
+
+    def test_generic_name_still_works(self):
+        """The unprefixed name is honored when the namespaced one is unset."""
+        with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///generic.db"}, clear=False):
+            os.environ.pop("RESEMBL_DATABASE_URL", None)
+            self.assertEqual(db_url_get(), "sqlite:///generic.db")
+
+    def test_empty_values_fall_through_to_the_default(self):
+        """An exported-but-empty variable means unset, not "use the empty URL"."""
+        with patch.dict(
+            os.environ,
+            {"RESEMBL_DATABASE_URL": "", "DATABASE_URL": ""},
+            clear=False,
+        ):
+            self.assertEqual(db_url_get(), DEFAULT_DB_URL)
+
+    def test_default_when_unset(self):
+        """With neither variable set the URL is the local assembly.db."""
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(db_url_get(), DEFAULT_DB_URL)
+
+    def test_read_at_call_time_not_import_time(self):
+        """A URL exported after import is the one the engine is built from.
+
+        The URL used to be captured in a module constant at import time, so
+        an embedder (or a test) that set the variable afterwards silently got
+        whatever the environment held when resembl was first imported.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(db_url_get(), DEFAULT_DB_URL)
+            os.environ["RESEMBL_DATABASE_URL"] = "sqlite:///late.db"
+            try:
+                self.assertEqual(db_url_get(), "sqlite:///late.db")
+                engine = create_db_engine()
+                self.assertEqual(str(engine.url), "sqlite:///late.db")
+            finally:
+                os.environ.pop("RESEMBL_DATABASE_URL", None)

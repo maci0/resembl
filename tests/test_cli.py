@@ -117,11 +117,13 @@ class TestCLICommands(BaseCLITest):
         self.assertIn("threshold", result.stderr)
 
     def test_find_rejects_invalid_config_num_permutations(self):
-        """An unbuildable num_permutations from config fails before any work.
+        """An out-of-range num_permutations from config never reaches the find.
 
-        Unvalidated, the value reached snippet_find_matches, which runs the
-        full auto-reindex side effect first and only then crashed with a raw
-        datasketch ValueError traceback.
+        The value used to travel all the way into snippet_find_matches,
+        which runs the full auto-reindex side effect first and only then
+        crashed with a raw datasketch ValueError traceback.  It is now
+        refused where it is read (config.validate_value): the command runs
+        on the default permutation count and says which value it ignored.
         """
         with tempfile.TemporaryDirectory() as cfgdir:
             config_path = os.path.join(cfgdir, "config.toml")
@@ -129,15 +131,16 @@ class TestCLICommands(BaseCLITest):
                 f.write("num_permutations = 1\n")
             env = {"RESEMBL_CONFIG_DIR": cfgdir}
             result = self.run_command("find --query 'MOV EAX, 1'", extra_env=env)
-            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("num_permutations", result.stderr)
+            self.assertIn("test_snippet", result.stdout)
             self.assertNotIn("Traceback", result.stderr)
 
             queries_file = os.path.join(cfgdir, "queries.txt")
             with open(queries_file, "w", encoding="utf-8") as f:
                 f.write("MOV EAX, 1\n")
             batch = self.run_command(f"find-batch --file {queries_file}", extra_env=env)
-            self.assertNotEqual(batch.returncode, 0)
+            self.assertEqual(batch.returncode, 0, batch.stderr)
             self.assertIn("num_permutations", batch.stderr)
             self.assertNotIn("Traceback", batch.stderr)
 
@@ -391,6 +394,27 @@ class TestCLIConfig(BaseCLITest):
                 self.assertIn("finite", result.stderr)
             config_path = os.path.join(cfgdir, "config.toml")
             self.assertFalse(os.path.exists(config_path))
+
+    def test_config_set_rejects_out_of_range_value(self):
+        """`config set` must reject a value outside the range the code works in.
+
+        Type coercion alone let ``ngram_size 0`` through: the reindex it
+        drives builds degenerate fingerprints (every snippet matches every
+        other) and nothing reports an error at any later point.
+        """
+        with tempfile.TemporaryDirectory() as cfgdir:
+            env = {"RESEMBL_CONFIG_DIR": cfgdir}
+            for key, bad in (
+                ("ngram_size", "0"),
+                ("top_n", "0"),
+                ("lsh_threshold", "5.0"),
+                ("jaccard_weight", "2"),
+            ):
+                result = self.run_command(f"config set {key} {bad}", extra_env=env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(f"Invalid value for '{key}'", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+            self.assertFalse(os.path.exists(os.path.join(cfgdir, "config.toml")))
 
     def test_config_set_invalid_format(self):
         """`config set format` should reject values outside the render enum."""

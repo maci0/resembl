@@ -655,7 +655,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     startup so serving is read-only; the port file is written on startup and
     removed on exit.
     """
-    from .database import create_db_engine
+    from .database import create_db_engine, db_url_mask
 
     # Refuse to double-serve: if a port file exists for this database and a
     # server is actually listening on it, another ``serve`` is already
@@ -790,6 +790,19 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # handlers.  The hook remains only as a backstop for callers that never
     # close the returned server.
     port = int(httpd.server_address[1])
+    # The configuration this generation actually serves with, on one line at
+    # DEBUG (`resembl serve -v`): the served database (password masked), where
+    # the advertisement lives, and the find defaults every request that omits
+    # a parameter inherits.  A long-lived process otherwise gives an operator
+    # no way to tell which config file it read at startup.
+    logger.debug(
+        "serving %s on %s:%d (port file %s), find defaults %s",
+        db_url_mask(db_url),
+        host,
+        port,
+        port_file,
+        ", ".join(f"{k}={v}" for k, v in find_defaults.items()),
+    )
     cleanup = functools.partial(port_file_cleanup, port_file, port)
     httpd.set_atexit_cleanup(cleanup)
     atexit.register(cleanup)

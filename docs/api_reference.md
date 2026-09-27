@@ -111,7 +111,7 @@ autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minh
 ## Configuration
 
 ### `ResemblConfig` (dataclass)
-Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`, which merges a dict (or another `ResemblConfig`) in, coercing each value to its field's type and rejecting out-of-range ones with a warning; every value read from the config file is coerced and validated against its field's type.
+Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`, which merges a dict (or another `ResemblConfig`) in, coercing each value to its field's type and, via `validate_value`, rejecting an out-of-enum or out-of-range one with a warning (so a hand-edited `ngram_size = 0` cannot reach the reindex).
 
 ### `load_config() → ResemblConfig`
 Load from `~/.config/resembl/config.toml`. `RESEMBL_CONFIG_DIR` overrides that
@@ -119,10 +119,22 @@ directory outright; otherwise `$XDG_CONFIG_HOME/resembl` is used when
 `XDG_CONFIG_HOME` is set. A missing, malformed, or unreadable file yields the
 defaults (malformed and unreadable files are logged as errors).
 
+### `validate_value(key: str, value: object) → str | None`
+The one configuration-value check: returns why *value* is unusable as a
+setting for *key* (wrong enum, outside `VALUE_BOUNDS`, non-finite), or `None`
+when it is fine. `resembl config set` refuses a value that returns a message;
+`ResemblConfig.update` warns and keeps the current value for one found in a
+hand-edited file.
+
 ## Database
 
+### `db_url_get() → str`
+The configured database URL, read from the environment at call time:
+`RESEMBL_DATABASE_URL` first, then `DATABASE_URL`, else
+`sqlite:///assembly.db`. An empty value of either variable counts as unset.
+
 ### `create_db_engine(url: str | None = None)`
-Create a SQLAlchemy engine. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`). Pass a PostgreSQL URL for team use.
+Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`). Pass a PostgreSQL URL for team use.
 
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
 Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard — all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.

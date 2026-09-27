@@ -20,16 +20,16 @@ port.
 `$XDG_CACHE_HOME/resembl`, else `~/.cache/resembl`). The hash is the first 12
 hex digits of the SHA1 of the **resolved** database URL (the engine's URL as
 rendered with the password intact, falling back to `sqlite:///assembly.db`
-when `DATABASE_URL` is unset), so one process can serve several databases. The
+when no database URL is set in the environment), so one process can serve several databases. The
 file is removed when the server exits.
 
 ```bash
 # any terminal; the digest below must be of the *resolved* URL, so set
-# DATABASE_URL even when you rely on the default.
-export DATABASE_URL=sqlite:///assembly.db
+# the database URL even when you rely on the default.
+export RESEMBL_DATABASE_URL=sqlite:///assembly.db
 resembl serve &
 
-port=$(cat ~/.cache/resembl/server_$(printf %s "$DATABASE_URL" | sha1sum | cut -c1-12).port)
+port=$(cat ~/.cache/resembl/server_$(printf %s "$RESEMBL_DATABASE_URL" | sha1sum | cut -c1-12).port)
 curl -s "http://127.0.0.1:$port/find" \
   -H 'Content-Type: application/json' \
   -d '{"query": "push ebx\nmov eax, 5\npop ebx\nret"}'

@@ -122,6 +122,9 @@ The `compare` command also reports control-flow graph similarity.
     restart skips rebuilding an index that is already current.  Starting a
     second server for the same database is refused (as is an occupied
     `--port`), with a clean error rather than a traceback.
+    `resembl serve -v` logs the configuration the server started with (the
+    served database with its password masked, the port file, and the find
+    defaults every request inherits).
     The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, JSON
     requests, `{"error": ...}` bodies) are documented in
     [http_api.md](http_api.md).
@@ -228,25 +231,37 @@ The `compare` command also reports control-flow graph similarity.
     versions (removed on write) and the `serve` port file used by `find`
     and `resembl-find` to locate a running server.
 
-**DATABASE_URL**
+**RESEMBL_DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
     Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)
     for team use.  The `pg8000` and `pymysql` drivers are installed with the
     package; a `duckdb:///` URL needs the extra: `uv pip install
     "resembl[duckdb]"`.
 
+**DATABASE_URL**
+:   Same as `RESEMBL_DATABASE_URL`, read only when that one is unset, so a
+    `DATABASE_URL` already exported by another tool still works. Prefer the
+    namespaced name: `DATABASE_URL` is a common name and a stray one
+    redirects resembl at a different database. An empty value of either
+    variable counts as unset.
+
 ## CONFIGURATION
 
 Settings are stored in `~/.config/resembl/config.toml`:
 
-| Key              | Type  | Default | Description                        |
-|------------------|-------|---------|------------------------------------|
-| lsh_threshold    | float | 0.5     | Minimum LSH Jaccard similarity     |
-| num_permutations | int   | 128     | MinHash permutation count          |
-| top_n            | int   | 5       | Default number of results          |
-| ngram_size       | int   | 3       | Token n-gram size for shingling    |
-| jaccard_weight   | float | 0.4     | Weight of Jaccard in hybrid score  |
-| format           | str   | table   | Default output format              |
+| Key              | Type  | Default | Range             | Description                     |
+|------------------|-------|---------|-------------------|---------------------------------|
+| lsh_threshold    | float | 0.5     | 0.0 <= v < 0.99   | Minimum LSH Jaccard similarity  |
+| num_permutations | int   | 128     | 2 <= v <= 4096    | MinHash permutation count       |
+| top_n            | int   | 5       | v >= 1            | Default number of results       |
+| ngram_size       | int   | 3       | v >= 1            | Token n-gram size for shingling |
+| jaccard_weight   | float | 0.4     | 0.0 <= v <= 1.0   | Weight of Jaccard in hybrid score |
+| format           | str   | table   | table/json/csv    | Default output format           |
+
+`config set` refuses a value outside these ranges. A hand-edited
+`config.toml` holding one is reported on stderr and ignored, and the default
+is used instead, so a bad value cannot silently produce a degenerate index
+or an empty result set.
 
 ## EXAMPLES
 

@@ -137,10 +137,10 @@ with Session(get_engine()) as session:
 
 ## Team Setup with PostgreSQL
 
-For shared databases, set the `DATABASE_URL` environment variable:
+For shared databases, set the `RESEMBL_DATABASE_URL` environment variable:
 
 ```bash
-export DATABASE_URL="postgresql+pg8000://user:password@db-host:5432/resembl"
+export RESEMBL_DATABASE_URL="postgresql+pg8000://user:password@db-host:5432/resembl"
 resembl import ./shared_samples/
 ```
 

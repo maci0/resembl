@@ -10,8 +10,11 @@ import os
 import tempfile
 import tomllib
 from collections.abc import Iterator
+from typing import NamedTuple
 
 import tomli_w
+
+from .scoring import MAX_NUM_PERM
 
 DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
@@ -19,6 +22,86 @@ DEFAULT_CONFIG_DIR = "~/.config/resembl"
 #: Anything else cannot be rendered: reject it where it enters instead of
 #: letting commands silently fall back to one branch or another.
 FORMATS = ("table", "json", "csv")
+
+
+#: A half-open numeric range: ``low`` always inclusive, ``high`` only when
+#: ``high_inclusive`` is set (unbounded above otherwise).
+class Range(NamedTuple):
+    """Bounds one configuration value has to stay inside."""
+
+    low: float
+    high: float = float("inf")
+    high_inclusive: bool = False
+
+
+#: ``lsh_threshold`` is accepted strictly below this bound: the banding needs
+#: at least 2 bands, which caps a buildable threshold below 1.0 (0.981 gives
+#: b=1 at 128 permutations).  A threshold inside this range can still be
+#: unbuildable at a small permutation count; that combination is refused by
+#: the caller that pairs the two values (``cli._validate_find_params`` and
+#: the index build), not here.
+THRESHOLD_MAX = 0.99
+
+#: Range each numeric setting has to stay inside, checked after the value has
+#: been coerced to its field's type.  These are the ranges the rest of the
+#: code actually works in, so a value outside one is a misconfiguration the
+#: user must hear about where it is written, not a runtime failure (or a
+#: silently wrong index) later:
+#:
+#: ``num_permutations``
+#:     The lower bound is what MinHash construction accepts; the upper bound is
+#:     ``scoring.MAX_NUM_PERM`` ("real configurations use 64-128"), the same
+#:     cap the server applies to request parameters and stored blobs.
+#: ``ngram_size``
+#:     Below 1 every shingle collapses to the empty token tuple, so every
+#:     snippet matches every other one without any error being raised.
+#: ``jaccard_weight``
+#:     A 0-1 balance between the LSH and Jaccard scores, per ``score_hybrid``;
+#:     both ends are usable (1.0 is a pure Jaccard ranking).
+#: ``top_n``
+#:     At least one result; 0 (or a negative value) truncates every ranking to
+#:     nothing, which reads as "no matches" rather than as a bad setting.
+#: No upper bound is imposed on ``top_n`` or ``ngram_size``: a large value only
+#: returns more rows or builds coarser shingles, neither of which is a fault.
+VALUE_BOUNDS: dict[str, Range] = {
+    "lsh_threshold": Range(0.0, THRESHOLD_MAX),
+    "num_permutations": Range(2.0, float(MAX_NUM_PERM), high_inclusive=True),
+    "top_n": Range(1.0),
+    "ngram_size": Range(1.0),
+    "jaccard_weight": Range(0.0, 1.0, high_inclusive=True),
+}
+
+
+def validate_value(key: str, value: object) -> str | None:
+    """Return why *value* is unusable as a setting for *key*, or None if fine.
+
+    The one place a configuration value is checked: ``resembl config set``
+    refuses a value that returns a message, and :meth:`ResemblConfig.update`
+    warns and keeps the current value when a hand-edited config file holds
+    one.  Both entry points share this, so the file and the CLI can never
+    disagree about what a legal value is.
+
+    *value* must already be coerced to the field's type (see
+    :meth:`ResemblConfig.update`); the enum and range rules are what this adds.
+    """
+    if key == "format":
+        if value not in FORMATS:
+            return f"expected one of: {', '.join(FORMATS)}"
+        return None
+    bounds = VALUE_BOUNDS.get(key)
+    if bounds is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return f"expected a finite {type(DEFAULTS[key]).__name__}"
+    if numeric < bounds.low:
+        return f"expected a value of at least {bounds.low:g}"
+    if bounds.high_inclusive and numeric <= bounds.high:
+        return None
+    if not bounds.high_inclusive and numeric < bounds.high:
+        return None
+    end = "at most" if bounds.high_inclusive else "below"
+    return f"expected a value {end} {bounds.high:g}"
 
 
 def config_dir_get() -> str:
@@ -78,6 +161,14 @@ class ResemblConfig:
         similarity score NaN.  An out-of-enum ``format`` is also rejected
         (warn and keep the current value) so the file cannot put every
         command into an undefined render branch.
+
+        Values of the right type but outside the range the code works in
+        (``ngram_size = 0``, ``lsh_threshold = 5.0``, ``top_n = -1``) are
+        rejected the same way, by :func:`validate_value`: unchecked, the
+        reindex they drive produces degenerate fingerprints (every snippet
+        matches every other) or the index build and every ``find`` fail at
+        use time, long after the value was written.  ``resembl config set``
+        runs the same check, so the two entry points cannot disagree.
         """
         source = other if isinstance(other, dict) else dataclasses.asdict(other)
         for key, value in source.items():
@@ -94,20 +185,9 @@ class ResemblConfig:
                     value,
                 )
                 continue
-            if isinstance(default, float) and not math.isfinite(value):
-                logger.warning(
-                    "Ignoring %s: expected a finite %s, got %r.",
-                    key,
-                    type(default).__name__,
-                    value,
-                )
-                continue
-            if key == "format" and value not in FORMATS:
-                logger.warning(
-                    "Ignoring unknown output format %r (expected one of: %s).",
-                    value,
-                    ", ".join(FORMATS),
-                )
+            problem = validate_value(key, value)
+            if problem is not None:
+                logger.warning("Ignoring %s: %s, got %r.", key, problem, value)
                 continue
             setattr(self, key, value)
 

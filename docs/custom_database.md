@@ -6,11 +6,12 @@ This guide will walk you through the process of using `resembl` with a custom da
 
 ## Supported Databases
 
-Set `DATABASE_URL` (or pass a URL to `create_db_engine`) to point the CLI
-at a different backend.  The dialect-specific SQL (bucket upserts, single-row
+Set `RESEMBL_DATABASE_URL` (or the unprefixed `DATABASE_URL` it falls back
+to, or pass a URL to `create_db_engine`) to point the CLI at a different
+backend.  The dialect-specific SQL (bucket upserts, single-row
 metadata upserts, random sampling) is selected automatically:
 
-| Database    | `DATABASE_URL` example                                      | Notes |
+| Database    | URL example                                      | Notes |
 |-------------|-------------------------------------------------------------|-------|
 | SQLite      | `sqlite:///assembly.db` (default)                           | WAL mode, band-major builds — the reference backend. |
 | PostgreSQL  | `postgresql+pg8000://user:pass@host:5432/db`                | `ON CONFLICT DO NOTHING`; integration-tested in CI.  Any PG driver works (`psycopg2`, `pg8000`, …). |
@@ -96,7 +97,7 @@ The architecture is designed to keep the **query path constant-time** regardless
 
 What the code already supports:
 
-- **PostgreSQL out of the box:** set `DATABASE_URL=postgresql+pg8000://user:pass@host/db`; the LSH index SQL is dialect-aware (`INSERT OR IGNORE` on SQLite, `ON CONFLICT DO NOTHING` on PostgreSQL), and the `reindex` that precedes a rebuild keeps a single final commit on PostgreSQL (the index build itself commits per band chunk on every backend, to bound memory and the SQLite WAL).
+- **PostgreSQL out of the box:** set `RESEMBL_DATABASE_URL=postgresql+pg8000://user:pass@host/db`; the LSH index SQL is dialect-aware (`INSERT OR IGNORE` on SQLite, `ON CONFLICT DO NOTHING` on PostgreSQL), and the `reindex` that precedes a rebuild keeps a single final commit on PostgreSQL (the index build itself commits per band chunk on every backend, to bound memory and the SQLite WAL).
 - **Bounded-memory bulk import:** `import --jobs N` prepares files in a process pool and flushes in chunks, expunging the session identity map after each chunk.
 - **Parallel, crash-safe reindex** (`reindex --jobs`), with the old index cleared up front so an interrupted run can never serve stale results.
 - **Incremental index maintenance:** `add` / `import` / `merge` / `rm` update only the affected bucket rows — no full rebuild after single changes.

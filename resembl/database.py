@@ -20,12 +20,38 @@ from . import models  # noqa: F401
 #   sqlite:///assembly.db        (default, local file)
 #   sqlite:///:memory:           (in-memory, for tests)
 #   postgresql://user:pass@host/db  (PostgreSQL for teams)
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///assembly.db")
+DEFAULT_DB_URL = "sqlite:///assembly.db"
+
+#: Environment variables consulted for the database URL, most specific first.
+#: ``RESEMBL_DATABASE_URL`` is the namespaced name every other resembl
+#: override uses (``RESEMBL_CONFIG_DIR``, ``RESEMBL_CACHE_DIR``) and wins
+#: outright.  The unprefixed ``DATABASE_URL`` stays supported and is read
+#: next: it is the name other Python and hosting stacks already export, so
+#: dropping it would break a working deployment.  An empty value counts as
+#: unset in both, matching the directory overrides, rather than handing
+#: SQLAlchemy an empty URL to fail on obscurely.
+DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
 
 #: Matches the credentials component of ``scheme://user:password@host/...``.
 #: The password run stops at the first character a URL may not carry bare;
 #: percent-encoded passwords round-trip untouched.
 _DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
+
+
+def db_url_get() -> str:
+    """Return the database URL configured in the environment.
+
+    Read at call time, not at import time: an embedder that sets
+    ``RESEMBL_DATABASE_URL`` after importing resembl (and a test that points
+    the engine at a temporary database) gets the value it set, instead of
+    whatever the environment happened to hold when the module was first
+    imported.
+    """
+    for var in DB_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+    return DEFAULT_DB_URL
 
 
 def db_url_mask(url: str) -> str:
@@ -47,8 +73,9 @@ def create_db_engine(
 ) -> Engine:
     """Create a SQLAlchemy engine for the given URL.
 
-    If *url* is ``None``, the ``DATABASE_URL`` environment variable is
-    used (falling back to ``sqlite:///assembly.db``).
+    If *url* is ``None``, the URL comes from :func:`db_url_get`
+    (``RESEMBL_DATABASE_URL``, then ``DATABASE_URL``, then
+    ``sqlite:///assembly.db``).
 
     SQLite-specific pragmas (WAL mode, synchronous=NORMAL) are applied
     automatically when the URL starts with ``sqlite``.
@@ -58,7 +85,7 @@ def create_db_engine(
     request thread per connection and the default (5 + 10 overflow) was
     exhausted under concurrent load.
     """
-    db_url = url or DATABASE_URL
+    db_url = url or db_url_get()
     kwargs: dict[str, object] = {"echo": False}
     if pool_size is not None:
         kwargs["pool_size"] = pool_size

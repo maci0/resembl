@@ -22,7 +22,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R2 | The find server has no authentication, no `Host` check, and no rate limit; the non-loopback bind is a warning, not a block | B1 | R1 plus sustained exhaustion, and browser reachability via DNS rebinding | Loopback default only (`resembl/cli.py:452`) |
 | R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever port it names | B5 | Query text (attacker-supplied source code) redirected to an attacker-controlled listener | none (`resembl/find_client.py:113`) |
 | R4 | The server logs nothing per request, so queries are unattributable after the fact | B1 | No way to investigate a suspected scrape or a hostile client | none (`resembl/server.py:516`) |
-| R5 | `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at attacker-chosen host; config read from attacker-chosen directory | none, by design (`resembl/database.py:22`, `resembl/cache.py:75`, `resembl/config.py:31`) |
+| R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at attacker-chosen host; config read from attacker-chosen directory | none, by design (`resembl/database.py:32`, `resembl/cache.py:75`, `resembl/config.py:113`) |
 | R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`resembl/core.py:1784`) |
 | R7 | `import` reads every `.asm`/`.txt` under a directory and lexes it, with no size or count cap | B2 | Memory and CPU exhaustion on a hostile directory | Bounded worker window only (`resembl/cli.py:864`) |
 | R8 | The in-process result cache keeps the 128 most recent query-and-result pairs resident | B1 | Query text (source under analysis) sits in process memory beyond the request | 128-entry LRU (`resembl/server.py:59`) |
@@ -67,11 +67,11 @@ reads a query from `--query` or an arbitrary `--file` path
 
 | Input | Location | Trust |
 | ----- | -------- | ----- |
-| `DATABASE_URL` | `resembl/database.py:22` | Trusted verbatim; may carry a password. |
+| `RESEMBL_DATABASE_URL`, then `DATABASE_URL` | `resembl/database.py:32` | Trusted verbatim; may carry a password. |
 | `RESEMBL_CACHE_DIR` | `resembl/cache.py:75` | Trusted verbatim; selects where the port file is written and read. |
-| `RESEMBL_CONFIG_DIR` | `resembl/config.py:31` | Trusted verbatim; selects the config file. |
-| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/config.py:34`, `resembl/cache.py:78` | Trusted when the override above is unset. |
-| `~/.config/resembl/config.toml` | `resembl/config.py:40` | Parsed as TOML, then every value coerced to its field's type (`resembl/config.py:88`). |
+| `RESEMBL_CONFIG_DIR` | `resembl/config.py:113` | Trusted verbatim; selects the config file. |
+| `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/config.py:117`, `resembl/cache.py:78` | Trusted when the override above is unset. |
+| `~/.config/resembl/config.toml` | `resembl/config.py:123` | Parsed as TOML, then every value coerced to its field's type and range-checked (`resembl/config.py:188`, `resembl/config.py:75`). |
 
 ### Files the tool writes
 
@@ -114,7 +114,7 @@ used to open an HTTP connection. Its contents are authenticated by nothing.
 inserted after structural checks, not after a trust decision about the
 source.
 
-**B7, secrets to code.** `DATABASE_URL` may embed a password. It is masked
+**B7, secrets to code.** The database URL may embed a password. It is masked
 for display (`resembl/database.py:30`, `resembl/find_client.py:33`) but used
 unmasked to derive the port-file name (`resembl/server.py:267`) and to open
 the connection.
@@ -124,7 +124,7 @@ the connection.
 | Asset | Why it matters | Held in |
 | ----- | -------------- | ------- |
 | Snippet corpus | Proprietary reverse-engineering data; the reason the tool exists | `snippet` table, served over B1 |
-| Database credentials | Reach to a shared Postgres/MySQL corpus | `DATABASE_URL`, process environment |
+| Database credentials | Reach to a shared Postgres/MySQL corpus | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, process environment |
 | LSH index | Minutes of CPU to rebuild; its loss is an availability hit, not a data loss | `lsh_bucket` table |
 | Warm server availability | The performance reason to run `serve` at all | `resembl/server.py:585` |
 | Port file | Discovery of the running server, and a redirect target | cache dir |

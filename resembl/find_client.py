@@ -2,7 +2,8 @@
 
 This module deliberately imports only the standard library so the client
 process starts in ~50 ms instead of ~450 ms.  It reads the same
-``DATABASE_URL`` / ``RESEMBL_CACHE_DIR`` environment variables the CLI uses,
+``RESEMBL_DATABASE_URL`` / ``DATABASE_URL`` / ``RESEMBL_CACHE_DIR``
+environment variables the CLI uses,
 locates the port file written by ``resembl serve``, and POSTs the query.
 
 Usage::
@@ -25,6 +26,13 @@ import urllib.request
 _DEFAULT_DB_URL = "sqlite:///assembly.db"
 _DEFAULT_CACHE_DIR = "~/.cache/resembl"
 
+#: Mirrors resembl.database.DB_URL_ENV_VARS (this module stays stdlib-only):
+#: the namespaced name wins, the unprefixed one is read next, and an empty
+#: value counts as unset so a stray ``export DATABASE_URL=`` in a shell
+#: profile does not send the client looking for a port file named after "".
+_DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
+
+
 #: Mirrors resembl.database.db_url_mask (this module stays stdlib-only):
 #: hides an embedded password before a URL reaches stderr.
 _DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
@@ -33,6 +41,15 @@ _DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
 def _mask_db_url(url: str) -> str:
     """Return *url* with any embedded password replaced by ``***``."""
     return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
+
+
+def _db_url_get() -> str:
+    """Return the database URL from the environment (see ``_DB_URL_ENV_VARS``)."""
+    for var in _DB_URL_ENV_VARS:
+        url = os.environ.get(var)
+        if url:
+            return url
+    return _DEFAULT_DB_URL
 
 
 def server_port_path(db_url: str, cache_dir: str) -> str:
@@ -71,6 +88,38 @@ def _load_config() -> dict:
         return {}
 
 
+#: The find defaults this client falls back to, mirroring
+#: ``ResemblConfig`` (resembl.config cannot be imported here: this module is
+#: stdlib-only so a warm find starts in ~50 ms).
+_CFG_DEFAULTS: dict[str, float] = {
+    "top_n": 5,
+    "lsh_threshold": 0.5,
+    "ngram_size": 3,
+    "num_permutations": 128,
+    "jaccard_weight": 0.4,
+}
+
+
+def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
+    """Return *key* from *cfg* as *cast*, or the default when it is unusable.
+
+    The config file is hand-editable, so a mistyped value must not take the
+    client down: ``int(cfg.get("top_n"))`` on a quoted ``"abc"`` raised an
+    uncaught ValueError traceback before the query was ever sent.  The CLI
+    handles the same file the same way (warn, keep the default).
+    """
+    default = _CFG_DEFAULTS[key]
+    value = cfg.get(key, default)
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        print(
+            f"error: ignoring config value {key} = {value!r} (not a number)",
+            file=sys.stderr,
+        )
+        return cast(default)
+
+
 def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="resembl-find", description="Query a running resembl server."
@@ -103,7 +152,7 @@ def _main(argv: list[str] | None = None) -> int:
         print("error: no query provided (--query, --file, or stdin)", file=sys.stderr)
         return 2
 
-    db_url = os.environ.get("DATABASE_URL", _DEFAULT_DB_URL)
+    db_url = _db_url_get()
     # Mirrors resembl.cache.cache_dir_get: RESEMBL_CACHE_DIR wins, then
     # $XDG_CACHE_HOME, then the historical ~/.cache/resembl default.  The
     # port file must resolve to the exact path `resembl serve` wrote.
@@ -128,14 +177,16 @@ def _main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # The literal fallbacks below must mirror ``ResemblConfig``'s defaults
+    # The fallbacks below must mirror ``ResemblConfig``'s defaults
     # (resembl.config); this client stays stdlib-only and cannot import it.
     cfg = _load_config()
-    effective_top_n = args.top_n if args.top_n is not None else int(cfg.get("top_n", 5))
-    effective_threshold = args.threshold if args.threshold is not None else cfg.get("lsh_threshold")
-    effective_ngram = int(cfg.get("ngram_size", 3))
-    effective_perm = int(cfg.get("num_permutations", 128))
-    effective_jw = float(cfg.get("jaccard_weight", 0.4))
+    effective_top_n = args.top_n if args.top_n is not None else _cfg_number(cfg, "top_n", int)
+    effective_threshold = (
+        args.threshold if args.threshold is not None else _cfg_number(cfg, "lsh_threshold", float)
+    )
+    effective_ngram = _cfg_number(cfg, "ngram_size", int)
+    effective_perm = _cfg_number(cfg, "num_permutations", int)
+    effective_jw = _cfg_number(cfg, "jaccard_weight", float)
 
     body = json.dumps(
         {
