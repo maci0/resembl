@@ -1199,6 +1199,63 @@ class TestServerMode(unittest.TestCase):
         self.assertEqual(nulled, omitted)
         self.assertIn("matches", nulled)
 
+    def test_omitted_threshold_defaults_to_the_served_one(self):
+        """A request that omits ``threshold`` searches the server's own index.
+
+        The served index is built for the server's configured
+        ``lsh_threshold`` and a request naming any other one is refused, so
+        an omitted field has to resolve to that same value.  It used to
+        resolve to the module default instead, which answered ``400`` to a
+        plain ``{"query": ...}`` on every server configured with anything
+        other than 0.5 — blaming the client's omission for the mismatch.
+        """
+        from resembl.config import ResemblConfig
+        from resembl.server import BadRequestError, _parse_find_request
+
+        params = ResemblConfig(lsh_threshold=0.7, ngram_size=3, num_permutations=128)
+        request = _parse_find_request({"query": "push ebx\nret"}, params)
+        self.assertEqual(request.effective_threshold, 0.7)
+        # An explicit ``null`` means the same thing, and a name that differs
+        # from the served index is still refused.
+        nulled = _parse_find_request({"query": "push ebx\nret", "threshold": None}, params)
+        self.assertEqual(nulled.effective_threshold, 0.7)
+        with self.assertRaises(BadRequestError):
+            _parse_find_request({"query": "push ebx\nret", "threshold": 0.5}, params)
+
+    def test_result_cache_refuses_an_oversized_payload(self):
+        """The entry count is not a memory bound; a huge payload is not stored.
+
+        ``top_n`` reaches 1000 and every match carries its snippet's whole
+        name list, so 128 cached large finds pinned an unbounded multiple of
+        the entry cap.  The oversized entry is simply not cached: the next
+        request recomputes it and answers the same.
+        """
+        from resembl.server import (
+            _RESULT_CACHE,
+            _RESULT_CACHE_MAX_CHARS,
+            _result_cache_put,
+        )
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+
+        def payload(match_count: int, name: str) -> dict:
+            return {
+                "lsh_candidates": match_count,
+                "matches": [
+                    {"checksum": f"{i:064x}", "names": [name], "score": 1.0}
+                    for i in range(match_count)
+                ],
+            }
+
+        small = payload(3, "push")
+        _result_cache_put(("small",), 1, small)
+        self.assertEqual(len(_RESULT_CACHE), 1)
+
+        big = payload(64, "n" * (_RESULT_CACHE_MAX_CHARS // 32))
+        _result_cache_put(("big",), 1, big)
+        self.assertEqual(len(_RESULT_CACHE), 1, "an oversized payload must not be stored")
+
     def test_result_cache_evicts_oldest_beyond_max(self):
         """The version-guarded result cache evicts its oldest entry past the cap."""
         from resembl.server import (

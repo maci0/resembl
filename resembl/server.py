@@ -39,7 +39,6 @@ from sqlmodel import Session
 from .cache import lsh_index_build
 from .config import ResemblConfig
 from .core import (
-    LSH_THRESHOLD,
     IndexBuildError,
     db_reindex,
     snippet_find_matches,
@@ -63,6 +62,14 @@ logger = logging.getLogger(__name__)
 #: is also a memory bound.
 _RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
 _RESULT_CACHE_MAX = 128
+#: Largest payload :func:`_result_cache_put` retains, in characters of
+#: checksum and name text.  One request chooses its own ``top_n`` and the
+#: name lists behind the matches, so the entry count alone bounds nothing
+#: but the number of dicts; this makes the real ceiling
+#: ``_RESULT_CACHE_MAX * _RESULT_CACHE_MAX_CHARS`` (32 MiB) instead of an
+#: unbounded multiple of it.  A triage find (a handful of matches, short
+#: names) is a few hundred characters, so ordinary requests stay cached.
+_RESULT_CACHE_MAX_CHARS = 256 * 1024
 #: Serializes access to the shared cache: requests run in concurrent
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
@@ -321,7 +328,14 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # outside [0.0, 1.0] anyway, so without this every out-of-range request
     # surfaced as a 500 leaking that internal error instead of a clean one.
     # (NaN fails both comparisons and is rejected too.)
-    effective_threshold = threshold if threshold is not None else LSH_THRESHOLD
+    # An omitted ``threshold`` means "search the way this server is
+    # configured", which is the *served* threshold and not the module
+    # default: the server built its index for ``params.lsh_threshold`` and
+    # the check below refuses anything else.  Defaulting to the module
+    # constant instead answered 400 to a plain ``{"query": ...}`` request
+    # on every server configured with anything other than 0.5, naming the
+    # client's own omission as the mismatch.
+    effective_threshold = threshold if threshold is not None else params.lsh_threshold
     if not 0.0 <= effective_threshold <= 1.0:
         raise BadRequestError(f"threshold {effective_threshold} is not in [0.0, 1.0]")
     # Same range rule as the threshold: score_hybrid documents the weight as a
@@ -527,8 +541,30 @@ def _result_cache_get(key: tuple, version: int) -> dict | None:
         return entry[1]
 
 
+def _payload_chars(payload: dict) -> int:
+    """Return the characters a find payload retains (checksums and names)."""
+    return sum(
+        len(match["checksum"]) + sum(len(name) for name in match["names"])
+        for match in payload["matches"]
+    )
+
+
 def _result_cache_put(key: tuple, version: int, payload: dict) -> None:
-    """Store *payload* for *key* at *version*, evicting past the cap."""
+    """Store *payload* for *key* at *version*, evicting past the cap.
+
+    A payload larger than :data:`_RESULT_CACHE_MAX_CHARS` is not stored at
+    all.  :data:`_RESULT_CACHE_MAX` bounds the number of entries, and the
+    key is a fixed-size digest, so the entry count *was* the whole memory
+    bound — but an entry's size is set by the request: ``top_n`` reaches
+    :data:`_MAX_TOP_N` and every match carries its snippet's whole name
+    list, so 128 large finds over richly named snippets pin hundreds of
+    megabytes of strings until the LRU happens to walk past them.  Refusing
+    the oversized entry leaves the cache correct and merely not warm for
+    that request; a repeated big find is the one a client is least likely
+    to make.
+    """
+    if _payload_chars(payload) > _RESULT_CACHE_MAX_CHARS:
+        return
     with _RESULT_CACHE_LOCK:
         _RESULT_CACHE[key] = (version, payload)
         _RESULT_CACHE.move_to_end(key)

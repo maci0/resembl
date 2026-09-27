@@ -519,6 +519,20 @@ project follows [Semantic Versioning](https://semver.org/).
   error envelope.  It used to raise `RecursionError`, which escaped the
   body's parse guard and the handler's own error handling, so the
   connection died with no response at all.
+- A `POST /find` or `POST /find-batch` request that omits `threshold` now
+  searches at the threshold the server's index was built for, instead of
+  answering `400` on any server configured with an `lsh_threshold` other
+  than `0.5`.  An omitted (or `null`) field has always meant "use the
+  server's configured default"; it resolved to the module default instead,
+  so the endpoint blamed the client's omission for a mismatch it had
+  created.  `resembl find` and `resembl-find` send the value from
+  `config.toml` and are unaffected.
+- `serve` no longer caches a find result whose payload retains more than
+  256 KiB of checksum and name text.  The result cache was bounded by entry
+  count, and one request chooses its own `top_n` and the name lists behind
+  the matches, so a client cycling large finds pinned an unbounded multiple
+  of that cap.  An oversized result is simply computed again next time; the
+  answer is unchanged.
 
 ## [2.0.0] - 2026-09-15
 
