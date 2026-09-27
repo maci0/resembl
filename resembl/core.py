@@ -15,6 +15,7 @@ import heapq
 import json
 import logging
 import os
+import random
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -1236,6 +1237,29 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
     }
 
 
+#: Environment variable holding the seed for every sampled value in a run
+#: (see :func:`_sample_key`).  Unset, the seed is drawn from the OS, which
+#: keeps production sampling as varied as it was; set, the whole run draws
+#: the same samples, which is what makes a recorded result replayable.
+SEED_ENV_VAR = "RESEMBL_SEED"
+
+
+def _sample_key() -> str:
+    """Return the 32-byte hex key a row sample starts from.
+
+    Drawn from :data:`SEED_ENV_VAR` when it is set, so a run that reports a
+    sample-derived number reports the same one on every replay; unset, the
+    seed comes from the OS, which is where it came from before this seam
+    existed.  The value is a sampling offset over the checksum key space, not
+    a secret, so a seeded draw carries no security weight.
+    """
+    import secrets
+
+    seed = os.environ.get(SEED_ENV_VAR)
+    gen = random.Random(int(seed, 0) if seed is not None else secrets.randbits(64))
+    return gen.randbytes(32).hex()
+
+
 def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
     """Return up to *limit* uniformly random snippet rows via the checksum PK.
 
@@ -1245,11 +1269,10 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
     over the 64-hex key space, so a contiguous run starting at a random key
     is a uniform sample, and the PK index makes it O(limit) regardless of
     table size (~0.6 ms measured).  Keys near the end of the key space wrap
-    around via a second indexed query.
+    around via a second indexed query.  The starting key comes from
+    :func:`_sample_key`, so the sample is reproducible from a seed.
     """
-    import secrets
-
-    key = secrets.token_hex(32)
+    key = _sample_key()
     rows = list(
         session.exec(
             select(Snippet).where(Snippet.checksum >= key).order_by(Snippet.checksum).limit(limit)

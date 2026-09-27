@@ -26,7 +26,14 @@ from resembl.core import (
     snippet_version_list,
     string_checksum,
 )
-from resembl.models import Collection, Snippet, SnippetVersion, timestamp_normalize
+from resembl.models import (
+    CLOCK_ENV_VAR,
+    Collection,
+    Snippet,
+    SnippetVersion,
+    timestamp_normalize,
+    timestamp_now,
+)
 
 
 class BaseDBTest(unittest.TestCase):
@@ -269,6 +276,33 @@ class TestTimestampNormalize(unittest.TestCase):
     def test_null_passes_through(self):
         """A NULL column has no instant to convert and is not a parse error."""
         self.assertIsNone(timestamp_normalize(None))
+
+
+class TestTimestampNow(unittest.TestCase):
+    """Tests for the injectable clock behind every created_at value."""
+
+    def test_wall_clock_when_unset(self):
+        """With no override the real clock is read, as it always was."""
+        with patch.dict(os.environ):
+            os.environ.pop(CLOCK_ENV_VAR, None)
+            self.assertTrue(timestamp_now().endswith("+00:00"))
+
+    def test_env_override_pins_the_stamp(self):
+        """A pinned clock makes two runs write identical created_at values."""
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "2024-06-01T10:00:00+00:00"}):
+            self.assertEqual(timestamp_now(), "2024-06-01T10:00:00+00:00")
+            self.assertEqual(timestamp_now(), timestamp_now())
+
+    def test_env_override_is_re_expressed_in_utc(self):
+        """A foreign offset is converted, so string ordering stays valid."""
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "2024-06-01T12:00:00+02:00"}):
+            self.assertEqual(timestamp_now(), "2024-06-01T10:00:00+00:00")
+
+    def test_unparseable_override_fails_loud(self):
+        """A bad override is not silently ignored: it would defeat the point."""
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "not-a-date"}):
+            with self.assertRaisesRegex(ValueError, CLOCK_ENV_VAR):
+                timestamp_now()
 
 
 # ---------------------------------------------------------------------------

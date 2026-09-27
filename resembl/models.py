@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -27,9 +28,33 @@ if TYPE_CHECKING:
     from .minhash import MinHash
 
 
+#: Environment variable that pins :func:`timestamp_now` to a fixed instant,
+#: given as an ISO 8601 string.  The wall clock is otherwise the only source
+#: of ``created_at`` values, and those values are written to the database and
+#: printed back by ``collection list`` and ``version list``, so two runs of
+#: the same inputs never produce the same rows or the same output.  Setting
+#: this variable is what makes a recorded run replay byte-for-byte.
+CLOCK_ENV_VAR = "RESEMBL_NOW"
+
+
 def timestamp_now() -> str:
-    """Return the current instant as a canonical UTC ISO 8601 string."""
-    return datetime.now(UTC).isoformat()
+    """Return the current instant as a canonical UTC ISO 8601 string.
+
+    Read from ``CLOCK_ENV_VAR`` when that variable is set, so a test or a
+    replay gets the same stamp every time; an unparseable value raises
+    ``ValueError`` rather than silently falling back to the wall clock, which
+    would defeat the point of setting it.
+    """
+    override = os.environ.get(CLOCK_ENV_VAR)
+    if override is None:
+        return datetime.now(UTC).isoformat()
+    try:
+        moment = datetime.fromisoformat(override)
+    except ValueError as exc:
+        raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant") from exc
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat()
 
 
 def timestamp_normalize(value: str | None) -> str | None:

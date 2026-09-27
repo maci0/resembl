@@ -869,11 +869,18 @@ def import_cmd(
     # on every platform: glob patterns are folded by os.path.normcase on
     # Windows but matched verbatim on Linux/macOS, so "*.asm" silently
     # skipped FOO.ASM there.
+    #
+    # The list is sorted because ``os.walk`` yields directory entries in
+    # readdir order, which is not stable across runs of the same tree.  Rows
+    # are written in this order, so an unsorted list made the resulting
+    # database's row order (and every later score tie, which is broken by
+    # insertion order) depend on the filesystem.
     file_paths: list[str] = []
     for root, _dirs, files in os.walk(directory):
         file_paths.extend(
             os.path.join(root, fname) for fname in files if fname.lower().endswith((".asm", ".txt"))
         )
+    file_paths.sort()
 
     if jobs is None:
         jobs = adaptive_worker_count(len(file_paths), os.cpu_count() or 1)
@@ -944,10 +951,20 @@ def import_cmd(
                     _submit_next()
 
                 def _completed_futures() -> Iterator[Future[tuple[str, str, str, bytes] | None]]:
+                    # Results are consumed in submission order, never in the
+                    # order the workers happen to finish: rows are written in
+                    # this order, so consuming as-completed would make the
+                    # row order (and with it the outcome of every later
+                    # score tie) depend on worker scheduling.  A replay of
+                    # the same file list then reproduces the same database.
                     while in_flight:
                         done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
-                        for future in done:
-                            in_flight.remove(future)
+                        finished = set(done)
+                        completed = [future for future in in_flight if future in finished]
+                        still_running = [future for future in in_flight if future not in finished]
+                        in_flight.clear()
+                        in_flight.extend(still_running)
+                        for future in completed:
                             yield future
                             _submit_next()
 

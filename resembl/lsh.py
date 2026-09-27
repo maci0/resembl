@@ -739,6 +739,13 @@ class ResemblLSH:
         one query per band (~4x faster measured); each branch still uses the
         ``(band, bucket)`` primary-key prefix, and candidates are the union
         of keys across all bands, deduplicated.
+
+        The result is sorted: a ``set`` of checksums iterates in string-hash
+        order, which varies with ``PYTHONHASHSEED``, and every tie in the
+        ranking downstream (``code_find`` orders by score alone) would then be
+        broken differently from one run to the next.  Sorting makes the
+        candidate order a function of the index contents alone, so the same
+        database returns the same matches in the same order on every run.
         """
         packed = self._as_packed(value)
         buckets = self._buckets(packed)
@@ -750,7 +757,7 @@ class ResemblLSH:
         for i, bucket in enumerate(buckets):
             params[f"b{i}"] = i
             params[f"k{i}"] = bucket
-        return list({row[0] for row in self.session.execute(text(sql), params).all()})
+        return sorted({row[0] for row in self.session.execute(text(sql), params).all()})
 
 
 def lsh_index_clear(session: Session) -> None:

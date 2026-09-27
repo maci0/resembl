@@ -791,6 +791,25 @@ class TestResemblLSH(BaseScalingTest):
         lsh.insert("k1", m)  # MinHash object, not packed bytes
         self.assertEqual(lsh.query(m), ["k1"])
 
+    def test_query_returns_candidates_in_checksum_order(self):
+        """Candidates come back sorted, so a replay ranks ties identically.
+
+        The set of candidates is collected as a ``set`` of checksums, whose
+        iteration order follows string hashing and therefore changes with
+        ``PYTHONHASHSEED``.  Every equal-score match downstream is ordered by
+        candidate position, so an unsorted candidate list made the same
+        database return a different top-n from one run to the next.
+        """
+        from resembl.lsh import ResemblLSH
+
+        lsh = ResemblLSH(self.session, 0.5, NUM_PERMUTATIONS)
+        m = code_create_minhash("MOV EAX, 1; RET")
+        packed = minhash_pack(m)
+        for key in ("k3", "k1", "k2", "k0"):
+            lsh.insert(key, packed)
+        self.session.commit()
+        self.assertEqual(lsh.query(m), ["k0", "k1", "k2", "k3"])
+
     def test_insert_batch_crosses_chunk_boundary(self):
         """>400 snippets produce >10k rows, exercising multi-chunk inserts."""
         from resembl.lsh import ResemblLSH
@@ -962,6 +981,29 @@ class TestIndexBuild(BaseScalingTest):
         lsh_index_build(self.session, 0.5, NUM_PERMUTATIONS)
         rows = self.session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0]
         self.assertEqual(rows, 20 * 25)
+
+    def test_sample_key_is_reproducible_from_the_seed(self):
+        """A seeded run samples the same rows, so `stats` can be reproduced.
+
+        The vocabulary and average-similarity figures are estimated from a
+        random sample, and the similarity mean is a float sum over it, so an
+        unseeded offset made every number move between two runs over the same
+        database.  ``RESEMBL_SEED`` pins the offset.
+        """
+        from resembl.core import SEED_ENV_VAR, _sample_key, db_stats
+
+        self._add(30, "seeded")
+        with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
+            first = db_stats(self.session)
+            first_key = _sample_key()
+        with patch.dict(os.environ, {SEED_ENV_VAR: "1234"}):
+            second = db_stats(self.session)
+            second_key = _sample_key()
+        with patch.dict(os.environ, {SEED_ENV_VAR: "4321"}):
+            other_key = _sample_key()
+        self.assertEqual(first, second)
+        self.assertEqual(first_key, second_key)
+        self.assertNotEqual(first_key, other_key)
 
     def test_stats_survives_corrupt_fingerprint(self):
         """A corrupt blob in the similarity sample must not crash `stats`."""
