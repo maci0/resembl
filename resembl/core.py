@@ -59,6 +59,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    name_json_escape,
     timestamp_normalize,
     timestamp_now,
 )
@@ -1604,12 +1605,17 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     insensitivity comes from ``ilike`` rather than plain ``LIKE``: SQLite
     happens to fold case in ``LIKE``, but PostgreSQL and DuckDB do not,
     which made the same search behave differently across backends.
+    *pattern* reaches the column in the two forms the stored names are in:
+    normalized to NFC, then spelled the way :func:`name_json_escape` spells
+    them.  A pattern macOS or a copy-paste hands over in NFD (``cafe`` plus a
+    combining acute), and a non-ASCII character is stored as its ``\\uXXXX``
+    escape, so the search missed names it was given.
     *limit* bounds the result (and the fetch) so a broad pattern on a
     large database returns a useful page instead of everything.  The page is
     ordered by the checksum primary key, so two runs over the same database
     return the same rows in the same order.
     """
-    query_pattern = f"%{pattern}%"
+    query_pattern = f"%{name_json_escape(normalize_unicode(pattern))}%"
     return list(
         session.exec(
             select(Snippet)

@@ -22,7 +22,14 @@ import tomllib
 import urllib.error
 import urllib.request
 
-from .paths import cache_dir_get, config_path_get, db_url_get, db_url_mask, server_port_path
+from .paths import (
+    cache_dir_get,
+    config_path_get,
+    console_utf8_reconfigure,
+    db_url_get,
+    db_url_mask,
+    server_port_path,
+)
 
 #: The find defaults this client falls back to, mirroring
 #: ``ResemblConfig`` (resembl.config cannot be imported here: it pulls in
@@ -82,6 +89,10 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
 
 
 def _main(argv: list[str] | None = None) -> int:
+    # Match names are printed below; a locale-encoded stdout would raise
+    # UnicodeEncodeError on the first one the platform's code page cannot
+    # represent, losing the whole result table.
+    console_utf8_reconfigure()
     parser = argparse.ArgumentParser(
         prog="resembl-find", description="Query a running resembl server."
     )

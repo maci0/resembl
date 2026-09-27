@@ -80,6 +80,18 @@ def timestamp_normalize(value: str | None) -> str | None:
     return moment.astimezone(UTC).isoformat()
 
 
+def name_json_escape(text: str) -> str:
+    """Return *text* as it appears inside a stored ``names`` / ``tags`` column.
+
+    Both columns hold a JSON list written by :func:`json.dumps`, which escapes
+    every non-ASCII character: the name ``café`` is stored with ``é`` written
+    as the escape sequence ``\\u00e9``, not as the character itself.  A SQL
+    ``LIKE`` probe carrying the character therefore matches no row, which is
+    why every name lookup and name search escapes its input this way first.
+    """
+    return json.dumps(text)[1:-1]
+
+
 class Collection(SQLModel, table=True):
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 
@@ -167,14 +179,16 @@ class Snippet(SQLModel, table=True):
         # The winner's full row is fetched via the identity map afterwards.
         #
         # The probe must reproduce the stored (JSON-encoded) spelling of
-        # *name*, or a name containing ``"`` or ``\`` can never match its own
-        # row: first encode like ``json.dumps`` does, then LIKE-escape the
-        # result ('\\' is the escape character, so every stored backslash —
+        # *name*, or a name containing ``"``, ``\`` or any non-ASCII
+        # character can never match its own row: encode it the way
+        # :func:`name_json_escape` describes, then LIKE-escape the result
+        # ('\\' is the escape character, so every stored backslash —
         # including the ones JSON just introduced — must be doubled) and
         # protect ``%`` / ``_`` so they match themselves instead of widening
         # the probe.
-        encoded = name.replace("\\", "\\\\").replace('"', '\\"')
-        literal = encoded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        literal = (
+            name_json_escape(name).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
         candidates = session.exec(
             select(cls.checksum, cls.names).where(
                 cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]

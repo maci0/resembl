@@ -27,6 +27,15 @@ values themselves. Compatibility normalization (NFKC/NFKD) is deliberately
 not used: it folds superscripts, fullwidth digits and roman numerals into
 their ASCII equivalents, which changes the text rather than its spelling.
 
+UTF-8 is the encoding at every boundary, never the platform default: snippet
+files are read with it (`resembl import`, `resembl find --file`,
+`resembl find-batch --file`), query bodies are UTF-8 JSON, and the process's
+own output streams are switched to it at startup
+(`resembl.paths.console_utf8_reconfigure`) with unencodable characters
+replaced rather than raised. A file the local code page cannot read is
+therefore never decoded into mojibake and stored that way, and a snippet
+name the local code page cannot print never costs the user a report.
+
 ## Core Functions
 
 ### `normalize_unicode(text: str) → str`

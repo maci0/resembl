@@ -6,18 +6,27 @@ Covers:
 - Filenames that carry a byte no encoding can decode (a lone surrogate, as
   POSIX permits and ``os.fsdecode`` produces) export instead of crashing.
 - Astral-plane and combining characters survive a full store/find round-trip.
+- Every text boundary names its encoding, and output is UTF-8 whatever the
+  host's locale is.
 """
 
 # pylint: disable=protected-access  # tests exercise private internals
 
+import io
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import unicodedata
 import unittest
+from unittest.mock import patch
 
+import typer.main
 from sqlalchemy import func
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from resembl import cli
 from resembl.core import (
     _EXPORT_STEM_MAX_BYTES,
     _export_safe_filename,
@@ -27,10 +36,12 @@ from resembl.core import (
     snippet_name_add,
     snippet_name_remove,
     snippet_prepare,
+    snippet_search_by_name,
     snippet_tag_add,
     string_checksum,
 )
 from resembl.models import Collection, Snippet
+from resembl.paths import console_utf8_reconfigure
 from resembl.scoring import code_tokenize, normalize_unicode
 
 #: The same assembly snippet written two ways: ``café`` precomposed (NFC)
@@ -38,6 +49,23 @@ from resembl.scoring import code_tokenize, normalize_unicode
 #: spelling for any filename containing an accented character.
 _NFC_CODE = 'mov rax, 0\ndb "café", 0'
 _NFD_CODE = unicodedata.normalize("NFD", _NFC_CODE)
+
+
+def _cli_run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    """Run ``python -m resembl.cli <args>`` in a child process, as a user would."""
+    return subprocess.run(
+        [sys.executable, "-m", "resembl.cli", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.path.join(os.getcwd(), "."),
+            "RESEMBL_CONFIG_DIR": os.path.join(tempfile.gettempdir(), "resembl-no-config"),
+            "RESEMBL_CACHE_DIR": os.path.join(tempfile.gettempdir(), "resembl-no-cache"),
+            **(env or {}),
+        },
+    )
 
 
 class TestNormalizeUnicode(unittest.TestCase):
@@ -186,6 +214,128 @@ class TestCollectionIdentity(unittest.TestCase):
             self.session.exec(select(func.count()).select_from(Collection)).one(),
             1,
         )
+
+
+class TestNameSearch(unittest.TestCase):
+    """A name search looks stored text up, so it must run on the stored form."""
+
+    def setUp(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+        SQLModel.metadata.create_all(engine)
+        self.session = Session(engine)
+
+    def tearDown(self):
+        self.session.close()
+
+    def test_nfd_pattern_finds_the_nfc_name(self):
+        """The pattern macOS and a copy-paste hand over: the base letter plus
+        a combining acute, a sequence no stored row contains."""
+        snippet = snippet_add(self.session, "café", "MOV EAX, 1")
+        self.assertIsNotNone(snippet)
+        found = snippet_search_by_name(self.session, "cafe\u0301")
+        self.assertEqual([s.checksum for s in found], [snippet.checksum])
+
+    def test_a_pattern_no_name_contains_still_matches_nothing(self):
+        snippet_add(self.session, "café", "MOV EAX, 1")
+        self.assertEqual(snippet_search_by_name(self.session, "tea"), [])
+
+    def test_a_name_lookup_finds_a_non_ascii_name(self):
+        """The LIKE probe has to spell the name the way the column stores it:
+        ``json.dumps`` escapes every non-ASCII character, so the character
+        itself matches no row."""
+        snippet = snippet_add(self.session, "café", "MOV EAX, 1")
+        self.assertIsNotNone(snippet)
+        found = Snippet.get_by_name(self.session, "café")
+        self.assertIsNotNone(found)
+        self.assertEqual(found.checksum, snippet.checksum)
+
+    def test_a_name_lookup_still_finds_a_name_with_a_quote(self):
+        snippet = snippet_add(self.session, 'say "hi"', "MOV EAX, 1")
+        self.assertIsNotNone(snippet)
+        found = Snippet.get_by_name(self.session, 'say "hi"')
+        self.assertIsNotNone(found)
+        self.assertEqual(found.checksum, snippet.checksum)
+
+
+class TestEncodingBoundaries(unittest.TestCase):
+    """Both text boundaries name UTF-8: the file a query is read from, and the
+    stream a name is printed to."""
+
+    def test_query_file_options_declare_utf8(self):
+        """``--file`` must not inherit the platform's locale.
+
+        ``resembl import`` has always read snippets as UTF-8.  A query file
+        read with the locale's encoding decodes the same bytes to different
+        text, so the query stops matching the snippet that same file imports
+        as, and a file outside the local code page is refused outright.
+        """
+        command = typer.main.get_command(cli.app)
+        for name in ("find", "find-batch"):
+            sub = command.commands[name]
+            file_param = next(p for p in sub.params if p.name == "file")
+            self.assertEqual(getattr(file_param.type, "encoding", None), "utf-8", name)
+
+    def test_a_utf8_query_file_matches_the_imported_snippet(self):
+        """End to end, with the child's locale defaulting to plain ASCII."""
+        code = 'mov eax, 1\ndb "café", 0\n'
+        with tempfile.TemporaryDirectory() as temp_dir:
+            query_path = os.path.join(temp_dir, "query.asm")
+            with open(query_path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(code)
+
+            added = _cli_run("import", query_path, "--force")
+            self.assertEqual(added.returncode, 0, added.stderr)
+
+            # The C locale with coercion off is the platform default a
+            # ``--file`` read used to inherit: ANSI_X3.4-1968, which cannot
+            # decode the file at all.
+            found = _cli_run(
+                "--format",
+                "json",
+                "find",
+                "--file",
+                query_path,
+                env={
+                    "LC_ALL": "C",
+                    "LANG": "C",
+                    "PYTHONCOERCECLOCALE": "0",
+                    "PYTHONUTF8": "0",
+                },
+            )
+            self.assertEqual(found.returncode, 0, found.stderr)
+            self.assertEqual(len(json.loads(found.stdout)["matches"]), 1, found.stdout)
+
+    def test_output_is_utf8_whatever_the_locale_says(self):
+        """A locale-encoded stdout raises on the first name it cannot draw,
+        losing the whole report instead of one character."""
+        raw = io.BytesIO()
+        legacy = io.TextIOWrapper(raw, encoding="cp1252")
+        with patch("sys.stdout", legacy), patch("sys.stderr", legacy):
+            console_utf8_reconfigure()
+            self.assertEqual(sys.stdout.encoding, "utf-8")
+            print("日本語")
+            sys.stdout.flush()
+        self.assertEqual(raw.getvalue().decode("utf-8"), "日本語\n")
+
+    def test_a_utf8_stream_is_left_alone(self):
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="utf-8")
+        with patch("sys.stdout", stream), patch("sys.stderr", stream):
+            console_utf8_reconfigure()
+        self.assertEqual(stream.encoding, "utf-8")
+        stream.detach()
+
+    def test_a_name_the_local_code_page_cannot_print_still_lists(self):
+        """The shipped report, with the child's stdout pinned to cp1252: this
+        raised ``UnicodeEncodeError`` and printed nothing at all."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_url = f"sqlite:///{os.path.join(temp_dir, 'test.db')}"
+            env = {"DATABASE_URL": db_url, "PYTHONIOENCODING": "cp1252"}
+            added = _cli_run("add", "日本語", 'db "café", 0', env=env)
+            self.assertEqual(added.returncode, 0, added.stderr)
+            listed = _cli_run("--format", "json", "list", env=env)
+            self.assertEqual(listed.returncode, 0, listed.stderr)
+            self.assertEqual(json.loads(listed.stdout)[0]["names"], ["日本語"])
 
 
 if __name__ == "__main__":

@@ -323,6 +323,27 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `resembl find --file` and `resembl find-batch --file` read the file as
+  UTF-8, the encoding `resembl import` already reads with.  Both went through
+  click's default instead, which is the platform's locale: on a Windows shell
+  with a legacy code page a UTF-8 snippet decoded to mojibake (`café` read as
+  `cafÃ©`), so the query no longer matched the snippet the same file imports
+  as, and a query file that was not in the local code page was refused
+  outright.
+
+- Output is written as UTF-8 whatever the host's locale says, and a character
+  the stream cannot represent is replaced rather than raising.  A snippet
+  named `日本語` printed under a cp1252 stdout raised
+  `UnicodeEncodeError` and lost the whole report: `list`, `find`, `search`,
+  `compare` and `collection list` all tracebacked instead of rendering.
+  Windows terminals, which already use their own Unicode writer, are
+  untouched.
+
+- `resembl search` normalizes its pattern to NFC, the form names are stored
+  in.  A pattern carrying an NFD spelling of an accented name (`café` as a
+  base letter plus a combining acute, the spelling macOS and a copy-paste
+  hand over) matched no row even though the name was in the database.
+
 - `POST /find` answers `400` for a blank `query`, and `POST /find-batch`
   carries the same message on that query's entry.  A blank query
   fingerprints to an empty token set, so the endpoint answered `200` with an

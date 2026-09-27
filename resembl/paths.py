@@ -5,7 +5,9 @@ the database URL, the cache directory, the config directory, and the port
 file ``resembl serve`` writes.  The CLI, the server and the standalone
 ``resembl-find`` client all read them from here, so a change to the override
 rules or the port-file naming cannot leave the client looking for a file the
-server never wrote.
+server never wrote.  The output encoding of the process goes here too, for
+the same reason: it is another environment-derived setting both entry points
+have to agree on.
 
 Standard library only, and importing it pulls in nothing from this package:
 ``resembl.find_client`` resolves its paths through this module instead of
@@ -16,8 +18,10 @@ numpy import graph and its ~50 ms startup.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
+import sys
 
 #: Database URL used when the environment names none.
 DEFAULT_DB_URL = "sqlite:///assembly.db"
@@ -117,3 +121,30 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
     """
     digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
     return os.path.join(cache_dir, f"server_{digest}.port")
+
+
+def _encoding_is_utf8(encoding: str) -> bool:
+    """Whether *encoding* names UTF-8 under any of its usual spellings."""
+    return encoding.lower().replace("-", "").replace("_", "") == "utf8"
+
+
+def console_utf8_reconfigure() -> None:
+    """Make the process's output streams UTF-8 for the rest of the run.
+
+    Every string in the package is UTF-8 by the time it is printed (names
+    and tags arrive from files, argv and JSON; code is stored NFC), but
+    ``sys.stdout`` encodes with whatever the platform's locale says.  A
+    Windows shell with a legacy code page hands the CLI a cp1252 stdout, and
+    a snippet named ``日本語`` then raised ``UnicodeEncodeError`` and lost
+    the whole report rather than one character, so the user saw a traceback
+    where a list was due.  ``errors="replace"`` keeps a character the
+    terminal's own code page cannot draw from escalating that into a crash.
+    Streams that are already UTF-8 (the common case) are left untouched, so
+    the Windows console's own writer keeps its Unicode path.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if not isinstance(stream, io.TextIOWrapper):
+            continue
+        if stream.closed or _encoding_is_utf8(stream.encoding):
+            continue
+        stream.reconfigure(encoding="utf-8", errors="replace")

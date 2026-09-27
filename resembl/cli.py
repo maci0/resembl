@@ -91,7 +91,13 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
-from .paths import cache_dir_get, db_url_get, db_url_mask, server_port_path
+from .paths import (
+    cache_dir_get,
+    console_utf8_reconfigure,
+    db_url_get,
+    db_url_mask,
+    server_port_path,
+)
 from .scoring import MAX_NUM_PERM
 from .theme import ACCENT, score_color
 
@@ -1451,7 +1457,10 @@ def reindex(
 def find(
     query: str | None = typer.Option(None, "--query", help="The query string to search for."),
     file: typer.FileText | None = typer.Option(
-        None, "--file", help="Path to a file containing the query. Use '-' for stdin."
+        None,
+        "--file",
+        help="Path to a file containing the query. Use '-' for stdin.",
+        encoding="utf-8",
     ),
     top_n: int | None = typer.Option(None, "--top-n", help="Number of top matches to return."),
     threshold: float | None = typer.Option(
@@ -1547,7 +1556,10 @@ def find(
 @app.command()
 def find_batch(
     file: typer.FileText = typer.Option(
-        ..., "--file", help="File of queries, one per line ('#' = comment)."
+        ...,
+        "--file",
+        help="File of queries, one per line ('#' = comment).",
+        encoding="utf-8",
     ),
     top_n: int | None = typer.Option(
         None, "--top-n", help="Number of top matches to return per query."
@@ -2182,6 +2194,10 @@ def config_unset_cmd(
 
 def main() -> None:
     """Entry point for the resembl command line interface."""
+    # Before anything is written: a locale-encoded stdout raises
+    # UnicodeEncodeError on the first snippet name it cannot represent, which
+    # costs the user the whole report.
+    console_utf8_reconfigure()
     if "--no-color" in sys.argv:
         # --no-color has to reach typer's own renderer, not just this module's
         # consoles: the --help panel is painted before the callback runs, and
