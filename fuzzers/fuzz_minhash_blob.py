@@ -137,9 +137,9 @@ def test_one_input(data):
     # The batched path is the scoring hot path and must match the scalar one.
     candidates = [candidate, _CONTROL]
     batch = minhash_jaccard_batch(candidate, candidates)
-    assert batch == [minhash_jaccard(candidate, c) for c in candidates], (
-        "batch jaccard disagrees with the scalar jaccard"
-    )
+    assert batch == [
+        minhash_jaccard(candidate, c) for c in candidates
+    ], "batch jaccard disagrees with the scalar jaccard"
 
 
 def main():

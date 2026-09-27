@@ -39,6 +39,14 @@ jobs:
         # Commonly enabled options, see https://github.com/actions/dependency-review-action#configuration-options for all available options.
         with:
           comment-summary-in-pr: always
-        #   fail-on-severity: moderate
-        #   deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
-        #   retry-on-snapshot-warnings: true
+          # The comment alone does not gate a merge: without a severity floor
+          # a known-vulnerable version only shows up as a bot comment. Moderate
+          # is the floor, not high/critical, so a moderate advisory is fixed
+          # before it reaches a release rather than after.
+          fail-on-severity: moderate
+          # A snapshot lookup that fails mid-run is reported as a warning and
+          # the scan passes, so without the retry a transient outage reads as a
+          # clean scan.
+          retry-on-snapshot-warnings: true
+        # deny-licenses stays off: the project is GPL-3.0-only, so no license
+        # is incompatible with it and the list would only encode preferences.

@@ -145,9 +145,9 @@ def test_one_input(data):
     parsed = _FindHandler._read_body(  # pylint: disable=protected-access
         _StubHandler(content_length, body)
     )
-    assert parsed is None or isinstance(parsed, dict), (
-        "read_body returned a non-object, non-None body"
-    )
+    assert parsed is None or isinstance(
+        parsed, dict
+    ), "read_body returned a non-object, non-None body"
     if parsed is None:
         return
 
@@ -160,19 +160,19 @@ def test_one_input(data):
     # every one of them is used to size a query, a banding structure, or a
     # cached MinHash template, so a value slipping through here is a memory
     # or a ranking bug downstream.
-    assert isinstance(request.top_n, int) and not isinstance(request.top_n, bool), (
-        f"top_n is not an int: {request.top_n!r}"
-    )
+    assert isinstance(request.top_n, int) and not isinstance(
+        request.top_n, bool
+    ), f"top_n is not an int: {request.top_n!r}"
     assert request.ngram_size >= 1, f"ngram_size below 1 accepted: {request.ngram_size}"
-    assert 2 <= request.num_permutations <= MAX_NUM_PERM, (
-        f"num_permutations out of range: {request.num_permutations}"
-    )
-    assert 0.0 <= request.jaccard_weight <= 1.0, (
-        f"jaccard_weight out of range: {request.jaccard_weight}"
-    )
-    assert 0.0 <= request.effective_threshold <= 1.0, (
-        f"effective_threshold out of range: {request.effective_threshold}"
-    )
+    assert (
+        2 <= request.num_permutations <= MAX_NUM_PERM
+    ), f"num_permutations out of range: {request.num_permutations}"
+    assert (
+        0.0 <= request.jaccard_weight <= 1.0
+    ), f"jaccard_weight out of range: {request.jaccard_weight}"
+    assert (
+        0.0 <= request.effective_threshold <= 1.0
+    ), f"effective_threshold out of range: {request.effective_threshold}"
     if request.threshold is not None:
         assert 0.0 <= request.threshold <= 1.0, f"threshold out of range: {request.threshold}"
     # NaN survives a naive range check, then poisons every comparison it

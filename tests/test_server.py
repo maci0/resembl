@@ -1643,7 +1643,8 @@ class TestServerConcurrency(unittest.TestCase):
 
         from resembl.models import LSHBucket
 
-        return self._session.exec(select(func.count(LSHBucket.checksum))).one()  # type: ignore[arg-type]
+        rows = select(func.count(LSHBucket.checksum))
+        return self._session.exec(rows).one()  # type: ignore[arg-type]
 
     def test_request_cannot_rebuild_the_served_index(self):
         """Parameters the served index was not built for are refused, not built.
@@ -1741,9 +1742,7 @@ class TestServerConcurrency(unittest.TestCase):
         meta = lsh_meta_get(self._session)
         self.assertIsNotNone(meta)
         bands, _r = banding_params(meta[0], meta[1])
-        num_snippets = self._session.exec(
-            select(func.count(Snippet.checksum))  # type: ignore[arg-type]
-        ).one()
+        num_snippets = self._session.exec(select(func.count(Snippet.checksum))).one()
         # Every snippet contributes exactly one row per band, and the rows
         # are unique by (band, bucket, checksum) — so the count is exact.
         self.assertEqual(self._bucket_row_count(), bands * num_snippets)
