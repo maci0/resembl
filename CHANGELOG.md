@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-28
+
 ### Fixed
 
 - Every command writes LF-terminated output on Windows too. The output streams
@@ -745,7 +747,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/maci0/resembl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/maci0/resembl/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/maci0/resembl/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/maci0/resembl/compare/v1.1.0...v1.2.0
