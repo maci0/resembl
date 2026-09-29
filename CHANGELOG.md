@@ -6,6 +6,16 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-09-29
+
+### Changed
+
+- Documentation only. The README opener says what `resembl` does, the "How It
+  Works" summary names the hybrid score (estimated Jaccard plus Levenshtein)
+  that ranks the LSH candidates, and CONTRIBUTING lists four plain principles.
+  README, CONTRIBUTING and the API reference, custom database and man page
+  guides no longer use em dashes or filler.
+
 ## [3.1.0] - 2026-09-28
 
 ### Fixed
@@ -747,7 +757,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.1...HEAD
+[3.1.1]: https://github.com/maci0/resembl/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/maci0/resembl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/maci0/resembl/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/maci0/resembl/compare/v1.2.0...v2.0.0
