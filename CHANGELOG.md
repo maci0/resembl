@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The mascot, icon and favicon have transparent backgrounds, so the README no
+  longer shows them as a white square on a dark theme. Only the white around
+  the art was removed; the eyes, the icon's line work and the brand green
+  (`#10911A`) are unchanged. The two PNGs are palette-optimized, the icon
+  from 105 kB to 19 kB and the mascot from 196 kB to 39 kB.
+
 ## [3.1.1] - 2026-09-29
 
 ### Changed
