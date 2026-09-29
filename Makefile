@@ -110,7 +110,7 @@ coverage:  ## Run the suite under coverage (terminal report plus build/coverage.
 	uv run --locked pytest --cov=resembl --cov-report=term-missing --cov-report=xml:build/coverage.xml
 
 db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URLs set)
-	@if [ -z "$$RESEMBL_TEST_PG_URL" ] || [ -z "$$RESEMBL_TEST_MYSQL_URL" ]; then \
+	@if [ -z "$${RESEMBL_TEST_PG_URL:-}" ] || [ -z "$${RESEMBL_TEST_MYSQL_URL:-}" ]; then \
 		echo "make db-test needs RESEMBL_TEST_PG_URL and RESEMBL_TEST_MYSQL_URL,"; \
 		echo "the two CI services (.github/workflows/tests.yml). Point them at your own servers:"; \
 		echo "  RESEMBL_TEST_PG_URL=postgresql+pg8000://user:pass@host/db \\"; \
@@ -142,7 +142,7 @@ check:  ## Run every check CI runs, plus the commit-gate file checks
 	uv run --locked black --check .
 	uv run --locked pylint resembl/ tests/ fuzzers/
 	$(MAKE) test
-	@if [ -z "$$RESEMBL_TEST_PG_URL" ] || [ -z "$$RESEMBL_TEST_MYSQL_URL" ]; then \
+	@if [ -z "$${RESEMBL_TEST_PG_URL:-}" ] || [ -z "$${RESEMBL_TEST_MYSQL_URL:-}" ]; then \
 		echo "note: the PostgreSQL and MySQL integration tests were skipped (unset"; \
 		echo "RESEMBL_TEST_PG_URL / RESEMBL_TEST_MYSQL_URL). CI runs them; 'make db-test' does too."; \
 	fi
