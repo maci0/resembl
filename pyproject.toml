@@ -1,6 +1,6 @@
 [project]
 name = "resembl"
-version = "3.1.3"
+version = "3.1.4"
 description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
 # SPDX expression, not free text: "GPLv3" is not an SPDX id, so indexers and

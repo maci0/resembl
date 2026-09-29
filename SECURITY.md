@@ -3,7 +3,7 @@
 Last reviewed: 2026-09-28, against the tree at version 3.1.0
 (`pyproject.toml:3`).
 
-This describes the current tree and the 3.1.3 release. The `serve`
+This describes the current tree and the 3.1.4 release. The `serve`
 controls below (the loopback `Host` check, `serve -v` request logging, the
 `0700` cache directory, the `0600` port file, and the 1000-row `top_n` cap)
 are documented in `CHANGELOG.md`.
@@ -32,7 +32,7 @@ The repository is <https://github.com/maci0/resembl>.
 | 3.x (current release line) | yes |
 | 2.x and earlier | no |
 
-The current release is 3.1.3. Older lines receive no fixes; upgrade to the
+The current release is 3.1.4. Older lines receive no fixes; upgrade to the
 current line before reporting an issue against them.
 
 ## Threat model
