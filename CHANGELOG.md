@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies refreshed to their latest releases, with the declared minimums
+  raised to match (among them `sqlmodel` 0.0.47, `numpy` 2.5.3, `rich` 15 and
+  `typer` 0.27.2), and the build backend pinned to `setuptools==84.0.0`.
+  `sqlalchemy` stays on 2.0.x: every `sqlmodel` release so far requires
+  `sqlalchemy<2.1`.
+
 ## [3.1.3] - 2026-09-29
 
 ### Fixed

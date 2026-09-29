@@ -27,22 +27,24 @@ classifiers = [
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # sqlmodel requires sqlalchemy<2.1.0, so the lock stays on
+    # 2.0.x; .github/dependabot.yml ignores 2.1 until sqlmodel lifts that cap.
     "sqlalchemy>=2.0.24",
-    "sqlmodel>=0.0.24",
+    "sqlmodel>=0.0.47",
     # Floor at 2.20.0: earlier releases are flagged by CVE-2026-4539
     # (ReDoS in an unused lexer); keep the floor above it so scanners pass.
-    "pygments>=2.20.0",
-    "rapidfuzz>=3.13.0",
-    "rich>=13.0.0",
+    "pygments>=2.21.0",
+    "rapidfuzz>=3.14.6",
+    "rich>=15.0.0",
     "tomli_w>=1.2.0",
-    "typer>=0.9.0",
-    "numpy>=1.24.0",
+    "typer>=0.27.2",
+    "numpy>=2.5.3",
     # DBAPI drivers for the non-SQLite backends the CLI advertises in its
     # DATABASE_URL help text and docs (postgresql+pg8000://, mysql+pymysql://).
     # Both are pure Python and small, so a plain install can use them; only
     # the compiled DuckDB driver needs the opt-in extra below.
-    "pg8000>=1.31.0",
-    "pymysql>=1.1.0",
+    "pg8000>=1.31.5",
+    "pymysql>=1.2.3",
 ]
 
 [project.urls]
@@ -51,21 +53,21 @@ repository = "https://github.com/maci0/resembl"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.4.1",
-    "mypy>=1.16.1",
-    "ruff>=0.12.2",
-    "black>=25.1.0",
-    "pre-commit>=4.2.0",
+    "pytest>=9.1.1",
+    "mypy>=2.3.1",
+    "ruff>=0.16.9",
+    "black>=26.5.1",
+    "pre-commit>=4.6.2",
     # Floor at 4: the tree is adapted to pylint 4's checks (its invalid-name
     # rule flags the two mutable module-level singletons, scoped-disabled
     # inline in resembl.database / resembl.scoring).  Do not lower.
-    "pylint>=4",
-    "hypothesis>=6.0.0",
+    "pylint>=4.0.9",
+    "hypothesis>=6.168.1",
     # The DuckDB driver (compiled, tens of MB) is opt-in for users via the
     # `duckdb` extra; the test suite needs it, so dev pulls the same extra.
     "resembl[duckdb]",
-    "pytest-benchmark>=4.0.0",
-    "pytest-cov>=5.0.0",
+    "pytest-benchmark>=5.3.0",
+    "pytest-cov>=7.1.0",
     # Test oracle only: resembl.minhash vendors a bit-compatible MinHash, and
     # these tests cross-check fingerprints and banding against the real
     # library.  Never import it from package code.  Floor at 2: the oracle
@@ -82,11 +84,11 @@ dev = [
 duckdb = [
     # Compiled DuckDB driver plus its SQLAlchemy dialect.  Needed only for a
     # `duckdb:///file.db` DATABASE_URL, so it is not a runtime dependency.
-    "duckdb>=1.0.0",
-    "duckdb-engine>=0.13.0",
+    "duckdb>=1.5.5",
+    "duckdb-engine>=0.17.0",
 ]
 fuzz = [
-    "atheris>=2.3.0",
+    "atheris>=3.1.0",
 ]
 
 [project.scripts]
@@ -104,10 +106,10 @@ required-version = "==0.12.13"
 [build-system]
 # Pinned exactly, not floored: the sdist and the wheel are the release
 # artifacts, and an open range lets the backend drift between two builds of
-# the same source.  80.9.0 is well above the setuptools 77 floor for PEP 639
+# the same source.  84.0.0 is well above the setuptools 77 floor for PEP 639
 # metadata (the SPDX `license` string and `license-files` above), which older
 # setuptools rejects.
-requires = ["setuptools==80.9.0"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -32,6 +32,13 @@ updates:
       dependencies:
         patterns:
           - "*"
+    ignore:
+      # sqlmodel requires sqlalchemy<2.1.0 (every release through 0.0.47), so
+      # a 2.1 bump cannot resolve and fails the whole group at `uv sync
+      # --locked`.  Drop this once a sqlmodel release allows 2.1, and bump
+      # both in the same change.
+      - dependency-name: sqlalchemy
+        versions: [">=2.1.0"]
 
   # The workflows pin actions by tag, so an upstream release never reaches a
   # run until it is reviewed here.
