@@ -62,7 +62,7 @@ Once your environment is set up, you are ready to start contributing. This secti
 All work should be tracked via the GitHub Issues tab. This practice encourages communication and prevents multiple people from working on the same thing or effort being wasted on a change that doesn't align with the project's direction.  
 
 - **For New Contributors:** A great place to start is by looking for issues tagged with `good first issue`. These are typically well-defined, smaller tasks that are perfect for getting familiar with the codebase and contribution process.  
-- **For All Contributors:** Before starting work on a new feature, a significant refactor, or a complex bug fix, please check if an issue already exists. If not, open a new one to discuss the proposed change with the maintainers. This ensures everyone is aligned on the approach before any code is written.
+- **For All Contributors:** Before starting work on a new feature, a significant refactor, or a complex bug fix, please check if an issue already exists. If not, open a new one to discuss the proposed change with the maintainers. Agree on the approach there before writing code.
 
 ### Create a Branch
 Never work directly on the `main` branch. For every contribution, create a new feature branch from an up-to-date `main` branch. We use a descriptive naming convention to keep the repository organized:

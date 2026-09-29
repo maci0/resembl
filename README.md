@@ -30,7 +30,7 @@ This approach provides several advantages:
 
 ### LSH Index
 
-To keep search time flat as the database grows, `resembl` maintains a **database-backed LSH index** (the `lsh_bucket` table). Every snippet contributes one row per band bucket it lands in, and a search only touches the buckets the query hits, so lookup time stays flat regardless of database size. The index is:
+`resembl` maintains a **database-backed LSH index** (the `lsh_bucket` table). Every snippet contributes one row per band bucket it lands in, and a search only touches the buckets the query hits, so lookup time does not grow with the number of snippets outside those buckets. The index is:
 
 - **Built lazily** on the first `find` (and rebuilt automatically when the configured `lsh_threshold` or `num_permutations` change).
 - **Kept in sync incrementally**: `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
@@ -40,7 +40,7 @@ Legacy pickle cache files (from older versions) are no longer loaded: unpickling
 
 ## How It Works
 
-Search is a two-step pipeline: a cheap filter, then an exact rerank.
+Search runs in two steps: an LSH lookup picks candidates, then a hybrid score (estimated Jaccard plus Levenshtein) ranks them.
 
 ### 1. Fast Candidate Filtering with MinHash and LSH
 
@@ -373,7 +373,7 @@ you point it at. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the commands.
 
 #### Code Coverage
 
-This project uses `pytest-cov` for line-level coverage measurement. A GitHub Actions workflow runs on every pull request to ensure that code quality is maintained. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
+This project uses `pytest-cov` for line-level coverage measurement. A GitHub Actions workflow runs the tests with coverage on every pull request. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
 
 You can run the coverage report locally with:
 ```bash
