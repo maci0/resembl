@@ -6,6 +6,12 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The icon and favicon eye rings end in rounded caps at the head outline. In
+  3.1.2 their ends stuck out past the silhouette as small white spikes on a
+  dark background.
+
 ## [3.1.2] - 2026-09-29
 
 ### Fixed
