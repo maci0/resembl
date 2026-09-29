@@ -1188,7 +1188,7 @@ requires-dist = [
     { name = "resembl", extras = ["duckdb"], marker = "extra == 'dev'" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.9" },
-    { name = "sqlalchemy", specifier = ">=2.0.24" },
+    { name = "sqlalchemy", specifier = ">=2.0.54" },
     { name = "sqlmodel", specifier = ">=0.0.47" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.27.2" },

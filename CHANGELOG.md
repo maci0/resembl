@@ -6,6 +6,11 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The declared `sqlalchemy` minimum is 2.0.54, the release the lockfile
+  already installs. It stays below 2.1, which `sqlmodel` does not allow yet.
+
 ## [3.1.4] - 2026-09-29
 
 ### Changed
