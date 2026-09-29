@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-09-29
+
 ### Fixed
 
 - The mascot, icon and favicon have transparent backgrounds, so the README no
@@ -765,7 +767,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.1...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.2...HEAD
+[3.1.2]: https://github.com/maci0/resembl/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/maci0/resembl/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/maci0/resembl/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/maci0/resembl/compare/v2.0.0...v3.0.0
