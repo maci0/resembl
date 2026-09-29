@@ -7,9 +7,11 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Requires Python 3.13 or newer and uv exactly 0.12.13: `pyproject.toml` pins it
-under `[tool.uv] required-version`, so any other uv release fails at the first
-command instead of after it has rewritten the lockfile.
+Requires Python 3.13 or newer and uv 0.12.13, the release CI installs.
+`pyproject.toml` sets it as the floor under `[tool.uv] required-version`, so an
+older uv fails at the first command instead of after it has rewritten the
+lockfile; the floor is not an exact pin because Dependabot's `uv` ecosystem
+regenerates `uv.lock` with its own uv release.
 
 ```bash
 make install   # uv sync --locked --extra dev, then the git hooks; same as CI

@@ -10,6 +10,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - The declared `sqlalchemy` minimum is 2.0.54, the release the lockfile
   already installs. It stays below 2.1, which `sqlmodel` does not allow yet.
+- Building from source needs uv 0.12.13 or newer instead of exactly 0.12.13.
 
 ## [3.1.4] - 2026-09-29
 
