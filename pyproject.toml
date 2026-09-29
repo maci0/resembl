@@ -29,7 +29,7 @@ requires-python = ">=3.13"
 dependencies = [
     # sqlmodel requires sqlalchemy<2.1.0, so the lock stays on
     # 2.0.x; .github/dependabot.yml ignores 2.1 until sqlmodel lifts that cap.
-    "sqlalchemy>=2.0.24",
+    "sqlalchemy>=2.0.54",
     "sqlmodel>=0.0.47",
     # Floor at 2.20.0: earlier releases are flagged by CVE-2026-4539
     # (ReDoS in an unused lexer); keep the floor above it so scanners pass.
