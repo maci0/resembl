@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The build clock is the commit time of HEAD (see `dist` in the
           # Makefile), so a tag build and a branch build of the same commit
@@ -65,7 +65,7 @@ jobs:
           dist/sdist-venv/bin/resembl --help
 
       - name: Upload the artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: resembl-dist-${{ github.sha }}
           # The published sdist and wheel are the tag's own artifact; this copy
@@ -105,7 +105,7 @@ jobs:
       attestations: write
     steps:
       - name: Download the built artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: resembl-dist-${{ github.sha }}
           path: dist

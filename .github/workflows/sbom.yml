@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # No job here pushes, so the token is not left in .git/config for a
           # later step to read and leak.
@@ -45,7 +45,7 @@ jobs:
         run: jq empty build/sbom.cdx.json
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-cyclonedx-${{ github.sha }}
           # A release SBOM is consumed while a release is being assessed, not
