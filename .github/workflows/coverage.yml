@@ -81,5 +81,10 @@ jobs:
         # to the action's root-level search, because the file is generated
         # output and does not sit in the repository root.
         files: build/coverage.xml
-        token: ${{ secrets.CODECOV_TOKEN }} # Optional for private repos
-        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+        # Strict whenever the token is present.  A Dependabot-triggered run
+        # gets only Dependabot secrets, so the token is empty there, and
+        # Codecov refuses a tokenless upload from a same-repository branch
+        # ("Token required because branch is protected").  Only that upload
+        # is allowed to fail; the tests above still gate the pull request.
+        fail_ci_if_error: ${{ secrets.CODECOV_TOKEN != '' }}
