@@ -1,4 +1,4 @@
-# resembl(1) — Assembly Code Similarity Search
+# resembl(1): Assembly Code Similarity Search
 
 ## SYNOPSIS
 
@@ -99,7 +99,7 @@ The `compare` command also reports control-flow graph similarity.
     runs, building the LSH index lazily on the first search.
 
 **find-batch** *--file QUERIES* [--top-n N] [--threshold T]
-:   Find matches for many queries in one process — each line of *file* is
+:   Find matches for many queries in one process; each line of *file* is
     one query (`#` starts a comment), and the interpreter startup and LSH
     index load are amortized across the whole batch.  Roughly N times
     faster than N separate `find` calls.  JSON/CSV output is a list of
@@ -116,8 +116,8 @@ The `compare` command also reports control-flow graph similarity.
     (subdirectories are included automatically).  A directory holding no
     such file is an error, not an import of zero snippets.  `--jobs N`
     (short form `-j N`) sets the worker count.  The default
-    worker count is adaptive — one worker per ~100 files, capped at the
-    CPU count — so small directories stay single-process (spawning each
+    worker count is adaptive (one worker per ~100 files, capped at the
+    CPU count) so small directories stay single-process (spawning each
     worker costs ~450 ms of interpreter startup) while large ones
     parallelize fully.
 

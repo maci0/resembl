@@ -2,7 +2,7 @@
   <img src="docs/resembl_mascot.png" alt="resembl mascot" width="200">
 </p>
 
-# resembl — Assembly Code Similarity Search
+# resembl: Assembly Code Similarity Search
 
 [![codecov](https://codecov.io/gh/maci0/resembl/branch/main/graph/badge.svg)](https://codecov.io/gh/maci0/resembl)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -10,12 +10,12 @@
 [![GitHub license](https://img.shields.io/github/license/maci0/resembl)](https://github.com/maci0/resembl/blob/main/LICENSE)
 [![GitHub last commit](https://img.shields.io/github/last-commit/maci0/resembl)](https://github.com/maci0/resembl/commits/main)
 
-`resembl` is a command-line tool designed to find similar assembly code snippets within a database. It uses a combination of MinHash, Locality-Sensitive Hashing, weighted shingling, and hybrid scoring to provide fast and accurate results, even when the query is a small fragment of a larger function.
+`resembl` finds the assembly snippets in a database that look like a query snippet, even when the query is a small fragment of a larger function. It normalizes registers and immediates away, fingerprints each snippet with MinHash over weighted shingles, narrows the candidates with a database-backed LSH index, and ranks them with a hybrid score.
 
-This tool is ideal for tasks such as:
-- Identifying known functions from a binary dump.
-- Finding code that is structurally similar to a given sample, despite minor differences.
-- Building a searchable library of assembly code patterns.
+Use it to:
+- name known functions in a binary dump,
+- find code that is structurally close to a sample despite register or constant changes,
+- keep a searchable library of assembly code patterns.
 
 ## Core Concepts
 
@@ -30,17 +30,17 @@ This approach provides several advantages:
 
 ### LSH Index
 
-To make searches nearly instantaneous, `resembl` maintains a **database-backed LSH index** (the `lsh_bucket` table). Every snippet contributes one row per band bucket it lands in, and a search only touches the buckets the query hits — so lookup time stays flat regardless of database size. The index is:
+To keep search time flat as the database grows, `resembl` maintains a **database-backed LSH index** (the `lsh_bucket` table). Every snippet contributes one row per band bucket it lands in, and a search only touches the buckets the query hits, so lookup time stays flat regardless of database size. The index is:
 
 - **Built lazily** on the first `find` (and rebuilt automatically when the configured `lsh_threshold` or `num_permutations` change).
-- **Kept in sync incrementally** — `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
-- **Streamed** during builds — rows are inserted in batches, bounding memory use on very large databases.
+- **Kept in sync incrementally**: `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
+- **Streamed** during builds: rows are inserted in batches, bounding memory use on very large databases.
 
-Legacy pickle cache files (from older versions) are no longer loaded — unpickling a file is arbitrary code execution, and the cache directory is not a trust boundary. Stale cache files are ignored and removed on the next write; the index simply rebuilds from the database. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
+Legacy pickle cache files (from older versions) are no longer loaded: unpickling a file is arbitrary code execution, and the cache directory is not a trust boundary. Stale cache files are ignored and removed on the next write; the index simply rebuilds from the database. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
 
 ## How It Works
 
-The search process is a two-step pipeline designed for both speed and accuracy:
+Search is a two-step pipeline: a cheap filter, then an exact rerank.
 
 ### 1. Fast Candidate Filtering with MinHash and LSH
 
@@ -75,7 +75,7 @@ To avoid the slow process of comparing a query against every single entry in the
 
 - **MinHash:** Each normalized snippet is converted into a **MinHash**. A MinHash is a compact "fingerprint" of the code. Snippets with similar structures will produce similar MinHash fingerprints.
 
-- **Locality Sensitive Hashing (LSH):** We use a banded LSH index stored in the database (the `lsh_bucket` table) to group the MinHashes. This data structure acts like a "bucketing" system. Similar MinHashes are likely to be placed into the same buckets. When you search, we hash your query's MinHash and only retrieve candidates from the buckets it lands in. This is an extremely fast way to narrow down a huge database to a handful of potential matches.
+- **Locality Sensitive Hashing (LSH):** We use a banded LSH index stored in the database (the `lsh_bucket` table) to group the MinHashes. This data structure acts like a "bucketing" system. Similar MinHashes are likely to be placed into the same buckets. When you search, we hash your query's MinHash and only retrieve candidates from the buckets it lands in. That narrows a large database to a handful of candidates without comparing the query to every entry.
 
 The key idea behind LSH is to hash items so that similar items have a higher probability of ending up in the same "bucket." The banding technique is a method for amplifying this effect, making the process more efficient and reliable for finding collision candidates.
 
@@ -110,7 +110,7 @@ The MinHash algorithm is a technique for quickly estimating how similar two sets
     - **3×** if the shingle contains a rare/distinctive instruction (e.g., `CPUID`, `RDTSC`, `SYSENTER`).
     - **1×** if the shingle is composed entirely of common instructions (e.g., `MOV`, `PUSH`, `ADD`).
     - **2×** otherwise.
-    A weight-`w` shingle is inserted as `w` distinct pseudo-elements, so its hash values are `w` times as likely to be the minimum — boosting the influence of distinctive patterns. (Hashing the same bytes repeatedly would be a no-op: MinHash keeps the per-position minimum, which duplicates never change.)
+    A weight-`w` shingle is inserted as `w` distinct pseudo-elements, so its hash values are `w` times as likely to be the minimum, which boosts the influence of distinctive patterns. (Hashing the same bytes repeatedly would be a no-op: MinHash keeps the per-position minimum, which duplicates never change.)
 
 3.  **Hashing:** Each unique shingle (and each weighted pseudo-element) is then hashed to an integer. This converts the set of shingles into a set of numbers.
 
@@ -281,7 +281,7 @@ uv run --locked resembl add my_memcpy "MOV EAX, EBX"
 # Or, after activating the virtual environment, you can call it directly
 resembl find --query "MOV EAX"
 
-# Bulk-import a large directory in parallel (default: adaptive — one worker
+# Bulk-import a large directory in parallel (default: adaptive, one worker
 # per ~100 files, capped at the CPU count; small directories stay single-
 # process so they never pay the ~450 ms per-worker spawn cost)
 resembl import --force --jobs 8 data/
@@ -346,7 +346,7 @@ uv run --locked resembl find-batch --file queries.txt --top-n 5
 
 ### 5. Running Tests
 
-To ensure everything is working correctly, you can run the test suite:
+Run the test suite:
 ```bash
 uv run --locked pytest
 ```
@@ -406,7 +406,7 @@ The script will:
 
 This provides a quick way to assess the performance of the core functionality on a non-trivial dataset.
 
-For larger datasets, use `tests/benchmark_scale.py`, which reports the metrics that matter at scale —
+For larger datasets, use `tests/benchmark_scale.py`, which reports the metrics that matter at scale:
 bulk import throughput, cold and warm `find` latency, `reindex` time, database size, and the stored
 MinHash footprint:
 
@@ -430,7 +430,7 @@ reindex in a single process:
 Key properties that keep these numbers flat as the database grows:
 
 - **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup; the query
-  itself is ~1.4 ms in-process) — queries hit a handful of indexed LSH bucket lookups (all in a
+  itself is ~1.4 ms in-process): queries hit a handful of indexed LSH bucket lookups (all in a
   single round trip) plus a chunked candidate fetch, independent of size.  The banding parameters
   are computed once and cached (the numpy banding search would otherwise run per query).
 - **Bulk import is linear and parallel** (~4,000–5,500 files/s with `--jobs`, ~5,560/s at 20k) with
@@ -438,10 +438,10 @@ Key properties that keep these numbers flat as the database grows:
   snippet is lexed once (the checksum string and the MinHash tokens are derived from the same token
   stream), the MinHash permutations are cloned from a cached template instead of regenerated
   (~260 µs saved), and the write path is a parameterized ``executemany`` bulk insert (multi-row
-  `VALUES` statements on DuckDB — see below).  The default worker count is adaptive (one worker per
+  `VALUES` statements on DuckDB; see below).  The default worker count is adaptive (one worker per
   ~100 files, capped at the CPU count), so small directories never pay the per-worker spawn cost.
 - **Fingerprints are 520 bytes each** (packed uint32s, self-describing) and the index is kept in sync
-  incrementally — `add`/`rm` never trigger a full rebuild.  *Note:* the weighted-shingling fix
+  incrementally: `add`/`rm` never trigger a full rebuild.  *Note:* the weighted-shingling fix
   (rare-instruction shingles now really boost the signature) changed the fingerprint format; the
   first `find` on a database created before that fix automatically reindexes once (the format
   version is stamped in the database, so this happens exactly one time).
@@ -471,31 +471,31 @@ the optimization.
 
 ### Scaling: the pieces that keep it fast
 
-- **Backends** — `RESEMBL_DATABASE_URL` (falling back to `DATABASE_URL`) selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
+- **Backends**: `RESEMBL_DATABASE_URL` (falling back to `DATABASE_URL`) selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
   the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
   [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
   in CI on every pull request to `main` and every push to it; DuckDB runs locally in the suite.
-- **DuckDB fast bulk inserts** — DuckDB's Python `executemany` path is pathologically slow
+- **DuckDB fast bulk inserts**: DuckDB's Python `executemany` path is pathologically slow
   (~7k rows/s measured), so the index build and the snippet import swap in multi-row `VALUES`
-  statements there (values are rendered through a quote-doubling / `FROM_HEX` literal builder — the
+  statements there (values are rendered through a quote-doubling / `FROM_HEX` literal builder; the
   injection boundary for user text).  Measured on this machine at 100k snippets: import 30 s
   (3.3k files/s, within ~20% of SQLite), reindex 11 s (on par), warm find ~1.2 s (interpreter-bound;
   ms when `serve`d).  The one-time LSH index build remains ~4× slower than SQLite at 100k
-  (~64 s vs ~14 s — DuckDB's row-insert model is slower at 2.5M point inserts than its bulk
+  (~64 s vs ~14 s; DuckDB's row-insert model is slower at 2.5M point inserts than its bulk
   paths), so cold-start latency favors SQLite; steady-state query and import throughput favor
   DuckDB's columnar engine.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
-- **Warm server** — `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
+- **Warm server**: `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
   route through it when running (with automatic in-process fallback), answering concurrent requests
   in milliseconds.  Its two endpoints are documented in the [HTTP API](./docs/http_api.md).
-- **Batch workflows** — `find-batch` processes a file of queries in one process (or one round trip
+- **Batch workflows**: `find-batch` processes a file of queries in one process (or one round trip
   through the server), amortizing startup across the batch.
-- **Bounded memory** — import prepares files with a bounded in-flight window (flat memory at a
+- **Bounded memory**: import prepares files with a bounded in-flight window (flat memory at a
   million files), flushes in chunks with `executemany`, and expunges the session identity map; the
   index build streams with band-major sorted inserts.
-- **Self-healing** — a missing index or an older fingerprint format is repaired automatically by the
+- **Self-healing**: a missing index or an older fingerprint format is repaired automatically by the
   next `find` (a format version is stamped in the database); `verify` reports health and flags a
   genuinely stale index.
-- **Cross-backend merge** — `merge` accepts any backend URL as its source.
+- **Cross-backend merge**: `merge` accepts any backend URL as its source.
 
 ## Development
 

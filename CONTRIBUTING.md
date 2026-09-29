@@ -1,26 +1,21 @@
 # Contributing to resembl
 
-## Part 1: A Foundation for Collaboration
-This document outlines the development standards, workflows, and best practices for contributing to the resembl project. Adhering to these guidelines ensures consistency, quality, and a positive and productive environment for everyone.
+## Part 1: How We Work
+Bug reports, feature proposals, documentation fixes and code changes are all welcome. This guide covers setup, the quality gates, and how a change gets reviewed and released.
 
-### Welcome to the resembl Project!
-Thank you for your interest in contributing to resembl! We are thrilled to have you here. This project thrives on community involvement, and we value contributions of all kinds, from filing detailed bug reports and proposing new features to improving documentation and submitting code changes. Every contribution helps make resembl better.
+### Principles
+resembl is a command-line tool meant to stay reliable, easy to use, and maintainable for years. Four rules follow from that:
 
-This guide is designed to make the contribution process as clear and straightforward as possible. Whether you are a first-time open-source contributor or a seasoned developer, we hope you find this document helpful. The goal is to create a welcoming space where we can collaborate effectively to build a great tool.  
-
-### Our Core Philosophy
-The central goal of resembl is to build a command-line tool that is robust, user-friendly, and maintainable for the long term. To achieve this, our development is guided by several core principles:
-
-- **User-Centricity:** We build for our users. Every feature, fix, and decision should be guided by the need to create a tool that is reliable, intuitive, and solves real-world problems effectively.
-- **Developer Experience:** We value our contributors. The development process itself should be smooth, well-documented, and rewarding. We strive to provide clear guidelines and automated tooling to make contributing a positive experience.  
-- **Quality and Maintainability:** We are committed to writing clean, well-tested, and thoroughly documented code. This ensures the project's long-term health and makes it easier for new contributors to get involved.  
-- **Iterative Improvement:** We favor small, well-defined, and incremental changes over large, monolithic pull requests. This approach makes reviews more manageable, reduces the risk of introducing bugs, and allows the project to evolve steadily.
+- **Users first:** a feature, fix, or decision earns its place by solving a problem someone running resembl has.
+- **Easy to contribute to:** setup is one command, every gate runs locally, and the rules are written down here.
+- **Tested and documented:** a change ships with its tests and the docs it affects, so the next contributor can read what it does.
+- **Small changes:** one well-defined pull request reviews faster and breaks less than a large one.
 
 ## Part 2: Getting Started: Your Development Environment
-This section provides a streamlined, one-time setup process to get the resembl codebase running on your local machine.
+A one-time setup that gets the resembl codebase running on your machine.
 
 ### Prerequisites
-Before you begin, please ensure you have the following software installed on your system:
+Install:
 
 - Git
 - Python 3.13 or newer
@@ -28,7 +23,7 @@ Before you begin, please ensure you have the following software installed on you
 - GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`). 
 
 ### One-Time Setup
-Follow these steps to create a local development environment. This workflow uses modern tooling to ensure a consistent and reproducible setup for all contributors.  
+Every contributor gets the same environment from the lockfile:
 
 1.  **Fork the Repository**
     Navigate to the resembl GitHub repository and click the "Fork" button in the top-right corner. This creates a personal copy of the project under your GitHub account.
@@ -83,7 +78,7 @@ git checkout -b fix/145-handle-api-errors
 This convention, which incorporates the Conventional Commit type and the issue number, provides valuable context at a glance.  
 
 ### Write Code, Write Tests
-The resembl project follows a test-driven approach to ensure quality and correctness.
+resembl is developed test-first.
 
 - **Test-Driven Development (TDD):** We strongly encourage TDD.
     - For new features, please write a failing test that captures the feature's requirements before you implement the feature itself.
@@ -147,7 +142,7 @@ git commit
 The commit message itself is a crucial part of your contribution and must follow a specific format, as detailed in the next section.
 
 ## Part 4: Quality, Standards, and Conventions
-This section details the core standards that ensure the long-term health, consistency, and maintainability of the resembl project.
+The standards every change is held to.
 
 ### Commit Message Guidelines: The Conventional Commits Standard
 To maintain a clear, navigable, and machine-readable Git history, resembl strictly adheres to the Conventional Commits specification v1.0.0. This is not just for aesthetic reasons; a structured commit history allows us to automate changelog generation and semantic versioning, which is critical for project maintenance.  
@@ -234,7 +229,7 @@ This includes:
 - **Docstrings:** All new modules, classes, and functions must have clear, concise docstrings explaining their purpose, arguments, and return values.
 - **README.md:** Update this file if your change affects installation, core concepts, or basic usage.
 - **Project Documentation:** Update the relevant files in the `docs/` directory, such as `user_stories.md` or `flowcharts.md`, to reflect any changes to features or workflows.
-- **Changelog:** Release notes are generated automatically by Release Drafter during a release, so your pull request title and description should be clear and comprehensive: they become the changelog entry.
+- **Changelog:** Release notes are generated automatically by Release Drafter during a release, so your pull request title and description should be clear and complete: they become the changelog entry.
 
 ### Managing Dependencies
 Dependencies represent a long-term maintenance cost and security liability. Therefore, they should be added sparingly and only when they provide significant value that cannot be reasonably achieved otherwise.
@@ -255,7 +250,7 @@ Unlike `uv pip install`, which only touches the virtual environment, `uv add` re
 This final part walks you through the process of getting your work reviewed and merged into the project.
 
 ### Preparing Your Pull Request
-Before opening a pull request, please run through this pre-flight checklist to ensure your submission is in good shape.
+Before opening a pull request, run through this checklist.
 
 1.  **Run Everything CI Runs:** `make check` runs the file-hygiene checks the pre-commit hooks enforce, then mypy, ruff, black, pylint, and the test suite. That covers the pull request pipeline and the commit gate, so a green run means the commit will not be refused and the checks will not fail after the push.
     ```bash
