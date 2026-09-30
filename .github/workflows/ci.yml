@@ -40,12 +40,10 @@ jobs:
       RESEMBL_TEST_MYSQL_URL: mysql+pymysql://resembl:resembl@localhost:3306/resembl
     steps:
       - uses: actions/checkout@v5
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.12'
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+          python-version: '3.13'
       - name: Install dependencies
         # Installs exactly the committed uv.lock (hash-verified, reproducible)
         # and fails if the lock has drifted from pyproject.toml.

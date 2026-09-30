@@ -192,14 +192,10 @@ resembl/
 This project is managed with [uv](https://github.com/astral-sh/uv). First, install uv if you haven't already. Then, from the root of the project, run:
 
 ```bash
-# 1. Create and activate the virtual environment
-uv venv
-source .venv/bin/activate
+# 1. Create .venv and install the locked dependencies
+uv sync --locked --extra dev
 
-# 2. Install dependencies
-uv pip install -e .[dev]
-
-# 3. (Recommended for developers) Install pre-commit hooks
+# 2. (Recommended for developers) Install pre-commit hooks
 uv run pre-commit install
 ```
 

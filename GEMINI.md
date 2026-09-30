@@ -53,9 +53,9 @@ Follow these steps to create a local development environment. This workflow uses
     ```
 
 5.  **Install Dependencies**
-    This command reads the `pyproject.toml` file and installs all necessary development and runtime dependencies into the virtual environment.
+    This command creates `.venv`, then installs the exact versions recorded in `uv.lock`. Every locked artifact is hash-pinned, so the install is reproducible and verified, matching what CI runs.
     ```bash
-    uv pip install -e .[dev]
+    uv sync --locked --extra dev
     ```
 6.  **Install Pre-Commit Hooks**
     This is a critical step for automating quality checks. This command sets up Git hooks that will automatically run formatters and linters on your code before each commit.
@@ -109,7 +109,7 @@ The resembl project follows a test-driven approach to ensure quality and correct
 
     Atheris is an optional dependency. Install it with the `fuzz` extra first:
     ```bash
-    uv pip install -e .[dev,fuzz]
+    uv sync --locked --extra dev --extra fuzz
     ```
     To run a specific fuzzer, execute its script directly. For example, to run the fuzzer for the `code_tokenize` function:
     ```bash
@@ -230,12 +230,12 @@ Dependencies represent a long-term maintenance cost and security liability. Ther
 - **Adding a Dependency:** If a new dependency is approved, add it to the project using uv. Do not manually edit `pyproject.toml`.
     ```bash
     # For a runtime dependency
-    uv pip install <package-name>
+    uv add <package-name>
 
-    # For a development-only dependency
-    uv pip install -e .[dev]
+    # For a development-only dependency (lands in [project.optional-dependencies].dev)
+    uv add --optional dev <package-name>
     ```
-Using `uv` ensures that both `pyproject.toml` is updated correctly, guaranteeing reproducible builds for all contributors.  
+Unlike `uv pip install`, which only touches the virtual environment, `uv add` records the dependency in `pyproject.toml` and the lockfile, guaranteeing reproducible builds for all contributors.  
 
 ## Part 5: Submitting Your Contribution
 This final part walks you through the process of getting your work reviewed and merged into the project.

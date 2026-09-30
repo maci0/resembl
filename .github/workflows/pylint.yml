@@ -8,17 +8,13 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
-    env:
-      # Make uv sync build .venv from the matrix interpreter.
-      UV_PYTHON: ${{ matrix.python-version }}
     steps:
     - uses: actions/checkout@v5
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Install uv and Python ${{ matrix.python-version }}
+      # Sets UV_PYTHON, so uv sync builds .venv from the matrix interpreter.
+      uses: astral-sh/setup-uv@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install uv
-      run: curl -LsSf https://astral.sh/uv/install.sh | sh
     - name: Install dependencies
       # Installs exactly the committed uv.lock (hash-verified, reproducible)
       # and fails if the lock has drifted from pyproject.toml.
