@@ -1140,6 +1140,7 @@ dependencies = [
     { name = "sqlmodel" },
     { name = "tomli-w" },
     { name = "typer" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
@@ -1156,7 +1157,6 @@ dev = [
     { name = "pytest-benchmark" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "tzdata" },
 ]
 duckdb = [
     { name = "duckdb" },
@@ -1192,7 +1192,7 @@ requires-dist = [
     { name = "sqlmodel", specifier = ">=0.0.47" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typer", specifier = ">=0.27.2" },
-    { name = "tzdata", marker = "extra == 'dev'", specifier = ">=2026.4" },
+    { name = "tzdata", specifier = ">=2026.4" },
 ]
 provides-extras = ["dev", "duckdb", "fuzz"]
 

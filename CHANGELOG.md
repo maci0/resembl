@@ -6,6 +6,16 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `resembl --tz <ZONE>` works on Windows. Windows ships no IANA time zone
+  database, and the `tzdata` package that supplies one was declared a
+  development-only dependency, so every named zone was refused with "is not a
+  known IANA time zone" even though the flag is documented for every supported
+  platform. `tzdata` is now a runtime dependency; Linux and macOS are
+  unaffected, since `zoneinfo` reads the system database first and consults
+  the package only when the system cannot answer.
+
 ### Changed
 
 - The declared `sqlalchemy` minimum is 2.0.54, the release the lockfile

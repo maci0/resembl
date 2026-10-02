@@ -45,6 +45,14 @@ dependencies = [
     # the compiled DuckDB driver needs the opt-in extra below.
     "pg8000>=1.31.5",
     "pymysql>=1.2.3",
+    # The IANA time zone database behind the `--tz` flag.  Linux and macOS
+    # read it from /usr/share/zoneinfo, but Windows ships no such database
+    # and Python's zoneinfo falls back to this package, so without it as a
+    # runtime dependency `resembl --tz Europe/Warsaw` fails there with
+    # "not a known IANA time zone" even though the flag is documented for
+    # every supported platform.  Pure Python and zoneinfo consults it only
+    # when the system database cannot answer, so it costs nothing on POSIX.
+    "tzdata>=2026.4",
 ]
 
 [project.urls]
@@ -74,12 +82,6 @@ dev = [
     # tests pin datasketch's `scheme="legacy"` family explicitly, a 2.0-only
     # keyword, so resolving 1.x fails the suite at collection.
     "datasketch>=2",
-    # Windows has no system IANA time zone database, so zoneinfo needs this
-    # package there for the test modules that call ZoneInfo(...) at import
-    # time.  Dev only on purpose: nothing the installed package runs reads a
-    # zone, so the runtime dependency set, and the SBOM built from it, stay
-    # without it.
-    "tzdata>=2026.4",
 ]
 duckdb = [
     # Compiled DuckDB driver plus its SQLAlchemy dialect.  Needed only for a

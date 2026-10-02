@@ -6,12 +6,29 @@
 #
 # `make help` lists the targets.
 
-# Recipe shells are bash with the usual strict flags, so a failing command in
-# a pipeline (`tar | gzip`) aborts the target instead of leaving the last
-# command's exit code as the verdict.  The Makefile writes no files itself,
-# only checks and builds.
-SHELL := /bin/bash
+# Recipes run under the platform's POSIX shell with the usual strict flags,
+# so a failing command aborts the target instead of leaving a later command's
+# exit code as the verdict.  The Makefile writes no files itself, only checks
+# and builds.
+#
+# SHELL is left at make's own default (/bin/sh) rather than pinned to
+# /bin/bash: README.md and CONTRIBUTING.md document this Makefile as the
+# command list on Windows (GnuWin32 Make) as well as macOS and Linux, and
+# neither a /bin/bash path nor a bash-only shell flag exists there.  The
+# recipes below use no bashism (POSIX `[ ]`, `for`, `$${VAR:-}` throughout),
+# so the default shell runs them unchanged.
+#
+# `-o pipefail` is not POSIX: dash and busybox `sh` reject the flag outright,
+# which would abort every recipe on a system where /bin/sh is dash.  It is
+# probed once here and prepended only when the shell accepts it, keeping the
+# fail-fast pipeline semantics (`tar | gzip`) on bash while leaving a
+# non-pipefail shell running the same commands with `-eu`.
+SHELL ?= /bin/sh
+.SHELLFLAGS := -eu -c
+PIPEFAIL := $(shell echo 'set -o pipefail' >/dev/null 2>&1 && echo pipefail)
+ifneq ($(PIPEFAIL),)
 .SHELLFLAGS := -eu -o pipefail -c
+endif
 
 # Every uv invocation runs with --locked, so no target can resolve the
 # environment against anything but uv.lock.  Plain `uv run` re-resolves and

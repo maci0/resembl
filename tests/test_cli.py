@@ -12,6 +12,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import zoneinfo
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -815,6 +816,31 @@ class TestZoneGet(unittest.TestCase):
     def test_unknown_zone_refused(self):
         with self.assertRaises(ValueError):
             _zone_get("Mars/Olympus_Mons")
+
+    def test_named_zone_resolves_without_a_system_tzdb(self):
+        """Zones resolve on a host with no system IANA database.
+
+        Linux and macOS read zones from /usr/share/zoneinfo; Windows ships
+        no such database, and ``zoneinfo`` falls back to the ``tzdata``
+        package there.  A runtime dependency the package once declared
+        dev-only meant ``--tz Europe/Warsaw`` answered "not a known IANA
+        time zone" for every installed Windows user, so the fallback is
+        pinned here: with the system search path emptied (exactly what
+        Windows reports) the documented zones must still resolve, through
+        ``tzdata``.
+        """
+        original = zoneinfo.TZPATH
+        try:
+            zoneinfo.reset_tzpath([])
+            self.assertEqual(zoneinfo.TZPATH, ())
+            self.assertEqual(_zone_get("Europe/Warsaw"), ZoneInfo("Europe/Warsaw"))
+            self.assertEqual(_zone_get("Asia/Tokyo"), ZoneInfo("Asia/Tokyo"))
+            # An unknown name is still refused rather than silently falling
+            # back to whatever the host database happens to hold.
+            with self.assertRaises(ValueError):
+                _zone_get("Mars/Olympus_Mons")
+        finally:
+            zoneinfo.reset_tzpath(original)
 
 
 class TestTimezoneOption(BaseCLITest):
