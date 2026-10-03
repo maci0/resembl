@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-03
+
 ### Fixed
 
 - `resembl --tz <ZONE>` works on Windows. Windows ships no IANA time zone
@@ -801,7 +803,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.1.4...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/maci0/resembl/compare/v3.1.4...v3.2.0
 [3.1.4]: https://github.com/maci0/resembl/compare/v3.1.3...v3.1.4
 [3.1.3]: https://github.com/maci0/resembl/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/maci0/resembl/compare/v3.1.1...v3.1.2
