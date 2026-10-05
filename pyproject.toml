@@ -62,14 +62,14 @@ repository = "https://github.com/maci0/resembl"
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
-    "mypy>=2.3.1",
-    "ruff>=0.16.9",
+    "mypy>=2.4.0",
+    "ruff>=0.16.10",
     "black>=26.5.1",
     "pre-commit>=4.6.2",
     # Floor at 4: the tree is adapted to pylint 4's checks (its invalid-name
     # rule flags the two mutable module-level singletons, scoped-disabled
     # inline in resembl.database / resembl.scoring).  Do not lower.
-    "pylint>=4.0.9",
+    "pylint>=4.1.1",
     "hypothesis>=6.168.1",
     # The DuckDB driver (compiled, tens of MB) is opt-in for users via the
     # `duckdb` extra; the test suite needs it, so dev pulls the same extra.
