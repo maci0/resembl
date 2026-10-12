@@ -30,14 +30,14 @@ dependencies = [
     # sqlmodel requires sqlalchemy<2.1.0, so the lock stays on
     # 2.0.x; .github/dependabot.yml ignores 2.1 until sqlmodel lifts that cap.
     "sqlalchemy>=2.0.54",
-    "sqlmodel>=0.0.47",
+    "sqlmodel>=0.0.48",
     # Floor at 2.20.0: earlier releases are flagged by CVE-2026-4539
     # (ReDoS in an unused lexer); keep the floor above it so scanners pass.
     "pygments>=2.21.0",
     "rapidfuzz>=3.14.6",
     "rich>=15.0.0",
     "tomli_w>=1.2.0",
-    "typer>=0.27.2",
+    "typer>=0.27.3",
     "numpy>=2.5.3",
     # DBAPI drivers for the non-SQLite backends the CLI advertises in its
     # DATABASE_URL help text and docs (postgresql+pg8000://, mysql+pymysql://).
@@ -52,7 +52,7 @@ dependencies = [
     # "not a known IANA time zone" even though the flag is documented for
     # every supported platform.  Pure Python and zoneinfo consults it only
     # when the system database cannot answer, so it costs nothing on POSIX.
-    "tzdata>=2026.4",
+    "tzdata>=2026.5",
 ]
 
 [project.urls]
@@ -62,15 +62,15 @@ repository = "https://github.com/maci0/resembl"
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
-    "mypy>=2.3.1",
-    "ruff>=0.16.9",
-    "black>=26.5.1",
+    "mypy>=2.4.0",
+    "ruff>=0.16.10",
+    "black>=26.10.0",
     "pre-commit>=4.6.2",
     # Floor at 4: the tree is adapted to pylint 4's checks (its invalid-name
     # rule flags the two mutable module-level singletons, scoped-disabled
     # inline in resembl.database / resembl.scoring).  Do not lower.
-    "pylint>=4.0.9",
-    "hypothesis>=6.168.1",
+    "pylint>=4.1.2",
+    "hypothesis>=6.168.5",
     # The DuckDB driver (compiled, tens of MB) is opt-in for users via the
     # `duckdb` extra; the test suite needs it, so dev pulls the same extra.
     "resembl[duckdb]",
