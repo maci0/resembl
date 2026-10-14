@@ -25,7 +25,7 @@
 # non-pipefail shell running the same commands with `-eu`.
 SHELL ?= /bin/sh
 .SHELLFLAGS := -eu -c
-PIPEFAIL := $(shell echo 'set -o pipefail' >/dev/null 2>&1 && echo pipefail)
+PIPEFAIL := $(shell (set -o pipefail) >/dev/null 2>&1 && echo pipefail)
 ifneq ($(PIPEFAIL),)
 .SHELLFLAGS := -eu -o pipefail -c
 endif
