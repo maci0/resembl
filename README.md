@@ -295,19 +295,27 @@ Global options:
 --quiet      Suppress informational output
 --verbose    Increase output verbosity
 --no-color   Disable colored output
---format     Output format: table, json, or csv (overrides config)
+-o, --output Output mode: auto, text, or json (auto stays text)
+--format     Data format: table, json, or csv (overrides config)
 --tz         Timezone (e.g. UTC, Europe/Berlin) for printed timestamps
 --version    Print the resembl version and exit
 ```
 
 Global options go before the subcommand: `resembl --format json find ...`.
+`resembl schema` prints a clispec 0.3 JSON document and does not open a
+database. `resembl -o json list` prints `{"items", "total"}`. `-o text` stays
+a table. `resembl-find` accepts the same `-o` / `--output` values, and
+`--json` remains its JSON switch. `resembl-find schema` prints that client's
+document without contacting a server.
 `--tz` takes an IANA zone name (`Europe/Warsaw`, not `+02:00`, which does not
 follow daylight saving) and only changes how `created_at` is rendered in
 table output; the stored value stays an aware-UTC string, and JSON/CSV
 output keeps it raw. Without `--tz` the host's local zone is used.
 
-Exit codes: `0` success, `1` the command failed, `2` the command line was
-rejected (unknown flag, bad flag value, missing query).
+Exit codes: `0` success, `1` the command failed (including a confirm that
+had no terminal; pass `--force`), `2` the command line was rejected (unknown
+flag, bad flag value, missing query). With `-o json`, the last stderr line
+is `{"error": {"kind", "message", "hint"}}`.
 
 For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
 ```bash

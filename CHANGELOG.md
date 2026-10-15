@@ -6,6 +6,27 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-15
+
+### Added
+
+- `resembl schema` prints a clispec 0.3 document for this CLI. It does not
+  read the config file and it does not open a database. `resembl-find schema`
+  prints the same kind of document for the thin client.
+
+### Changed
+
+- `-o` / `--output` selects `auto`, `text`, or `json` and is placed before the
+  subcommand. `auto` stays text when stdout is a pipe. `--format` still selects
+  `table`, `json`, or `csv`.
+- JSON listings from `list`, `search`, `collection list`, `collection show`,
+  `version`, and `find-batch` are one document with `items` and `total`.
+- With `-o json`, a failure finishes with one stderr object carrying `kind`,
+  `message`, and `hint`. `resembl-find --json` does the same, and `-o text`
+  keeps the human line.
+- `export`, `export-yara`, `import`, `rm`, and `reindex` ask on a terminal.
+  `--force` proceeds when there is no terminal.
+
 ## [3.2.1] - 2026-10-14
 
 ### Fixed
@@ -811,7 +832,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/maci0/resembl/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/maci0/resembl/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/maci0/resembl/compare/v3.1.4...v3.2.0
 [3.1.4]: https://github.com/maci0/resembl/compare/v3.1.3...v3.1.4

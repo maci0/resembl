@@ -181,7 +181,7 @@ class TestCLICommands(BaseCLITest):
 
     def test_reindex_command(self):
         """`reindex` should run when confirmation is provided."""
-        result = self.run_command("reindex", input_data="y\n")
+        result = self.run_command("reindex --force")
         self.assertEqual(result.returncode, 0)
         self.assertIn("Re-indexing Complete", result.stdout)
 
@@ -192,7 +192,7 @@ class TestCLICommands(BaseCLITest):
             self.assertIsNotNone(snippet)
             checksum = snippet.checksum
 
-        rm_result = self.run_command(f"rm {checksum}", input_data="y\n")
+        rm_result = self.run_command(f"rm --force {checksum}")
         self.assertEqual(rm_result.returncode, 0)
 
         with Session(self.engine) as session:
@@ -202,7 +202,7 @@ class TestCLICommands(BaseCLITest):
     def test_export_command(self):
         """Test the export command."""
         with tempfile.TemporaryDirectory() as export_dir:
-            result = self.run_command(f"export {export_dir}", input_data="y\n")
+            result = self.run_command(f"export --force {export_dir}")
             self.assertEqual(result.returncode, 0)
             self.assertIn("Export Complete", result.stdout)
 
@@ -671,7 +671,7 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(json.loads(result.stdout)["num_imported"], 1)
 
             listed = self.run_command("--format json list")
-            names = [name for row in json.loads(listed.stdout) for name in row["names"]]
+            names = [name for row in json.loads(listed.stdout)["items"] for name in row["names"]]
             self.assertIn("one", names)
 
     def test_list_reversed_range_fails_cleanly(self):

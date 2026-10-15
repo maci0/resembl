@@ -359,7 +359,7 @@ class TestEncodingBoundaries(unittest.TestCase):
             self.assertEqual(added.returncode, 0, added.stderr)
             listed = _cli_run("--format", "json", "list", env=env)
             self.assertEqual(listed.returncode, 0, listed.stderr)
-            self.assertEqual(json.loads(listed.stdout)[0]["names"], ["日本語"])
+            self.assertEqual(json.loads(listed.stdout)["items"][0]["names"], ["日本語"])
 
 
 if __name__ == "__main__":

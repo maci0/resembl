@@ -88,21 +88,104 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
         return cast(default)
 
 
+_VALUE_FLAGS = frozenset({"-o", "--output", "--query", "--file", "--top-n", "--threshold"})
+
+
+def _schema_words(argv: list[str]) -> list[str] | None:
+    """Return the words after a ``schema`` command, or None when it is not one."""
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in _VALUE_FLAGS:
+            index += 2
+            continue
+        if token.startswith("--") and "=" in token:
+            index += 1
+            continue
+        if token in {"--json", "--no-normalization", "-h", "--help"}:
+            index += 1
+            continue
+        if token == "schema":
+            return argv[index + 1 :]
+        return None
+    return None
+
+
+def _json_on(output: str, json_flag: bool) -> bool:
+    """True when the caller asked for JSON. ``-o text`` wins over ``--json``."""
+    if output == "text":
+        return False
+    return output == "json" or json_flag
+
+
+def _fail(
+    message: str,
+    code: int,
+    *,
+    json_on: bool,
+    kind: str | None = None,
+    hint: str = "",
+) -> int:
+    """Print one error. JSON mode writes the stderr envelope and returns *code*."""
+    resolved = kind or ("usage" if code == 2 else "failure")
+    if json_on:
+        payload = {"error": {"kind": resolved, "message": message, "hint": hint}}
+        sys.stderr.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return code
+
+
+def _print_schema(words: list[str], *, json_on: bool) -> int:
+    """Print the clispec document. No config read and no server connection."""
+    from .clispec import build_find_schema
+
+    path = " ".join(words)
+    document = build_find_schema(path or None)
+    if path and not document["commands"]:
+        return _fail(f"no command matches {path!r}", 2, json_on=json_on, kind="usage")
+    sys.stdout.write(json.dumps(document, separators=(",", ":")) + "\n")
+    return 0
+
+
 def _main(argv: list[str] | None = None) -> int:
     # Match names are printed below; a locale-encoded stdout would raise
     # UnicodeEncodeError on the first one the platform's code page cannot
     # represent, losing the whole result table.
     console_utf8_reconfigure()
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    schema_words = _schema_words(args_list)
+    if schema_words is not None:
+        output = "auto"
+        json_flag = "--json" in args_list
+        for index, token in enumerate(args_list):
+            if token in {"-o", "--output"} and index + 1 < len(args_list):
+                output = args_list[index + 1]
+            elif token.startswith("--output="):
+                output = token.split("=", 1)[1]
+        return _print_schema(schema_words, json_on=_json_on(output, json_flag))
+
     parser = argparse.ArgumentParser(
-        prog="resembl-find", description="Query a running resembl server."
+        prog="resembl-find",
+        description=(
+            "Query a running resembl server. `resembl-find schema` prints the clispec 0.3 document."
+        ),
     )
     parser.add_argument("--query", help="Query string (single-line ';' = separator).")
     parser.add_argument("--file", help="Path to a file containing the query ('-' for stdin).")
     parser.add_argument("--top-n", type=int, default=None)
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--no-normalization", action="store_true")
+    parser.add_argument(
+        "--output",
+        "-o",
+        choices=("auto", "text", "json"),
+        default="auto",
+        help="Output mode: auto, text, or json. auto stays text. --json is json.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(args_list)
+    json_on = _json_on(args.output, args.json)
 
     query = args.query
     if query is None and args.file == "-":
@@ -112,8 +195,7 @@ def _main(argv: list[str] | None = None) -> int:
             with open(args.file, encoding="utf-8") as f:
                 query = f.read()
         except (OSError, UnicodeDecodeError) as exc:
-            print(f"error: cannot read {args.file}: {exc}", file=sys.stderr)
-            return 1
+            return _fail(f"cannot read {args.file}: {exc}", 1, json_on=json_on)
     elif query is None and not sys.stdin.isatty():
         # Same piping contract as `resembl find`: with neither --query nor
         # --file, a redirected stdin is the query.
@@ -121,8 +203,12 @@ def _main(argv: list[str] | None = None) -> int:
     if query and ";" in query and "\n" not in query:
         query = query.replace(";", "\n")
     if not query:
-        print("error: no query provided (--query, --file, or stdin)", file=sys.stderr)
-        return 2
+        return _fail(
+            "no query provided (--query, --file, or stdin)",
+            2,
+            json_on=json_on,
+            kind="usage",
+        )
 
     db_url = db_url_get()
     # The port file must resolve to the exact path `resembl serve` wrote.
@@ -131,11 +217,11 @@ def _main(argv: list[str] | None = None) -> int:
         with open(port_file, encoding="utf-8") as f:
             port = int(f.read().strip())
     except (OSError, ValueError):
-        print(
-            f"error: no server running for {db_url_mask(db_url)} (start `resembl serve`)",
-            file=sys.stderr,
+        return _fail(
+            f"no server running for {db_url_mask(db_url)} (start `resembl serve`)",
+            1,
+            json_on=json_on,
         )
-        return 1
 
     # The fallbacks below must mirror ``ResemblConfig``'s defaults
     # (resembl.config); this client stays stdlib-only and cannot import it.
@@ -175,17 +261,14 @@ def _main(argv: list[str] | None = None) -> int:
             detail = json.loads(exc.read()).get("error", "")
         except (ValueError, OSError, AttributeError):
             detail = ""
-        print(f"error: {detail or exc.reason}", file=sys.stderr)
-        return 1
+        return _fail(str(detail or exc.reason), 1, json_on=json_on)
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        print(f"error: server unreachable: {exc}", file=sys.stderr)
-        return 1
+        return _fail(f"server unreachable: {exc}", 1, json_on=json_on)
     if "error" in payload:
-        print(f"error: {payload['error']}", file=sys.stderr)
-        return 1
+        return _fail(str(payload["error"]), 1, json_on=json_on)
 
-    if args.json:
-        print(json.dumps(payload))
+    if json_on:
+        print(json.dumps(payload, separators=(",", ":")))
         return 0
 
     print(f"Found {payload['lsh_candidates']} candidates via LSH.")

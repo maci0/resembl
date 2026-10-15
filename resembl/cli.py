@@ -21,6 +21,7 @@ Key design choices
 from __future__ import annotations
 
 import atexit
+import contextvars
 import csv
 import difflib
 import json
@@ -130,6 +131,104 @@ def _legacy_windows_for(stream: object) -> bool | None:
 # there (see ``theme``), never one the library guessed.
 console = Console(highlight=False, legacy_windows=_legacy_windows_for(sys.stdout))
 err_console = Console(stderr=True, highlight=False, legacy_windows=_legacy_windows_for(sys.stderr))
+
+_OUTPUT_CHOICES = frozenset({"auto", "text", "json"})
+_output_choice: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "resembl_output", default="auto"
+)
+_pending_error: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "resembl_pending_error", default=None
+)
+
+
+def _write_error(kind: str, message: str, hint: str) -> None:
+    """Write one clispec error envelope as the next stderr line."""
+    payload = {"error": {"kind": kind, "message": message, "hint": hint}}
+    sys.stderr.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    sys.stderr.flush()
+
+
+def _bind_err_console(target: Console) -> Console:
+    """Keep a rich error line in text mode, and defer it in JSON mode.
+
+    JSON mode stashes the message. ``typer.Exit`` then writes the envelope
+    with the kind that matches the exit code, so the line is not emitted
+    before the code is known.
+    """
+    original = target.print
+
+    def _print(*args: object, **kwargs: Any) -> None:
+        if (
+            args
+            and isinstance(args[0], str)
+            and args[0].startswith("[red]Error:[/red] ")
+            and _output_choice.get() == "json"
+        ):
+            _pending_error.set(args[0].removeprefix("[red]Error:[/red] "))
+            return
+        original(*args, **kwargs)
+
+    target.print = _print  # type: ignore[method-assign]
+    return target
+
+
+# Mutable, not a constant: pylint's const-rgx would demand UPPER_CASE for the literal.
+_hooks_installed = False  # pylint: disable=invalid-name
+
+
+def _install_exit_hook() -> None:
+    """When JSON mode stashed an error, write it as ``typer.Exit`` is built."""
+    original = typer.Exit.__init__
+
+    def _init(self: typer.Exit, code: int = 0) -> None:
+        original(self, code)
+        message = _pending_error.get()
+        if message and code and _output_choice.get() == "json":
+            kind = "usage" if code == 2 else "failure"
+            _pending_error.set(None)
+            _write_error(kind, message, "")
+
+    typer.Exit.__init__ = _init  # type: ignore[method-assign]
+
+
+def _install_click_error_hook() -> None:
+    """Usage errors in JSON mode are the stderr envelope, not a rich panel."""
+    from click.exceptions import ClickException
+    from click.exceptions import UsageError as ClickUsageError
+
+    original = ClickException.show
+
+    def _show(self: ClickException, file: Any = None) -> None:
+        if _output_choice.get() == "json":
+            kind = "usage" if isinstance(self, ClickUsageError) else "failure"
+            _write_error(kind, self.format_message(), "")
+            return
+        original(self, file=file)
+
+    ClickException.show = _show  # type: ignore[method-assign]
+
+
+def _install_hooks() -> None:
+    """Install the JSON error hooks once per process."""
+    global _hooks_installed
+    if _hooks_installed:
+        return
+    _install_exit_hook()
+    _install_click_error_hook()
+    _hooks_installed = True
+
+
+err_console = _bind_err_console(err_console)
+_install_hooks()
+
+
+def _accept_output(value: str) -> str:
+    """Record ``-o`` before the subcommand runs."""
+    if value not in _OUTPUT_CHOICES:
+        raise typer.BadParameter("must be one of auto, text, json")
+    _output_choice.set(value)
+    return value
+
 
 # --- Typer apps ---
 
@@ -350,8 +449,8 @@ def _echo_format(data: object) -> None:
         writer.writerows({k: _csv_safe(v) for k, v in row.items()} for row in rows)
     else:
         # Reached only for "json": every caller guards on
-        # `format in ("json", "csv")`.
-        console.print_json(json.dumps(data, indent=2))
+        # `format in ("json", "csv")`. A list is a collection document.
+        sys.stdout.write(_json_text(data) + "\n")
 
 
 def _echo_kv_table(title: str, rows: list[tuple[str, str]]) -> None:
@@ -385,20 +484,30 @@ def _snippet_table(rows: Iterable[tuple[str, Sequence[str]]], title: str, start:
     return table
 
 
-def _write_json_stream(items: Iterator[dict]) -> None:
-    """Write *items* to stdout as a single streamed JSON array.
+def _json_text(data: object) -> str:
+    """Serialize one JSON document. A list becomes ``items`` and ``total``."""
+    if isinstance(data, list):
+        data = {"items": data, "total": len(data)}
+    if sys.stdout.isatty():
+        return json.dumps(data, indent=2)
+    return json.dumps(data, separators=(",", ":"))
 
-    Shared by the unbounded ``list`` and ``collection show`` renders: both
-    must emit the same array shape without materializing every row first.
+
+def _write_json_stream(items: Iterator[dict]) -> None:
+    """Write *items* as one ``{"items", "total"}`` document.
+
+    Shared by ``list`` and ``collection show``. Rows are written as they
+    arrive so the whole set is not built in memory first. ``total`` is the
+    count of rows actually written.
     """
-    sys.stdout.write("[")
-    written = False
+    sys.stdout.write('{"items":[')
+    total = 0
     for item in items:
-        if written:
+        if total:
             sys.stdout.write(",")
-        written = True
-        sys.stdout.write("\n  " + json.dumps(item))
-    sys.stdout.write("\n]\n" if written else "]\n")
+        total += 1
+        sys.stdout.write(json.dumps(item, separators=(",", ":")))
+    sys.stdout.write(f'],"total":{total}}}\n')
 
 
 def _build_progress_printer() -> Callable[[int, int], None]:
@@ -674,6 +783,44 @@ def serve(
 USAGE_ERROR = 2
 
 
+def _fail(
+    message: str,
+    code: int = 1,
+    *,
+    kind: str | None = None,
+    hint: str = "",
+) -> None:
+    """Print one error and exit. ``-o json`` writes the stderr envelope."""
+    resolved = kind or ("usage" if code == USAGE_ERROR else "failure")
+    _pending_error.set(None)
+    if _output_choice.get() == "json":
+        _write_error(resolved, message, hint)
+    else:
+        err_console.print(f"[red]Error:[/red] {message}")
+    raise typer.Exit(code=code)
+
+
+def _emit_kept_error(message: str) -> None:
+    """Report one error and keep going. JSON mode writes the envelope now."""
+    if _output_choice.get() == "json":
+        _write_error("failure", message, "")
+        return
+    err_console.print(f"[red]Error:[/red] {message}")
+
+
+def _confirm(prompt: str, force: bool) -> None:
+    """Confirm on a terminal. Off a terminal, require ``--force``."""
+    if force:
+        return
+    if not sys.stdin.isatty():
+        _fail(
+            "This command needs a terminal to confirm, or --force to proceed.",
+            kind="confirmation_required",
+            hint="Pass --force to proceed without a prompt.",
+        )
+    typer.confirm(prompt, abort=True)
+
+
 def _validate_find_params(
     threshold: float, num_perm: int, ngram_size: int, top_n: int | None = None
 ) -> None:
@@ -791,7 +938,7 @@ def _apply_snippet_field_mutation(
     snippet = mutate()
     if snippet is None:
         if state.format in ("json", "csv"):
-            _echo_format({"error": failure_message})
+            _fail(failure_message)
         elif not state.quiet:
             err_console.print(f"[red]Error:[/red] {failure_message}")
         raise typer.Exit(code=1)
@@ -828,12 +975,22 @@ def app_callback(
         "--tz",
         metavar="ZONE",
         help=(
-            "IANA zone for printed timestamps (e.g. Europe/Warsaw). "
-            "Default: the host's local zone."
+            "IANA zone for printed timestamps (e.g. Europe/Warsaw). Default: the host's local zone."
         ),
     ),
+    output_format: str = typer.Option(
+        "auto",
+        "--output",
+        "-o",
+        callback=_accept_output,
+        is_eager=True,
+        help="Output mode before the subcommand: auto, text, or json. auto stays text.",
+    ),
 ) -> None:
-    """Set up logging and shared state."""
+    """Set up logging and shared state.
+
+    ``resembl schema`` prints the clispec 0.3 document and does not open a database.
+    """
     global console, err_console, _active_session
 
     if version:
@@ -841,6 +998,10 @@ def app_callback(
         # works against an unreachable or missing DATABASE_URL.
         console.print(f"resembl {_package_version()}")
         raise typer.Exit(code=0)
+
+    # schema is a document about this CLI. It must not read config or open a database.
+    if ctx.invoked_subcommand == "schema":
+        return
 
     if ctx.invoked_subcommand is None:
         # Bare `resembl` is a request for the command list, not a command;
@@ -855,11 +1016,13 @@ def app_callback(
         console = Console(
             no_color=True, highlight=False, legacy_windows=_legacy_windows_for(sys.stdout)
         )
-        err_console = Console(
-            stderr=True,
-            no_color=True,
-            highlight=False,
-            legacy_windows=_legacy_windows_for(sys.stderr),
+        err_console = _bind_err_console(
+            Console(
+                stderr=True,
+                no_color=True,
+                highlight=False,
+                legacy_windows=_legacy_windows_for(sys.stderr),
+            )
         )
 
     log_level = logging.INFO
@@ -873,7 +1036,14 @@ def app_callback(
     logging.basicConfig(level=log_level, stream=sys.stderr)
 
     state.config = load_config()
-    state.format = format_opt or state.config.format
+    if format_opt is not None:
+        state.format = format_opt
+    elif output_format == "json":
+        state.format = "json"
+    elif output_format == "text":
+        state.format = "table"
+    else:
+        state.format = state.config.format
     if state.format not in FORMATS:
         # An unknown format is a usage error, not a silent fallback: the
         # renderers branch on this value, so an unrecognized one used to
@@ -906,6 +1076,22 @@ def app_callback(
 # --- Snippet commands ---
 
 
+@app.command("schema")
+def schema_cmd(
+    command: list[str] | None = typer.Argument(
+        None, help="Command path to include. Other commands are omitted."
+    ),
+) -> None:
+    """Print the clispec 0.3 JSON document for this CLI."""
+    from .clispec import build_schema
+
+    path = " ".join(command or [])
+    document = build_schema(path or None)
+    if path and not document["commands"]:
+        _fail(f"no command matches {path!r}", code=USAGE_ERROR, kind="usage")
+    sys.stdout.write(json.dumps(document, separators=(",", ":")) + "\n")
+
+
 @app.command()
 def add(
     name: str = typer.Argument(help="The name or alias for the snippet."),
@@ -923,7 +1109,7 @@ def add(
             )
     else:
         if state.format in ("json", "csv"):
-            _echo_format({"error": "Failed to add snippet."})
+            _fail("Failed to add snippet.")
         else:
             err_console.print("[red]Error:[/red] Snippet could not be added (empty code?).")
         raise typer.Exit(code=1)
@@ -935,11 +1121,7 @@ def export_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
     """Export all snippets to a directory."""
-    if not force:
-        typer.confirm(
-            f"Are you sure you want to export all snippets to '{directory}'?",
-            abort=True,
-        )
+    _confirm(f"Are you sure you want to export all snippets to '{directory}'?", force)
 
     try:
         result = snippet_export(state.session, directory)
@@ -970,11 +1152,7 @@ def export_yara_cmd(
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
 ) -> None:
     """Export snippets as YARA string patterns."""
-    if not force:
-        typer.confirm(
-            f"Are you sure you want to export YARA rules to '{output_file}'?",
-            abort=True,
-        )
+    _confirm(f"Are you sure you want to export YARA rules to '{output_file}'?", force)
 
     try:
         result = snippet_export_yara(state.session, output_file)
@@ -1074,10 +1252,7 @@ def import_cmd(
 
     if not force:
         target = "snippet" if len(file_paths) == 1 else "all snippets"
-        typer.confirm(
-            f"Are you sure you want to import {target} from '{path}'?",
-            abort=True,
-        )
+        _confirm(f"Are you sure you want to import {target} from '{path}'?", force)
 
     start_time = time.monotonic()
     ngram_size = state.config.ngram_size
@@ -1279,9 +1454,9 @@ def _stream_list(session: Session) -> None:
     """Render the unbounded ``list`` output in bounded-memory batches.
 
     Only the (checksum, names) columns are fetched (see
-    ``snippet_names_stream``).  JSON output is written as a single array,
-    CSV as a header plus streamed rows — byte-for-byte the same shape as
-    the in-memory render — and table output is printed per batch so a huge
+    ``snippet_names_stream``).  JSON output is the items document, CSV a
+    header plus streamed rows — the same rows as the in-memory render — and
+    table output is printed per batch so a huge
     listing never builds one giant table.  In table mode an empty database
     says so, instead of printing nothing at all.
     """
@@ -1364,11 +1539,10 @@ def rm(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    if not force:
-        typer.confirm(
-            f"Are you sure you want to delete the snippet with checksum '{resolved}'?",
-            abort=True,
-        )
+    _confirm(
+        f"Are you sure you want to delete the snippet with checksum '{resolved}'?",
+        force,
+    )
     if not snippet_delete(state.session, resolved, quiet=state.quiet):
         err_console.print(f"[red]Error:[/red] Snippet with checksum '{resolved}' not found.")
         raise typer.Exit(code=1)
@@ -1453,11 +1627,10 @@ def reindex(
     ),
 ) -> None:
     """Re-calculate all MinHashes in the database."""
-    if not force:
-        typer.confirm(
-            "Are you sure you want to re-index the entire database? This may take a while.",
-            abort=True,
-        )
+    _confirm(
+        "Are you sure you want to re-index the entire database? This may take a while.",
+        force,
+    )
 
     if jobs is None:
         jobs = max(1, os.cpu_count() or 1)
@@ -1668,7 +1841,7 @@ def find_batch(
                 # A per-query server-side failure (isolated by /find-batch)
                 # must render as that query's error, not crash the whole
                 # batch on the missing payload keys.
-                err_console.print(f"[red]Error:[/red] {result['error']}")
+                _emit_kept_error(result["error"])
             else:
                 _render_find_payload(result)
             _echo("")
@@ -1962,9 +2135,9 @@ def collection_list_cmd() -> None:
     """List all collections."""
     cols = collection_list(state.session)
     if state.format != "table":
-        # An empty list is still a document: `[]` (json) or a bare header
-        # (csv), never the human "No collections found." line, which a parser
-        # would choke on.
+        # An empty list is still a document: ``{"items", "total"}`` (json) or a
+        # bare header (csv), never the human "No collections found." line, which
+        # a parser would choke on.
         _echo_format(cols)
         return
 

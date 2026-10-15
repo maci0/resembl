@@ -39,7 +39,7 @@ class TestCLIFindBatch(BaseCLITest):
         try:
             result = self.run_command(f"--format json find-batch --file {queries_file}")
             self.assertEqual(result.returncode, 0, result.stderr)
-            payload = json.loads(result.stdout)
+            payload = json.loads(result.stdout)["items"]
             self.assertEqual(len(payload), 3)  # comments are skipped
             by_query = {d["query"]: d for d in payload}
             self.assertGreater(by_query["MOV EAX, 1\n RET"]["lsh_candidates"], 0)
@@ -265,11 +265,11 @@ class TestCLICollections(BaseCLITest):
         """
         result = self.run_command("--format json collection list")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout), [])
+        self.assertEqual(json.loads(result.stdout), {"items": [], "total": 0})
 
         result = self.run_command("--format json collection show absent")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout), [])
+        self.assertEqual(json.loads(result.stdout), {"items": [], "total": 0})
 
         # CSV's "no rows" is no output: there are no columns to name.
         result = self.run_command("--format csv collection list")
@@ -351,7 +351,7 @@ class TestCLIVersion(BaseCLITest):
 
         as_json = self.run_command(f"--format json version {checksum}")
         self.assertEqual(as_json.returncode, 0, as_json.stderr)
-        self.assertEqual(json.loads(as_json.stdout), [])
+        self.assertEqual(json.loads(as_json.stdout), {"items": [], "total": 0})
 
         as_csv = self.run_command(f"--format csv version {checksum}")
         self.assertEqual(as_csv.returncode, 0, as_csv.stderr)
@@ -416,7 +416,7 @@ class TestCLIEmptyResults(BaseCLITest):
         """The empty-state line is table output only; JSON stays a document."""
         result = self.run_command("--format json list")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(json.loads(result.stdout), [])
+        self.assertEqual(json.loads(result.stdout), {"items": [], "total": 0})
 
     def test_list_range_past_the_end_says_so(self):
         """An out-of-window --range names the range, not a bare empty table."""
@@ -443,9 +443,10 @@ class TestCLIFormatFlag(BaseCLITest):
         result = self.run_command("--format json list")
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
-        self.assertEqual(len(data), 1)
-        self.assertEqual(data[0]["names"], ["test_snippet"])
-        self.assertEqual(data[0]["checksum"], string_checksum("MOV EAX, 1"))
+        self.assertEqual(data["total"], 1)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["names"], ["test_snippet"])
+        self.assertEqual(data["items"][0]["checksum"], string_checksum("MOV EAX, 1"))
 
     def test_list_csv(self):
         """list --format csv parses back into the rows it wrote."""
@@ -792,7 +793,7 @@ class TestCLIServeLifecycle(BaseCLITest):
                         os.remove(queries_file)
                 self.assertEqual(batch.returncode, 0, batch.stderr)
                 batch_payload = json.loads(batch.stdout)
-                self.assertEqual(len(batch_payload), 2)
+                self.assertEqual(len(batch_payload["items"]), 2)
             finally:
                 # The stop signal a service manager sends must shut the process
                 # down cleanly and remove the port file.

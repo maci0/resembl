@@ -60,6 +60,7 @@ SUBMODULES = frozenset(
     (
         "cache",
         "cli",
+        "clispec",
         "config",
         "core",
         "database",
