@@ -217,7 +217,13 @@ ranges afresh instead and can produce an environment CI never tested.
 On Windows, activate the environment with `.venv\Scripts\Activate.ps1`
 (PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe) in place of
 `source .venv/bin/activate`; every other command in this README runs
-unchanged on PowerShell and cmd.exe. macOS uses the POSIX commands verbatim.
+unchanged on PowerShell and cmd.exe. On macOS, use current Homebrew Make for
+the contributor commands:
+
+```bash
+brew install make
+export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
+```
 
 The test suite runs on Linux, macOS and Windows, so all three are covered
 rather than assumed. The PostgreSQL and MySQL integration tests only run on

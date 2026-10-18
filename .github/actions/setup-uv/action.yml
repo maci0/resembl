@@ -25,6 +25,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Select current GNU Make on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install make
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
     # uv's cache root is platform-specific: the XDG roots on Linux and macOS,
     # %LOCALAPPDATA%\uv on Windows.  One step per platform, because
     # actions/cache validates that every listed path exists and fails the
