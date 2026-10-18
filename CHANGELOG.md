@@ -17,6 +17,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Windows server discovery preserves the configured database URL spelling, so
+  SQLAlchemy URL escaping cannot hide a running server from thin clients.
 - CLI startup works in runtime-only installations without a separate Click
   package; error hooks use the exceptions supplied by Typer itself.
 - The Black commit hook receives the project path when scanning the whole tree.

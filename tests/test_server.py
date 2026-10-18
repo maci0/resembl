@@ -616,7 +616,11 @@ class TestServerMode(_ServeTestCase):
         engine = sa_create_engine(url)
         try:
             with Session(engine) as session:
-                db_url = _session_db_url(session)
+                for configured in (url, "sqlite:///another.db", "invalid-url"):
+                    with self.subTest(configured=configured):
+                        with patch.dict(os.environ, {"RESEMBL_DATABASE_URL": configured}):
+                            db_url = _session_db_url(session)
+                        self.assertEqual(db_url, url)
         finally:
             engine.dispose()
         # The password is rendered back, not masked to ***.
@@ -625,6 +629,27 @@ class TestServerMode(_ServeTestCase):
         self.assertNotEqual(
             server_port_path(db_url, cache_dir_get()),
             server_port_path(db_url_mask(url), cache_dir_get()),
+        )
+
+    def test_port_file_digest_preserves_configured_windows_path(self):
+        """URL rendering must not change the address used by thin clients."""
+        from sqlalchemy import create_engine as sa_create_engine
+        from sqlmodel import Session
+
+        from resembl.cli import _session_db_url
+        from resembl.paths import server_port_path
+
+        url = r"sqlite:///C:\Users\tester\assembly.db"
+        engine = sa_create_engine(url)
+        try:
+            with patch.dict(os.environ, {"RESEMBL_DATABASE_URL": url}):
+                with Session(engine) as session:
+                    actual = _session_db_url(session)
+        finally:
+            engine.dispose()
+        self.assertEqual(actual, url)
+        self.assertEqual(
+            server_port_path(actual, self._cache_dir), server_port_path(url, self._cache_dir)
         )
 
     def test_thin_client_propagates_error_payload(self):

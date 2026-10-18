@@ -12,6 +12,9 @@ from tests.test_cli import BaseCLITest
 def _run(
     module: str, args: list[str], env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
+    if env is not None:
+        # Windows socket initialization requires its OS location even without config.
+        env = {key: os.environ[key] for key in ("SystemRoot", "WINDIR") if key in os.environ} | env
     return subprocess.run(
         [sys.executable, "-m", module, *args],
         capture_output=True,
@@ -116,7 +119,7 @@ class TestOutputMode(BaseCLITest):
         self.assertIn("hint", envelope["error"])
 
     def test_confirmation_off_a_tty_names_force(self) -> None:
-        result = self.run_command("-o json reindex")
+        result = self.run_command("-o json reindex", input_data="")
         self.assertEqual(result.returncode, 1, result.stderr)
         envelope = json.loads(result.stderr.strip().splitlines()[-1])
         self.assertEqual(envelope["error"]["kind"], "confirmation_required")
