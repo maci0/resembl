@@ -6,6 +6,11 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Refresh contributor environment tooling to virtualenv 21.14.11. Runtime
+  dependencies, supported Python versions and command behavior are unchanged.
+
 ## [3.3.1] - 2026-10-18
 
 ### Changed
