@@ -7,7 +7,7 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Requires Python 3.13 or newer and uv 0.12.13, the release CI installs.
+Requires Python 3.13 or newer and uv 0.12.13 or newer; CI installs uv 0.13.1.
 `pyproject.toml` sets it as the floor under `[tool.uv] required-version`, so an
 older uv fails at the first command instead of after it has rewritten the
 lockfile; the floor is not an exact pin because Dependabot's `uv` ecosystem

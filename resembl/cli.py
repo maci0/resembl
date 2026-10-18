@@ -193,8 +193,8 @@ def _install_exit_hook() -> None:
 
 def _install_click_error_hook() -> None:
     """Usage errors in JSON mode are the stderr envelope, not a rich panel."""
-    from click.exceptions import ClickException
-    from click.exceptions import UsageError as ClickUsageError
+    from typer._click.exceptions import ClickException
+    from typer._click.exceptions import UsageError as ClickUsageError
 
     original = ClickException.show
 

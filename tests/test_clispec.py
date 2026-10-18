@@ -51,6 +51,22 @@ class TestSchema(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("schema", result.stdout)
 
+    def test_root_help_does_not_require_external_click(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.modules['click'] = None; from resembl.cli import main; main()",
+                "--help",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("schema", result.stdout)
+
     def test_schema_filters_a_command_path(self) -> None:
         env = {"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}
         result = _run("resembl.cli", ["schema", "collection"], env=env)

@@ -14,11 +14,11 @@
 repos:
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     # Pinned to the commit, not the tag: a tag is a mutable ref, so whoever
-    # controls the upstream repository could repoint v5.0.0 and have every
+    # controls the upstream repository could repoint v6.0.0 and have every
     # `git commit` and every CI run execute the new tree with the whole
     # working copy in reach.  The comment is what `pre-commit autoupdate`
     # reads back, so the release stays identifiable.
-    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # v5.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # v6.0.0
     hooks:
     -   id: check-yaml
     -   id: end-of-file-fixer
@@ -32,6 +32,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+        args: ["."]
 
     -   id: ruff
         name: ruff
