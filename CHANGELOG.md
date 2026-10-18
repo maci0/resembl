@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-18
+
 ### Changed
 
 - Refresh contributor environment tooling to virtualenv 21.14.11. Runtime
@@ -859,7 +861,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.3.1...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/maci0/resembl/compare/v3.3.1...v3.4.0
 [3.3.1]: https://github.com/maci0/resembl/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/maci0/resembl/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/maci0/resembl/compare/v3.2.0...v3.2.1
