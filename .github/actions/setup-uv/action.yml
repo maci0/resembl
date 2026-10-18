@@ -25,6 +25,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Select current GNU Make on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install make
+        echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
     # uv's cache root is platform-specific: the XDG roots on Linux and macOS,
     # %LOCALAPPDATA%\uv on Windows.  One step per platform, because
     # actions/cache validates that every listed path exists and fails the
@@ -32,7 +39,7 @@ runs:
     # do not have the other's directory.
     - name: Restore the uv cache (posix)
       if: runner.os != 'Windows'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/uv
@@ -43,7 +50,7 @@ runs:
 
     - name: Restore the uv cache (windows)
       if: runner.os == 'Windows'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~\AppData\Local\uv
         key: uv-${{ runner.os }}-${{ inputs.python-version || 'default' }}-${{ hashFiles('uv.lock') }}
@@ -55,7 +62,7 @@ runs:
       # The input reaches the script through the environment, never spliced
       # into it, so a caller cannot turn a version string into shell code.
       env:
-        UV_VERSION: "0.12.13"
+        UV_VERSION: "0.13.1"
         UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
       run: |
         set -euo pipefail

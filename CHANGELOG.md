@@ -6,6 +6,23 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Refresh locked runtime and development dependencies, including SQLModel
+  0.0.48 and its newly supported SQLAlchemy 2.1 line. Minimum supported
+  dependency versions are unchanged; automated updates can now include
+  SQLAlchemy 2.1.
+- CI uses uv 0.13.1 and the current cache action; repository hygiene hooks
+  use pre-commit-hooks 6.0.0.
+
+### Fixed
+
+- Windows server discovery preserves the configured database URL spelling, so
+  SQLAlchemy URL escaping cannot hide a running server from thin clients.
+- CLI startup works in runtime-only installations without a separate Click
+  package; error hooks use the exceptions supplied by Typer itself.
+- The Black commit hook receives the project path when scanning the whole tree.
+
 ## [3.3.0] - 2026-10-15
 
 ### Added

@@ -19,8 +19,8 @@ Install:
 
 - Git
 - Python 3.13 or newer
-- uv 0.12.13, the release CI installs. `pyproject.toml` sets it as the floor under `required-version`, so an older uv fails at the first uv command rather than after rewriting `uv.lock`.
-- GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`). 
+- uv 0.12.13 or newer; CI installs uv 0.13.1. `pyproject.toml` sets the minimum under `required-version`, so an older uv fails at the first uv command rather than after rewriting `uv.lock`.
+- GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. On macOS, install Homebrew `make` and prepend `$(brew --prefix make)/libexec/gnubin` to `PATH`; the system's old Make ignores recipe shell flags. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`).
 
 ### One-Time Setup
 Every contributor gets the same environment from the lockfile:

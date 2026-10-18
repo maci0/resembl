@@ -193,8 +193,8 @@ def _install_exit_hook() -> None:
 
 def _install_click_error_hook() -> None:
     """Usage errors in JSON mode are the stderr envelope, not a rich panel."""
-    from click.exceptions import ClickException
-    from click.exceptions import UsageError as ClickUsageError
+    from typer._click.exceptions import ClickException
+    from typer._click.exceptions import UsageError as ClickUsageError
 
     original = ClickException.show
 
@@ -537,9 +537,22 @@ def _session_db_url(session: Session) -> str:
     the standalone ``resembl-find`` client hashes: with credentials in the
     URL, the server would advertise under one digest while every thin
     client looked under another, and warm finds would silently fall back to
-    cold process startups.  Render the URL unmasked instead.
+    cold process startups. SQLAlchemy can also URL-encode Windows paths when
+    rendering them. Preserve the configured spelling when it names this bind;
+    render an externally supplied session's URL unmasked otherwise.
     """
-    return cast(Engine, session.get_bind()).url.render_as_string(hide_password=False)
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    url = cast(Engine, session.get_bind()).url
+    configured = db_url_get()
+    try:
+        if make_url(configured) == url:
+            return configured
+    except ArgumentError:
+        # An externally supplied session need not use the environment's URL.
+        pass
+    return url.render_as_string(hide_password=False)
 
 
 def _server_request(path: str, body: dict, timeout: float) -> dict | None:
