@@ -2,7 +2,7 @@
 
 Set ``RESEMBL_TEST_MYSQL_URL`` (e.g.
 ``mysql+pymysql://user:pass@host:3306/db``) to enable; the CI workflow
-provides a ``mysql:8`` service container.  Exercises the dialect-guarded
+provides a ``mysql:26.7`` service container.  Exercises the dialect-guarded
 paths unique to MySQL: ``INSERT IGNORE`` bucket upserts, ``ON DUPLICATE
 KEY UPDATE`` metadata upserts, and the indexable-hex bucket schema.
 """

@@ -32,7 +32,7 @@ The pre-commit hooks run, over the project rather than the staged files
 
 | Hook   | Command            | Scope                      |
 | ------ | ------------------ | -------------------------- |
-| black  | `uv run --locked black`     | project                    |
+| black  | `uv run --locked black .`   | project                    |
 | ruff   | `uv run --locked ruff check --fix --exit-non-zero-on-fix` | project |
 | mypy  | `uv run --locked mypy`      | `files` in `pyproject.toml` |
 | pylint | `uv run --locked pylint`    | `resembl/ tests/ fuzzers/` |

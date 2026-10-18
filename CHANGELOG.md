@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-10-18
+
 ### Changed
 
 - Refresh locked runtime and development dependencies, including SQLModel
@@ -14,6 +16,7 @@ project follows [Semantic Versioning](https://semver.org/).
   SQLAlchemy 2.1.
 - CI uses uv 0.13.1 and the current cache action; repository hygiene hooks
   use pre-commit-hooks 6.0.0.
+- Database integration and coverage checks use PostgreSQL 18 and MySQL 26.7.
 
 ### Fixed
 
@@ -22,6 +25,8 @@ project follows [Semantic Versioning](https://semver.org/).
 - CLI startup works in runtime-only installations without a separate Click
   package; error hooks use the exceptions supplied by Typer itself.
 - The Black commit hook receives the project path when scanning the whole tree.
+- macOS contributor setup selects current GNU Make so recipe pipeline failures
+  stop the build; the old system Make ignores those shell flags.
 
 ## [3.3.0] - 2026-10-15
 
@@ -849,7 +854,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.3.1...HEAD
+[3.3.1]: https://github.com/maci0/resembl/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/maci0/resembl/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/maci0/resembl/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/maci0/resembl/compare/v3.1.4...v3.2.0
