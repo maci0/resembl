@@ -6,6 +6,18 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Select Python 3.14.8 for contributor environments and the current CI lane.
+  DuckDB 1.5.6 advertises, tests and publishes wheels through Python 3.14;
+  Python 3.15 remains an unqualified source-build path. Retain the 3.13 lane.
+- Refresh locked dependencies and the setuptools 84.2.0 build backend; use
+  uv 0.13.3 and immutable release commits for CI actions.
+
+### Fixed
+
+- Print `config path` verbatim so long paths remain usable by scripts.
+
 ## [3.5.0] - 2026-10-20
 
 ### Changed

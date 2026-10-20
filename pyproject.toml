@@ -106,10 +106,10 @@ required-version = ">=0.12.13"
 [build-system]
 # Pinned exactly, not floored: the sdist and the wheel are the release
 # artifacts, and an open range lets the backend drift between two builds of
-# the same source.  84.0.0 is well above the setuptools 77 floor for PEP 639
+# the same source.  84.2.0 is well above the setuptools 77 floor for PEP 639
 # metadata (the SPDX `license` string and `license-files` above), which older
 # setuptools rejects.
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

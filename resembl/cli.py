@@ -2320,7 +2320,7 @@ def version_cmd(
 @config_app.command("path")
 def config_path_cmd() -> None:
     """Show the path to the config file."""
-    console.print(config_path_get())
+    typer.echo(config_path_get())
 
 
 @config_app.command("list")

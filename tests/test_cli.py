@@ -347,7 +347,9 @@ class TestCLIConfig(BaseCLITest):
 
     def test_config_dir_env_override(self):
         """RESEMBL_CONFIG_DIR should override the default config path."""
-        with tempfile.TemporaryDirectory() as cfgdir:
+        with tempfile.TemporaryDirectory() as root:
+            cfgdir = os.path.join(root, "long-config-" + "x" * 128)
+            os.mkdir(cfgdir)
             self.run_command("config set top_n 7", extra_env={"RESEMBL_CONFIG_DIR": cfgdir})
             config_path = os.path.join(cfgdir, "config.toml")
             with open(config_path, "rb") as f:
@@ -355,7 +357,7 @@ class TestCLIConfig(BaseCLITest):
             self.assertEqual(data.get("top_n"), 7)
 
             result = self.run_command("config path", extra_env={"RESEMBL_CONFIG_DIR": cfgdir})
-            self.assertIn(config_path, result.stdout)
+            self.assertEqual(result.stdout, config_path + "\n")
 
     def test_cache_dir_env_override(self):
         """RESEMBL_CACHE_DIR should control where legacy cache files are stored.

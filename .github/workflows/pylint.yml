@@ -25,11 +25,11 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        python-version: ["3.13", "3.14"]
+        python-version: ["3.13", "3.14.8"]
     # The matrix interpreter reaches `uv sync` as UV_PYTHON, exported by the
     # setup-uv action from its python-version input.
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         # No job here pushes, so the token is not left in .git/config for a
         # later step, or a test that shells out, to read and leak.

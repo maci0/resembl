@@ -7,7 +7,7 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Requires Python 3.13 or newer and uv 0.12.13 or newer; CI installs uv 0.13.1.
+Requires Python 3.13 or newer and uv 0.12.13 or newer; CI installs uv 0.13.3.
 On macOS, install Homebrew `make` and prepend `$(brew --prefix make)/libexec/gnubin`
 to `PATH`; Apple's old Make ignores the recipe shell flags. CI does this too.
 `pyproject.toml` sets it as the floor under `[tool.uv] required-version`, so an

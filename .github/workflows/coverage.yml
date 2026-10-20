@@ -52,7 +52,7 @@ jobs:
       RESEMBL_TEST_PG_URL: postgresql+pg8000://postgres:postgres@localhost:5432/postgres
       RESEMBL_TEST_MYSQL_URL: mysql+pymysql://resembl:resembl@localhost:3306/resembl
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         # No job here pushes, so the token is not left in .git/config for a
         # later step, or a test that shells out, to read and leak.
@@ -61,7 +61,7 @@ jobs:
     # copy of CPython on the runner is downloaded and then never used.
     - uses: ./.github/actions/setup-uv
       with:
-        python-version: '3.13'
+        python-version: '3.14.8'
 
     - name: Install dependencies
       # Installs exactly the committed uv.lock (hash-verified, reproducible)
@@ -75,7 +75,7 @@ jobs:
       run: make coverage
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         # Where `make coverage` writes it.  Named explicitly rather than left
         # to the action's root-level search, because the file is generated
