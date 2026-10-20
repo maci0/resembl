@@ -405,3 +405,8 @@ host's `TZ` moved under me.
 - `resembl add my_snippet "MOV EAX, EBX"` stores the snippet, and adds it to the LSH index when one is already built (on a fresh database the next `find` builds the index).
 - `resembl find --query "MOV EAX, EBX"` returns that snippet among the results.
 - Each result includes a similarity score.
+
+Status colors follow the shared Relumea Brand palette: LIBRARY is mulberry
+origin attribution; SIZE_MISMATCH uses the failure color; LIVE indicates active
+processing and is excluded from verification-result legends. CLI role colors
+come from Brand's portable palette, with no-color and machine output preserved.

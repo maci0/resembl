@@ -43,6 +43,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import track
 from rich.table import Table
+from rich.theme import Theme
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
@@ -100,6 +101,7 @@ from .paths import (
     server_port_path,
 )
 from .scoring import MAX_NUM_PERM
+from .status_colors import RICH_STYLES
 from .theme import ACCENT, score_color
 
 if TYPE_CHECKING:
@@ -129,8 +131,15 @@ def _legacy_windows_for(stream: object) -> bool | None:
 # highlighting=False keeps rich's stock highlighter from tinting quoted text
 # inside messages: a color in resembl's output is always one this module put
 # there (see ``theme``), never one the library guessed.
-console = Console(highlight=False, legacy_windows=_legacy_windows_for(sys.stdout))
-err_console = Console(stderr=True, highlight=False, legacy_windows=_legacy_windows_for(sys.stderr))
+console = Console(
+    theme=Theme(RICH_STYLES), highlight=False, legacy_windows=_legacy_windows_for(sys.stdout)
+)
+err_console = Console(
+    theme=Theme(RICH_STYLES),
+    stderr=True,
+    highlight=False,
+    legacy_windows=_legacy_windows_for(sys.stderr),
+)
 
 _OUTPUT_CHOICES = frozenset({"auto", "text", "json"})
 _output_choice: contextvars.ContextVar[str] = contextvars.ContextVar(

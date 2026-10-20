@@ -6,6 +6,13 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Use the shared Relumea terminal palette for human output; preserve no-color and structured formats.
+
+- `resembl schema` and `resembl-find schema` declare `type` on every global
+  argument, and a one-character alias as `short`.
+
 ## [3.4.0] - 2026-10-18
 
 ### Changed

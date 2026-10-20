@@ -225,7 +225,8 @@ def _document(
 _RESEMBL_ARGS: list[dict[str, Any]] = [
     {
         "name": "--output",
-        "alias": "-o",
+        "short": "-o",
+        "type": "string",
         "enum": ["auto", "text", "json"],
         "default": "auto",
         "description": (
@@ -235,13 +236,24 @@ _RESEMBL_ARGS: list[dict[str, Any]] = [
     },
     {
         "name": "--format",
+        "type": "string",
         "enum": ["table", "json", "csv"],
         "description": "Data format. Overrides the config file. Independent of -o.",
     },
-    {"name": "--quiet", "alias": "-q", "description": "Suppress informational output."},
-    {"name": "--verbose", "alias": "-v", "description": "Increase output verbosity."},
-    {"name": "--no-color", "description": "Disable colored output."},
-    {"name": "--version", "description": "Show the resembl version and exit."},
+    {
+        "name": "--quiet",
+        "short": "-q",
+        "type": "boolean",
+        "description": "Suppress informational output.",
+    },
+    {
+        "name": "--verbose",
+        "short": "-v",
+        "type": "boolean",
+        "description": "Increase output verbosity.",
+    },
+    {"name": "--no-color", "type": "boolean", "description": "Disable colored output."},
+    {"name": "--version", "type": "boolean", "description": "Show the resembl version and exit."},
     {"name": "--tz", "description": "IANA zone for printed timestamps.", "type": "string"},
 ]
 
@@ -275,21 +287,32 @@ _RESEMBL_ERRORS: list[dict[str, Any]] = [
 _FIND_ARGS: list[dict[str, Any]] = [
     {
         "name": "--output",
-        "alias": "-o",
+        "short": "-o",
+        "type": "string",
         "enum": ["auto", "text", "json"],
         "default": "auto",
         "description": "Format. auto stays text. --json remains a synonym for json.",
     },
     {
         "name": "--json",
+        "type": "boolean",
         "description": "Print the result as JSON. Same as -o json. -o text wins.",
     },
-    {"name": "--query", "description": "Query string. A single line uses ';' as a separator."},
-    {"name": "--file", "description": "File containing the query. '-' reads stdin."},
+    {
+        "name": "--query",
+        "type": "string",
+        "description": "Query string. A single line uses ';' as a separator.",
+    },
+    {
+        "name": "--file",
+        "type": "path",
+        "description": "File containing the query. '-' reads stdin.",
+    },
     {"name": "--top-n", "type": "integer", "description": "How many matches to return."},
     {"name": "--threshold", "type": "number", "description": "LSH threshold override."},
     {
         "name": "--no-normalization",
+        "type": "boolean",
         "description": "Do not fold registers and immediates.",
     },
 ]

@@ -72,6 +72,7 @@ SUBMODULES = frozenset(
         "paths",
         "scoring",
         "server",
+        "status_colors",
         "theme",
     )
 )

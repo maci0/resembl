@@ -6,8 +6,9 @@ Color carries exactly one of two roles.
   brand green sampled from the shipped icon, mascot, and favicon
   (``docs/resembl_icon.png``), so the terminal and the project's assets
   read as one thing.
-* **Status** (errors, warnings, score tiers) uses rich's native semantic
-  names, so a user's own terminal theme still decides how those read.
+* **Status** (errors, warnings, score tiers) uses the shared Relumea role
+  palette through the CLI Rich theme. No-color modes and machine output
+  remain plain; limited-color terminals receive the nearest available color.
 
 A value is never colored for decoration: the score is the one number in
 ``find`` output that earns a color, and it gets one because its value is
