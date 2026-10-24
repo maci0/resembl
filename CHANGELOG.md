@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-10-24
+
 ### Changed
 
 - Shorten repeated LSH and ranking explanations in the README.
@@ -888,7 +890,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.6.1...HEAD
+[3.6.1]: https://github.com/maci0/resembl/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/maci0/resembl/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/maci0/resembl/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/maci0/resembl/compare/v3.3.1...v3.4.0
