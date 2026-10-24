@@ -48,7 +48,6 @@ To avoid the slow process of comparing a query against every single entry in the
 
 - **Normalization:** The assembly code is first "normalized" by a lexer, which reduces it to a canonical token representation focused on structure rather than on specific registers or immediate values. This behavior can be disabled with the `--no-normalization` flag on the `find` command.
 
-    Here’s what it does:
     - **Generalizes Registers:** All general-purpose registers (e.g., `EAX`, `RBX`, `RDI`) are replaced with the generic token `REG`.
     - **Generalizes Immediate Values:** All numerical values (e.g., `0x10`, `42`) are replaced with the token `IMM`.
     - **Generalizes Labels:** All labels (e.g., `loc_123:`, `?_0001:`) are replaced with the token `LABEL`.
@@ -77,17 +76,13 @@ To avoid the slow process of comparing a query against every single entry in the
 
 - **Locality Sensitive Hashing (LSH):** We use a banded LSH index stored in the database (the `lsh_bucket` table) to group the MinHashes. This data structure acts like a "bucketing" system. Similar MinHashes are likely to be placed into the same buckets. When you search, we hash your query's MinHash and only retrieve candidates from the buckets it lands in. That narrows a large database to a handful of candidates without comparing the query to every entry.
 
-The key idea behind LSH is to hash items so that similar items have a higher probability of ending up in the same "bucket." The banding technique is a method for amplifying this effect, making the process more efficient and reliable for finding collision candidates.
-
-Here’s how it works:
-
 1.  **Divide the Signature:** The MinHash signature (a list of 128 hash values) is divided into several smaller "bands." For example, if we have 128 hashes and we create 32 bands, each band would contain 4 hashes.
 
 2.  **Hash Each Band:** Each band is then hashed separately. If two snippets have a band that is identical (meaning all hash values within that band are the same), they will produce the same hash for that band and be considered candidates for a match.
 
 3.  **Candidate Pairs:** Two snippets are considered a candidate pair if they are identical in at least one band.
 
-This technique is effective because it balances the trade-off between false positives and false negatives. By requiring an entire band to match, we reduce the chance of accidental collisions (false positives). At the same time, by allowing a match in *any* of the bands, we increase the chance of finding truly similar items, even if their MinHash signatures are not identical (avoiding false negatives). This makes the LSH process both fast and effective at finding likely matches in a very large dataset.
+This technique is effective because it balances the trade-off between false positives and false negatives. By requiring an entire band to match, we reduce the chance of accidental collisions (false positives). At the same time, by allowing a match in *any* of the bands, we increase the chance of finding truly similar items, even if their MinHash signatures are not identical (avoiding false negatives).
 
 ### 2. Accurate Ranking with Hybrid Scoring
 
@@ -102,7 +97,7 @@ The LSH step gives us a small list of candidates, but it's not perfectly accurat
 
 #### How MinHash Works
 
-The MinHash algorithm is a technique for quickly estimating how similar two sets are. In our case, the "sets" are the normalized assembly code snippets. Here’s a step-by-step breakdown of how it works:
+The MinHash algorithm is a technique for quickly estimating how similar two sets are. In our case, the "sets" are the normalized assembly code snippets.
 
 1.  **Shingling:** The normalized code is first broken down into a set of overlapping "shingles" (or n-grams). For example, a 3-shingle of the tokens `['MOV', 'REG', 'IMM']` would be `('MOV', 'REG', 'IMM')`. This creates a set of all unique shingles in the snippet.
 
@@ -125,8 +120,6 @@ The key insight is that the similarity of two MinHash signatures is a good estim
 After the LSH index provides a list of potential candidates, `resembl` uses the `rapidfuzz` library to perform a more precise similarity calculation. `rapidfuzz` is a high-performance library that implements a variety of string similarity algorithms in C++.
 
 The primary algorithm used is a variation of the **Levenshtein distance**, which measures the number of edits (insertions, deletions, or substitutions) needed to change one string into another. `rapidfuzz` calculates a normalized similarity ratio based on this distance, which gives a score from 0 to 100, where 100 is a perfect match.
-
-By using `rapidfuzz`, `resembl` can accurately score the similarity between the query and candidate snippets. This Levenshtein score is then combined with the Jaccard similarity into a **hybrid score** for final ranking.
 
 ### Control-Flow Graph (CFG) Similarity
 

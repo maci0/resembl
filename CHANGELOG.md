@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Shorten repeated LSH and ranking explanations in the README.
+
 ## [3.6.0] - 2026-10-21
 
 ### Changed
