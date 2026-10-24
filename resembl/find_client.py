@@ -80,7 +80,7 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     value = cfg.get(key, default)
     try:
         return cast(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         print(
             f"error: ignoring config value {key} = {value!r} (not a number)",
             file=sys.stderr,
@@ -216,7 +216,7 @@ def _main(argv: list[str] | None = None) -> int:
     try:
         with open(port_file, encoding="utf-8") as f:
             port = int(f.read().strip())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return _fail(
             f"no server running for {db_url_mask(db_url)} (start `resembl serve`)",
             1,
@@ -259,7 +259,7 @@ def _main(argv: list[str] | None = None) -> int:
         # tells the caller nothing about which parameter was refused.
         try:
             detail = json.loads(exc.read()).get("error", "")
-        except (ValueError, OSError, AttributeError):
+        except ValueError, OSError, AttributeError:
             detail = ""
         return _fail(str(detail or exc.reason), 1, json_on=json_on)
     except (urllib.error.URLError, OSError, ValueError) as exc:

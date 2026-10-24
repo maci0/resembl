@@ -163,7 +163,7 @@ def main() -> None:
                 with open(port_file, encoding="utf-8") as f:
                     int(f.read().strip())
                 break
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 time.sleep(0.1)
         else:
             raise RuntimeError("serve did not write its port file in time")

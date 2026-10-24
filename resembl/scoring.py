@@ -1352,7 +1352,7 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     b = struct.unpack(f">{num_perm_a}I", packed_b[8 : 8 + 4 * num_perm_a])
     # ``map(operator.eq, ...)`` iterates with C-level callbacks instead of a
     # Python ``for``/generator — ~1.6x faster over 128 hash values.
-    return sum(map(operator.eq, a, b)) / num_perm_a
+    return sum(map(operator.eq, a, b, strict=True)) / num_perm_a
 
 
 def minhash_jaccard_batch(

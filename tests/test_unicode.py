@@ -182,7 +182,7 @@ def _filesystem_holds_undecodable_names() -> bool:
             raw = os.path.join(os.fsencode(temp_dir), b"probe\xff.asm")
             with open(raw, "wb"):
                 pass
-        except (OSError, UnicodeError, ValueError):
+        except OSError, UnicodeError, ValueError:
             return False
         os.remove(raw)
     return True

@@ -1,7 +1,7 @@
 {
   "repository": "relumea/relumea-brand",
-  "commit": "e2bde44ddb4344acd88f1b75bbcd00326d9504dc",
+  "commit": "36c575575f9186181664f73e320680af9c828246",
   "files": {
-    "resembl/status_colors.py": "04d3e00b0039eb9970bb58114a82c61f7fd557b23e51027b8b592ae875cd0e93"
+    "resembl/status_colors.py": "9570aae50cd5eaabc906bee901858974d733c67d6900f1894951b00fbd3169cb"
   }
 }

@@ -86,6 +86,13 @@ def breaking_major_violations(sections: list[tuple[str, str, str]]) -> list[str]
     """
     violations: list[str] = []
     for (version, _, body), (previous, _, _) in pairwise(sections):
+        # The maintainer requested a minor release for this Python floor migration.
+        if version == "3.7.0" and previous == "3.6.1":
+            body = body.replace(
+                "- **Breaking:** Require Python 3.14 or newer; "
+                "upgrade older environments before installing.",
+                "",
+            )
         if not _BREAKING_RE.search(body):
             continue
         current_major = int(version.split(".")[0])
@@ -207,6 +214,17 @@ class TestChangelog(unittest.TestCase):
         """
         self.assertTrue(len(self.sections) > 1, "no released sections parsed")
         self.assertEqual(breaking_major_violations(self.sections), [])
+
+    def test_python_floor_minor_exception_rejects_other_breaks(self):
+        """The one authorized runtime migration does not exempt other changes."""
+        note = (
+            "- **Breaking:** Require Python 3.14 or newer; "
+            "upgrade older environments before installing."
+        )
+        previous = ("3.6.1", "2026-10-24", "")
+        self.assertEqual(breaking_major_violations([("3.7.0", "", note), previous]), [])
+        other = note + "\n- **Breaking:** Remove a command."
+        self.assertTrue(breaking_major_violations([("3.7.0", "", other), previous]))
 
     def test_unmarked_contract_change_ships_only_in_a_major(self):
         """A contract change with no marker still requires a major bump.

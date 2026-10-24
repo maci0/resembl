@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  # The matrix starts at 3.13: the project requires Python >=3.13 (see
+  # The matrix starts at 3.14: the project requires Python >=3.14 (see
   # requires-python in pyproject.toml), so a 3.12 leg could not even
   # install the lockfile.
   build:
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        python-version: ["3.13", "3.14.8"]
+        python-version: ["3.14.9"]
     # The matrix interpreter reaches `uv sync` as UV_PYTHON, exported by the
     # setup-uv action from its python-version input.
     steps:

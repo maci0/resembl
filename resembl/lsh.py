@@ -401,7 +401,7 @@ def _stamp_get(session: Session, key: str) -> int | None:
         return None
     try:
         return int(row[0])
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         # A corrupt stamp must not crash every find — treating it as unset
         # routes through the self-healing reindex instead.
         return None
@@ -514,7 +514,7 @@ def fingerprint_stamps_get(session: Session) -> FingerprintStamps:
     for key, value in rows:
         try:
             values[key] = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             values[key] = None
     return FingerprintStamps(
         version=values[_VERSION_STAMP_KEY],

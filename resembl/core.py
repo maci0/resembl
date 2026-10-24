@@ -1562,7 +1562,7 @@ def _export_manifest_read(export_dir: str) -> set[str]:
     try:
         with open(os.path.join(export_dir, _EXPORT_MANIFEST_NAME), encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return set()
     if not isinstance(data, list):
         return set()

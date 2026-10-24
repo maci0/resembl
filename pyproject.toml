@@ -1,6 +1,6 @@
 [project]
 name = "resembl"
-version = "3.6.1"
+version = "3.7.0"
 description = "Assembly Code Similarity Search (resembl)"
 authors = [{ name = "N/A" }]
 # SPDX expression, not free text: "GPLv3" is not an SPDX id, so indexers and
@@ -21,11 +21,10 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
-    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "sqlalchemy>=2.0.54",
     "sqlmodel>=0.0.47",
@@ -106,10 +105,10 @@ required-version = ">=0.12.13"
 [build-system]
 # Pinned exactly, not floored: the sdist and the wheel are the release
 # artifacts, and an open range lets the backend drift between two builds of
-# the same source.  84.2.0 is well above the setuptools 77 floor for PEP 639
+# the same source.  84.2.1 is well above the setuptools 77 floor for PEP 639
 # metadata (the SPDX `license` string and `license-files` above), which older
 # setuptools rejects.
-requires = ["setuptools==84.2.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -122,9 +121,9 @@ include = ["resembl*"]
 [tool.black]
 line-length = 100
 # Pinned rather than inferred: black otherwise derives the target set from
-# `requires-python = ">=3.13"`, which is open ended, so the formatting a
+# `requires-python = ">=3.14"`, which is open ended, so the formatting a
 # given black version produces depends on how new the running interpreter is.
-target-version = ["py313"]
+target-version = ["py314"]
 
 [tool.ruff]
 line-length = 100
@@ -263,7 +262,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 known-first-party = ["resembl"]
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 files = ["resembl", "tests", "fuzzers"]
 ignore_missing_imports = true
 # Strict flags the whole tree (package + tests) already passes.
@@ -302,7 +301,7 @@ disallow_untyped_decorators = true
 # numpy is type-checked through its shipped stubs.  An earlier
 # `follow_imports = "skip"` override for `numpy.*` was needed while the check
 # target was Python 3.11, which could not parse the PEP 695 syntax those stubs
-# use; the target is 3.13 and the stubs parse, so the override is gone and
+# use; the target is 3.14 and the stubs parse, so the override is gone and
 # resembl.minhash is checked against real numpy types instead of `Any`.
 
 [tool.pytest.ini_options]

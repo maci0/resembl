@@ -61,7 +61,7 @@ jobs:
     # copy of CPython on the runner is downloaded and then never used.
     - uses: ./.github/actions/setup-uv
       with:
-        python-version: '3.14.8'
+        python-version: '3.14.9'
 
     - name: Install dependencies
       # Installs exactly the committed uv.lock (hash-verified, reproducible)

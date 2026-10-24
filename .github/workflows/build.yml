@@ -41,7 +41,7 @@ jobs:
 
       - uses: ./.github/actions/setup-uv
         with:
-          python-version: '3.14.8'
+          python-version: '3.14.9'
 
       - name: Build the sdist and the wheel, twice, and compare
         run: make dist-verify
@@ -49,7 +49,7 @@ jobs:
       - name: Install the wheel and run the entry point
         run: |
           set -euo pipefail
-          uv venv --python 3.13 dist/wheel-venv
+          uv venv --python 3.14 dist/wheel-venv
           # --no-deps is not an option here: the wheel declares its runtime
           # dependencies, and an install that skipped them would pass a
           # smoke test the real installation would fail.
@@ -60,7 +60,7 @@ jobs:
       - name: Install the sdist and run the entry point
         run: |
           set -euo pipefail
-          uv venv --python 3.13 dist/sdist-venv
+          uv venv --python 3.14 dist/sdist-venv
           uv pip install --python dist/sdist-venv/bin/python dist/*.tar.gz
           dist/sdist-venv/bin/resembl --help
 

@@ -979,7 +979,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             return None
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, KeyError, RecursionError):
+        except ValueError, KeyError, RecursionError:
             return None
         return body if isinstance(body, dict) else None
 
@@ -1420,7 +1420,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     try:
         with open(port_file, encoding="utf-8") as f:
             existing_port = int(f.read().strip())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         existing_port = None  # no port file, or malformed
     if existing_port is not None:
         try:

@@ -9,8 +9,8 @@
 # step instead of piping a truncated script into sh.
 #
 # The cache key is keyed on uv.lock and the interpreter, because uv keys its
-# wheel cache by Python version, so the 3.14 pylint leg never serves 3.13
-# wheels. A non-empty python-version is also exported as UV_PYTHON, so the
+# wheel cache by Python version, so each interpreter uses its own wheels.
+# A non-empty python-version is also exported as UV_PYTHON, so the
 # interpreter a workflow asks for is the one uv builds the environment from and
 # not only the one the cache is keyed on.
 name: Set up uv
@@ -62,7 +62,7 @@ runs:
       # The input reaches the script through the environment, never spliced
       # into it, so a caller cannot turn a version string into shell code.
       env:
-        UV_VERSION: "0.13.3"
+        UV_VERSION: "0.13.5"
         UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
       run: |
         set -euo pipefail

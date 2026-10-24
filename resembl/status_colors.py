@@ -37,9 +37,16 @@ RICH_STYLES: dict[str, str] = {
     "magenta": TERMINAL["thunk"],
     "yellow": TERMINAL["warn"],
     "red": TERMINAL["fail"],
+    "bold green": f"bold {TERMINAL['exact']}",
+    "green bold": f"bold {TERMINAL['exact']}",
+    "bold cyan": f"bold {TERMINAL['live']}",
+    "cyan bold": f"bold {TERMINAL['live']}",
+    "bold blue": f"bold {TERMINAL['near']}",
+    "blue bold": f"bold {TERMINAL['near']}",
+    "bold magenta": f"bold {TERMINAL['thunk']}",
+    "magenta bold": f"bold {TERMINAL['thunk']}",
+    "bold yellow": f"bold {TERMINAL['warn']}",
+    "yellow bold": f"bold {TERMINAL['warn']}",
+    "bold red": f"bold {TERMINAL['fail']}",
+    "red bold": f"bold {TERMINAL['fail']}",
 }
-
-# Rich resolves combined style strings separately from their plain color name.
-for name, color in tuple(RICH_STYLES.items()):
-    RICH_STYLES[f"bold {name}"] = f"bold {color}"
-    RICH_STYLES[f"{name} bold"] = f"bold {color}"
