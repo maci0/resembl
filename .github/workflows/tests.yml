@@ -21,6 +21,10 @@ permissions:
 
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14.9", "3.15.1"]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -67,7 +71,7 @@ jobs:
       # copy of CPython on the runner is downloaded and then never used.
       - uses: ./.github/actions/setup-uv
         with:
-          python-version: '3.14.9'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         # Installs exactly the committed uv.lock (hash-verified, reproducible)
@@ -116,10 +120,21 @@ jobs:
 
       - uses: ./.github/actions/setup-uv
         with:
-          python-version: '3.14.9'
+          python-version: '3.15.1'
 
       - name: Install dependencies
         run: uv sync --locked --extra dev
 
       - name: Run tests
         run: uv run --locked pytest -q
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-uv
+      - name: Smoke all fuzz targets on Atheris's supported interpreter
+        run: make fuzz FUZZ_SECONDS=1

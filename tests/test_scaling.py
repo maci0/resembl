@@ -58,6 +58,7 @@ from resembl.models import (
     Snippet,
     minhash_ensure_packed,
     minhash_jaccard,
+    minhash_num_perm,
     minhash_pack,
     minhash_unpack,
 )
@@ -174,6 +175,12 @@ class TestMinHashStorage(BaseScalingTest):
             minhash_unpack(legacy)
         with self.assertRaises(ValueError):
             minhash_ensure_packed(legacy)
+
+    def test_num_perm_rejects_missing_magic(self):
+        """A valid count and length cannot hide an unsupported blob format."""
+        raw = b"xxxx" + struct.pack(">I", 2) + b"\x00" * 8
+        with self.assertRaisesRegex(ValueError, "missing RMLH magic"):
+            minhash_num_perm(raw)
 
     def test_unpack_corrupt_payload(self):
         raw = b"RMLH" + struct.pack(">I", 128) + b"\x00" * 100

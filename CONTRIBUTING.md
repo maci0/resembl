@@ -18,7 +18,7 @@ A one-time setup that gets the resembl codebase running on your machine.
 Install:
 
 - Git
-- Python 3.14 or newer
+- Python 3.15.1 for normal development (Python 3.14+ remains supported for consumers)
 - uv 0.12.13 or newer; CI installs uv 0.13.5. `pyproject.toml` sets the minimum under `required-version`, so an older uv fails at the first uv command rather than after rewriting `uv.lock`.
 - GNU Make, which drives the commands below (`make install`, `make check`, `make fuzz`). Every Makefile target prints the `uv` command it wraps, and the setup step has a make-free equivalent, so nothing here is only reachable through `make`. On macOS, install Homebrew `make` and prepend `$(brew --prefix make)/libexec/gnubin` to `PATH`; the system's old Make ignores recipe shell flags. Windows has no `make` by default: run the two commands under the make-free equivalent, or install `make` (Chocolatey, WSL, or `winget install GnuWin32.Make`).
 
@@ -115,13 +115,13 @@ resembl is developed test-first.
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 
-    Atheris is an optional dependency in the `fuzz` extra, and `uv run` brings the environment in line with the lockfile before it runs, so the extra has to be named on the invocation that runs the fuzzer:
+    The hash-pinned maintained Atheris 3.1.0+relumea.1 wheel supports Python 3.15 on Linux x86_64 with glibc 2.38+ and GLIBCXX 3.4.32+ (Ubuntu 24.04 or Debian Trixie). Fuzzing uses Python 3.15.1 in its own `.venv-fuzz`, preserving the normal development environment. The upstream 3.1.0 package remains available for Python 3.14 library compatibility. Atheris is an optional dependency in the `fuzz` extra, and `uv run` brings the environment in line with the lockfile before it runs, so the extra has to be named on the invocation that runs the fuzzer:
     ```bash
-    uv run --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py
+    UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.15.1 --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py
     ```
     The fuzzer will run indefinitely until you stop it manually (with `Ctrl+C`) or until it finds a crash. To run it for a fixed duration, use the `-max_total_time` flag:
     ```bash
-    uv run --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
+    UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.15.1 --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py -max_total_time=60
     ```
     If a crash is found, the fuzzer will stop and create a `crash-<hash>` file in the root directory containing the input that caused the failure. This file is crucial for debugging and should be included in any bug report.
 
@@ -282,7 +282,7 @@ You are now ready to open a pull request on GitHub.
 ### The Review Process
 Once your pull request is submitted, it will go through a review process. Here is what to expect:
 
-- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite on Linux, the one job that carries the two PostgreSQL and MySQL services, and a second portability job on macOS and Windows, where those two integration modules skip themselves, lint, type, and style checks (pylint runs on Python 3.14), and building the release artifacts twice to confirm the two builds are byte-identical. The PR cannot be merged if these checks fail.
+- **Automated Checks:** As soon as you open the pull request, GitHub Actions will automatically run our full CI pipeline. This includes running the test suite on Linux, the one job that carries the two PostgreSQL and MySQL services, and a second portability job on macOS and Windows, where those two integration modules skip themselves, lint, type, and style checks (Python 3.14 compatibility and the default Python 3.15 runtime are tested), and building the release artifacts twice to confirm the two builds are byte-identical. The PR cannot be merged if these checks fail.
 - **Human Review:** A project maintainer will review your code for correctness, architectural soundness, and adherence to project standards.
 - **Responding to Feedback:** It is common for reviewers to request changes. This is a normal and healthy part of the collaborative process. Please engage in the discussion and address the feedback by pushing new commits to your branch. The pull request will update automatically.
 - **Approval and Merge:** Once all automated checks are passing and a maintainer has approved the changes, your pull request will be merged.

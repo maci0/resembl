@@ -136,6 +136,7 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 	fi
 	uv run --locked pytest -q $(DB_TESTS) $(PYTEST_ARGS)
 
+# Isolate the maintained Python 3.15 Atheris build from normal development.
 # atheris lives in the `fuzz` extra, so the target asks uv for it instead of
 # failing on an import the contributor has to guess at.  Naming one script
 # (make fuzz FUZZER=fuzz_code_tokenize.py) is the common case while working
@@ -146,7 +147,7 @@ FUZZER ?=
 fuzz:  ## Fuzz every entry point for FUZZ_SECONDS, or one via FUZZER=<name> (installs the fuzz extra)
 	@for f in $(if $(FUZZER),$(FUZZER),$(FUZZERS)); do \
 		echo "== fuzzers/$$f for $(FUZZ_SECONDS)s"; \
-		uv run --locked --extra fuzz ./fuzzers/$$f -max_total_time=$(FUZZ_SECONDS) || exit 1; \
+		UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.15.1 --locked --extra fuzz ./fuzzers/$$f -max_total_time=$(FUZZ_SECONDS) || exit 1; \
 	done
 
 # The order mirrors .github/workflows/tests.yml and pylint.yml: the file

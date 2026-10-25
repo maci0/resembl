@@ -6,6 +6,23 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-10-25
+
+### Changed
+
+- Default normal development, standalone use and release builds to Python 3.15.1.
+  Retain Python 3.14 compatibility and the existing Python floor for consumers.
+- Run optional Atheris fuzzing on Python 3.15.1 in a separate environment using
+  the maintained, hash-pinned Atheris 3.1.0+relumea.1 Linux x86_64 wheel. It needs
+  glibc 2.38+ and GLIBCXX 3.4.32+ (Ubuntu 24.04 or Debian Trixie).
+- Test normal runtime behavior on Python 3.14 and 3.15, and smoke all fuzz targets
+  on Python 3.15.1 with the maintained Atheris binding.
+
+### Fixed
+
+- Validate the MinHash magic before using an otherwise plausible count and length;
+  malformed stored fingerprints consistently follow the existing recovery path.
+
 ## [3.7.0] - 2026-10-25
 
 ### Changed
@@ -898,7 +915,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/maci0/resembl/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/maci0/resembl/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/maci0/resembl/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/maci0/resembl/compare/v3.5.0...v3.6.0

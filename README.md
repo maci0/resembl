@@ -366,7 +366,10 @@ uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # o
 ```
 
 `make help` lists every target (`install`, `format`, `lint`, `types`, `hygiene`,
-`test`, `coverage`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`). `make check` runs everything CI
+`test`, `coverage`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`).
+Normal development defaults to Python 3.15.1; Python 3.14+ consumers remain
+supported. Atheris fuzzing runs separately on Python 3.15.1 using the maintained,
+hash-pinned Linux x86_64 build (Ubuntu 24.04 or Debian Trixie). `make check` runs everything CI
 runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
 hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
 enforce and no CI workflow does, so a green `make check` is a commit the hooks

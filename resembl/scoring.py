@@ -1263,6 +1263,8 @@ def minhash_num_perm(data: bytes) -> int:
     """
     if len(data) < 8:
         raise ValueError("Corrupt MinHash payload: shorter than the 8-byte header.")
+    if not data.startswith(MINHASH_MAGIC):
+        raise ValueError("Corrupt MinHash payload: missing RMLH magic (unsupported format).")
     num_perm = struct.unpack(">I", data[4:8])[0]
     if num_perm < 2 or num_perm > MAX_NUM_PERM:
         raise ValueError(f"Corrupt MinHash payload: implausible permutation count {num_perm}.")
