@@ -115,7 +115,7 @@ resembl is developed test-first.
 
 - **Running Fuzzers:** This project uses fuzz testing to find bugs and crashes in core, security-sensitive functions. The fuzzers are located in the `fuzzers/` directory and are built on the `atheris` engine. You can run them locally to test for issues.
 
-    The qualified wheel is Atheris 3.1.0+relumea.2 for CPython 3.15 normal GIL on Linux x86_64. It needs GLIBC 2.38 and GLIBCXX 3.4.32. Free-threading, PyPy, ARM, macOS, Windows, and Python 3.16 are not qualified and resolve the maintained source instead of that wheel. Python below 3.15 keeps upstream Atheris. Fuzzing uses Python 3.15.1 in its own `.venv-fuzz`, preserving the normal development environment. Atheris is an optional dependency in the `fuzz` extra, and `uv run` brings the environment in line with the lockfile before it runs, so the extra has to be named on the invocation that runs the fuzzer:
+    The qualified wheel is Atheris 3.1.0+relumea.2 for CPython 3.15 normal GIL on Linux x86_64. It needs GLIBC 2.38 and GLIBCXX 3.4.32. Free-threading, PyPy, ARM, macOS, Windows, and Python 3.16 are not qualified and resolve the published sdist instead of that wheel. Python below 3.15 keeps upstream Atheris. Fuzzing uses Python 3.15.1 in its own `.venv-fuzz`, preserving the normal development environment. Atheris is an optional dependency in the `fuzz` extra, and `uv run` brings the environment in line with the lockfile before it runs, so the extra has to be named on the invocation that runs the fuzzer:
     ```bash
     UV_PROJECT_ENVIRONMENT=.venv-fuzz uv run --python 3.15.1 --locked --extra fuzz ./fuzzers/fuzz_code_tokenize.py
     ```

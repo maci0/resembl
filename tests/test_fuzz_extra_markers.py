@@ -14,7 +14,7 @@ from packaging.requirements import Requirement
 
 _ROOT = Path(__file__).resolve().parents[1]
 _WHEEL = "6a1dd5169f6b9448d204164917da4749706c070efd0053120c22702d6c1dbd9c"
-_SOURCE = "5f7fa7f9084d557a7b6002a9471dac88a0a36cd0"
+_SOURCE = "f68bf1c9b2337df27578c89842eb32da6218efd3427a37ace0982693b907a1c6"
 
 
 def _requirements() -> list[Requirement]:
@@ -82,6 +82,8 @@ class FuzzExtraMarkerTests(unittest.TestCase):
                     self.assertNotIn("relumea.1", url)
                 elif kind == "source":
                     self.assertIn(_SOURCE, url)
+                    self.assertIn("relumea.2.tar.gz", url)
+                    self.assertNotIn("/archive/", url)
                     self.assertNotIn(_WHEEL, url)
                 else:
                     self.assertIsNone(req.url)

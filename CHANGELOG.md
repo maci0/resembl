@@ -16,7 +16,7 @@ project follows [Semantic Versioning](https://semver.org/).
   The qualified wheel is Atheris 3.1.0+relumea.2 for CPython 3.15 normal GIL
   on Linux x86_64. It needs GLIBC 2.38 and GLIBCXX 3.4.32. Free-threading,
   PyPy, ARM, macOS, Windows, and Python 3.16 are not qualified: they resolve
-  the maintained source at the published commit instead of that wheel, and
+  the published sdist from that release instead of that wheel, and
   Python 3.15 does not fall back to unported upstream Atheris. Python below
   3.15 keeps the upstream Atheris package.
 - Test normal runtime behavior on Python 3.14 and 3.15, and smoke all fuzz targets

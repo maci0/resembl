@@ -91,13 +91,13 @@ duckdb = [
 # The cp315 wheel is the qualified build: CPython 3.15 normal GIL (not
 # cp315t), Linux x86_64, GLIBC 2.38 and GLIBCXX 3.4.32. PEP 508 cannot
 # name the GIL or glibc, so those limits are recorded here. Python 3.16,
-# PyPy, and any other machine resolve the maintained source at the same
-# commit. That source is not a qualified build. It is not the cp315 wheel,
+# PyPy, and any other machine resolve the published sdist from the same
+# release. That sdist is not a qualified build. It is not the cp315 wheel,
 # and 3.15 does not fall back to unported upstream Atheris.
 fuzz = [
     "atheris>=3.1.0; python_version < '3.15'",
     "atheris @ https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2-cp315-cp315-linux_x86_64.whl#sha256=6a1dd5169f6b9448d204164917da4749706c070efd0053120c22702d6c1dbd9c ; python_version == '3.15' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "atheris @ https://github.com/maci0/atheris/archive/5f7fa7f9084d557a7b6002a9471dac88a0a36cd0.tar.gz#sha256=d57fdc1b45861505770ab7d39dd7e3e1138a0da3c07d6457414f3dcff25fb1b0 ; python_version > '3.15' or python_version == '3.15' and platform_python_implementation != 'CPython' or python_version == '3.15' and platform_python_implementation == 'CPython' and sys_platform != 'linux' or python_version == '3.15' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and platform_machine != 'x86_64'",
+    "atheris @ https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz#sha256=f68bf1c9b2337df27578c89842eb32da6218efd3427a37ace0982693b907a1c6 ; python_version > '3.15' or python_version == '3.15' and platform_python_implementation != 'CPython' or python_version == '3.15' and platform_python_implementation == 'CPython' and sys_platform != 'linux' or python_version == '3.15' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and platform_machine != 'x86_64'",
 ]
 
 [project.scripts]
