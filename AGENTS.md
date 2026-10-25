@@ -89,9 +89,10 @@ test to make a suite pass; change it so it still asserts the behavior.
 
 Fuzzers live in `fuzzers/`; `make fuzz` runs each for `FUZZ_SECONDS` (60 by
 default), uses an isolated `.venv-fuzz` on Python 3.15.1, and asks uv for the
-`fuzz` extra itself. The hash-pinned maintained Atheris 3.1.0+relumea.1 wheel
-supports Linux x86_64 with glibc 2.38+ and GLIBCXX 3.4.32+ (Ubuntu 24.04 or
-Debian Trixie); upstream 3.1.0 has no cp315 wheel or source archive:
+`fuzz` extra itself. The qualified wheel is Atheris 3.1.0+relumea.2 for
+CPython 3.15 normal GIL on Linux x86_64, with GLIBC 2.38 and GLIBCXX 3.4.32.
+Other 3.15 tuples and Python 3.16 resolve the maintained source and are not
+qualified builds. Python below 3.15 keeps upstream Atheris:
 
 ```bash
 make fuzz FUZZER=fuzz_code_tokenize.py
