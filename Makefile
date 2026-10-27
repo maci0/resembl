@@ -12,7 +12,7 @@
 # and builds.
 #
 # SHELL is left at make's own default (/bin/sh) rather than pinned to
-# /bin/bash: README.md and CONTRIBUTING.md document this Makefile as the
+# /bin/bash: CONTRIBUTING.md and docs/tutorial.md document this Makefile as the
 # command list on Windows (GnuWin32 Make) as well as macOS and Linux, and
 # neither a /bin/bash path nor a bash-only shell flag exists there.  The
 # recipes below use no bashism (POSIX `[ ]`, `for`, `$${VAR:-}` throughout),

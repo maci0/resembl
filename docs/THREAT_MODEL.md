@@ -2,7 +2,9 @@
 
 Last reviewed: 2026-09-27, against the code at `resembl/` version 2.0.0
 (`pyproject.toml:3`). Every reference below was re-read in that tree on that
-date.
+date. The `file:line` references are historical: later releases moved the
+code, so find a cited function by name before relying on a line number. The
+model has not been re-reviewed since.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code

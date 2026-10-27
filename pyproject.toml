@@ -11,7 +11,7 @@ license = "GPL-3.0-only"
 # datasketch, and those terms require the grant to travel with every copy.
 license-files = ["LICENSE", "NOTICE"]
 # The operating systems named here are the three the docs tell a user how to
-# install on (README.md, CONTRIBUTING.md, docs/tutorial.md) and the three the
+# install on (CONTRIBUTING.md, docs/tutorial.md) and the three the
 # `portability` job in .github/workflows/tests.yml runs the suite on, so an
 # indexer reading this metadata reports what is actually tested.  3.14 is
 # retained for consumers; CI also tests the default Python 3.15 runtime.

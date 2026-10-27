@@ -3,7 +3,9 @@
 Last reviewed: 2026-09-28, against the tree at version 3.1.0
 (`pyproject.toml:3`).
 
-This describes the current tree and the 3.9.0 release. The `serve`
+This policy is kept current through the 3.9.0 release, but the last security
+review (above) was against 3.1.0; changes released since then have not had
+one. The `serve`
 controls below (the loopback `Host` check, `serve -v` request logging, the
 `0700` cache directory, the `0600` port file, and the 1000-row `top_n` cap)
 are documented in `CHANGELOG.md`.
