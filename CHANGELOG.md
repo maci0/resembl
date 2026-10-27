@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.9.0] - 2026-10-27
+
+### Changed
+
+- Document that, by default, DuckDB before 2.0 cannot read database files
+  DuckDB 2.0 creates, and that an existing older-format file keeps its storage
+  version.
+
 ## [3.8.0] - 2026-10-25
 
 ### Changed
@@ -919,7 +927,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.8.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.9.0...HEAD
+[3.9.0]: https://github.com/maci0/resembl/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/maci0/resembl/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/maci0/resembl/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/maci0/resembl/compare/v3.6.0...v3.6.1
