@@ -13,13 +13,16 @@ import tempfile
 import tomllib
 import unittest
 import zoneinfo
+from contextvars import Context
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from click.testing import CliRunner
 from sqlmodel import Session, SQLModel, create_engine, select
+from typer.main import get_command
 
-from resembl import cli
+from resembl import cli, database
 from resembl.cli import _format_created_at, _zone_get
 from resembl.core import snippet_add
 from resembl.models import Snippet
@@ -33,6 +36,7 @@ class BaseCLITest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.db_name = os.path.join(tmp.name, "test.db")
+        self.cli_command = get_command(cli.app)
         self.engine = create_engine(f"sqlite:///{self.db_name}")
         SQLModel.metadata.create_all(self.engine)
         with Session(self.engine) as session:
@@ -43,7 +47,35 @@ class BaseCLITest(unittest.TestCase):
         self.engine.dispose()
 
     def run_command(self, command, input_data=None, extra_env=None):
-        """Helper function to run a command and return the output."""
+        """Exercise the real CLI without paying interpreter startup per assertion."""
+        args = shlex.split(command.replace("\\", "\\\\"))
+        if "--no-color" in args:
+            return self.run_process(command, input_data, extra_env)
+        env = {"DATABASE_URL": f"sqlite:///{self.db_name}", **(extra_env or {})}
+        with (
+            patch.object(database, "_engine", None),
+            patch.object(cli, "state", cli.State()),
+            patch.object(cli, "_active_session", None),
+        ):
+            try:
+                result = Context().run(
+                    CliRunner().invoke,
+                    self.cli_command,
+                    args,
+                    input=input_data,
+                    env=env,
+                    catch_exceptions=False,
+                )
+                return subprocess.CompletedProcess(
+                    args, result.exit_code, result.stdout, result.stderr
+                )
+            finally:
+                cli._close_active_session()
+                if database._engine is not None:
+                    database._engine.dispose()
+
+    def run_process(self, command, input_data=None, extra_env=None):
+        """Run a fresh interpreter for startup, colour and process lifecycle checks."""
         env = {
             **os.environ,
             "PYTHONPATH": os.path.join(os.getcwd(), "."),
@@ -149,7 +181,7 @@ class TestCLICommands(BaseCLITest):
             with open(config_path, "w", encoding="utf-8") as f:
                 f.write("num_permutations = 1\n")
             env = {"RESEMBL_CONFIG_DIR": cfgdir}
-            result = self.run_command("find --query 'MOV EAX, 1'", extra_env=env)
+            result = self.run_process("find --query 'MOV EAX, 1'", extra_env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("num_permutations", result.stderr)
             self.assertIn("test_snippet", result.stdout)
@@ -158,7 +190,7 @@ class TestCLICommands(BaseCLITest):
             queries_file = os.path.join(cfgdir, "queries.txt")
             with open(queries_file, "w", encoding="utf-8") as f:
                 f.write("MOV EAX, 1\n")
-            batch = self.run_command(f"find-batch --file {queries_file}", extra_env=env)
+            batch = self.run_process(f"find-batch --file {queries_file}", extra_env=env)
             self.assertEqual(batch.returncode, 0, batch.stderr)
             self.assertIn("num_permutations", batch.stderr)
             self.assertNotIn("Traceback", batch.stderr)
@@ -510,6 +542,18 @@ class TestCLIConfig(BaseCLITest):
 class TestCLIOptions(BaseCLITest):
     """Tests for global command-line options like --quiet and --no-color."""
 
+    def test_invocations_have_independent_state(self):
+        """Quiet and output choices from one invocation cannot leak to the next."""
+        with patch.object(
+            subprocess, "run", side_effect=AssertionError("unexpected CLI subprocess")
+        ):
+            quiet = self.run_command("--quiet --format json stats")
+            self.assertEqual(quiet.returncode, 0, quiet.stderr)
+            self.assertEqual(quiet.stdout, "")
+            normal = self.run_command("stats")
+            self.assertEqual(normal.returncode, 0, normal.stderr)
+            self.assertIn("Database Statistics", normal.stdout)
+
     def test_quiet_option(self):
         """Test that --quiet suppresses informational output."""
         result = self.run_command("--quiet stats")
@@ -569,7 +613,7 @@ class TestCLIOptions(BaseCLITest):
             with open(os.path.join(cfgdir, "config.toml"), "w", encoding="utf-8") as f:
                 f.write('lsh_threshold = "nonsense"\n')
             env = {"RESEMBL_CONFIG_DIR": cfgdir}
-            result = self.run_command("--format json stats", extra_env=env)
+            result = self.run_process("--format json stats", extra_env=env)
         self.assertEqual(result.returncode, 0)
         self.assertIn("lsh_threshold", result.stderr)
         self.assertIn("num_snippets", json.loads(result.stdout))

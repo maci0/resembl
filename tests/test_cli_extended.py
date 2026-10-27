@@ -710,6 +710,10 @@ class TestCLIServeLifecycle(BaseCLITest):
     Windows, which has no SIGTERM — shuts the process down cleanly.
     """
 
+    def run_command(self, command, input_data=None, extra_env=None):
+        """Keep the thin client's process boundary in the server lifecycle tests."""
+        return self.run_process(command, input_data, extra_env)
+
     def _serve_env(self, cache_dir):
         return {
             **os.environ,

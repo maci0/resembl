@@ -75,7 +75,7 @@ class TestCompareAccent(BaseCLITest):
         # emits the color the accent is, and name the terminal that has it.
         with patch.dict(os.environ, {"FORCE_COLOR": "1", "TERM": "xterm-256color"}):
             os.environ.pop("NO_COLOR", None)
-            result = self.run_command(f"compare {checksums[0]} {checksums[1]}")
+            result = self.run_process(f"compare {checksums[0]} {checksums[1]}")
         self.assertEqual(result.returncode, 0, result.stderr)
 
         rows = {
