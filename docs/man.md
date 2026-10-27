@@ -37,9 +37,16 @@ The `compare` command also reports control-flow graph similarity.
     the wrong wall clock.  `json` and `csv` output keeps the stored UTC
     string.
 
+**--output, -o** *auto|text|json*
+:   Output mode (default `auto`, which stays text).  `-o json list` prints
+    `{"items", "total"}`; `-o text` stays a table.  With `-o json`, the last
+    stderr line of a failure is `{"error": {"kind", "message", "hint"}}`.
+
 **--version**
 :   Print the resembl version and exit.  Read before the database is
     opened, so it works with an unreachable `DATABASE_URL`.
+
+Global options go before the subcommand: `resembl --format json find ...`.
 
 ## EXIT STATUS
 
@@ -60,6 +67,10 @@ The `compare` command also reports control-flow graph similarity.
     rejected the same way, for both an unknown zone name and a fixed offset.
 
 ## COMMANDS
+
+**schema** [*COMMAND*...]
+:   Print the clispec 0.3 JSON document for this CLI, limited to *COMMAND*
+    when given.  Does not open a database.
 
 ### Snippet Management
 
@@ -143,7 +154,10 @@ The `compare` command also reports control-flow graph similarity.
     is written to the cache directory and removed on exit.  Stop with
     Ctrl+C.  For repeated queries, the thin client
     `resembl-find --query "…"` (or `python -m resembl.find_client`) is the
-    fastest path.  Requests run concurrently (each gets its own session);
+    fastest path.  It takes `--query`, `--file`, `--top-n`, `--threshold`,
+    `--no-normalization`, `-o` / `--output` and `--json`, and
+    `resembl-find schema` prints its own clispec document without contacting
+    a server.  Requests run concurrently (each gets its own session);
     the fingerprint migration and index build happen once at startup, and a
     restart skips rebuilding an index that is already current.  Starting a
     second server for the same database is refused (as is an occupied
@@ -352,7 +366,7 @@ resembl collection create "crypto" -d "Cryptographic routines"
 resembl collection add crypto abc123
 
 # Use with PostgreSQL
-DATABASE_URL=postgresql+pg8000://user:pass@host/db resembl list
+RESEMBL_DATABASE_URL=postgresql+pg8000://user:pass@host/db resembl list
 ```
 
 ## SEE ALSO

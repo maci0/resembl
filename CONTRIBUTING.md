@@ -229,7 +229,7 @@ This includes:
 - **Docstrings:** All new modules, classes, and functions must have clear, concise docstrings explaining their purpose, arguments, and return values.
 - **README.md:** Update this file if your change affects installation, core concepts, or basic usage.
 - **Project Documentation:** Update the relevant files in the `docs/` directory, such as `user_stories.md` or `flowcharts.md`, to reflect any changes to features or workflows.
-- **Changelog:** Release notes are generated automatically by Release Drafter during a release, so your pull request title and description should be clear and complete: they become the changelog entry.
+- **Changelog:** Add a consumer-facing entry to `CHANGELOG.md` under `## [Unreleased]`, grouped `Added` / `Changed` / `Fixed`, with the migration step for anything breaking. The Release Drafter draft does not replace it: the release commit turns `[Unreleased]` into the version's notes (Part 6).
 
 ### Managing Dependencies
 Dependencies represent a long-term maintenance cost and security liability. Therefore, they should be added sparingly and only when they provide significant value that cannot be reasonably achieved otherwise.

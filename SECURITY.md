@@ -80,8 +80,9 @@ relies on, not configuration options.
   host. Keep it in the process environment, not in a shell profile or a
   shared dotfile.
 - **Imported directories are the operator's own.** `resembl import` walks a
-  directory, keeps every `.asm`/`.txt` path in memory, and runs one worker
-  process per CPU over the set. There is no file-count or file-size cap, so a
+  directory, keeps every `.asm`/`.txt` path in memory, and runs a process
+  pool over the set (by default one worker per ~100 files, capped at the CPU
+  count; `--jobs` sets it). There is no file-count or file-size cap, so a
   large or hostile tree costs the machine memory and CPU, and the
   confirmation prompt is not a bound.
 - **Merge sources are trusted.** `resembl merge` inserts another database's

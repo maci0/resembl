@@ -153,9 +153,11 @@ resembl/
 │   ├── __main__.py
 │   ├── cache.py
 │   ├── cli.py
+│   ├── clispec.py
 │   ├── config.py
 │   ├── core.py
 │   ├── database.py
+│   ├── diagnostics.py
 │   ├── find_client.py
 │   ├── lsh.py
 │   ├── minhash.py
@@ -163,6 +165,7 @@ resembl/
 │   ├── paths.py
 │   ├── scoring.py
 │   ├── server.py
+│   ├── status_colors.py
 │   └── theme.py
 ├── docs/
 │   ├── adr/
@@ -176,12 +179,16 @@ resembl/
 │   └── user_stories.md
 ├── fuzzers/
 ├── tests/
-├── .gitignore
+├── AGENTS.md
+├── CHANGELOG.md
 ├── CONTRIBUTING.md
+├── LICENSE
 ├── Makefile
+├── NOTICE
 ├── README.md
 ├── SECURITY.md
-└── pyproject.toml
+├── pyproject.toml
+└── uv.lock
 ```
 
 ## Setup and Usage

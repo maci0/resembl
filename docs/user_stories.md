@@ -387,7 +387,7 @@ host's `TZ` moved under me.
 - `resembl --tz <ZONE>` names the zone `collection list` and
   `version <checksum>` render their timestamps in; the default is the host's
   local zone.
-- The zone is stored in UTC and only the display converts, so `json` and `csv`
+- Timestamps are stored in UTC and only the display converts, so `json` and `csv`
   output still carries the stored UTC string.
 - A fixed offset (`+02:00`) is refused, naming one instant of the year rather
   than a zone that follows daylight saving; an unknown zone name is refused
