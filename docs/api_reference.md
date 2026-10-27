@@ -171,9 +171,7 @@ autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minh
 Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`. Supports `items()`, `to_dict()`, and `update()`, which merges a dict (or another `ResemblConfig`) in, coercing each value to its field's type and, via `validate_value`, rejecting an out-of-enum or out-of-range one with a warning (so a hand-edited `ngram_size = 0` cannot reach the reindex).
 
 ### `load_config() → ResemblConfig`
-Load from `~/.config/resembl/config.toml`. `RESEMBL_CONFIG_DIR` overrides that
-directory outright; otherwise `$XDG_CONFIG_HOME/resembl` is used when
-`XDG_CONFIG_HOME` is set. A missing, malformed, or unreadable file yields the
+Load `config_path_get()` (see [Paths](#paths)). A missing, malformed, or unreadable file yields the
 defaults (malformed and unreadable files are logged as errors).
 
 ### `validate_value(key: str, value: object) → str | None`

@@ -151,7 +151,9 @@ Global options go before the subcommand: `resembl --format json find ...`.
 :   Start a warm server for this database (default: loopback, auto-assigned
     port).  `find` then talks to it over localhost in a few milliseconds
     instead of paying ~450 ms of interpreter startup per query; the port file
-    is written to the cache directory and removed on exit.  Stop with
+    is written to the cache directory and removed on exit.  A client that
+    times out keeps the port file; only a refused connection (no server
+    listening) removes it.  Stop with
     Ctrl+C.  For repeated queries, the thin client
     `resembl-find --query "…"` (or `python -m resembl.find_client`) is the
     fastest path.  It takes `--query`, `--file`, `--top-n`, `--threshold`,
@@ -326,7 +328,15 @@ Linux or Windows are one name.
 
 ## CONFIGURATION
 
-Settings are stored in `~/.config/resembl/config.toml`:
+Settings are stored in `config.toml` in the config directory
+(`~/.config/resembl` unless overridden, see ENVIRONMENT); `config path`
+prints it.  Manage it with the `config` commands or edit it by hand:
+
+```toml
+lsh_threshold = 0.8
+top_n = 5
+jaccard_weight = 0.5
+```
 
 | Key              | Type  | Default | Range             | Description                     |
 |------------------|-------|---------|-------------------|---------------------------------|

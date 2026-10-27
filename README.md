@@ -17,6 +17,108 @@ Use it to:
 - find code that is structurally close to a sample despite register or constant changes,
 - keep a searchable library of assembly code patterns.
 
+## Setup and Usage
+
+### 1. Installation
+
+This project is managed with [uv](https://github.com/astral-sh/uv) (0.12.13 or newer). From the root of a checkout:
+
+```bash
+# Create .venv from the pinned interpreter (.python-version) and the
+# committed lockfile, then install the pre-commit hooks
+make install
+source .venv/bin/activate
+```
+
+Without `make`, the same two steps are `uv sync --locked --extra dev` and
+`uv run --locked pre-commit install`. `uv sync --locked` installs the exact
+versions recorded in `uv.lock` and fails if that lockfile has drifted from
+`pyproject.toml`. Windows activation, macOS Make and the tested platforms are
+in [CONTRIBUTING.md](./CONTRIBUTING.md#one-time-setup).
+
+### 2. Configuration
+
+`resembl config` manages the defaults in `config.toml` (`lsh_threshold`,
+`num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`, `format`); the
+keys, ranges and file location are in the manual's
+[CONFIGURATION](./docs/man.md#configuration) section.
+
+`RESEMBL_DATABASE_URL` selects the database: SQLite by default
+(`sqlite:///assembly.db`), or PostgreSQL, MySQL/MariaDB or DuckDB. Every
+environment variable is listed under [ENVIRONMENT](./docs/man.md#environment),
+and the backends, drivers and the DuckDB extra are in
+[Using a Custom Database](./docs/custom_database.md).
+
+### 3. Usage
+
+The CLI can be invoked through uv or by running the module directly after activating the shell.
+
+**Examples:**
+```bash
+# Run commands through uv
+uv run --locked resembl add my_memcpy "MOV EAX, EBX"
+
+# Or, after activating the virtual environment, you can call it directly
+resembl find --query "MOV EAX"
+
+# Bulk-import a large directory in parallel (default: adaptive, one worker
+# per ~100 files, capped at the CPU count; small directories stay single-
+# process so they never pay the ~450 ms per-worker spawn cost)
+resembl import --force --jobs 8 data/
+
+# Recompute all fingerprints in parallel (default: one worker per CPU)
+resembl reindex --force --jobs 8
+```
+
+Global options go before the subcommand: `resembl --format json find ...`.
+The [manual page](./docs/man.md) lists every command, global option, exit
+status and environment variable; the [User Stories](./docs/user_stories.md)
+give each command's acceptance criteria. The same command list is in:
+```bash
+uv run --locked resembl --help
+```
+
+### 4. Example with test_data
+
+This is an example of how to import the provided `test_data` and then search for a snippet within it.
+
+```bash
+# import the data
+uv run --locked resembl import tests/test_data
+```
+
+```bash
+# search for a snippet
+# (single-line --query strings use ';' as a statement separator)
+uv run --locked resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
+```
+
+```bash
+# search for a function
+uv run --locked resembl find --file tests/test_data/1000A0A0.asm
+```
+
+```bash
+# or pipe the query in (stdin is read when --query/--file are absent)
+cat tests/test_data/1000A0A0.asm | uv run --locked resembl find
+```
+
+```bash
+# check many queries in one process (amortizes startup + index load)
+uv run --locked resembl find-batch --file queries.txt --top-n 5
+```
+
+## Documentation
+
+- [Manual page](./docs/man.md): commands, global options, exit status, configuration and environment variables.
+- [Tutorial](./docs/tutorial.md): a reference library, collections, tags, YARA export and library use, end to end.
+- [User Stories](./docs/user_stories.md): each command's acceptance criteria.
+- [HTTP API](./docs/http_api.md): the `resembl serve` endpoints.
+- [API Reference](./docs/api_reference.md): the Python library.
+- [Using a Custom Database](./docs/custom_database.md): backends, drivers, and embedding resembl in your own database.
+- [Flowcharts](./docs/flowcharts.md): the add, find, import and export workflows.
+- [Threat Model](./docs/THREAT_MODEL.md) and [Architecture Decision Records](./docs/adr/README.md).
+
 ## Core Concepts
 
 ### Checksum as Primary Key
@@ -36,7 +138,7 @@ This approach provides several advantages:
 - **Kept in sync incrementally**: `add`, `import`, `merge`, and `rm` update only the affected snippets' rows, so a search never requires a full rebuild.
 - **Streamed** during builds: rows are inserted in batches, bounding memory use on very large databases.
 
-Legacy pickle cache files (from older versions) are no longer loaded: unpickling a file is arbitrary code execution, and the cache directory is not a trust boundary. Stale cache files are ignored and removed on the next write; the index simply rebuilds from the database. The `RESEMBL_CACHE_DIR` environment variable continues to control the location of those legacy cache files.
+Legacy pickle cache files (from older versions) are no longer loaded: unpickling a file is arbitrary code execution, and the cache directory is not a trust boundary. Stale cache files are ignored and removed on the next write; the index rebuilds from the database.
 
 ## How It Works
 
@@ -133,16 +235,7 @@ This structural metric is displayed in `compare` output alongside Jaccard, Leven
 
 ### Lookup Flow
 
-When you run `resembl find`, the tool processes your query in several stages:
-
-1. **Load metadata** – The SQLite database and the LSH index are loaded. If the index is missing or its parameters changed, it is rebuilt from the stored MinHash fingerprints (streamed in batches).
-2. **Normalize query** – The query assembly is lexed and normalized unless `--no-normalization` is specified.
-3. **MinHash lookup** – The query's MinHash is hashed into the LSH buckets to retrieve candidate checksums via a handful of indexed lookups.
-4. **Retrieve candidates** – Snippets matching those checksums are loaded from the database.
-5. **Score** – Each candidate is scored by both Jaccard similarity and Levenshtein distance, combined into a hybrid score.
-6. **Display results** – Candidates are sorted by hybrid score and the top results are shown or output as JSON/CSV.
-
-This pipeline lets `resembl` search large datasets in milliseconds while ranking results accurately.
+The [Find Matches Flow](./docs/flowcharts.md#find-matches-flow) chart shows the stages of `resembl find`, including the warm-server path and the lazy index build.
 
 ## Project Structure
 
@@ -167,16 +260,7 @@ resembl/
 │   ├── server.py
 │   ├── status_colors.py
 │   └── theme.py
-├── docs/
-│   ├── adr/
-│   ├── api_reference.md
-│   ├── custom_database.md
-│   ├── flowcharts.md
-│   ├── http_api.md
-│   ├── man.md
-│   ├── THREAT_MODEL.md
-│   ├── tutorial.md
-│   └── user_stories.md
+├── docs/            # listed under Documentation above
 ├── fuzzers/
 ├── tests/
 ├── AGENTS.md
@@ -190,227 +274,6 @@ resembl/
 ├── pyproject.toml
 └── uv.lock
 ```
-
-## Setup and Usage
-
-### 1. Installation
-
-This project is managed with [uv](https://github.com/astral-sh/uv). First, install uv if you haven't already. Then, from the root of the project, run:
-
-```bash
-# 1. Create .venv from the pinned interpreter (.python-version) and the
-#    committed lockfile, then install the pre-commit hooks
-make install
-source .venv/bin/activate
-```
-
-Without `make`, the same two steps are `uv sync --locked --extra dev` and
-`uv run --locked pre-commit install`. Windows ships no `make` by default, so that is
-the path there (`winget install GnuWin32.Make` or WSL if you would rather have
-the shortcuts).
-
-`uv sync --locked` installs the exact versions recorded in `uv.lock` and fails
-if that lockfile has drifted from `pyproject.toml`, so a checkout builds the
-same way locally and in CI. `uv pip install -e .[dev]` resolves the dependency
-ranges afresh instead and can produce an environment CI never tested.
-
-On Windows, activate the environment with `.venv\Scripts\Activate.ps1`
-(PowerShell) or `.venv\Scripts\activate.bat` (cmd.exe) in place of
-`source .venv/bin/activate`; every other command in this README runs
-unchanged on PowerShell and cmd.exe. On macOS, use current Homebrew Make for
-the contributor commands:
-
-```bash
-brew install make
-export PATH="$(brew --prefix make)/libexec/gnubin:$PATH"
-```
-
-The test suite runs on Linux, macOS and Windows, so all three are covered
-rather than assumed. The PostgreSQL and MySQL integration tests only run on
-the Linux job, which is the one with the two database services; on the other
-two they skip themselves.
-
-### 2. Configuration
-
-You can create a configuration file at `~/.config/resembl/config.toml` to set
-default values. Set `RESEMBL_CONFIG_DIR` to override this location; when it is
-unset, `$XDG_CONFIG_HOME/resembl` is used if `XDG_CONFIG_HOME` is defined (the
-same fallback applies to the cache directory via `RESEMBL_CACHE_DIR` /
-`XDG_CACHE_HOME`).
-
-| Key               | Default | Range | Description |
-|-------------------|--------:|-------|-------------|
-| `lsh_threshold`   | `0.5`   | `0.0 <= v < 0.99` | Minimum Jaccard similarity used when querying the LSH index. Lower values yield more candidates. |
-| `num_permutations`| `128`   | `2 <= v <= 4096`  | Number of permutations used when building MinHash fingerprints. |
-| `top_n`           | `5`     | `v >= 1`          | Number of matches returned by the `find` command. |
-| `ngram_size`      | `3`     | `v >= 1`          | Token n-gram size for shingling. |
-| `jaccard_weight`  | `0.4`   | `0.0 <= v <= 1.0` | Weight of Jaccard similarity in the hybrid score. |
-| `format`          | `table` | `table`, `json`, `csv` | Default output format. |
-
-`resembl config set` refuses a value outside its range. A hand-edited file
-holding one is reported on stderr and ignored (the default is used), so a
-bad value cannot quietly build a degenerate index or return nothing.
-
-The database backend is selected with the `RESEMBL_DATABASE_URL` environment
-variable: SQLite (default, `sqlite:///assembly.db`), PostgreSQL
-(`postgresql+pg8000://…`), MySQL/MariaDB (`mysql+pymysql://…`), or
-DuckDB (`duckdb:///file.db` via `duckdb-engine`).  The `pg8000` and `pymysql`
-drivers ship with the package; the compiled DuckDB driver is opt-in, so
-install the extra first:
-
-```bash
-uv pip install "resembl[duckdb]"
-```
-
-The development lock pins DuckDB 2.0.0. By default, DuckDB 2.0 creates new
-database files in a storage format that DuckDB before 2.0 cannot read. An
-existing file created by an earlier version keeps its storage version when 2.0
-writes to it. Keep a copy when testing an upgrade. The
-[DuckDB 2.0 migration guide](https://duckdb.org/docs/2.0/operations_manual/migration)
-covers files that older readers must open.
-
-An unprefixed `DATABASE_URL` is still honored when `RESEMBL_DATABASE_URL` is
-unset, so an existing deployment keeps working.  See
-[Using a Custom Database](docs/custom_database.md) for details.
-
-**Example `config.toml`:**
-```toml
-lsh_threshold = 0.8
-top_n = 5
-jaccard_weight = 0.5
-```
-
-You can manage this file with the `resembl config` command.
-
-### 3. Usage
-
-The CLI can be invoked through uv or by running the module directly after activating the shell.
-
-**Examples:**
-```bash
-# Run commands through uv
-uv run --locked resembl add my_memcpy "MOV EAX, EBX"
-
-# Or, after activating the virtual environment, you can call it directly
-resembl find --query "MOV EAX"
-
-# Bulk-import a large directory in parallel (default: adaptive, one worker
-# per ~100 files, capped at the CPU count; small directories stay single-
-# process so they never pay the ~450 ms per-worker spawn cost)
-resembl import --force --jobs 8 data/
-
-# Recompute all fingerprints in parallel (default: one worker per CPU)
-resembl reindex --force --jobs 8
-```
-
-Global options:
-```
---quiet      Suppress informational output
---verbose    Increase output verbosity
---no-color   Disable colored output
--o, --output Output mode: auto, text, or json (auto stays text)
---format     Data format: table, json, or csv (overrides config)
---tz         Timezone (e.g. UTC, Europe/Berlin) for printed timestamps
---version    Print the resembl version and exit
-```
-
-Global options go before the subcommand: `resembl --format json find ...`.
-`resembl schema` prints a clispec 0.3 JSON document and does not open a
-database. `resembl -o json list` prints `{"items", "total"}`. `-o text` stays
-a table. `resembl-find` accepts the same `-o` / `--output` values, and
-`--json` remains its JSON switch. `resembl-find schema` prints that client's
-document without contacting a server.
-`--tz` takes an IANA zone name (`Europe/Warsaw`, not `+02:00`, which does not
-follow daylight saving) and only changes how `created_at` is rendered in
-table output; the stored value stays an aware-UTC string, and JSON/CSV
-output keeps it raw. Without `--tz` the host's local zone is used.
-
-Exit codes: `0` success, `1` the command failed (including a confirm that
-had no terminal; pass `--force`), `2` the command line was rejected (unknown
-flag, bad flag value, missing query). With `-o json`, the last stderr line
-is `{"error": {"kind", "message", "hint"}}`.
-
-For a detailed breakdown of all commands and features, see the [User Stories](./docs/user_stories.md) or run:
-```bash
-uv run --locked resembl --help
-```
-
-### 4. Example with test_data
-
-This is an example of how to import the provided `test_data` and then search for a snippet within it.
-
-```bash
-# import the data
-uv run --locked resembl import tests/test_data
-```
-
-```bash
-# search for a snippet
-# (single-line --query strings use ';' as a statement separator)
-uv run --locked resembl find --threshold 0.2 --query "push esi; mov esi, dword [esp+0CH]; push edi"
-```
-
-```bash
-# search for a function
-uv run --locked resembl find --file tests/test_data/1000A0A0.asm
-```
-
-```bash
-# or pipe the query in (stdin is read when --query/--file are absent)
-cat tests/test_data/1000A0A0.asm | uv run --locked resembl find
-```
-
-```bash
-# check many queries in one process (amortizes startup + index load)
-uv run --locked resembl find-batch --file queries.txt --top-n 5
-```
-
-### 5. Running Tests
-
-Run the test suite:
-```bash
-uv run --locked pytest
-```
-
-The suite takes several minutes. While editing, run only what you touched:
-```bash
-uv run --locked pytest tests/test_cli.py                    # one file
-uv run --locked pytest tests/test_cli.py -k config_set      # by name
-uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset   # one test
-```
-
-`make help` lists every target (`install`, `format`, `lint`, `types`, `hygiene`,
-`test`, `coverage`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`).
-Normal development defaults to Python 3.15.1; Python 3.14+ consumers remain
-supported. Atheris fuzzing runs separately on Python 3.15.1 using the maintained,
-hash-pinned Linux x86_64 build (Ubuntu 24.04 or Debian Trixie). `make check` runs everything CI
-runs: mypy, ruff, black, pylint, then the test suite. It also runs `make
-hygiene`, the trailing-whitespace and final-newline checks the pre-commit hooks
-enforce and no CI workflow does, so a green `make check` is a commit the hooks
-will accept.
-
-The PostgreSQL and MySQL integration tests skip themselves unless
-`RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is
-green without a database server. CI sets both. `make check` prints a note when
-they are unset, and `make db-test` runs just those two modules against servers
-you point it at. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the commands.
-
-#### Code Coverage
-
-This project uses `pytest-cov` for line-level coverage measurement. A GitHub Actions workflow runs the tests with coverage on every pull request. The results are uploaded to [Codecov](https://codecov.io/gh/maci0/resembl).
-
-You can run the coverage report locally with:
-```bash
-make coverage
-```
-
-`make coverage` is the command that workflow runs, so the number you read
-locally is the one Codecov stores. It writes the per-file report to the
-terminal and `build/coverage.xml` alongside it.
-
-## Advanced Usage
-
-- **[Using a Custom Database](./docs/custom_database.md)**: Learn how to integrate `resembl` with your own application's database.
 
 ## Benchmarking
 
@@ -428,7 +291,11 @@ The script will:
 3.  Measure the time it takes to run a `find` query against the newly created database.
 4.  Clean up the generated files and the benchmark database.
 
-This provides a quick way to assess the performance of the core functionality on a non-trivial dataset.
+`tests/generate_data.py` writes randomized assembly files on its own (1,000 into `data/` by default), for importing with `resembl import data/`:
+
+```bash
+uv run --locked python tests/generate_data.py --num-files 500 --data-dir custom_data/
+```
 
 For larger datasets, use `tests/benchmark_scale.py`, which reports the metrics that matter at scale:
 bulk import throughput, cold and warm `find` latency, `reindex` time, database size, and the stored
@@ -480,12 +347,8 @@ Key properties that keep these numbers flat as the database grows:
 - **Instant warm finds with `serve`**: start `resembl serve` once and `find` (or the stdlib-only
   `resembl-find` client) answers in a few milliseconds instead of the ~450 ms of interpreter and
   library startup a fresh process pays (measured 74 ms end to end at 5k snippets on a loaded machine,
-  which includes the client's own startup).  The
-  port file lives in the cache directory and is cleaned up on exit; a second `serve` for the same
-  database is refused, restarts skip rebuilding a current index, and a slow-but-alive server's port
-  file survives client timeouts.  A long-lived `serve` answers `GET /health` (readiness) and
-  `GET /metrics` (request counts, latency histogram, result-cache hit rate) in the Prometheus text
-  format, and every log record it makes carries a per-request correlation id.
+  which includes the client's own startup).  `find` and `find-batch` fall back to the in-process
+  path when no server answers.  The endpoints are in the [HTTP API](./docs/http_api.md).
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses
@@ -495,9 +358,8 @@ the optimization.
 
 ### Scaling: the pieces that keep it fast
 
-- **Backends**: `RESEMBL_DATABASE_URL` (falling back to `DATABASE_URL`) selects SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB;
-  the dialect-specific SQL (upserts, sampling, DDL) is portable and tested (see
-  [Using a Custom Database](docs/custom_database.md)).  PostgreSQL and MySQL run integration tests
+- **Backends**: SQLite (default), PostgreSQL, MySQL/MariaDB, or DuckDB; see
+  [Using a Custom Database](docs/custom_database.md).  PostgreSQL and MySQL run integration tests
   in CI on every pull request to `main` and every push to it; DuckDB runs locally in the suite.
 - **DuckDB fast bulk inserts**: DuckDB's Python `executemany` path is pathologically slow
   (~7k rows/s measured), so the index build and the snippet import swap in multi-row `VALUES`
@@ -508,9 +370,6 @@ the optimization.
   (~64 s vs ~14 s; DuckDB's row-insert model is slower at 2.5M point inserts than its bulk
   paths), so cold-start latency favors SQLite; steady-state query and import throughput favor
   DuckDB's columnar engine.  `benchmark_scale.py --db-url duckdb:///x.db` measures any backend.
-- **Warm server**: `resembl serve` keeps the engine and LSH index warm; `find` and `find-batch`
-  route through it when running (with automatic in-process fallback), answering concurrent requests
-  in milliseconds.  Its two endpoints are documented in the [HTTP API](./docs/http_api.md).
 - **Batch workflows**: `find-batch` processes a file of queries in one process (or one round trip
   through the server), amortizing startup across the batch.
 - **Bounded memory**: import prepares files with a bounded in-flight window (flat memory at a
@@ -523,7 +382,7 @@ the optimization.
 
 ## Development
 
-For detailed guidelines on contributing to this project, please see our [Contributor Guide](./CONTRIBUTING.md).
+The [Contributor Guide](./CONTRIBUTING.md) covers the test suite (`uv run --locked pytest`), `make check`, coverage, the PostgreSQL and MySQL integration tests, fuzzing and the release steps.
 
 ## Security
 
@@ -533,25 +392,3 @@ vulnerability the way [SECURITY.md](./SECURITY.md) describes, and see it for
 the supported versions and the deployment assumptions the code relies on. The
 full surface, boundaries, and ranked
 risks are in [docs/THREAT_MODEL.md](./docs/THREAT_MODEL.md).
-
-### Generating Test Data
-
-The `tests/generate_data.py` script can be used to create a large number of randomized assembly files for performance testing and validation. By default, it generates 1,000 files in a `data/` directory, but this can be configured.
-
-**Usage:**
-```bash
-# Generate 1000 files in the default 'data/' directory
-uv run --locked python tests/generate_data.py
-
-# Generate 500 files in a custom directory
-uv run --locked python tests/generate_data.py --num-files 500 --data-dir custom_data/
-```
-
-You can then import the generated files into `resembl` using the `import` command:
-```bash
-uv run --locked resembl import data/
-```
-
-## Visual Flowcharts
-
-For a visual representation of the core workflows, see the [Flowcharts](./docs/flowcharts.md).

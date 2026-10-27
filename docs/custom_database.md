@@ -19,6 +19,14 @@ upserts, DDL) is selected automatically; the sampled average similarity in
 | MySQL/MariaDB | `mysql+pymysql://user:pass@host:3306/db`                   | `INSERT IGNORE` / `ON DUPLICATE KEY UPDATE`.  Bucket keys are stored as indexable hex strings (a raw `BLOB` cannot be a primary key on MySQL).  Integration-tested in CI. |
 | DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | Needs the `duckdb` extra: `uv pip install "resembl[duckdb]"`.  `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas.  Bulk paths use multi-row `VALUES` (its `executemany` path is several times slower, measured ~7–13x depending on the table); verified live at 100k snippets. |
 
+The `pg8000` and `pymysql` drivers ship with the package; only DuckDB needs the
+extra. The development lock pins DuckDB 2.0.0. By default, DuckDB 2.0 creates
+new database files in a storage format that DuckDB before 2.0 cannot read. An
+existing file created by an earlier version keeps its storage version when 2.0
+writes to it. Keep a copy when testing an upgrade. The
+[DuckDB 2.0 migration guide](https://duckdb.org/docs/2.0/operations_manual/migration)
+covers files that older readers must open.
+
 The schema is portable: string primary keys carry explicit lengths and long
 text columns use `TEXT`, so `SQLModel.metadata.create_all` emits valid DDL on
 all of the above (pinned by `tests/test_pg_dialect.py`).
