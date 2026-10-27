@@ -255,6 +255,13 @@ install the extra first:
 uv pip install "resembl[duckdb]"
 ```
 
+The development lock pins DuckDB 2.0.0. By default, DuckDB 2.0 creates new
+database files in a storage format that DuckDB before 2.0 cannot read. An
+existing file created by an earlier version keeps its storage version when 2.0
+writes to it. Keep a copy when testing an upgrade. The
+[DuckDB 2.0 migration guide](https://duckdb.org/docs/2.0/operations_manual/migration)
+covers files that older readers must open.
+
 An unprefixed `DATABASE_URL` is still honored when `RESEMBL_DATABASE_URL` is
 unset, so an existing deployment keeps working.  See
 [Using a Custom Database](docs/custom_database.md) for details.
