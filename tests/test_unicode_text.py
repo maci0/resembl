@@ -164,6 +164,31 @@ class TestNameNormalization(BaseDBTest):
         )
         self.assertEqual(calls, ["mov"])
 
+    def test_name_add_normalizes_the_query_once(self):
+        """ASCII aliases are checked against one composed query.
+
+        Adding a name walks every alias already on the snippet.  Composing
+        those ASCII aliases again would repeat NFC on text that is already
+        NFC.
+        """
+        snippet = snippet_add(self.session, "mov_label", "MOV EAX, 1\nRET")
+        for i in range(5):
+            snippet_name_add(self.session, snippet.checksum, f"alias_{i}")
+        self.session.commit()
+
+        calls: list[str] = []
+
+        def counting(value: str) -> str:
+            calls.append(value)
+            return name_normalize(value)
+
+        with patch("resembl.core.name_normalize", side_effect=counting):
+            updated = snippet_name_add(self.session, snippet.checksum, "fresh_alias")
+
+        assert updated is not None
+        self.assertIn("fresh_alias", updated.name_list)
+        self.assertEqual(calls, ["fresh_alias"])
+
     def test_name_add_is_idempotent_across_normalization_forms(self):
         snippet = snippet_add(self.session, _NFC_NAME, "MOV EAX, 1")
         same = snippet_name_add(self.session, snippet.checksum, _NFD_NAME)

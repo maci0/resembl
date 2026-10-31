@@ -180,9 +180,12 @@ def snippet_name_add(
     new_name = normalize_unicode(new_name)
     name_list = snippet.name_list
     # Compare in NFC: a name typed here and the same name imported from a
-    # macOS filesystem (NFD) are one alias, not two.
+    # macOS filesystem (NFD) are one alias, not two.  The query is already
+    # NFC.  ASCII is NFC as well, so composing an ASCII alias again cannot
+    # change equality.  A non-ASCII alias may still be the decomposed
+    # spelling (a row from before names were composed, or from macOS).
     new_name = name_normalize(new_name)
-    if new_name in [name_normalize(name) for name in name_list]:
+    if any(new_name == (name if name.isascii() else name_normalize(name)) for name in name_list):
         return snippet  # Idempotent: already named
 
     name_list.append(new_name)
