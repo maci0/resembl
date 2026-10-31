@@ -4,7 +4,11 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [3.10.0] - 2026-11-01
+
+### Changed
+
+- Name query and alias performance: normalize query once per lookup and skip NFC on ASCII aliases during lookup, search, and add.
 
 ## [3.9.0] - 2026-10-27
 
