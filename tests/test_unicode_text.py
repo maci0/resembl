@@ -15,6 +15,7 @@ import os
 import tempfile
 import unicodedata
 import unittest
+from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -105,6 +106,38 @@ class TestNameNormalization(BaseDBTest):
         snippet_add(self.session, "a_b", "MOV EAX, 1")
         self.assertIsNotNone(Snippet.get_by_name(self.session, "a_b"))
         self.assertIsNone(Snippet.get_by_name(self.session, "aXb"))
+
+    def test_get_by_name_normalizes_the_query_once(self):
+        """A lookup normalizes the query once, then compares that form to each row.
+
+        The LIKE probe can admit many rows.  The row that wins is the one
+        whose stored alias normalizes to that same form.
+        """
+        for i in range(5):
+            decoy = snippet_add(self.session, f"decoy_{i}", f"NOP\n; decoy {i}\nRET")
+            # The stored JSON contains the quoted query as a substring, so
+            # the LIKE probe returns the row, and the decoded name does not
+            # normalize to the query, so verification rejects it.
+            decoy.names = json.dumps(['x"mov_label'])
+            self.session.add(decoy)
+        real = snippet_add(self.session, "mov_label", "MOV EAX, 1\nRET")
+        self.session.commit()
+
+        calls: list[str] = []
+
+        def counting(value: str) -> str:
+            calls.append(value)
+            return name_normalize(value)
+
+        with patch("resembl.models.name_normalize", side_effect=counting):
+            found = Snippet.get_by_name(self.session, "mov_label")
+
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.checksum, real.checksum)
+        # Once for the query, once for the stored alias that equals it.
+        # Decoy rows add no further calls with this argument.
+        self.assertEqual(calls.count("mov_label"), 2)
 
     def test_name_add_is_idempotent_across_normalization_forms(self):
         snippet = snippet_add(self.session, _NFC_NAME, "MOV EAX, 1")

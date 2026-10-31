@@ -206,8 +206,10 @@ class Snippet(SQLModel, table=True):
         #
         # A name is probed in both canonical forms, because a row written
         # before names were normalized (or imported from a macOS filesystem,
-        # which hands out NFD) stores the other one.
-        for spelling in dict.fromkeys((name_normalize(name), unicodedata.normalize("NFD", name))):
+        # which hands out NFD) stores the other one.  Both probes compare
+        # against one normalized query, computed once per lookup.
+        needle = name_normalize(name)
+        for spelling in dict.fromkeys((needle, unicodedata.normalize("NFD", name))):
             literal = (
                 name_json_escape(spelling)
                 .replace("\\", "\\\\")
@@ -222,9 +224,7 @@ class Snippet(SQLModel, table=True):
             for checksum, names in candidates:
                 # Compare normalized spellings, so either probe above can
                 # reach a row stored in the form the other one used.
-                if name_normalize(spelling) in [
-                    name_normalize(stored) for stored in json.loads(names)
-                ]:
+                if needle in [name_normalize(stored) for stored in json.loads(names)]:
                     return session.get(cls, checksum)
         return None
 
