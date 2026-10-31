@@ -30,6 +30,7 @@ from resembl.core import (
     snippet_name_add,
     snippet_name_remove,
     snippet_prepare,
+    snippet_search_by_name,
 )
 from resembl.models import Collection, Snippet, name_normalize
 
@@ -138,6 +139,32 @@ class TestNameNormalization(BaseDBTest):
         # Once for the query, once for the stored alias that equals it.
         # Decoy rows add no further calls with this argument.
         self.assertEqual(calls.count("mov_label"), 2)
+
+    def test_search_normalizes_the_query_once(self):
+        """ASCII hits are checked against one composed pattern.
+
+        The LIKE probe can return every alias that contains the pattern.
+        Composing those ASCII aliases again would repeat NFC on text that
+        is already NFC.
+        """
+        for i in range(12):
+            snippet_add(self.session, f"mov_{i}", f"MOV EAX, {i}\nRET")
+        self.session.commit()
+
+        calls: list[str] = []
+
+        def counting(value: str) -> str:
+            calls.append(value)
+            return name_normalize(value)
+
+        with patch("resembl.core.name_normalize", side_effect=counting):
+            found = snippet_search_by_name(self.session, "mov", limit=50)
+
+        self.assertEqual(
+            sorted(name for row in found for name in row.name_list),
+            sorted(f"mov_{i}" for i in range(12)),
+        )
+        self.assertEqual(calls, ["mov"])
 
     def test_name_add_is_idempotent_across_normalization_forms(self):
         snippet = snippet_add(self.session, _NFC_NAME, "MOV EAX, 1")

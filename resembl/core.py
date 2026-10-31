@@ -1484,7 +1484,19 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
         .order_by(Snippet.checksum)
         .limit(limit)
     ).all()
-    return [row for row in rows if any(target in name_normalize(n) for n in row.name_list)]
+    # The pattern is already NFC.  ASCII is NFC as well, so composing an
+    # ASCII alias again cannot change whether the pattern occurs in it.
+    # A non-ASCII alias may still be the decomposed spelling (a row from
+    # before names were composed, or from macOS), and a substring of that
+    # raw spelling is not a substring of the composed form.
+    return [
+        row
+        for row in rows
+        if any(
+            target in (stored if stored.isascii() else name_normalize(stored))
+            for stored in row.name_list
+        )
+    ]
 
 
 #: Characters invalid in filenames on at least one major filesystem:
