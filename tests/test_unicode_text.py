@@ -109,16 +109,16 @@ class TestNameNormalization(BaseDBTest):
         self.assertIsNone(Snippet.get_by_name(self.session, "aXb"))
 
     def test_get_by_name_normalizes_the_query_once(self):
-        """A lookup normalizes the query once, then compares that form to each row.
+        """ASCII hits are checked against one composed query.
 
-        The LIKE probe can admit many rows.  The row that wins is the one
-        whose stored alias normalizes to that same form.
+        The LIKE probe can admit many rows.  Composing those ASCII aliases
+        again would repeat NFC on text that is already NFC.
         """
         for i in range(5):
             decoy = snippet_add(self.session, f"decoy_{i}", f"NOP\n; decoy {i}\nRET")
             # The stored JSON contains the quoted query as a substring, so
             # the LIKE probe returns the row, and the decoded name does not
-            # normalize to the query, so verification rejects it.
+            # equal the query, so verification rejects it.
             decoy.names = json.dumps(['x"mov_label'])
             self.session.add(decoy)
         real = snippet_add(self.session, "mov_label", "MOV EAX, 1\nRET")
@@ -136,9 +136,7 @@ class TestNameNormalization(BaseDBTest):
         self.assertIsNotNone(found)
         assert found is not None
         self.assertEqual(found.checksum, real.checksum)
-        # Once for the query, once for the stored alias that equals it.
-        # Decoy rows add no further calls with this argument.
-        self.assertEqual(calls.count("mov_label"), 2)
+        self.assertEqual(calls, ["mov_label"])
 
     def test_search_normalizes_the_query_once(self):
         """ASCII hits are checked against one composed pattern.

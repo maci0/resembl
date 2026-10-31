@@ -221,10 +221,16 @@ class Snippet(SQLModel, table=True):
                     cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]
                 )
             ).all()
+            # The query is already NFC.  ASCII is NFC as well, so composing
+            # an ASCII alias again cannot change equality.  A non-ASCII alias
+            # may still be the decomposed spelling (a row from before names
+            # were composed, or from macOS), and either probe above can reach
+            # a row stored in the form the other one used.
             for checksum, names in candidates:
-                # Compare normalized spellings, so either probe above can
-                # reach a row stored in the form the other one used.
-                if needle in [name_normalize(stored) for stored in json.loads(names)]:
+                if any(
+                    needle == (stored if stored.isascii() else name_normalize(stored))
+                    for stored in json.loads(names)
+                ):
                     return session.get(cls, checksum)
         return None
 
