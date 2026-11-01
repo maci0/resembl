@@ -1341,6 +1341,7 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     """
     if not (packed_a.startswith(MINHASH_MAGIC) and packed_b.startswith(MINHASH_MAGIC)):
         return minhash_unpack(packed_a).jaccard(minhash_unpack(packed_b))
+    num_perm_a = minhash_num_perm(packed_a)
     # Byte-identical blobs are exact matches — a single C-level memcmp that
     # is ~100x faster than the element-wise loop.  This is the common
     # self-match / exact-duplicate case in candidate scoring.
@@ -1348,7 +1349,6 @@ def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
         return 1.0
     # The two blobs may encode different permutation counts; reject the
     # mismatch the same way datasketch's MinHash.jaccard does.
-    num_perm_a = minhash_num_perm(packed_a)
     require_same_num_perm(num_perm_a, minhash_num_perm(packed_b))
     a = struct.unpack(f">{num_perm_a}I", packed_a[8 : 8 + 4 * num_perm_a])
     b = struct.unpack(f">{num_perm_a}I", packed_b[8 : 8 + 4 * num_perm_a])
@@ -1396,14 +1396,13 @@ def minhash_jaccard_batch(
     expected_len = 8 + 4 * num_perm
     for start in range(0, len(packed_list), chunk_size):
         chunk = packed_list[start : start + chunk_size]
-        # A well-formed packed blob's length implies its permutation count,
-        # so the common candidate only pays one C-level ``len`` comparison;
-        # a mismatched or corrupt blob falls back to the full header parse
+        # Check length and encoded count before trusting the payload.
+        # A mismatched or corrupt blob falls back to the full header parse
         # and raises the precise error.  (A blob with a matching claimed
         # count but a wrong length used to slip past validation and break
         # the reshape below; rejecting it here also closes that path.)
         for p in chunk:
-            if len(p) != expected_len:
+            if len(p) != expected_len or p[4:8] != query_packed[4:8]:
                 require_same_num_perm(num_perm, minhash_num_perm(p))
         # The list comprehension lets ``bytes.join`` take its pre-sized
         # fast path; over a generator the same join measured ~2x slower

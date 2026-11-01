@@ -842,6 +842,20 @@ class TestResemblLSH(BaseScalingTest):
         m = code_create_minhash("MOV EAX, 42; RET")
         self.assertIn("k42", lsh.query(m))
 
+    def test_query_handles_more_than_sqlite_compound_select_limit(self):
+        """A valid large index must remain queryable on SQLite."""
+        from resembl.lsh import ResemblLSH
+        from resembl.scoring import minhash_new
+
+        lsh = ResemblLSH(self.session, 0.1, 4096)
+        self.assertGreater(lsh.b, 500)
+        fingerprint = minhash_new(4096)
+        lsh.insert("match", fingerprint)
+        packed = minhash_pack(fingerprint)
+        changed = 8 + 800 * lsh.r * 4
+        query = packed[:8] + bytes(changed - 8) + packed[changed:]
+        self.assertEqual(lsh.query(query), ["match"])
+
     def test_remove(self):
         from resembl.lsh import ResemblLSH
 

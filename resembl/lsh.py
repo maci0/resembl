@@ -136,6 +136,9 @@ _DUCKDB_VALUES_CHUNK = 1000
 #: ``_DUCKDB_VALUES_CHUNK`` does for DuckDB.
 _INSERT_CHUNK = 10_000
 
+#: Keep UNION terms and bind parameters within SQLite limits.
+_QUERY_BAND_CHUNK = 400
+
 
 def sql_text_literal(value: object) -> str:
     """Render *value* as a quoted DuckDB SQL string literal.
@@ -748,7 +751,7 @@ class ResemblLSH:
     def query(self, value: bytes | MinHash) -> list[str]:
         """Return the keys whose fingerprints share a band bucket with *value*.
 
-        All band lookups run in a single ``UNION ALL`` round trip instead of
+        Band lookups run in bounded ``UNION ALL`` batches instead of
         one query per band (~4x faster measured); each branch still uses the
         ``(band, bucket)`` primary-key prefix, and candidates are the union
         of keys across all bands, deduplicated.
@@ -762,15 +765,19 @@ class ResemblLSH:
         """
         packed = self._as_packed(value)
         buckets = self._buckets(packed)
-        sql = " UNION ALL ".join(
-            f"SELECT checksum FROM lsh_bucket WHERE band = :b{i} AND bucket = :k{i}"
-            for i in range(len(buckets))
-        )
-        params: dict[str, object] = {}
-        for i, bucket in enumerate(buckets):
-            params[f"b{i}"] = i
-            params[f"k{i}"] = bucket
-        return sorted({row[0] for row in self.session.execute(text(sql), params).all()})
+        keys: set[str] = set()
+        for start in range(0, len(buckets), _QUERY_BAND_CHUNK):
+            chunk = buckets[start : start + _QUERY_BAND_CHUNK]
+            sql = " UNION ALL ".join(
+                f"SELECT checksum FROM lsh_bucket WHERE band = :b{i} AND bucket = :k{i}"
+                for i in range(len(chunk))
+            )
+            params: dict[str, object] = {}
+            for i, bucket in enumerate(chunk):
+                params[f"b{i}"] = start + i
+                params[f"k{i}"] = bucket
+            keys.update(row[0] for row in self.session.execute(text(sql), params).all())
+        return sorted(keys)
 
 
 def lsh_index_clear(session: Session) -> None:

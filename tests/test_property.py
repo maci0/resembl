@@ -244,6 +244,17 @@ class TestPropertyJaccardBatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             minhash_jaccard_batch(minhash_pack(a), [minhash_pack(b)])
 
+    def test_corrupt_packed_headers_raise_in_scalar_and_batch(self) -> None:
+        """A correct magic and length do not make an invalid header valid."""
+        from resembl.models import minhash_jaccard, minhash_jaccard_batch, minhash_new, minhash_pack
+
+        valid = minhash_pack(minhash_new(32))
+        corrupt = valid[:4] + (31).to_bytes(4, "big") + valid[8:]
+        with self.assertRaises(ValueError):
+            minhash_jaccard(corrupt, corrupt)
+        with self.assertRaises(ValueError):
+            minhash_jaccard_batch(valid, [corrupt])
+
     def test_non_packed_blob_raises_value_error_everywhere(self) -> None:
         """A blob in any non-packed format is rejected, never deserialized.
 

@@ -1026,7 +1026,7 @@ wheels = [
 
 [[package]]
 name = "resembl"
-version = "3.9.0"
+version = "3.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },

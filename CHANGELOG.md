@@ -4,6 +4,13 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [3.10.1] - 2026-11-01
+
+### Fixed
+
+- Reject malformed packed fingerprint headers during scalar and batch similarity scoring.
+- Query large LSH indexes on SQLite without exceeding its compound query limit.
+
 ## [3.10.0] - 2026-11-01
 
 ### Changed
@@ -931,7 +938,9 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.9.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.10.1...HEAD
+[3.10.1]: https://github.com/maci0/resembl/compare/v3.10.0...v3.10.1
+[3.10.0]: https://github.com/maci0/resembl/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/maci0/resembl/compare/v3.8.0...v3.9.0
 [3.8.0]: https://github.com/maci0/resembl/compare/v3.7.0...v3.8.0
 [3.7.0]: https://github.com/maci0/resembl/compare/v3.6.1...v3.7.0
