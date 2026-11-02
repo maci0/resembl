@@ -7,7 +7,7 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Defaults to Python 3.15.1; Python 3.14+ remains supported for consumers. Requires uv 0.12.13 or newer; CI installs uv 0.13.5.
+Defaults to Python 3.15.2; Python 3.14+ remains supported for consumers. Requires uv 0.12.13 or newer; CI installs uv 0.13.6.
 On macOS, install Homebrew `make` and prepend `$(brew --prefix make)/libexec/gnubin`
 to `PATH`; Apple's old Make ignores the recipe shell flags. CI does this too.
 `pyproject.toml` sets it as the floor under `[tool.uv] required-version`, so an
@@ -88,7 +88,7 @@ finished result, or asserting only exit code 0 is not a test. Do not delete a
 test to make a suite pass; change it so it still asserts the behavior.
 
 Fuzzers live in `fuzzers/`; `make fuzz` runs each for `FUZZ_SECONDS` (60 by
-default), uses an isolated `.venv-fuzz` on Python 3.15.1, and asks uv for the
+default), uses an isolated `.venv-fuzz` on Python 3.15.2, and asks uv for the
 `fuzz` extra itself. The qualified wheel is Atheris 3.1.0+relumea.2 for
 CPython 3.15 normal GIL on Linux x86_64, with GLIBC 2.38 and GLIBCXX 3.4.32.
 Other 3.15 tuples and Python 3.16 resolve the published sdist and are not

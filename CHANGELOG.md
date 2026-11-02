@@ -4,6 +4,14 @@ All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [3.10.2] - 2026-11-02
+
+### Changed
+
+- Refresh dependency locks and use Python 3.15.2 and uv 0.13.6 for development.
+
 ## [3.10.1] - 2026-11-01
 
 ### Fixed
@@ -938,7 +946,7 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.10.1...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.10.2...HEAD
 [3.10.1]: https://github.com/maci0/resembl/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/maci0/resembl/compare/v3.9.0...v3.10.0
 [3.9.0]: https://github.com/maci0/resembl/compare/v3.8.0...v3.9.0
@@ -963,3 +971,5 @@ and the `resembl find` matching pipeline.
 [1.1.0]: https://github.com/maci0/resembl/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/maci0/resembl/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/maci0/resembl/releases/tag/v0.1.0
+
+[3.10.2]: https://github.com/maci0/resembl/releases/tag/v3.10.2
