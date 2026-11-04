@@ -238,6 +238,3 @@ attestation for both archives; publish the bytes it attested, since an
 attestation over artifacts nobody published proves nothing to a consumer. A
 published version is immutable: something wrong means a new patch, never a
 re-upload.
-
-The maintainer explicitly selected 3.7.0 as a minor release for the Python 3.14
-floor migration; only that migration is exempt from the major-release rule.

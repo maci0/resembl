@@ -33,6 +33,9 @@ project follows [Semantic Versioning](https://semver.org/).
   Backups written before this change carry no content hash and are
   never reused, so the first run after upgrading always writes a fresh
   backup.
+- `AGENTS.md` no longer carries the historical 3.7.0 exception that
+  released the Python 3.14 floor migration as a minor; the section now
+  states the SemVer rule without that one-time exemption.
 
 ### Changed
 
