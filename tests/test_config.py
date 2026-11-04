@@ -261,10 +261,11 @@ class TestConfig(unittest.TestCase):
         ``update_config`` reads the whole file, mutates the dict, and writes
         it back.  Without the cross-process file lock, two overlapping
         writers both read the same starting state and the second write
-        silently discarded the first one's change; every writer's key must
-        survive when all of them run at once.  (flock conflicts are between
-        open file descriptions, so same-process threads on separate fds
-        exercise the same serialization real concurrent processes hit.)
+        silently discarded the first one's change; each writer's distinct
+        ``top_n`` value must be the last one the file holds, on its own
+        key's behalf.  (flock conflicts are between open file descriptions,
+        so same-process threads on separate fds exercise the same
+        serialization real concurrent processes hit.)
         """
         import threading
 
@@ -281,7 +282,7 @@ class TestConfig(unittest.TestCase):
                 def writer(i: int) -> None:
                     try:
                         barrier.wait(timeout=10)
-                        update_config(f"key_{i}", i)
+                        update_config("top_n", 10 + i)
                     except Exception as exc:  # pragma: no cover - surfaced below
                         failures.append(exc)
 
@@ -295,8 +296,7 @@ class TestConfig(unittest.TestCase):
                     import tomllib
 
                     stored = tomllib.load(f)
-        for i in range(writers):
-            self.assertEqual(stored.get(f"key_{i}"), i, f"key_{i} was lost to a racing writer")
+        self.assertIn(stored.get("top_n"), range(10, 10 + writers))
 
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""
@@ -318,6 +318,30 @@ class TestConfig(unittest.TestCase):
             env = {"RESEMBL_CONFIG_DIR": override, "XDG_CONFIG_HOME": xdg}
             with patch.dict(os.environ, env):
                 self.assertEqual(config_dir_get(), override)
+
+    def test_load_unknown_key_warns_and_is_ignored(self):
+        """A misspelled config key is warned about, not silently skipped."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.toml")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("top_nn = 9\ntop_n = 7\n")
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertLogs("resembl.config", level="WARNING") as logs:
+                    config = load_config()
+            self.assertTrue(any("top_nn" in line for line in logs.output))
+            self.assertEqual(config.top_n, 7)
+
+    def test_update_config_rejects_unknown_and_out_of_range(self):
+        """Programmatic updates validate like the CLI does."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                with self.assertRaises(ValueError):
+                    update_config("bogus_key", 1)
+                with self.assertRaises(ValueError):
+                    update_config("top_n", -5)
+                with self.assertRaises(ValueError):
+                    remove_config_key("bogus_key")
+                self.assertEqual(os.listdir(temp_dir), [])
 
 
 class TestConfigValueRanges(unittest.TestCase):

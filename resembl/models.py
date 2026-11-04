@@ -63,7 +63,7 @@ def timestamp_now() -> str:
     would defeat the point of setting it.
     """
     override = os.environ.get(CLOCK_ENV_VAR)
-    if override is None:
+    if override is None or not override.strip():
         return datetime.now(UTC).isoformat()
     try:
         moment = datetime.fromisoformat(override)

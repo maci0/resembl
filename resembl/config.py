@@ -151,6 +151,7 @@ class ResemblConfig:
         source = other if isinstance(other, dict) else dataclasses.asdict(other)
         for key, value in source.items():
             if not hasattr(self, key):
+                logger.warning("Ignoring unknown configuration key: %s.", key)
                 continue
             default = DEFAULTS[key]
             # int() truncates (2.9 -> 2), silently accepting a fractional
@@ -336,8 +337,16 @@ def update_config(key: str, value: int | float | str) -> dict:
 
     Raises :class:`ConfigError` (an ``OSError``) when the existing file
     cannot be read or parsed, so the update fails closed instead of
-    overwriting and discarding the file's previous contents.
+    overwriting and discarding the file's previous contents.  Raises
+    :class:`ValueError` for an unknown key or a value outside the range
+    ``validate_value`` allows, so programmatic callers cannot persist a
+    misconfiguration the CLI would refuse.
     """
+    if key not in DEFAULTS:
+        raise ValueError(f"unknown configuration key: {key!r}")
+    problem = validate_value(key, value)
+    if problem is not None:
+        raise ValueError(f"invalid value for {key!r}: {problem}, got {value!r}")
     with _config_file_lock():
         config = _read_config_dict()
         config[key] = value
@@ -353,8 +362,11 @@ def remove_config_key(key: str) -> dict:
 
     Raises :class:`ConfigError` (an ``OSError``) when the existing file
     cannot be read or parsed, so the removal fails closed instead of
-    overwriting and discarding the file's previous contents.
+    overwriting and discarding the file's previous contents.  Raises
+    :class:`ValueError` for an unknown key.
     """
+    if key not in DEFAULTS:
+        raise ValueError(f"unknown configuration key: {key!r}")
     with _config_file_lock():
         config = _read_config_dict()
         if key in config:

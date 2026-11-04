@@ -72,6 +72,8 @@ def sample_rng() -> random.Random:
     global _SAMPLE_RNG, _SAMPLE_SEED  # pylint: disable=global-statement
 
     env_seed = os.environ.get(SEED_ENV_VAR)
+    if env_seed is not None and not env_seed.strip():
+        env_seed = None
     with _SAMPLE_LOCK:
         if env_seed is None:
             if _SAMPLE_RNG is None:

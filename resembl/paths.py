@@ -59,7 +59,7 @@ def db_url_get() -> str:
     """
     for var in DB_URL_ENV_VARS:
         url = os.environ.get(var)
-        if url:
+        if url and url.strip():
             return url
     return DEFAULT_DB_URL
 
@@ -98,7 +98,7 @@ def cache_dir_get() -> str:
     ``$XDG_CACHE_HOME`` is invalid and ignored.
     """
     override = os.environ.get("RESEMBL_CACHE_DIR")
-    if override:
+    if override and override.strip():
         return _expand_home(override)
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg and os.path.isabs(xdg):
@@ -115,7 +115,7 @@ def config_dir_get() -> str:
     ``$XDG_CONFIG_HOME`` is invalid and ignored.
     """
     override = os.environ.get("RESEMBL_CONFIG_DIR")
-    if override:
+    if override and override.strip():
         return _expand_home(override)
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg and os.path.isabs(xdg):
