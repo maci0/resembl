@@ -1106,7 +1106,12 @@ def app_callback(
     # stderr, not stdout: a warning raised mid-run (a config key ignored, a
     # parallel import falling back) would otherwise be interleaved into the
     # JSON/CSV array a script is parsing.
-    logging.basicConfig(level=log_level, stream=sys.stderr)
+    logging.basicConfig(
+        level=log_level,
+        stream=sys.stderr,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
 
     state.config = load_config()
     if format_opt is not None:

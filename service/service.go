@@ -51,16 +51,23 @@ type custodyHolder struct {
 	custody Custody
 }
 
+// latency buckets mirror the Python server's histogram bounds so both
+// exposures answer the same latency questions.
+var latencyBuckets = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 30.0}
+
 // serviceMetrics holds in-process counters exposed at GET /metrics.
 // No user-controlled label values: cardinality is bounded by fixed paths
 // and status codes, mirroring the Python server.
 type serviceMetrics struct {
 	mu       sync.Mutex
 	requests map[[2]string]int64
+	buckets  map[[2]interface{}]int64
+	sums     map[string]float64
+	counts   map[string]int64
 	started  time.Time
 }
 
-func (m *serviceMetrics) record(path string, status int) {
+func (m *serviceMetrics) record(path string, status int, seconds float64) {
 	label := path
 	if label != "/v1/find" && label != "/v1/find-batch" && label != "/healthz" && label != "/metrics" {
 		label = "other"
@@ -68,6 +75,13 @@ func (m *serviceMetrics) record(path string, status int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.requests[[2]string{label, strconv.Itoa(status)}]++
+	m.sums[label] += seconds
+	m.counts[label]++
+	for _, bound := range latencyBuckets {
+		if seconds <= bound {
+			m.buckets[[2]interface{}{label, bound}]++
+		}
+	}
 }
 
 func (m *serviceMetrics) render() string {
@@ -75,9 +89,32 @@ func (m *serviceMetrics) render() string {
 	defer m.mu.Unlock()
 	var b strings.Builder
 	b.WriteString("# HELP resembl_service_up 1 while this process is answering requests.\n# TYPE resembl_service_up gauge\nresembl_service_up 1\n")
+	b.WriteString("# HELP resembl_service_uptime_seconds Seconds since this process started serving.\n# TYPE resembl_service_uptime_seconds gauge\n")
+	fmt.Fprintf(&b, "resembl_service_uptime_seconds %.3f\n", time.Since(m.started).Seconds())
 	b.WriteString("# HELP resembl_service_requests_total Requests answered, by path and status.\n# TYPE resembl_service_requests_total counter\n")
 	for key, count := range m.requests {
 		fmt.Fprintf(&b, "resembl_service_requests_total{path=%q,status=%q} %d\n", key[0], key[1], count)
+	}
+	b.WriteString("# HELP resembl_service_request_duration_seconds Answered-request latency, by path.\n# TYPE resembl_service_request_duration_seconds histogram\n")
+	labels := make([]string, 0, len(m.counts))
+	for label := range m.counts {
+		labels = append(labels, label)
+	}
+	// deterministic order for stable exposition
+	for i := 0; i < len(labels); i++ {
+		for j := i + 1; j < len(labels); j++ {
+			if labels[j] < labels[i] {
+				labels[i], labels[j] = labels[j], labels[i]
+			}
+		}
+	}
+	for _, label := range labels {
+		for _, bound := range latencyBuckets {
+			fmt.Fprintf(&b, "resembl_service_request_duration_seconds_bucket{path=%q,le=%q} %d\n", label, strconv.FormatFloat(bound, 'f', -1, 64), m.buckets[[2]interface{}{label, bound}])
+		}
+		fmt.Fprintf(&b, "resembl_service_request_duration_seconds_bucket{path=%q,le=%q} %d\n", label, "+Inf", m.counts[label])
+		fmt.Fprintf(&b, "resembl_service_request_duration_seconds_sum{path=%q} %.6f\n", label, m.sums[label])
+		fmt.Fprintf(&b, "resembl_service_request_duration_seconds_count{path=%q} %d\n", label, m.counts[label])
 	}
 	return b.String()
 }
@@ -86,7 +123,7 @@ func New(authority Authorizer, engine Engine, resource string, concurrency int, 
 	if authority == nil || engine == nil || resource == "" || concurrency < 1 || concurrency > 64 || timeout <= 0 {
 		return nil, errors.New("invalid service configuration")
 	}
-	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), started: time.Now()}}, nil
+	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), buckets: make(map[[2]interface{}]int64), sums: make(map[string]float64), counts: make(map[string]int64), started: time.Now()}}, nil
 }
 
 // SetCustody installs an owner-supplied durable capacity store before serving.
@@ -146,13 +183,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusOK
 		}
+		elapsed := time.Since(started)
 		if s.metrics != nil {
-			s.metrics.record(r.URL.Path, status)
+			s.metrics.record(r.URL.Path, status, elapsed.Seconds())
 		}
 		if status >= 500 {
-			log.Printf("[%s] %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, time.Since(started))
-		} else if time.Since(started) >= time.Second {
-			log.Printf("[%s] slow %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, time.Since(started))
+			log.Printf("[%s] %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, elapsed)
+		} else if elapsed >= time.Second {
+			log.Printf("[%s] slow %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, elapsed)
 		}
 	}()
 	w = rec
@@ -215,6 +253,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	custody := s.getCustody()
 	if custody == nil {
+		log.Printf("[%s] custody unavailable", reqID)
 		writeError(w, http.StatusServiceUnavailable, "custody unavailable")
 		return
 	}
@@ -228,12 +267,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	default:
+		log.Printf("[%s] busy: concurrency slots exhausted", reqID)
 		writeError(w, http.StatusServiceUnavailable, "busy")
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	if err != nil {
 		if ctx.Err() != nil {
+			log.Printf("[%s] request timed out", reqID)
 			writeError(w, http.StatusServiceUnavailable, "request timed out")
 			return
 		}
@@ -254,6 +295,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if custody != nil {
 		release, err = custody.Claim()
 		if err != nil {
+			log.Printf("[%s] capacity unavailable: %v", reqID, err)
 			writeError(w, http.StatusServiceUnavailable, "capacity unavailable")
 			return
 		}
@@ -265,7 +307,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// its failure still changes the status. Here the response is
 			// already decided; a failed release is logged, not swallowed.
 			if err := release(); err != nil {
-				log.Printf("capacity release failed: %v", err)
+				log.Printf("[%s] capacity release failed: %v", reqID, err)
 			}
 		}
 	}()
@@ -298,6 +340,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	completed = true
 	if !json.Valid(result) {
+		log.Printf("[%s] invalid engine response", reqID)
 		writeError(w, http.StatusBadGateway, "invalid engine response")
 		return
 	}
@@ -307,12 +350,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := release()
 		release = nil
 		if err != nil {
+			log.Printf("[%s] capacity release failed: %v", reqID, err)
 			writeError(w, http.StatusServiceUnavailable, "capacity release failed")
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(result); err != nil {
+		log.Printf("[%s] response write failed: %v", reqID, err)
 		// Response may be truncated on the wire; the claim is already
 		// released, so the client must retry against fresh capacity.
 		writeError(w, http.StatusServiceUnavailable, "response write failed")

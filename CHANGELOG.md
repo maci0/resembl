@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Go service `GET /metrics` now exposes `resembl_service_uptime_seconds` and a `resembl_service_request_duration_seconds` histogram (same buckets as the Python server); failure paths that previously answered `503` without a log record (custody unavailable, busy, capacity claim/release, invalid engine response, response write) now log with the request correlation id.
+
 ### Changed
 
 - The root `.dockerignore` (the context for `service/Dockerfile`, built from
@@ -17,6 +21,8 @@ project follows [Semantic Versioning](https://semver.org/).
   entrypoint or COPY path fails in CI instead of on an operator's host.
 
 ### Fixed
+
+- CLI logging now writes ISO-8601 timestamps (`%(asctime)s %(levelname)s %(name)s %(message)s`) instead of the bare `LEVEL:name:message` default, so log aggregators can parse and order records; unhandled server errors now log with traceback instead of relying on the stdlib default.
 
 - Backups, manifests, config writes, and exports are now fsynced before
   being published (and the directory entry fsynced after the rename), so
