@@ -111,12 +111,29 @@ logger = logging.getLogger(__name__)
 #: Default LSH similarity threshold for candidate filtering.
 LSH_THRESHOLD = 0.5
 
-#: Name of the manifest :func:`db_backup` writes beside a backup file.  It
-#: carries the snippet count and the fingerprint version so a restore can be
-#: checked against a live database, and it is also what :func:`db_backup`
-#: prunes, so a backup directory never accumulates backups nobody can name.
-#: Written by the same temp-file-plus-rename publication the export path uses.
+#: Name of the legacy shared manifest :func:`db_backup` used to write beside
+#: a backup file.  It carried the snippet count and the fingerprint version
+#: of only the newest backup, so it described every other retained copy
+#: wrongly; each backup now gets its own ``<backup-stem>.json`` manifest
+#: (see :func:`_db_backup_manifest_name`).  The name stays so
+#: :func:`db_verify_backup` can still read a backup that predates per-backup
+#: manifests, when the shared file records that backup's own name.
 DB_BACKUP_MANIFEST_NAME = ".resembl-backup.json"
+
+
+def _db_backup_manifest_name(backup_path: str) -> str:
+    """Return the per-backup manifest name for *backup_path*.
+
+    Each backup gets its own ``<backup-stem>.json`` manifest because a
+    directory retains several backups at once (``keep`` defaults to 7):
+    a single shared manifest always described only the newest backup,
+    so ``verify-backup`` on any older retained copy compared its counts
+    against counts that were never its own and reported a mismatch on
+    every backup but the latest.
+    """
+    stem, _ = os.path.splitext(os.path.basename(backup_path))
+    return f"{stem}.json"
+
 
 #: Bounded retries for the index clear inside ``db_reindex`` (see there):
 #: concurrent cold finds of the same database contend on SQLite's exclusive
@@ -1921,11 +1938,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     The backup is published by writing to a temporary file in the same
     directory and renaming it into place, exactly like
     :func:`snippet_export_yara`, so a failed backup never leaves a truncated
-    file that looks complete.  A manifest (see :data:`DB_BACKUP_MANIFEST_NAME`)
-    records the snippet count and fingerprint version of the source at backup
-    time; the manifest is the contract a restore is verified against
-    (:func:`db_verify_backup`) and the list :func:`db_backup` prunes to the
-    newest *keep* backups.  Non-SQLite backends have no offline copy here —
+    file that looks complete.  A per-backup manifest (see
+    :func:`_db_backup_manifest_name`) records the snippet count and
+    fingerprint version of the source at backup time; the manifest is the
+    contract a restore is verified against (:func:`db_verify_backup`).
+    Non-SQLite backends have no offline copy here —
     their own backup tooling (``pg_dump``, ``mysqldump``) owns that — so this
     raises :class:`ValueError` naming the backend.
 
@@ -2020,8 +2037,9 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         "fingerprint_version": fingerprint_version_get(session),
         "created_at": timestamp_now(),
     }
-    manifest_path = os.path.join(backup_dir, DB_BACKUP_MANIFEST_NAME)
-    tmp_manifest = os.path.join(backup_dir, f"{DB_BACKUP_MANIFEST_NAME}.{os.getpid()}.tmp")
+    manifest_name = _db_backup_manifest_name(backup_name)
+    manifest_path = os.path.join(backup_dir, manifest_name)
+    tmp_manifest = os.path.join(backup_dir, f"{manifest_name}.{os.getpid()}.tmp")
     try:
         fd = os.open(tmp_manifest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
@@ -2046,12 +2064,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
 def _db_backup_prune(backup_dir: str, keep: int) -> int:
     """Remove backup files beyond the newest *keep* in *backup_dir*.
 
-    Only files the manifest names — or the ``assembly-*.db`` shape this
-    module writes — are candidates, so pruning can never reach a file the
-    user placed in the directory by hand.  The newest are kept by name sort,
-    which is chronological for the timestamped names :func:`db_backup`
-    writes.  A missing directory or unreadable entry is not an error: the
-    backup is already in place, and pruning is the only thing being skipped.
+    Only ``assembly-*.db`` files this module writes are candidates, so
+    pruning can never reach a file the user placed in the directory by
+    hand.  The newest are kept by name sort, which is chronological for
+    the timestamped names :func:`db_backup` writes.  A missing directory
+    or unreadable entry is not an error: the backup is already in place,
+    and pruning is the only thing being skipped.
     """
     try:
         names = os.listdir(backup_dir)
@@ -2071,6 +2089,16 @@ def _db_backup_prune(backup_dir: str, keep: int) -> int:
             removed += 1
         except OSError as e:
             logger.warning("Could not remove old backup %s: %s", name, e)
+            continue
+        # A pruned backup's manifest describes no file that remains, so
+        # remove it too rather than leaving the directory accumulating
+        # manifests whose backups are gone.
+        try:
+            os.remove(os.path.join(backup_dir, _db_backup_manifest_name(name)))
+        except OSError:
+            # A missing or unremovable manifest strands bookkeeping, not
+            # data; verify-backup ignores manifests that name no backup.
+            pass
     return removed
 
 
@@ -2127,16 +2155,28 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     finally:
         connection.close()
 
-    manifest_path = os.path.join(
-        os.path.dirname(os.path.abspath(backup_path)), DB_BACKUP_MANIFEST_NAME
-    )
+    manifest_dir = os.path.dirname(os.path.abspath(backup_path))
+    per_backup_path = os.path.join(manifest_dir, _db_backup_manifest_name(backup_path))
+    shared_path = os.path.join(manifest_dir, DB_BACKUP_MANIFEST_NAME)
     manifest_snippets: int | None = None
-    try:
-        with open(manifest_path, encoding="utf-8") as f:
-            data = json.load(f)
+    manifest_present = False
+    for manifest_path in (per_backup_path, shared_path):
+        try:
+            with open(manifest_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except OSError, ValueError:
+            continue
+        # The shared manifest records only the newest backup's own name,
+        # so treat it as this file's contract only when it names this
+        # file; otherwise it describes a different backup in the directory.
+        if os.path.basename(manifest_path) == DB_BACKUP_MANIFEST_NAME:
+            if not isinstance(data, dict) or data.get("backup") != os.path.basename(backup_path):
+                continue
         if isinstance(data, dict) and isinstance(data.get("num_snippets"), int):
             manifest_snippets = data["num_snippets"]
-    except OSError, ValueError:
+            manifest_present = True
+        break
+    if not manifest_present:
         issues.append("no readable backup manifest; snippet count not cross-checked")
     if manifest_snippets is not None and manifest_snippets != num_snippets:
         issues.append(

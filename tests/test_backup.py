@@ -49,7 +49,8 @@ class TestDbBackup(FileDBTest):
         self.assertEqual(result["num_snippets"], 2)
         self.assertTrue(os.path.isfile(result["backup"]))
         # The manifest is the contract a restore is verified against.
-        with open(os.path.join(backup_dir, ".resembl-backup.json"), encoding="utf-8") as f:
+        manifest_name = os.path.splitext(os.path.basename(result["backup"]))[0] + ".json"
+        with open(os.path.join(backup_dir, manifest_name), encoding="utf-8") as f:
             manifest = json.load(f)
         self.assertEqual(manifest["num_snippets"], 2)
         self.assertEqual(manifest["backup"], os.path.basename(result["backup"]))
@@ -79,6 +80,24 @@ class TestDbBackup(FileDBTest):
             if name.startswith("assembly-") and name.endswith(".db")
         )
         self.assertEqual(len(backups), 2)
+
+    def test_older_retained_backups_verify_against_their_own_counts(self):
+        """Every retained backup verifies: the manifest must be per-backup.
+
+        Regression test: a single shared manifest described only the
+        newest backup, so ``verify-backup`` reported a snippet-count
+        mismatch on every older retained copy and the oldest good
+        restores looked unrestorable exactly when the newest was lost.
+        """
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        results = []
+        for i in range(3):
+            snippet_add(self.session, f"s{i}", f"mov eax, {i}\nret")
+            results.append(db_backup(self.session, backup_dir, keep=7))
+        for result, expected in zip(results, (1, 2, 3), strict=True):
+            check = db_verify_backup(self.session, result["backup"])
+            self.assertTrue(check["ok"], (result["backup"], check["issues"]))
+            self.assertEqual(check["num_snippets"], expected)
 
     def test_backup_rejects_keep_below_one(self):
         """``keep=0`` would delete the backup just taken."""
@@ -120,7 +139,8 @@ class TestDbVerifyBackup(FileDBTest):
         snippet_add(self.session, "foo", "mov eax, 1\nret")
         backup_dir = os.path.join(self._tmpdir.name, "backups")
         result = db_backup(self.session, backup_dir)
-        manifest_path = os.path.join(backup_dir, ".resembl-backup.json")
+        manifest_name = os.path.splitext(os.path.basename(result["backup"]))[0] + ".json"
+        manifest_path = os.path.join(backup_dir, manifest_name)
         with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
         manifest["num_snippets"] = 999
@@ -135,7 +155,8 @@ class TestDbVerifyBackup(FileDBTest):
         snippet_add(self.session, "foo", "mov eax, 1\nret")
         backup_dir = os.path.join(self._tmpdir.name, "backups")
         result = db_backup(self.session, backup_dir)
-        os.remove(os.path.join(backup_dir, ".resembl-backup.json"))
+        manifest_name = os.path.splitext(os.path.basename(result["backup"]))[0] + ".json"
+        os.remove(os.path.join(backup_dir, manifest_name))
         check = db_verify_backup(self.session, result["backup"])
         self.assertTrue(check["ok"], check["issues"])
         self.assertTrue(any("manifest" in issue for issue in check["issues"]))
