@@ -1093,7 +1093,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             for snippet in Snippet.stream_all(session):
                 primary_name = _snippet_primary_name(snippet)
-                rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", primary_name)
+                rule_name = _RULE_NAME_INVALID_CHARS.sub("_", primary_name)
                 # A name may be empty (e.g. added with an empty alias) — index
                 # would crash; prefix instead, as for names starting with a digit.
                 if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
@@ -1535,6 +1535,10 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
 #: portable filename: substituting it with the same ``_`` as every other
 #: illegal character is the only answer that keeps the export running.
 _INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\ud800-\udfff]')
+
+#: Compiled once at module load; the YARA export loop previously called
+#: ``re.sub`` per snippet, paying a cache lookup + compile check per row.
+_RULE_NAME_INVALID_CHARS = re.compile(r"[^a-zA-Z0-9_]")
 
 #: Windows reserves these stems (case-insensitive, extension ignored):
 #: writing "con.asm" targets the console device instead of a file.

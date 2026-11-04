@@ -117,14 +117,19 @@ class Collection(SQLModel, table=True):
     created_at: str = Field(default_factory=timestamp_now)
 
     @classmethod
-    def get_all(cls, session: Session) -> Sequence[Collection]:
+    def get_all(cls, session: Session, limit: int | None = None) -> Sequence[Collection]:
         """Return all collections, in name order.
 
         Name order rather than the backend's row order: `collection list`
         renders these rows directly, and a merge snapshots them in the same
         order, so an unspecified order is a run-to-run difference in output.
+
+        *limit* caps the fetch symmetrically with :meth:`Snippet.get_all`.
         """
-        return session.exec(select(cls).order_by(cls.name)).all()
+        stmt = select(cls).order_by(cls.name)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return session.exec(stmt).all()
 
     @classmethod
     def get_by_name(cls, session: Session, name: str) -> Collection | None:
@@ -152,13 +157,23 @@ class SnippetVersion(SQLModel, table=True):
     created_at: str = Field(default_factory=timestamp_now)
 
     @classmethod
-    def get_by_checksum(cls, session: Session, checksum: str) -> Sequence[SnippetVersion]:
-        """Return all versions for a given snippet, newest first."""
-        return session.exec(
+    def get_by_checksum(
+        cls, session: Session, checksum: str, limit: int | None = None
+    ) -> Sequence[SnippetVersion]:
+        """Return all versions for a given snippet, newest first.
+
+        *limit* caps the fetch so a caller asking for history does not pull
+        an unbounded version list into memory; ``None`` (the default) keeps
+        the historical unbounded behavior for callers that need every row.
+        """
+        stmt = (
             select(cls)
             .where(cls.snippet_checksum == checksum)
             .order_by(cls.created_at.desc())  # type: ignore[attr-defined]
-        ).all()
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return session.exec(stmt).all()
 
 
 class Snippet(SQLModel, table=True):
@@ -235,15 +250,23 @@ class Snippet(SQLModel, table=True):
         return None
 
     @classmethod
-    def get_all(cls, session: Session) -> Sequence[Snippet]:
-        """Return all snippets in the database, in checksum order.
+    def get_all(cls, session: Session, limit: int | None = None) -> Sequence[Snippet]:
+        """Return snippets in the database, in checksum order.
 
         Ordered by the primary key so the row order is a property of the
         data rather than of the plan the backend happens to pick: every
         caller renders, paginates or float-sums these rows, and none of
         that may differ between two runs over the same database.
+
+        *limit* caps the fetch so a caller paging or sampling does not pull
+        the whole corpus (``code`` column included) into memory; ``None``
+        (the default) keeps the historical unbounded behavior.  Prefer
+        :meth:`stream_all` / :meth:`iter_batches` for full scans.
         """
-        return session.exec(select(cls).order_by(cls.checksum)).all()
+        stmt = select(cls).order_by(cls.checksum)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return session.exec(stmt).all()
 
     @classmethod
     def stream_all(cls, session: Session, batch_size: int = 1000) -> Iterator[Snippet]:
@@ -301,13 +324,24 @@ class Snippet(SQLModel, table=True):
             last = batch[-1][0]
 
     @classmethod
-    def get_by_collection(cls, session: Session, collection_name: str) -> Sequence[Snippet]:
-        """Return all snippets in a given collection, in checksum order."""
-        return session.exec(
+    def get_by_collection(
+        cls, session: Session, collection_name: str, limit: int | None = None
+    ) -> Sequence[Snippet]:
+        """Return snippets in a given collection, in checksum order.
+
+        *limit* caps the fetch so a large collection is not pulled into
+        memory whole; ``None`` (the default) keeps the historical unbounded
+        behavior.  Prefer the streamed ``snippet_collection_names_stream``
+        for rendering names without loading the ``code`` column.
+        """
+        stmt = (
             select(cls)
             .where(cls.collection == name_normalize(collection_name))
             .order_by(cls.checksum)
-        ).all()
+        )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return session.exec(stmt).all()
 
     def get_minhash_obj(self) -> MinHash:
         """Return the stored MinHash object for this snippet."""

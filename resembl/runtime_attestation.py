@@ -26,7 +26,7 @@ def verify_runtime(manifest_path: str, expected: str) -> None:
     if not isinstance(document, dict) or not document or len(document) > MAX_FILES:
         raise ValueError("invalid runtime manifest")
     required = {str(Path(sys.executable).resolve())}
-    for module in tuple(sys.modules.values()):
+    for module in sys.modules.values():
         filename = getattr(module, "__file__", None)
         if not isinstance(filename, str):
             continue
