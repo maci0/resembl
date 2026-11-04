@@ -1441,6 +1441,8 @@ def _names_stream(
     :func:`snippet_collection_names_stream`; only the two rendered columns
     are read so the ``code`` column never enters memory.
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
     last: str | None = None
     while True:
         stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(batch_size)

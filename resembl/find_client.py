@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import tomllib
 import urllib.error
@@ -75,17 +76,47 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     client down: ``int(cfg.get("top_n"))`` on a quoted ``"abc"`` raised an
     uncaught ValueError traceback before the query was ever sent.  The CLI
     handles the same file the same way (warn, keep the default).
+
+    The ``resembl.config`` loader also bounds-checks each value
+    (``validate_value``: ``top_n >= 1``, ``lsh_threshold < 0.99``, ...).
+    This client cannot import that module without paying for
+    ``tomli_w``/``sqlmodel``, so it enforces only the low/high bounds here —
+    an out-of-range value must never leave this process, where it would
+    change the result set (or be refused by the server with whichever
+    bound *it* enforces).
     """
     default = _CFG_DEFAULTS[key]
     value = cfg.get(key, default)
     try:
-        return cast(value)
-    except TypeError, ValueError:
+        number = cast(value)
+    except TypeError, ValueError, OverflowError:
         print(
             f"error: ignoring config value {key} = {value!r} (not a number)",
             file=sys.stderr,
         )
         return cast(default)
+    if isinstance(value, bool) or not _within_bounds(key, number):
+        print(
+            f"error: ignoring config value {key} = {value!r} (out of range)",
+            file=sys.stderr,
+        )
+        return cast(default)
+    return number
+
+
+def _within_bounds(key: str, number: float) -> bool:
+    """True when *number* lies inside the range ``resembl.config`` enforces for *key*."""
+    if not math.isfinite(number):
+        return False
+    if key == "lsh_threshold":
+        return 0.0 <= number < 0.99
+    if key == "num_permutations":
+        return 2.0 <= number <= float(1 << 12)  # scoring.MAX_NUM_PERM
+    if key == "jaccard_weight":
+        return 0.0 <= number <= 1.0
+    if key in {"top_n", "ngram_size"}:
+        return number >= 1.0
+    return True
 
 
 _VALUE_FLAGS = frozenset({"-o", "--output", "--query", "--file", "--top-n", "--threshold"})

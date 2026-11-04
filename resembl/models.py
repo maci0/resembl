@@ -276,6 +276,8 @@ class Snippet(SQLModel, table=True):
         key index, so a streamed scan stays a merge over the b-tree rather
         than a sort of the whole table.
         """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         yield from session.exec(select(cls).order_by(cls.checksum)).yield_per(batch_size)
 
     @classmethod
@@ -288,6 +290,8 @@ class Snippet(SQLModel, table=True):
         otherwise raises ``database is locked`` when a write happens while a
         read cursor is still open on the connection.
         """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         last: str | None = None
         while True:
             stmt = select(cls).order_by(cls.checksum).limit(batch_size)
@@ -312,6 +316,8 @@ class Snippet(SQLModel, table=True):
         batch is fully consumed before yielding, so callers may write to the
         same connection between batches).
         """
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         last: str | None = None
         while True:
             stmt = select(cls.checksum, cls.minhash).order_by(cls.checksum).limit(batch_size)
