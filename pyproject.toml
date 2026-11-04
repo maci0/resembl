@@ -2,7 +2,7 @@
 name = "resembl"
 version = "3.12.0"
 description = "Assembly Code Similarity Search (resembl)"
-authors = [{ name = "N/A" }]
+authors = [{ name = "Marcel Wysocki" }]
 # SPDX expression, not free text: "GPLv3" is not an SPDX id, so indexers and
 # scanners could not match it.  The tree ships the plain GPLv3 text with no
 # "or later" grant, so the accurate expression is GPL-3.0-only.
