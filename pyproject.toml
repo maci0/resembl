@@ -44,14 +44,12 @@ dependencies = [
     # the compiled DuckDB driver needs the opt-in extra below.
     "pg8000>=1.31.5",
     "pymysql>=1.2.3",
-    # The IANA time zone database behind the `--tz` flag.  Linux and macOS
-    # read it from /usr/share/zoneinfo, but Windows ships no such database
-    # and Python's zoneinfo falls back to this package, so without it as a
-    # runtime dependency `resembl --tz Europe/Warsaw` fails there with
-    # "not a known IANA time zone" even though the flag is documented for
-    # every supported platform.  Pure Python and zoneinfo consults it only
-    # when the system database cannot answer, so it costs nothing on POSIX.
-    "tzdata>=2026.4",
+    # The IANA time zone database behind the `--tz` flag: zoneinfo consults
+    # tzdata only when the system database cannot answer, so it costs
+    # nothing on POSIX, and Windows ships no such database at all. It
+    # need not be installed everywhere, so it is kept to the one platform
+    # that needs it instead of every consumer paying its download.
+    "tzdata>=2026.4; sys_platform == 'win32'",
 ]
 
 [project.urls]
