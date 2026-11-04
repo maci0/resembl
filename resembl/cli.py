@@ -1764,7 +1764,11 @@ def find(
         # A piped or redirected query: `resembl find < snippet.asm`.  Only
         # when neither --query nor --file was given, and only off a TTY, so an
         # interactive run is never left waiting on a terminal.
-        piped = sys.stdin.buffer.read().decode("utf-8")
+        try:
+            piped = sys.stdin.buffer.read().decode("utf-8")
+        except UnicodeDecodeError:
+            err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+            raise typer.Exit(code=USAGE_ERROR)
         if any(0xD800 <= ord(ch) <= 0xDFFF for ch in piped):
             err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
             raise typer.Exit(code=USAGE_ERROR)

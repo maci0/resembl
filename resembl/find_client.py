@@ -240,7 +240,10 @@ def _main(argv: list[str] | None = None) -> int:
 
     query = args.query
     if query is None and args.file == "-":
-        query = sys.stdin.buffer.read().decode("utf-8")
+        try:
+            query = sys.stdin.buffer.read().decode("utf-8")
+        except UnicodeDecodeError:
+            return _fail("query input is not valid UTF-8", 2, json_on=json_on, kind="usage")
     elif query is None and args.file:
         try:
             with open(args.file, encoding="utf-8") as f:
@@ -250,7 +253,10 @@ def _main(argv: list[str] | None = None) -> int:
     elif query is None and not sys.stdin.isatty():
         # Same piping contract as `resembl find`: with neither --query nor
         # --file, a redirected stdin is the query.
-        query = sys.stdin.buffer.read().decode("utf-8")
+        try:
+            query = sys.stdin.buffer.read().decode("utf-8")
+        except UnicodeDecodeError:
+            return _fail("query input is not valid UTF-8", 2, json_on=json_on, kind="usage")
     if query and any(0xD800 <= ord(ch) <= 0xDFFF for ch in query):
         return _fail("query input is not valid UTF-8", 2, json_on=json_on, kind="usage")
     if query and ";" in query and "\n" not in query:
