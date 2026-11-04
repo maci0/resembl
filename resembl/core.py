@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, func, select, text
 
 if TYPE_CHECKING:
@@ -621,10 +621,16 @@ def snippet_add_batch(
         # still advertised a complete index, and a retried import never
         # repaired that — the re-run saw the checksums already present, took
         # the alias path, and indexed nothing.
-        index_threshold = lsh_index_add_batch(
-            session, [(s.checksum, s.minhash) for s in new_snippets], commit=False
-        )
-        session.commit()
+        try:
+            index_threshold = lsh_index_add_batch(
+                session, [(s.checksum, s.minhash) for s in new_snippets], commit=False
+            )
+            session.commit()
+        except IntegrityError:
+            # Concurrent batch committed the same checksums first; converge
+            # by re-running the dedup pass on the now-current rows.
+            session.rollback()
+            return snippet_add_batch(session, prepared_items, batch_size, ngram_size)
         if index_threshold is not None:
             lsh_pickle_cache_remove(index_threshold)
         if new_snippets:
@@ -692,10 +698,24 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     session.add(new_snippet)
     # Keep the DB-backed LSH index in sync, in the snippet row's transaction:
     # see ``snippet_add_batch`` for why the two must commit together.
-    index_threshold = lsh_index_add(
-        session, new_snippet.checksum, new_snippet.minhash, commit=False
-    )
-    session.commit()
+    try:
+        index_threshold = lsh_index_add(
+            session, new_snippet.checksum, new_snippet.minhash, commit=False
+        )
+        session.commit()
+    except IntegrityError:
+        # A concurrent add of the same checksum committed first; converge
+        # to the alias path instead of failing the retry.
+        session.rollback()
+        existing = Snippet.get_by_checksum(session, checksum)
+        if existing is None:
+            raise
+        if name and name not in existing.name_list:
+            existing.names = json.dumps([*existing.name_list, name])
+            session.add(existing)
+            session.commit()
+        session.refresh(existing)
+        return existing
     if index_threshold is not None:
         lsh_pickle_cache_remove(index_threshold)
     session.refresh(new_snippet)
@@ -1879,7 +1899,15 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
         return existing
     collection = Collection(name=name_normalize(name), description=description)
     session.add(collection)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # A concurrent create of the same name committed first.
+        session.rollback()
+        existing = Collection.get_by_name(session, name)
+        if existing is None:
+            raise
+        return existing
     session.refresh(collection)
     return collection
 
