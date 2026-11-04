@@ -240,6 +240,18 @@ class TestSearch(BaseDBTest):
         results = snippet_search_by_name(self.session, "zzz")
         self.assertEqual(len(results), 0)
 
+    def test_search_negative_limit_returns_empty(self):
+        """A non-positive limit bounds the result to zero rows.
+
+        ``checksums[:-1]`` would silently drop only the last match, so a
+        negative limit must not leak matches.
+        """
+        snippet_add(self.session, "memcpy", "REP MOVSB")
+        snippet_add(self.session, "memset", "REP STOSB")
+        results = snippet_search_by_name(self.session, "mem", limit=-1)
+        self.assertEqual(results, [])
+        self.assertEqual(snippet_search_by_name(self.session, "mem", limit=0), [])
+
 
 # ---------------------------------------------------------------------------
 # Timestamp normalization tests

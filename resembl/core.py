@@ -1546,6 +1546,11 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
     rows on every run: an unordered ``OFFSET``/``LIMIT`` over the same
     database can return a different page once the plan changes.
     """
+    if start < 0:
+        # A window starting before the first row selects no rows: SQLite
+        # reads ``OFFSET -1`` as 0, so without this guard the window
+        # answered with rows from the start instead of none.
+        return []
     if end is not None:
         # ``end < start`` is an empty window, not a negative LIMIT: SQLite
         # reads a negative LIMIT as "unbounded" and would return every row
@@ -1660,6 +1665,10 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     # A non-ASCII alias may still be the decomposed spelling (a row from
     # before names were composed, or from macOS), and a substring of that
     # raw spelling is not a substring of the composed form.
+    if limit <= 0:
+        # ``checksums[:-1]`` would silently drop only the last match, so a
+        # non-positive limit must bound the result to zero rows.
+        return []
     checksums = [
         checksum
         for checksum, names in candidates

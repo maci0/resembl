@@ -483,6 +483,17 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         snippets = snippet_list(self.session, start=1, end=2)
         self.assertEqual(len(snippets), 1)
 
+    def test_snippet_list_negative_start_is_empty_window(self):
+        """A negative start lies before the first row, so the window is empty.
+
+        SQLite reads ``OFFSET -1`` as 0, so without a guard the window
+        returned every row from the start instead of no rows.
+        """
+        snippet_add(self.session, "test1", "MOV EAX, 1")
+        snippet_add(self.session, "test2", "MOV EAX, 2")
+        self.assertEqual(snippet_list(self.session, start=-1, end=2), [])
+        self.assertEqual(snippet_list(self.session, start=-5), [])
+
     def test_snippet_names_stream(self):
         """snippet_names_stream yields (checksum, names) across batch boundaries."""
         for i in range(2500):
