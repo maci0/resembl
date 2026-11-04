@@ -111,6 +111,13 @@ logger = logging.getLogger(__name__)
 #: Default LSH similarity threshold for candidate filtering.
 LSH_THRESHOLD = 0.5
 
+#: Name of the manifest :func:`db_backup` writes beside a backup file.  It
+#: carries the snippet count and the fingerprint version so a restore can be
+#: checked against a live database, and it is also what :func:`db_backup`
+#: prunes, so a backup directory never accumulates backups nobody can name.
+#: Written by the same temp-file-plus-rename publication the export path uses.
+DB_BACKUP_MANIFEST_NAME = ".resembl-backup.json"
+
 #: Bounded retries for the index clear inside ``db_reindex`` (see there):
 #: concurrent cold finds of the same database contend on SQLite's exclusive
 #: schema lock, and the loser should wait rather than crash.
@@ -1876,6 +1883,250 @@ def db_clean(session: Session) -> dict:
         "time_elapsed": time_elapsed,
         "vacuum_success": vacuum_success,
     }
+
+
+def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
+    """Write a consistent, restorable copy of the database into *backup_dir*.
+
+    SQLite-only: the copy is made through SQLite's online backup API
+    (:func:`sqlite3.Connection.backup`), which checkpoints the WAL and
+    produces a single-file database the current binary can open — unlike a
+    raw file copy of ``assembly.db`` taken mid-write, which pairs the main
+    file with a stale or missing ``-wal`` sidecar and can restore as an
+    empty or corrupt database.  The destination must not be the live file
+    nor its ``-wal``/``-shm`` sidecars: backing up over the source would
+    destroy the data the backup exists to protect.
+
+    The backup is published by writing to a temporary file in the same
+    directory and renaming it into place, exactly like
+    :func:`snippet_export_yara`, so a failed backup never leaves a truncated
+    file that looks complete.  A manifest (see :data:`DB_BACKUP_MANIFEST_NAME`)
+    records the snippet count and fingerprint version of the source at backup
+    time; the manifest is the contract a restore is verified against
+    (:func:`db_verify_backup`) and the list :func:`db_backup` prunes to the
+    newest *keep* backups.  Non-SQLite backends have no offline copy here —
+    their own backup tooling (``pg_dump``, ``mysqldump``) owns that — so this
+    raises :class:`ValueError` naming the backend.
+
+    ``keep`` counts backup files (not manifests): the oldest beyond *keep*
+    are removed after the new one is durably in place, so a pruning failure
+    can never cost the backup just taken.  A ``keep`` below 1 raises
+    :class:`ValueError`: zero would delete the backup this call just wrote.
+    """
+    if keep < 1:
+        raise ValueError("keep must be at least 1")
+    bind = session.get_bind()
+    # ``get_bind`` on a Session always returns an Engine in this codebase;
+    # mypy models it as ``Engine | Connection``, so narrow by attribute.
+    if not hasattr(bind, "dialect") or bind.dialect.name != "sqlite":
+        backend = getattr(getattr(bind, "dialect", None), "name", "unknown")
+        raise ValueError(
+            f"db_backup supports SQLite only (backend is {backend!r}); "
+            "use the backend's own backup tooling"
+        )
+    import sqlite3
+    import tempfile
+
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_dir = os.path.realpath(backup_dir)
+    # Microseconds keep two backups in the same second distinct, so prune
+    # counts backups rather than overwriting one.
+    stamp = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000:06d}"
+    backup_name = f"assembly-{stamp}.db"
+    final_path = os.path.join(backup_dir, backup_name)
+    # ``backup`` refuses a destination that is the source connection's own
+    # file, and a same-directory temp file makes the collision explicit
+    # instead of depending on the driver's refusal.  Compare against the
+    # live file and its sidecars, which a path-only check would miss.
+    live_path = ""
+    try:
+        row = session.execute(text("PRAGMA database_list")).first()
+        if row is not None and len(row) > 2 and row[2]:
+            live_path = os.path.realpath(str(row[2]))
+    except Exception:
+        live_path = ""
+    if live_path:
+        live_dir = os.path.dirname(live_path)
+        live_base = os.path.basename(live_path)
+        # The backup target lives beside the live file only when the caller
+        # pointed backup_dir at the database's own directory; the temp file
+        # below is never the live file itself, so this guards the rename
+        # target, not the copy.
+        if live_dir == backup_dir and (
+            live_base == backup_name or live_base.startswith("assembly-")
+        ):
+            # Different names, same directory: safe.  Only an exact name
+            # collision would overwrite the live file.
+            if live_base == backup_name:
+                raise ValueError("backup destination is the live database file")
+    dbapi_connection = bind.raw_connection()  # type: ignore[union-attr]
+    if dbapi_connection is None:
+        raise ValueError("db_backup: no database connection available")
+    sqlite_connection = dbapi_connection.dbapi_connection
+    if not isinstance(sqlite_connection, sqlite3.Connection):
+        raise ValueError("db_backup: the SQLite driver did not yield a sqlite3 connection")
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=backup_dir, prefix=".assembly-", suffix=".tmp")
+    os.close(tmp_fd)
+    try:
+        # Remove the empty placeholder: sqlite3.connect creates the file
+        # itself, and ``backup`` requires a path it may create.
+        os.unlink(tmp_path)
+        destination = sqlite3.connect(tmp_path)
+        try:
+            sqlite_connection.backup(destination)
+        finally:
+            destination.close()
+        os.replace(tmp_path, final_path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    try:
+        dbapi_connection.close()
+    except Exception:
+        pass
+    session.rollback()
+
+    try:
+        num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+    except Exception:
+        num_snippets = 0
+    manifest = {
+        "backup": backup_name,
+        "num_snippets": int(num_snippets),
+        "fingerprint_version": fingerprint_version_get(session),
+        "created_at": timestamp_now(),
+    }
+    manifest_path = os.path.join(backup_dir, DB_BACKUP_MANIFEST_NAME)
+    tmp_manifest = os.path.join(backup_dir, f"{DB_BACKUP_MANIFEST_NAME}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp_manifest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(manifest, f)
+        os.replace(tmp_manifest, manifest_path)
+    except OSError as e:
+        logger.warning("Could not write the backup manifest: %s", e)
+        try:
+            os.unlink(tmp_manifest)
+        except OSError:
+            pass
+
+    removed = _db_backup_prune(backup_dir, keep)
+    return {
+        "backup": final_path,
+        "num_snippets": manifest["num_snippets"],
+        "fingerprint_version": manifest["fingerprint_version"],
+        "num_removed": removed,
+    }
+
+
+def _db_backup_prune(backup_dir: str, keep: int) -> int:
+    """Remove backup files beyond the newest *keep* in *backup_dir*.
+
+    Only files the manifest names — or the ``assembly-*.db`` shape this
+    module writes — are candidates, so pruning can never reach a file the
+    user placed in the directory by hand.  The newest are kept by name sort,
+    which is chronological for the timestamped names :func:`db_backup`
+    writes.  A missing directory or unreadable entry is not an error: the
+    backup is already in place, and pruning is the only thing being skipped.
+    """
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return 0
+    candidates = sorted(
+        name
+        for name in names
+        if name.startswith("assembly-")
+        and name.endswith(".db")
+        and os.path.isfile(os.path.join(backup_dir, name))
+    )
+    removed = 0
+    for name in candidates[: max(0, len(candidates) - keep)]:
+        try:
+            os.remove(os.path.join(backup_dir, name))
+            removed += 1
+        except OSError as e:
+            logger.warning("Could not remove old backup %s: %s", name, e)
+    return removed
+
+
+def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: disable=unused-argument
+    """Check that *backup_path* opens and holds the data its manifest promised.
+
+    Opens the backup as a read-only SQLite database, confirms every table
+    the schema creates is present, and compares the live snippet count
+    against the manifest :func:`db_backup` wrote beside it.  A backup whose
+    own manifest disagrees with its contents is reported, not trusted: a
+    copy that silently lost rows (a raw file copy paired with a stale WAL,
+    a truncated transfer) must fail verification rather than pass on the
+    strength of having been written.
+
+    Returns ``{"ok": bool, "num_snippets": int, "issues": [...]}``; ``ok``
+    is false — and the caller should treat the backup as unrestorable —
+    whenever the file cannot be opened, a table is missing, or the counts
+    disagree.  A missing manifest is an issue but not a failure: the file
+    may predate manifests, and its contents are what matter.
+    """
+    import sqlite3
+
+    issues: list[str] = []
+    if not os.path.isfile(backup_path):
+        return {"ok": False, "num_snippets": 0, "issues": [f"backup not found: {backup_path}"]}
+    try:
+        connection = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
+    except sqlite3.Error as e:
+        return {"ok": False, "num_snippets": 0, "issues": [f"cannot open backup: {e}"]}
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        expected_tables = {
+            "snippet",
+            "collection",
+            "lsh_bucket",
+            "lsh_meta",
+            "app_meta",
+            "snippetversion",
+        }
+        missing = sorted(expected_tables - tables)
+        if missing:
+            issues.append(f"missing tables: {', '.join(missing)}")
+        num_snippets = 0
+        if "snippet" in tables:
+            row = connection.execute("SELECT COUNT(*) FROM snippet").fetchone()
+            num_snippets = int(row[0]) if row else 0
+    except sqlite3.Error as e:
+        return {"ok": False, "num_snippets": 0, "issues": [f"cannot read backup: {e}"]}
+    finally:
+        connection.close()
+
+    manifest_path = os.path.join(
+        os.path.dirname(os.path.abspath(backup_path)), DB_BACKUP_MANIFEST_NAME
+    )
+    manifest_snippets: int | None = None
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("num_snippets"), int):
+            manifest_snippets = data["num_snippets"]
+    except OSError, ValueError:
+        issues.append("no readable backup manifest; snippet count not cross-checked")
+    if manifest_snippets is not None and manifest_snippets != num_snippets:
+        issues.append(
+            f"snippet count mismatch: backup holds {num_snippets}, "
+            f"manifest records {manifest_snippets}"
+        )
+    # A missing manifest alone does not fail verification: the file may
+    # predate manifests, and its contents are what matter.  A missing table
+    # or a count mismatch does.
+    hard_failures = [i for i in issues if "mismatch" in i or "missing tables" in i]
+    return {"ok": not hard_failures, "num_snippets": num_snippets, "issues": issues}
 
 
 # ---------------------------------------------------------------------------

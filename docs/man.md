@@ -204,6 +204,23 @@ Global options go before the subcommand: `resembl --format json find ...`.
     database.  Legacy pickle cache files are removed by the next index
     write, not by `clean`.
 
+**backup** *DIR* [**--keep** *N*] [**--force**]
+:   Write a consistent, restorable copy of the default SQLite database
+    into *DIR*, pruned to the newest *N* backups (default 7).  Uses
+    SQLite's online backup API, so the copy is a single database file
+    the current binary can open — not a raw copy of `assembly.db`
+    paired with a stale WAL.  Also writes a manifest (snippet count,
+    fingerprint version) beside it.  SQLite only; other backends use
+    their own backup tooling.  RPO is the time since the last backup;
+    RTO is the time to copy the file back to `assembly.db` and run
+    `verify` (the index is rebuilt by the next `find` if it is stale).
+
+**verify-backup** *PATH*
+:   Check that a backup file opens, holds every table, and matches its
+    manifest's snippet count.  Exits 1 when the backup is not
+    restorable.  Run this after a restore to prove the copy is good —
+    a backup never restored is a hypothesis, not a backup.
+
 **merge** *PATH*
 :   Merge snippets from another resembl database into the current one,
     deduplicating by checksum.  *PATH* is a database file or a full

@@ -16,6 +16,13 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `resembl backup DIR` writes a consistent, restorable copy of the default
+  SQLite database (via the online backup API, with a manifest holding the
+  snippet count and fingerprint version, pruned to the newest 7 by default),
+  and `resembl verify-backup PATH` checks a backup opens, holds every table,
+  and matches its manifest. A restore is copying the file back to
+  `assembly.db` and running `verify`; RPO is the time since the last backup.
+  See `docs/man.md`.
 - `resembl serve` answers `POST /score`, which scores one listing against
   listings in the request with the find blend and an optional Jaccard floor,
   and `POST /band-keys`, which returns the LSH band keys of listings in the

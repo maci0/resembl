@@ -133,6 +133,17 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command("compare", "Compare two snippets.", "read_only"),
     _command("clean", "Drop the LSH index and vacuum the database.", "non_idempotent"),
     _command(
+        "backup",
+        "Write a consistent, restorable copy of the database.",
+        "non_idempotent",
+        confirmation="--force",
+    ),
+    _command(
+        "verify-backup",
+        "Check a backup opens and holds its manifest's snippet count.",
+        "read_only",
+    ),
+    _command(
         "merge",
         "Copy snippets from another resembl database into this one.",
         "non_idempotent",

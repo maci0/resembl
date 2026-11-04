@@ -66,11 +66,13 @@ from .core import (
     collection_delete,
     collection_list,
     collection_remove_snippet,
+    db_backup,
     db_clean,
     db_merge,
     db_reindex,
     db_stats,
     db_verify,
+    db_verify_backup,
     snippet_add,
     snippet_add_batch,
     snippet_collection_names_stream,
@@ -2026,6 +2028,53 @@ def clean() -> None:
         rows.append(("LSH index", "[green]Dropped[/green]"))
         rows.append(("Time elapsed", f"{result['time_elapsed']:.4f}s"))
         _echo_kv_table("Database Cleaned", rows)
+
+
+@app.command()
+def backup(
+    directory: str = typer.Argument(
+        help="Directory to write the backup into (created if missing)."
+    ),
+    keep: int = typer.Option(7, "--keep", help="Newest backups to retain; older ones are removed."),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+) -> None:
+    """Write a consistent, restorable copy of the database."""
+    _confirm(f"Write a backup of the database to '{directory}'?", force)
+    try:
+        result = db_backup(state.session, directory, keep=keep)
+    except (ValueError, OSError) as e:
+        err_console.print(f"[red]Error:[/red] Backup failed: {e}")
+        raise typer.Exit(code=1) from e
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+    else:
+        rows = [
+            ("Backup", result["backup"]),
+            ("Snippets", str(result["num_snippets"])),
+        ]
+        if result.get("num_removed"):
+            rows.append(("Old backups removed", str(result["num_removed"])))
+        _echo_kv_table("Backup Complete", rows)
+
+
+@app.command("verify-backup")
+def verify_backup_cmd(
+    backup_path: str = typer.Argument(help="Path to a backup file to check."),
+) -> None:
+    """Check a backup opens and holds its manifest's snippet count."""
+    if not os.path.isfile(backup_path):
+        err_console.print(f"[red]Error:[/red] File not found: {backup_path}")
+        raise typer.Exit(code=1)
+    result = db_verify_backup(state.session, backup_path)
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+    else:
+        rows = [("Snippets", str(result["num_snippets"]))]
+        rows.append(("OK", "[green]yes[/green]" if result["ok"] else "[red]no[/red]"))
+        rows.extend(("Issue", issue) for issue in result["issues"])
+        _echo_kv_table("Backup Verification", rows)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
 
 
 @app.command()
