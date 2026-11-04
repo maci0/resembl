@@ -52,6 +52,26 @@ class TestExportSurface(unittest.TestCase):
         with self.assertRaises(AttributeError):
             _ = resembl.not_a_module
 
+    def test_core_and_model_exports_cover_all(self):
+        """Every ``__all__`` name is dispatched via CORE or MODEL_EXPORTS.
+
+        ``__all__`` is the documented public surface; a name listed there
+        but in neither dispatch set would raise AttributeError on access
+        despite passing ``test_public_names_resolve``'s not-None check
+        only if the lazy lookup were bypassed.
+        """
+        self.assertEqual(set(resembl.__all__), resembl.CORE_EXPORTS | resembl.MODEL_EXPORTS)
+        self.assertEqual(resembl.CORE_EXPORTS & resembl.MODEL_EXPORTS, frozenset())
+        self.assertEqual(len(resembl.__all__), len(set(resembl.__all__)))
+
+    def test_status_colors_reexports_theme_palettes(self):
+        """The compatibility shim exposes the same objects as theme."""
+        from resembl import status_colors, theme
+
+        self.assertIs(status_colors.LIGHT, theme.LIGHT)
+        self.assertIs(status_colors.TERMINAL, theme.TERMINAL)
+        self.assertIs(status_colors.RICH_STYLES, theme.RICH_STYLES)
+
 
 class TestFindClientDefaults(unittest.TestCase):
     """``resembl-find`` answers on defaults without importing the config."""

@@ -227,6 +227,19 @@ class TestCfgExtract(unittest.TestCase):
         self.assertEqual(cfg["adj"], {0: [1], 1: []})
         self.assertEqual(cfg["num_edges"], 1)
 
+    def test_unconditional_jump_to_unknown_label_has_no_edge(self):
+        """A JMP to a never-defined label must not fabricate an edge.
+
+        The edge-resolution helper drops unknown targets; without this
+        assertion a regression that resolves a missing label to block 0
+        (or counts a phantom edge) would pass the dangling-label tests
+        above, which only cover labels that are defined but empty.
+        """
+        cfg = cfg_extract("JMP nowhere\nMOV EAX, 1")
+        self.assertEqual(cfg["num_blocks"], 2)
+        self.assertEqual(cfg["num_edges"], 0)
+        self.assertEqual(cfg["adj"], {0: [], 1: []})
+
     def test_real_asm_file(self):
         """Test CFG extraction on a real ASM file (1000A133.asm)."""
         asm_path = os.path.join(TEST_DATA_DIR, "1000A133.asm")
