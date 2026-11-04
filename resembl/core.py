@@ -2126,12 +2126,17 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     may predate manifests, and its contents are what matter.
     """
     import sqlite3
+    from urllib.parse import quote
 
     issues: list[str] = []
     if not os.path.isfile(backup_path):
         return {"ok": False, "num_snippets": 0, "issues": [f"backup not found: {backup_path}"]}
     try:
-        connection = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
+        # Percent-encode so '?'/'#' in a filename cannot inject URI params
+        # (e.g. "?mode=rwc") and escape the read-only mode.
+        connection = sqlite3.connect(
+            f"file:{quote(os.path.abspath(backup_path), safe='/')}?mode=ro", uri=True
+        )
     except sqlite3.Error as e:
         return {"ok": False, "num_snippets": 0, "issues": [f"cannot open backup: {e}"]}
     try:

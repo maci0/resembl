@@ -219,7 +219,7 @@ def _config_file_lock() -> Iterator[None]:
     neither locking API fall back to the historical unlocked behavior.
     """
     os.makedirs(config_dir_get(), exist_ok=True)
-    fd = os.open(config_path_get() + ".lock", os.O_CREAT | os.O_RDWR, 0o644)
+    fd = os.open(config_path_get() + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
         try:
             import fcntl
