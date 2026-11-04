@@ -44,6 +44,19 @@ class CiImagePinTests(unittest.TestCase):
         self.assertRegex(text, r"ARG GO_IMAGE=\S+@sha256:[0-9a-f]{64}")
         self.assertIn("FROM ${GO_IMAGE} AS build", text)
 
+    def test_go_version_agrees_everywhere(self) -> None:
+        """go.mod, Dockerfile, Makefile and docs name the same Go version."""
+        mod = (_ROOT / "service" / "go.mod").read_text(encoding="utf-8")
+        module_version = re.search(r"^go (\d+\.\d+)$", mod, re.MULTILINE)
+        self.assertIsNotNone(module_version, "no go directive in service/go.mod")
+        assert module_version is not None
+        version = module_version.group(1)
+        dockerfile = (_ROOT / "service" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn(f"golang:{version}-alpine", dockerfile)
+        for relative in ("Makefile", "CONTRIBUTING.md", "service/README.md"):
+            text = (_ROOT / relative).read_text(encoding="utf-8")
+            self.assertIn(f"Go {version}", text, f"{relative} does not name Go {version}")
+
 
 if __name__ == "__main__":
     unittest.main()

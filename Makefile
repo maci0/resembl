@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom
+.PHONY: help install format lint types hygiene test bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom
 
 PYTEST_ARGS ?=
 
@@ -115,6 +115,13 @@ hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing white
 test:  ## Run the test suite (pass args through: make test PYTEST_ARGS="-k cache")
 	uv run --locked pytest -q $(PYTEST_ARGS)
 
+# The microbenchmarks in tests/test_bench.py run disabled by default
+# (pyproject.toml addopts --benchmark-disable), so a plain `make test`
+# never measures them.  This target enables them explicitly; it is not
+# part of `check` so the default gate stays fast.
+bench:  ## Run the microbenchmarks in tests/test_bench.py
+	uv run --locked pytest -q tests/test_bench.py --benchmark-enable $(PYTEST_ARGS)
+
 # The command the Code Coverage workflow runs, so the number a contributor
 # reads locally and the one Codecov stores come from the same invocation.
 # term-missing names the uncovered lines a contributor acts on; the XML report
@@ -139,9 +146,9 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 # The experimental Go query service in service/ has its own module and its own
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a
 # Python-only contributor needs no Go toolchain.
-service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.25+)
+service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.26+)
 	@if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then \
-		echo "make service-check needs Go 1.25+ (go and gofmt on PATH; see service/go.mod)."; \
+		echo "make service-check needs Go 1.26+ (go and gofmt on PATH; see service/go.mod)."; \
 		echo "Install Go from https://go.dev/dl/ and re-run 'make service-check'."; \
 		exit 1; \
 	fi
@@ -155,7 +162,7 @@ service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.2
 # Atheris one. FUZZER names a target (e.g. FuzzServeHTTP); FUZZ_SECONDS bounds it.
 service-fuzz:  ## Fuzz the Go service targets for FUZZ_SECONDS, or one via FUZZER=<name>
 	@if ! command -v go >/dev/null 2>&1; then \
-		echo "make service-fuzz needs Go 1.25+ (see service/go.mod)."; \
+		echo "make service-fuzz needs Go 1.26+ (see service/go.mod)."; \
 		exit 1; \
 	fi
 	@for t in $(if $(FUZZER),$(FUZZER),FuzzHandle FuzzServeHTTP); do \

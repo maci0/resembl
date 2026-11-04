@@ -10,9 +10,11 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - Go service `GET /metrics` now exposes `resembl_service_uptime_seconds` and a `resembl_service_request_duration_seconds` histogram (same buckets as the Python server); failure paths that previously answered `503` without a log record (custody unavailable, busy, capacity claim/release, invalid engine response, response write) now log with the request correlation id.
 - Two new Atheris fuzz harnesses: `fuzzers/fuzz_yara_escape.py` covers the YARA export escaping (`_yara_string_escape`) and filename sanitizer (`_export_safe_filename`) with round-trip and traversal invariants, and `fuzzers/fuzz_config_file.py` covers the `config.toml` TOML reader (`_read_config_file`) over raw bytes, truncation, invalid UTF-8, and deeply nested documents. Both run via `make fuzz FUZZER=<name>`.
+- `make bench` runs the microbenchmarks in `tests/test_bench.py` with `--benchmark-enable`; they are disabled by default so a plain `make test` never measures them.
 
 ### Changed
 
+- The Go service now requires Go 1.26 everywhere: `service/go.mod`, `service/Dockerfile`, the Makefile and the docs named 1.25 while the Dockerfile built with 1.26, so a contributor with Go 1.25 got a toolchain switch instead of a named error.
 - **Breaking:** Snippet checksums are now taken over a whitespace-collapsed
   normalized string. Before, `mov eax,1` and `mov  eax,  1` tokenized and
   fingerprinted identically but hashed to different checksums, so the same

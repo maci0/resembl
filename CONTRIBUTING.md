@@ -102,7 +102,11 @@ resembl is developed test-first.
     uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
     make test PYTEST_ARGS="tests/test_cli.py -k config_set"                     # same, via the Makefile
     ```
-    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `coverage`, `db-test`, `service-check`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`.
+    The microbenchmarks in `tests/test_bench.py` are disabled by default (`--benchmark-disable` in `pyproject.toml`), so they never run in the plain suite. Run them explicitly:
+    ```bash
+    make bench
+    ```
+    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `bench`, `coverage`, `db-test`, `service-check`, `service-fuzz`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`.
 
 - **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run --locked pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
     ```bash
@@ -262,7 +266,7 @@ Before opening a pull request, run through this checklist.
     ```bash
     make check
     ```
-    A change under `service/` (the experimental Go query service) also needs `make service-check`, which needs Go 1.25 or newer; the `Go service` workflow runs it.
+    A change under `service/` (the experimental Go query service) also needs `make service-check`, which needs Go 1.26 or newer; the `Go service` workflow runs it.
 2.  **Update Your Branch:** Make sure your branch is up-to-date with the
     latest changes from the `resembl` main branch. This helps avoid merge
     conflicts.

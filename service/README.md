@@ -31,7 +31,7 @@ The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm 
 
 `/v1/find-batch` answers `501` on this binary, because the pinned protocol has no batch form.
 
-Run the checks with `make service-check` from the repository root (needs Go 1.25 or newer).
+Run the checks with `make service-check` from the repository root (needs Go 1.26 or newer).
 
 ## Container image
 

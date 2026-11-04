@@ -38,6 +38,7 @@ class MakefileShellTests(unittest.TestCase):
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         self.assertIn("dist-verify", help_result.stdout)
         self.assertIn("sbom", help_result.stdout)
+        self.assertIn("bench", help_result.stdout)
         with tempfile.TemporaryDirectory() as directory:
             probe = Path(directory) / "Makefile"
             probe.write_text(
@@ -66,8 +67,25 @@ class MakefileShellTests(unittest.TestCase):
         """Bash still refuses a pipeline whose first command fails."""
         self.shell_check("bash", True)
 
+    def test_bench_enables_benchmarks(self) -> None:
+        """bench runs test_bench.py with --benchmark-enable, not the disabled default."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [make, "-n", "bench"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tests/test_bench.py", result.stdout)
+        self.assertIn("--benchmark-enable", result.stdout)
+
     def test_service_check_names_missing_go(self) -> None:
-        """Without Go on PATH, service-check names Go 1.25+ instead of a bare shell error."""
+        """Without Go on PATH, service-check names Go 1.26+ instead of a bare shell error."""
         make = shutil.which("make")
         if make is None:
             self.skipTest("make is required")
@@ -84,5 +102,5 @@ class MakefileShellTests(unittest.TestCase):
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("needs Go 1.25+", result.stdout + result.stderr)
+        self.assertIn("needs Go 1.26+", result.stdout + result.stderr)
         self.assertIn("https://go.dev/dl/", result.stdout + result.stderr)
