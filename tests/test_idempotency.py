@@ -103,6 +103,19 @@ class TestSnippetWrites(BaseDBTest):
         self.assertEqual(_state(self.session), after_first)
         self.assertEqual(again.name_list, ["proc"])
 
+    def test_add_nfc_alias_after_nfd_stored_adds_no_duplicate(self):
+        """A decomposed stored alias and its composed spelling are one name."""
+        import json
+        import unicodedata
+
+        nfd = unicodedata.normalize("NFD", "café.asm")
+        snippet = snippet_add(self.session, nfd, "MOV EAX, 1")
+        snippet.names = json.dumps([nfd])
+        self.session.add(snippet)
+        self.session.commit()
+        again = snippet_add(self.session, "café.asm", "MOV EAX, 1")
+        self.assertEqual(len(again.name_list), 1)
+
     def test_add_twice_with_a_new_alias_merges_names(self):
         """Re-adding the same alias appends it once, not once per run."""
         snippet_add(self.session, "proc", "MOV EAX, 1")

@@ -805,9 +805,9 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
 
     if existing_snippet:
         name_list = existing_snippet.name_list
-        if name and name not in name_list:
-            name_list.append(name)
-            existing_snippet.names = json.dumps(name_list)
+        merged = _merge_names(name_list, [name] if name else [])
+        if len(merged) > len(name_list):
+            existing_snippet.names = json.dumps(merged)
             session.add(existing_snippet)
             session.commit()
             session.refresh(existing_snippet)
@@ -843,10 +843,12 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
         existing = Snippet.get_by_checksum(session, checksum)
         if existing is None:
             raise
-        if name and name not in existing.name_list:
-            existing.names = json.dumps([*existing.name_list, name])
-            session.add(existing)
-            session.commit()
+        if name:
+            merged = _merge_names(existing.name_list, [name])
+            if len(merged) > len(existing.name_list):
+                existing.names = json.dumps(merged)
+                session.add(existing)
+                session.commit()
         session.refresh(existing)
         return existing
     if index_threshold is not None:
