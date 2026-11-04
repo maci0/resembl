@@ -22,6 +22,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `docs/THREAT_MODEL.md` now records the Go service `/v1/find-batch` `501` on the pinned binary (the handler's `BatchEngine` assertion against `PinnedSQLiteEngine`, which implements `Find` only), the Go latency histogram and uptime gauges in `/metrics`, and the Python `GET /health` database probe; it also states that the Go tree gets `gofmt`/`go vet`/`go test -race` via `service.yml`, not CodeQL SAST.
 - CLI logging now writes ISO-8601 timestamps (`%(asctime)s %(levelname)s %(name)s %(message)s`) instead of the bare `LEVEL:name:message` default, so log aggregators can parse and order records; unhandled server errors now log with traceback instead of relying on the stdlib default.
 
 - Backups, manifests, config writes, and exports are now fsynced before
