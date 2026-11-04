@@ -1243,7 +1243,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         if length < 0 or length > _MAX_BODY_BYTES:
             return None
         try:
-            body = json.loads(self.rfile.read(length) or b"{}")
+            body = json.loads((self.rfile.read(length) or b"{}").decode("utf-8"))
         except ValueError, KeyError, RecursionError:
             return None
         return body if isinstance(body, dict) else None

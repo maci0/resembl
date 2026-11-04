@@ -240,7 +240,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     query = args.query
     if query is None and args.file == "-":
-        query = sys.stdin.read()
+        query = sys.stdin.buffer.read().decode("utf-8")
     elif query is None and args.file:
         try:
             with open(args.file, encoding="utf-8") as f:
@@ -250,7 +250,9 @@ def _main(argv: list[str] | None = None) -> int:
     elif query is None and not sys.stdin.isatty():
         # Same piping contract as `resembl find`: with neither --query nor
         # --file, a redirected stdin is the query.
-        query = sys.stdin.read()
+        query = sys.stdin.buffer.read().decode("utf-8")
+    if query and any(0xD800 <= ord(ch) <= 0xDFFF for ch in query):
+        return _fail("query input is not valid UTF-8", 2, json_on=json_on, kind="usage")
     if query and ";" in query and "\n" not in query:
         query = query.replace(";", "\n")
     if not query:
@@ -303,13 +305,13 @@ def _main(argv: list[str] | None = None) -> int:
     )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
-            payload = json.loads(response.read())
+            payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # A 4xx answer carries the server's own JSON error envelope: report
         # it verbatim rather than the transport-level "HTTP Error 400", which
         # tells the caller nothing about which parameter was refused.
         try:
-            detail = json.loads(exc.read()).get("error", "")
+            detail = json.loads(exc.read().decode("utf-8")).get("error", "")
         except ValueError, OSError, AttributeError:
             detail = ""
         return _fail(str(detail or exc.reason), 1, json_on=json_on)

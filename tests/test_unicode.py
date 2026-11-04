@@ -368,6 +368,20 @@ class TestEncodingBoundaries(unittest.TestCase):
         self.assertEqual(stream.encoding, "utf-8")
         stream.detach()
 
+    def test_stdin_is_utf8_whatever_the_locale_says(self):
+        """A piped UTF-8 query must decode as UTF-8, not the locale.
+
+        Under a C locale the standard stdin decodes bytes as ASCII with
+        ``surrogateescape``, so ``café`` arrived as two lone surrogates and
+        fingerprinted to nothing -- the query matched no snippet.
+        """
+        raw = io.BytesIO()
+        legacy = io.TextIOWrapper(raw, encoding="ascii", errors="surrogateescape")
+        with patch("sys.stdin", legacy):
+            console_utf8_reconfigure()
+            self.assertEqual(sys.stdin.encoding, "utf-8")
+        legacy.detach()
+
     def test_a_name_the_local_code_page_cannot_print_still_lists(self):
         """The shipped report, with the child's stdout pinned to cp1252: this
         raised ``UnicodeEncodeError`` and printed nothing at all."""

@@ -603,9 +603,13 @@ def _lexed_pass(
                 append("REG")
                 continue
             # Pygments already classifies registers; the string check covers
-            # register spellings the lexer misses.  ``lower`` is computed
-            # once and reused instead of per-branch.
-            lower = value.lower()
+            # register spellings the lexer misses.  Registers are ASCII; the
+            # fold is casefold, not ``lower``: a non-ASCII spelling that
+            # ``lower`` would map *into* the set (KELVIN SIGN U+212A -> "k",
+            # LONG S U+017F -> "s") must not match, and ``casefold`` keeps
+            # the fold total for the ASCII set.  Computed once and reused
+            # instead of per-branch.
+            lower = value.casefold()
             if lower in ALL_REGISTERS:
                 append("REG")
                 continue

@@ -605,7 +605,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read())
+            payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError:
         # A 4xx/5xx answer is a decision, not an outage: the server is
         # healthy and deliberately refused this request.  Fall back to the
@@ -1757,11 +1757,17 @@ def find(
         query_string = _query_inline_statements(query)
     elif file:
         query_string = file.read()
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in query_string):
+            err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+            raise typer.Exit(code=USAGE_ERROR)
     elif not sys.stdin.isatty():
         # A piped or redirected query: `resembl find < snippet.asm`.  Only
         # when neither --query nor --file was given, and only off a TTY, so an
         # interactive run is never left waiting on a terminal.
-        piped = sys.stdin.read()
+        piped = sys.stdin.buffer.read().decode("utf-8")
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in piped):
+            err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+            raise typer.Exit(code=USAGE_ERROR)
         query_string = _query_inline_statements(piped) if piped.strip() else None
 
     if not query_string:
