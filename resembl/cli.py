@@ -1077,7 +1077,9 @@ def app_callback(
     if ctx.invoked_subcommand is None:
         # Bare `resembl` is a request for the command list, not a command;
         # print it the way `--help` does and keep the nonzero exit a missing
-        # subcommand has always had.
+        # subcommand has always had. It is a usage error, so the help goes
+        # to stderr like every other usage error (and like the bare group
+        # commands), keeping stdout clean for scripts.
         if _output_choice.get() == "json":
             _fail(
                 "No command given.",
@@ -1085,7 +1087,18 @@ def app_callback(
                 kind="usage",
                 hint="Run 'resembl --help' for the command list.",
             )
-        console.print(ctx.get_help())
+        # Typer's rich help prints straight to stdout and get_help()
+        # returns "", so render plain to get a string for stderr.
+        command = ctx.command
+        original_mode = getattr(command, "rich_markup_mode", None)
+        if original_mode is not None:
+            command.rich_markup_mode = None  # type: ignore[attr-defined]
+        try:
+            help_text = ctx.get_help()
+        finally:
+            if original_mode is not None:
+                command.rich_markup_mode = original_mode  # type: ignore[attr-defined]
+        err_console.print(help_text)
         raise typer.Exit(code=2)
 
     state.quiet = quiet
@@ -1135,6 +1148,12 @@ def app_callback(
             f"[red]Error:[/red] --format must be one of {', '.join(FORMATS)}, got '{state.format}'."
         )
         raise typer.Exit(code=2)
+    if state.format == "json":
+        # `--format json` (or a config default of json) is structured
+        # output too: its failures carry the same stderr envelope `-o json`
+        # uses, so a script parsing stdout as JSON can parse stderr the
+        # same way. Checked after the format is validated.
+        _output_choice.set("json")
     try:
         state.tz = _zone_get(tz_name)
     except ValueError as e:
