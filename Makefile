@@ -265,6 +265,6 @@ dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-ident
 # by the next `make dist`.  Both are gitignored build output.
 sbom:  ## Write build/sbom.cdx.json, the CycloneDX 1.5 inventory of the runtime dependencies
 	@mkdir -p build
-	uv export --preview-features sbom-export --format cyclonedx1.5 \
+	uv export --locked --preview-features sbom-export --format cyclonedx1.5 \
 		--no-dev --quiet --output-file build/sbom.cdx.json
 	@echo "wrote build/sbom.cdx.json"
