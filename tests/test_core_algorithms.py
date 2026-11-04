@@ -488,3 +488,26 @@ class TestDbUrlMask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNormalizeWhitespaceCollapse(unittest.TestCase):
+    """Regression: string_normalize collapses whitespace (docs/api_reference.md)."""
+
+    def test_spacing_variants_share_checksum(self):
+        variants = [
+            "mov eax, 1",
+            "mov  eax,   1",
+            "mov\teax,\t1",
+            "  mov eax, 1  ",
+        ]
+        checksums = {string_checksum(v) for v in variants}
+        self.assertEqual(len(checksums), 1, f"spacing variants diverged: {checksums}")
+
+
+class TestCfgDuplicateEdge(unittest.TestCase):
+    """Regression: conditional branch to the fallthrough block is one edge."""
+
+    def test_branch_to_next_block_single_edge(self):
+        cfg = cfg_extract("JZ foo\nfoo:\nMOV EBX, 2")
+        self.assertEqual(cfg["adj"], {0: [1], 1: []})
+        self.assertEqual(cfg["num_edges"], 1)

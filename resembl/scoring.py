@@ -581,6 +581,7 @@ def _lexed_pass(
     append = output_tokens.append
     normalized_parts: list[str] = []
     normalized_append = normalized_parts.append
+    normalized_sep = ""  # pending separator before the next token
     # Local alias + inline miss path: the cache hits for every token after the
     # first of its type, so the per-token ``_token_type_flags`` call is pure
     # overhead (measured ~1.2x on the tokenize phase).
@@ -593,7 +594,24 @@ def _lexed_pass(
             continue
 
         if want_normalized and (flags & _TT_TEXT) == 0:
-            normalized_append(value)
+            # Collapse whitespace: a checksum must not depend on how the
+            # author spaced the operands (``mov eax,1`` vs ``mov  eax,  1``
+            # tokenize and fingerprint identically but hashed differently
+            # before, storing the same snippet twice).  Whitespace becomes
+            # a pending separator — a newline stays a newline because it
+            # lexes differently (``A\n0`` emits an Error token, ``A 0`` a
+            # Number) — and a missing separator between adjacent tokens is
+            # supplied, so every gap is exactly one separator.
+            if flags & _TT_WS and value.isspace():
+                if "\n" in value:
+                    normalized_sep = "\n"
+                elif normalized_sep != "\n":
+                    normalized_sep = " "
+            else:
+                if normalized_parts:
+                    normalized_append(normalized_sep or " ")
+                normalized_append(value)
+                normalized_sep = ""
 
         if not want_tokens:
             continue
@@ -637,7 +655,7 @@ def _lexed_pass(
         if not (flags & _TT_PUNCT) and value.strip():
             append(value.upper())
 
-    normalized = " ".join(normalized_parts).strip() if want_normalized else ""
+    normalized = "".join(normalized_parts).strip() if want_normalized else ""
     return output_tokens, normalized
 
 
@@ -824,7 +842,11 @@ def cfg_extract(code: str) -> dict:
                 adj[i].append(i + 1)
             if len(words) > 1:
                 target_block = _resolve(words[-1].strip())
-                if target_block is not None:
+                # A branch to the fallthrough block is the same edge, not a
+                # second one: recording both inflated ``num_edges`` (and
+                # skewed ``cfg_similarity``'s edge ratio) for ``jz foo``
+                # where ``foo:`` follows immediately.
+                if target_block is not None and target_block not in adj[i]:
                     adj[i].append(target_block)
         else:
             if i + 1 < len(blocks):

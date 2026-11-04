@@ -12,6 +12,13 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking:** Snippet checksums are now taken over a whitespace-collapsed
+  normalized string. Before, `mov eax,1` and `mov  eax,  1` tokenized and
+  fingerprinted identically but hashed to different checksums, so the same
+  snippet was stored twice. Stored rows keep their old checksums (they stay
+  findable by fingerprint); re-importing a snippet after upgrading writes it
+  under its new checksum instead of deduplicating against the old row, and
+  the duplicate appears in `find` until it is deleted by hand.
 - The root `.dockerignore` (the context for `service/Dockerfile`, built from
   the repository root) now also excludes local databases and benchmark
   data, matching `service/.dockerignore`: sensitive corpus data stays
