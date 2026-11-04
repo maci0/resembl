@@ -73,7 +73,12 @@ def _seeded_uuid_hex() -> str:
     """
     from .diagnostics import SEED_ENV_VAR, sample_rng
 
-    if os.environ.get(SEED_ENV_VAR) is not None:
+    seed = os.environ.get(SEED_ENV_VAR)
+    # Blank counts as unset, exactly as in sample_rng(): an empty
+    # ``RESEMBL_SEED=`` in the environment must not divert ids off the
+    # OS-random path, or every request id in the process becomes a draw
+    # from the sampling stream while diagnostics reports an OS seed.
+    if seed is not None and seed.strip():
         return sample_rng().randbytes(16).hex()
     import uuid
 

@@ -263,6 +263,32 @@ def test_seeded_server_ids_replay_byte_for_byte(tmp_path, monkeypatch):
             diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
 
 
+def test_blank_seed_uses_os_randomness_not_sampling_stream():
+    """RESEMBL_SEED="" counts as unset in _seeded_uuid_hex.
+
+    ``sample_rng`` already treats a blank seed as unset (OS-drawn sampling
+    seed); ``_seeded_uuid_hex`` used to treat it as set, so ids were drawn
+    from the sampling generator while it had been built from an OS seed —
+    replay used the wrong stream.  A blank seed must leave that generator
+    untouched and take the uuid4 path like the unset case.
+    """
+    from resembl import diagnostics
+    from resembl.diagnostics import SEED_ENV_VAR
+
+    for blank in ("", "   "):
+        with patch.dict("os.environ", {SEED_ENV_VAR: blank}):
+            saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+            diagnostics._SAMPLE_RNG = None
+            diagnostics._SAMPLE_SEED = None
+            try:
+                a = server._seeded_uuid_hex()
+                b = server._seeded_uuid_hex()
+                assert a != b
+                assert diagnostics._SAMPLE_RNG is None
+            finally:
+                diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
+
+
 def test_snapshot_distinguishes_blob_from_text(tmp_path):
     db = tmp_path / "types.db"
     engine = create_engine(f"sqlite:///{db}")
