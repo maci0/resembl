@@ -95,6 +95,19 @@ def sample_rng() -> random.Random:
         return _SAMPLE_RNG
 
 
+def sample_randbytes(n: int) -> bytes:
+    """Return *n* bytes from the process-wide generator, drawn atomically.
+
+    ``random.Random`` is not thread-safe: ``randbytes`` feeds ``getrandbits``,
+    a multi-step Mersenne-Twister state update that two threads can interleave
+    inside, so the draw itself is taken under :data:`_SAMPLE_LOCK`.  This is
+    the one entry point every draw — sampling keys and request ids alike —
+    goes through.
+    """
+    with _SAMPLE_LOCK:
+        return sample_rng().randbytes(n)
+
+
 def _sample_key() -> str:
     """Return the 32-byte hex key a row sample starts from.
 
@@ -104,8 +117,7 @@ def _sample_key() -> str:
     inside the generator's state update, and a seeded run would stop being
     reproducible.
     """
-    with _SAMPLE_LOCK:
-        return sample_rng().randbytes(32).hex()
+    return sample_randbytes(32).hex()
 
 
 def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:

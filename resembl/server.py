@@ -71,7 +71,7 @@ def _seeded_uuid_hex() -> str:
     server run can be reproduced.  Unset, fall back to OS randomness — these
     values are correlation ids and a generation marker, not secrets.
     """
-    from .diagnostics import SEED_ENV_VAR, sample_rng
+    from .diagnostics import SEED_ENV_VAR, sample_randbytes
 
     seed = os.environ.get(SEED_ENV_VAR)
     # Blank counts as unset, exactly as in sample_rng(): an empty
@@ -79,7 +79,7 @@ def _seeded_uuid_hex() -> str:
     # OS-random path, or every request id in the process becomes a draw
     # from the sampling stream while diagnostics reports an OS seed.
     if seed is not None and seed.strip():
-        return sample_rng().randbytes(16).hex()
+        return sample_randbytes(16).hex()
     import uuid
 
     return uuid.uuid4().hex
