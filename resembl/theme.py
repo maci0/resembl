@@ -60,25 +60,19 @@ TERMINAL: dict[str, str] = {
 }
 
 #: Rich theme mapping the stock style names onto the TERMINAL palette.
-RICH_STYLES: dict[str, str] = {
+_BASE: dict[str, str] = {
     "green": TERMINAL["exact"],
     "cyan": TERMINAL["live"],
     "blue": TERMINAL["near"],
     "magenta": TERMINAL["thunk"],
     "yellow": TERMINAL["warn"],
     "red": TERMINAL["fail"],
-    "bold green": f"bold {TERMINAL['exact']}",
-    "green bold": f"bold {TERMINAL['exact']}",
-    "bold cyan": f"bold {TERMINAL['live']}",
-    "cyan bold": f"bold {TERMINAL['live']}",
-    "bold blue": f"bold {TERMINAL['near']}",
-    "blue bold": f"bold {TERMINAL['near']}",
-    "bold magenta": f"bold {TERMINAL['thunk']}",
-    "magenta bold": f"bold {TERMINAL['thunk']}",
-    "bold yellow": f"bold {TERMINAL['warn']}",
-    "yellow bold": f"bold {TERMINAL['warn']}",
-    "bold red": f"bold {TERMINAL['fail']}",
-    "red bold": f"bold {TERMINAL['fail']}",
+}
+
+RICH_STYLES: dict[str, str] = {
+    **_BASE,
+    **{f"bold {name}": f"bold {hex_}" for name, hex_ in _BASE.items()},
+    **{f"{name} bold": f"bold {hex_}" for name, hex_ in _BASE.items()},
 }
 
 
