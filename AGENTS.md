@@ -73,8 +73,9 @@ byte-identical, then installs each into a throwaway environment and runs
 `pyproject.toml`'s packaging, the package's data files, or anything the
 wheel's contents depend on; no other gate would notice. A change to the
 dependency graph wants `make sbom` as well, which writes the CycloneDX 1.5
-inventory of the runtime graph that the `SBOM` workflow attaches to a
-release; it is `uv export`, so the SBOM and the lockfile cannot disagree.
+inventory of the runtime graph that the `SBOM` workflow uploads as a
+30-day artifact on `main` and on `v*` tags; it is `uv export`, so the
+SBOM and the lockfile cannot disagree.
 
 `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip
 themselves unless `RESEMBL_TEST_PG_URL` / `RESEMBL_TEST_MYSQL_URL` are set, so
@@ -179,7 +180,7 @@ Non-obvious, and cheap to break without noticing:
   `NOTICE` carries that grant and is listed in `license-files`; any new
   vendored or derived third-party code adds its notice to `NOTICE` in the same
   change, or nothing downstream can trace the grant.
-- The `pygments>=2.20.0` floor clears CVE-2026-4539; `pylint>=4` is required
+- The `pygments>=2.21.0` floor clears CVE-2026-4539; `pylint>=4` is required
   because the tree is adapted to pylint 4's checks, including the two mutable
   module-level singletons in `resembl/database.py` and `resembl/scoring.py` that
   are scope-disabled inline. Lowering either floor makes CI fail.

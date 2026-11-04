@@ -6,6 +6,18 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `CONTRIBUTING.md` now matches `AGENTS.md` on trunk-based development
+  (commit straight to `main`, branch only for work that must not land
+  yet) instead of requiring a feature branch for every contribution;
+  the PR checklist no longer references an `upstream` remote or a pull
+  request template that does not exist.
+- `AGENTS.md` no longer claims the `SBOM` workflow attaches its inventory
+  to a release; it uploads a 30-day artifact on `main` and on `v*` tags.
+  It also states the actual `pygments>=2.21.0` floor from
+  `pyproject.toml` instead of `2.20.0`.
+
 ### Changed
 
 - **Breaking:** `score_hybrid` now raises `ValueError` for a non-finite

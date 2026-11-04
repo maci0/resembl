@@ -65,7 +65,11 @@ All work should be tracked via the GitHub Issues tab. This practice encourages c
 - **For All Contributors:** Before starting work on a new feature, a significant refactor, or a complex bug fix, please check if an issue already exists. If not, open a new one to discuss the proposed change with the maintainers. Agree on the approach there before writing code.
 
 ### Create a Branch
-Never work directly on the `main` branch. For every contribution, create a new feature branch from an up-to-date `main` branch. We use a descriptive naming convention to keep the repository organized:
+Trunk-based: commit straight to `main` in small, verified, self-contained
+commits; `main` stays releasable at every commit. Branch only for work that
+must not land yet (a risky or long-running change, or one awaiting review),
+merge it by fast-forward and delete the branch. When you branch, use a
+descriptive naming convention to keep the repository organized:
 
 ```bash
 # General format: git checkout -b <type>/<issue-number>-short-description
@@ -75,7 +79,8 @@ git checkout -b feat/123-add-json-output
 # Example for a bug fix:
 git checkout -b fix/145-handle-api-errors
 ```
-This convention, which incorporates the Conventional Commit type and the issue number, provides valuable context at a glance.  
+This convention, which incorporates the Conventional Commit type and the issue
+number, provides valuable context at a glance.
 
 ### Write Code, Write Tests
 resembl is developed test-first.
@@ -257,15 +262,16 @@ Before opening a pull request, run through this checklist.
     make check
     ```
     A change under `service/` (the experimental Go query service) also needs `make service-check`, which needs Go 1.25 or newer; the `Go service` workflow runs it.
-2.  **Update Your Branch:** Make sure your branch is up-to-date with the latest changes from the `resembl` main branch. This helps avoid merge conflicts.
+2.  **Update Your Branch:** Make sure your branch is up-to-date with the
+    latest changes from the `resembl` main branch. This helps avoid merge
+    conflicts.
     ```bash
-    # Fetch the latest changes from the upstream repository
-    git fetch upstream
+    # Fetch the latest changes from the remote
+    git fetch origin
 
     # Rebase your branch on top of the latest main
-    git rebase upstream/main
+    git rebase origin/main
     ```
-    (Note: If you have not configured an `upstream` remote, you can do so with `git remote add upstream https://github.com/maci0/resembl.git`)
 
 3.  **Push Your Branch:** Push your changes to your fork on GitHub.
     ```bash
@@ -275,7 +281,7 @@ Before opening a pull request, run through this checklist.
 You are now ready to open a pull request on GitHub.
 
 - **Clear Title:** The pull request title should be clear and concise. It's good practice to use the format of your primary commit message.
-- **Detailed Description:** Fill out the pull request template provided. This is your opportunity to explain your change to the maintainers.
+- **Detailed Description:** Describe your change to the maintainers.
 - **Link the Issue:** Make sure to include a line like `Closes #123` in the description. This will automatically link the PR to the issue and close the issue when the PR is merged.
 - **Summarize the "What" and "Why":** Briefly describe what the change does and why it's necessary.
 - **Self-Review:** Before submitting, click on the "Files Changed" tab and review your own changes one last time. This is a great way to catch typos or small mistakes.
