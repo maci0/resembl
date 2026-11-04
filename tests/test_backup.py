@@ -111,6 +111,44 @@ class TestDbBackup(FileDBTest):
         with self.assertRaises(ValueError):
             db_backup(self.session, os.path.join(self._tmpdir.name, "backups"), keep=0)
 
+    def test_prune_never_deletes_the_backup_just_written(self):
+        """A directory already over ``keep`` cannot prune the newest backup.
+
+        The directory already holds more than ``keep`` ``assembly-*.db``
+        files (e.g. a user-supplied copy with a later timestamp, or a
+        clock skew), so the retention window counts it as the newest
+        and the fresh backup as the oldest.  Without the preserve
+        guard the prune would delete the backup ``db_backup`` just
+        wrote, reporting success for a directory from which it was
+        already gone.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        os.makedirs(backup_dir)
+        # An existing backup with a *later* timestamp than the new one.
+        far_future = os.path.join(backup_dir, "assembly-29991231T235959-999999.db")
+        with open(far_future, "wb") as f:
+            f.write(b"not a real backup")
+        result = db_backup(self.session, backup_dir, keep=1)
+        self.assertTrue(os.path.isfile(result["backup"]), result)
+        self.assertTrue(db_verify_backup(self.session, result["backup"])["ok"])
+
+    def test_backup_self_verifies_before_reporting_success(self):
+        """The published backup verifies against its manifest at write time.
+
+        ``db_backup`` hands back a backup a restore drill would trust by
+        name order, so the copy must pass ``db_verify_backup`` before
+        success is reported.  A backup whose manifest write failed was
+        already untrustworthy; this guards the published file itself.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        self.assertTrue(result["manifest_written"])
+        self.assertTrue(result["verified"])
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
     def test_backup_name_uses_utc_regardless_of_local_zone(self):
         """``db_backup`` filenames are UTC so prune sorting stays chronological across DST.
 

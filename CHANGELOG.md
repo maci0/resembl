@@ -58,6 +58,7 @@ project follows [Semantic Versioning](https://semver.org/).
   It also states the actual `pygments>=2.21.0` floor from
   `pyproject.toml` instead of `2.20.0`.
 - `resembl backup` reuse is now on the full corpus identity (names, tags, collection, not checksums alone), so an alias/tag change after a backup writes a fresh one instead of reusing the stale copy.
+- `resembl backup` now re-verifies the published backup against its manifest (via `db_verify_backup`) before reporting success, and removes an unverifiable copy instead of leaving it as the newest restore point a drill would trust. Backup pruning never deletes the backup just written, even when the directory already holds more than `--keep` files.
 - `resembl backup` is now idempotent: re-running it on unchanged content
   returns the existing backup instead of writing a new copy and pruning
   the oldest retained one, so a retried or double-scheduled run can no

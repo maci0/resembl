@@ -55,7 +55,10 @@ Keep `keep` high enough (default 7) that the pre-corruption copy survives.
 
 ## Verifying backups periodically
 
-A backup never restored is a hypothesis. Schedule:
+A backup never restored is a hypothesis. Schedule (``db_backup`` now
+re-verifies the published backup against its manifest and refuses to
+report a copy that fails, so a *new* backup is only reported once it has
+verified):
 
 ```bash
 resembl verify-backup backups/assembly-<newest>.db   # exit 1 = unrestorable

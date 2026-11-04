@@ -2102,7 +2102,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     The backup is published by writing to a temporary file in the same
     directory and renaming it into place, exactly like
     :func:`snippet_export_yara`, so a failed backup never leaves a truncated
-    file that looks complete.  A per-backup manifest (see
+    file that looks complete.  The published backup is immediately
+    re-verified with :func:`db_verify_backup` and removed (with
+    ``manifest_written: False``) if verification fails — an
+    unverifiable copy that a later drill finds by name order would be
+    trusted as a restore point.  A per-backup manifest (see
     :func:`_db_backup_manifest_name`) records the snippet count and
     fingerprint version of the source at backup time; the manifest is the
     contract a restore is verified against (:func:`db_verify_backup`).
@@ -2114,6 +2118,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     are removed after the new one is durably in place, so a pruning failure
     can never cost the backup just taken.  A ``keep`` below 1 raises
     :class:`ValueError`: zero would delete the backup this call just wrote.
+    Pruning never deletes the backup this call just wrote, even when the
+    directory already holds more than *keep* files: the new backup is
+    marked ``preserve`` across the prune, so an oversized directory
+    cannot prune the newest restore point out from under the caller.
 
     Re-execution is convergent: when the newest retained backup already
     holds this database's current content (see :func:`_db_content_hash`),
@@ -2284,7 +2292,16 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # against a manifest that was never written would pass on contents
         # alone. Say so in the result instead of leaving the caller to
         # discover it at verify time.
-        removed = _db_backup_prune(backup_dir, keep)
+        removed = _db_backup_prune(backup_dir, keep, preserve=backup_name)
+        # An unverifiable backup must not sit silently where a later
+        # verify-backup (or a restore drill) finds it by name order and
+        # trusts it.  Remove the unmanifested file too: re-running the
+        # backup will write a fresh one, and the caller was already told
+        # via ``manifest_written``.
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
         return {
             "backup": final_path,
             "num_snippets": manifest["num_snippets"],
@@ -2292,9 +2309,42 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             "fingerprint_version": manifest["fingerprint_version"],
             "num_removed": removed,
             "manifest_written": False,
+            "verified": False,
         }
 
-    removed = _db_backup_prune(backup_dir, keep)
+    # Re-verify the published backup before reporting success: a copy
+    # whose contents disagree with its manifest (a truncated publish, a
+    # page flipped on write) must not be handed to a restore drill as
+    # the newest restore point.  Deleting it here keeps ``db_backup``
+    # honest — success means it verified, failure means no file was
+    # left to trust.
+    check = db_verify_backup(session, final_path)
+    if not check["ok"]:
+        logger.warning(
+            "New backup %s failed verification (%s); removing it.",
+            final_path,
+            "; ".join(check["issues"]),
+        )
+        try:
+            os.remove(final_path)
+        except OSError:
+            pass
+        try:
+            os.remove(manifest_path)
+        except OSError:
+            pass
+        return {
+            "backup": final_path,
+            "num_snippets": manifest["num_snippets"],
+            "snippet_count_known": count_known,
+            "fingerprint_version": manifest["fingerprint_version"],
+            "num_removed": 0,
+            "manifest_written": False,
+            "verified": False,
+            "verify_issues": check["issues"],
+        }
+
+    removed = _db_backup_prune(backup_dir, keep, preserve=backup_name)
     return {
         "backup": final_path,
         "num_snippets": manifest["num_snippets"],
@@ -2302,10 +2352,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         "fingerprint_version": manifest["fingerprint_version"],
         "num_removed": removed,
         "manifest_written": True,
+        "verified": True,
     }
 
 
-def _db_backup_prune(backup_dir: str, keep: int) -> int:
+def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None) -> int:
     """Remove backup files beyond the newest *keep* in *backup_dir*.
 
     Only ``assembly-*.db`` files this module writes are candidates, so
@@ -2313,7 +2364,11 @@ def _db_backup_prune(backup_dir: str, keep: int) -> int:
     hand.  The newest are kept by name sort, which is chronological for
     the timestamped names :func:`db_backup` writes.  A missing directory
     or unreadable entry is not an error: the backup is already in place,
-    and pruning is the only thing being skipped.
+    and pruning is the only thing being skipped.  *preserve* names a
+    backup file that must survive this prune even when *keep* would
+    remove it; ``db_backup`` passes the backup it just wrote, so a
+    directory already over *keep* by hand-supplied ``assembly-*.db``
+    files can never make pruning delete the newest restore point.
     """
     try:
         names = os.listdir(backup_dir)
@@ -2328,6 +2383,8 @@ def _db_backup_prune(backup_dir: str, keep: int) -> int:
     )
     removed = 0
     for name in candidates[: max(0, len(candidates) - keep)]:
+        if preserve is not None and name == preserve:
+            continue
         try:
             os.remove(os.path.join(backup_dir, name))
             removed += 1

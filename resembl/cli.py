@@ -2101,6 +2101,9 @@ def backup(
             ("Backup", result["backup"]),
             ("Snippets", str(result["num_snippets"])),
         ]
+        if result.get("verified") is False:
+            rows.append(("Verified", "[red]no[/red]"))
+            rows.extend(("Issue", issue) for issue in result.get("verify_issues", []))
         if result.get("num_removed"):
             rows.append(("Old backups removed", str(result["num_removed"])))
         _echo_kv_table("Backup Complete", rows)
