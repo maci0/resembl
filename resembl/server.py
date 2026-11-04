@@ -851,8 +851,8 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
 
 _METRICS = _ServerMetrics()
 #: The paths this server serves, each POST-only except /health and /metrics.
-_FIND_PATHS = ("/find", "/find-batch")
-_ALL_PATHS = ("/find", "/find-batch", "/health", "/metrics")
+_FIND_PATHS = ("/find", "/find-batch", "/find-pinned")
+_ALL_PATHS = ("/find", "/find-batch", "/find-pinned", "/runtime-generation", "/health", "/metrics")
 
 
 class _FindHandler(BaseHTTPRequestHandler):
@@ -1023,6 +1023,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         if body is None:
             self._respond(400, {"error": "bad request body"})
             return
+        if self.route == "/find-pinned":
+            self._handle_find_pinned(body)
+            return
         if self.route == "/find":
             self._handle_find(body)
             return
@@ -1052,6 +1055,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         # keeps the verb answer, so a stray GET cannot look like a find.
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
+            return
+        if self.route == "/runtime-generation":
+            self._respond(200, {"generation": self.server.runtime_generation})  # type: ignore[attr-defined]
             return
         if self.route == "/health":
             self._handle_health()
@@ -1163,6 +1169,73 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, payload)
+
+    def _handle_find_pinned(self, body: dict) -> None:
+        """Hold a SQLite writer fence from index identity through the query."""
+        from .pinned_snapshot import index_digest
+        from .runtime_attestation import verify_runtime
+
+        artifact = body.get("artifact_sha256")
+        generation = body.get("generation")
+        manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "")
+        if (
+            not isinstance(artifact, str)
+            or not manifest_path
+            or generation != self.server.runtime_generation  # type: ignore[attr-defined]
+        ):
+            self._respond(503, {"error": "runtime identity unavailable"})
+            return
+        expected = body.get("index_sha256")
+        query = body.get("query")
+        if (
+            not isinstance(expected, str)
+            or len(expected) != 64
+            or any(c not in "0123456789abcdef" for c in expected)
+            or not isinstance(query, str)
+            or _query_field_error(query) is not None
+        ):
+            self._respond(400, {"error": "invalid pinned query"})
+            return
+        try:
+            verify_runtime(manifest_path, artifact)
+            with Session(self.engine) as session:
+                connection = session.connection()
+                if connection.dialect.name != "sqlite":
+                    self._respond(503, {"error": "pinned index unavailable"})
+                    return
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+                actual = index_digest(connection)
+                if actual != expected:
+                    self._respond(409, {"error": "index identity mismatch"})
+                    return
+                request = _parse_find_request(body, self.find_defaults)
+                from .cache import lsh_cache_load
+                from .core import fingerprints_need_reindex
+
+                if fingerprints_need_reindex(session, request.ngram_size, request.num_permutations):
+                    self._respond(503, {"error": "pinned index requires rebuild"})
+                    return
+                if not lsh_cache_load(
+                    session, request.effective_threshold, request.num_permutations
+                ):
+                    self._respond(503, {"error": "pinned index requires rebuild"})
+                    return
+                payload = _find_uncached(session, query, request)
+                verify_runtime(manifest_path, artifact)
+                self._respond(
+                    200,
+                    {
+                        "index_sha256": actual,
+                        "artifact_sha256": artifact,
+                        "generation": generation,
+                        "result": payload,
+                    },
+                )
+        except BadRequestError as exc:
+            self._respond(400, {"error": str(exc)})
+        except Exception:
+            logger.exception("pinned query failed")
+            self._respond(503, {"error": "pinned index unavailable"})
 
     def _handle_find_batch(self, body: dict) -> None:
         """Process many queries in one request (results keyed by query)."""
@@ -1325,6 +1398,7 @@ class _FindServer(ThreadingHTTPServer):
     """
 
     engine: Any
+    runtime_generation: str
     #: ``Host`` values this generation answers to; empty means unrestricted
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()
@@ -1528,6 +1602,7 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     # Per-instance shared state (see _FindHandler.engine): each server
     # generation carries its own engine and find defaults.
     httpd.engine = engine
+    httpd.runtime_generation = uuid.uuid4().hex
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     tmp_port_path = f"{port_file}.{os.getpid()}.tmp"

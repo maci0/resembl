@@ -49,14 +49,16 @@ curl -s "http://127.0.0.1:$port/find" \
 | ------ | ---- | ------- |
 | `POST` | `/find` | Find matches for one query. |
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
+| `POST` | `/find-pinned` | Experimental, for `service/`: a find that succeeds only while the SQLite index digest and the runtime manifest match the request. |
+| `GET` | `/runtime-generation` | Experimental: the process generation that `/find-pinned` requires. |
 | `GET` | `/health` | Whether this process can still serve a find. |
 | `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
 
-The two `POST` endpoints are read-only, and the path is matched verbatim: a
+The `POST` endpoints are read-only, and the path is matched verbatim: a
 query string makes `/find?x=1` an unknown path, answered `404`. `PUT`,
 `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405` on any path (with
-an `Allow: POST` header), as is a `GET` to any path other than `/health` and
-`/metrics`. A `HEAD` answer carries those headers and no body bytes, as
+an `Allow: POST` header), as is a `GET` to any path other than `/health`,
+`/metrics` and `/runtime-generation`. A `HEAD` answer carries those headers and no body bytes, as
 `HEAD` requires. Any other verb is answered by the stdlib base class with
 `501` and an HTML body. Every response this server produces itself, success or
 error, is `Content-Type: application/json`, except `/metrics`.

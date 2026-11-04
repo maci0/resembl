@@ -171,6 +171,16 @@ class TestCfgExtract(unittest.TestCase):
         cfg = cfg_extract(code)
         self.assertGreaterEqual(cfg["num_blocks"], 2)
 
+    def test_inline_label_branch_matches_separate_label(self):
+        """An instruction on a label line has the same control flow."""
+        for instruction in ("JMP end", "JZ end", "RET"):
+            with self.subTest(instruction=instruction):
+                inline = f"start: {instruction}\nMOV EAX, 1\nend: RET"
+                separate = f"start:\n{instruction}\nMOV EAX, 1\nend:\nRET"
+                self.assertEqual(cfg_extract(inline), cfg_extract(separate))
+                compact = f"start:{instruction}\nMOV EAX, 1\nend:RET"
+                self.assertEqual(cfg_extract(compact), cfg_extract(separate))
+
     def test_segment_override_not_a_label(self):
         """Memory operands with segment overrides must not split blocks.
 

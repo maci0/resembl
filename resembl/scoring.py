@@ -1075,18 +1075,17 @@ def cfg_extract(code: str) -> dict:
         # followed by ':'.  Checking the leading word alone keeps memory
         # operands with segment overrides (e.g. ``mov eax, [fs:0]``) from
         # being misread as labels and needlessly splitting the block.
-        is_label = len(first_word) > 1 and first_word.endswith(":")
-        if is_label:
-            label_name = first_word[:-1]
-            remainder = stripped[len(first_word) :].strip()
+        label_name, separator, _suffix = first_word.partition(":")
+        if label_name and separator:
+            remainder = stripped[len(label_name) + 1 :].strip()
 
             if current_block:
                 blocks.append(current_block)
                 current_block = []
             label_to_block[label_name] = len(blocks)
-            if remainder:
-                current_block.append(remainder)
-            continue
+            if not remainder:
+                continue
+            stripped = remainder
 
         current_block.append(stripped)
 

@@ -70,6 +70,8 @@ SUBMODULES = frozenset(
         "minhash",
         "models",
         "paths",
+        "pinned_snapshot",
+        "runtime_attestation",
         "scoring",
         "server",
         "status_colors",
