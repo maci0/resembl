@@ -139,15 +139,18 @@ def lsh_index_build(
             with index_build_lock(session):
                 _build_once(lsh, threshold, num_perm, progress)
             return lsh
-        except OperationalError:
+        except OperationalError as exc:
             session.rollback()  # abort the failed transaction before retrying
             if attempt + 1 < _BUILD_RETRIES:
                 logger.warning(
                     "Index build hit a database lock (another process may be "
-                    "writing); retrying in %ds…",
+                    "writing); retrying in %ds… (%s)",
                     _BUILD_RETRY_BACKOFF * (attempt + 1),
+                    exc,
                 )
                 time.sleep(_BUILD_RETRY_BACKOFF * (attempt + 1))
+            else:
+                logger.error("Index build attempt %d failed: %s", attempt + 1, exc)
     logger.error(
         "Index build failed repeatedly (another process may be writing to "
         "this database); retry once it is idle."

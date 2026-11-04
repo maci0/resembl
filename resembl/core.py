@@ -2754,8 +2754,8 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         source_engine = create_db_engine(source_url)
         source_session = Session(source_engine)
     except Exception as e:
-        logger.error("Failed to open source database: %s", e)
-        return {"error": str(e)}
+        logger.exception("Failed to open source database %r: %s", source_db_path, e)
+        return {"error": f"failed to open source database {source_db_path}: {e}"}
 
     added = 0
     updated = 0
@@ -2839,11 +2839,12 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 )
                 try:
                     packed = minhash_pack(code_create_minhash(source_snippet.code))
-                except Exception:
+                except Exception as recompute_exc:
                     logger.warning(
                         "Skipping source snippet %s: corrupt fingerprint and "
-                        "no recomputable code.",
+                        "no recomputable code (%s).",
                         source_snippet.checksum,
+                        recompute_exc,
                     )
                     skipped += 1
                     return
@@ -2944,7 +2945,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         if added:
             _fingerprint_stamps_clear(session)
     except Exception as e:
-        logger.exception("Merge failed: %s", e)
+        logger.exception("Merge failed for %r: %s", source_db_path, e)
         # Chunks already through ``flush_new_rows`` are committed (it commits
         # as each chunk fills), so a failure can leave a partial merge behind.
         # End the aborted transaction so the caller's session stays usable,

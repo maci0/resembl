@@ -337,11 +337,30 @@ def index_build_lock(session: Session) -> Iterator[None]:
 
 
 def lsh_meta_get(session: Session) -> tuple[float, int] | None:
-    """Return ``(threshold, num_perm)`` of the built index, or ``None``."""
+    """Return ``(threshold, num_perm)`` of the built index, or ``None``.
+
+    A missing ``lsh_meta`` table (pre-migration database) reads as no
+    index, so the caller rebuilds it.  Any other database error (a
+    ``database is locked`` during a concurrent build, a dropped column)
+    is a different signal: returning ``None`` there would make the
+    caller rebuild an index that already exists, and the rebuild's
+    ``lsh_meta_set`` overwrites the winner's metadata while its rows
+    are still being written — silently serving a fraction of matches.
+    Log the failure and re-raise so the caller fails instead of
+    rebuilding on a transient lock.
+    """
     try:
         row = session.execute(text(_META_SELECT)).one_or_none()
-    except OperationalError:  # table missing on pre-migration DBs
-        return None
+    except OperationalError as exc:
+        message = str(exc).lower()
+        if "no such table" in message or "does not exist" in message or "doesn't exist" in message:
+            return None
+        logger.error(
+            "Could not read the LSH index metadata: %s. "
+            "Failing instead of rebuilding a possibly-current index.",
+            exc,
+        )
+        raise
     if row is None:
         return None
     return float(row[0]), int(row[1])
