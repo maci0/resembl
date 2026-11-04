@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import typer
 from rich.console import Console
+from rich.markup import escape as _markup_escape
 from rich.panel import Panel
 from rich.progress import track
 from rich.table import Table
@@ -352,6 +353,40 @@ def _echo(message: object, **kwargs: Any) -> None:
         console.print(message, **kwargs)
 
 
+#: Code points dropped from text before it is shown on a terminal: C0 controls
+#: except tab and newline (so a multi-line query still reads), carriage return
+#: (it overwrites the line so far, which spoofs what was printed before it),
+#: DEL, and the C1 range.  ESC goes with them, which is what stops a stored
+#: name from smuggling ANSI sequences (clear screen, write a fake prompt, set
+#: the window title) into the viewer's terminal.
+_DISPLAY_STRIP = dict.fromkeys(
+    [*range(0x09), 0x0B, 0x0C, 0x0D, *range(0x0E, 0x20), 0x7F, *range(0x80, 0xA0)],
+    None,
+)
+
+
+def _strip_controls(text: str) -> str:
+    """Return *text* with terminal control characters removed.
+
+    Names and other database text are untrusted on the way out as well as in:
+    a shared or merged database can carry a name with raw ESC bytes that would
+    rewrite the viewer's screen.  Tab and newline survive (they are how
+    multi-line queries render); everything else below a space, carriage
+    return, DEL and the C1 range go.
+    """
+    return text.translate(_DISPLAY_STRIP)
+
+
+def _display(text: str) -> str:
+    """Return *text* safe to embed in a rich-markup string.
+
+    Drops terminal controls (see :func:`_strip_controls`) and escapes rich's
+    bracket markup, so a stored name like ``[bold]`` reaches the terminal as
+    literal text instead of restyling the output it ships in.
+    """
+    return _markup_escape(_strip_controls(text))
+
+
 def _zone_get(name: str | None) -> tzinfo | None:
     """Return the IANA zone *name* resolves to, or ``None`` for the local zone.
 
@@ -527,7 +562,7 @@ def _snippet_table(rows: Iterable[tuple[str, Sequence[str]]], title: str, start:
     table.add_column("Checksum", style="bold")
     table.add_column("Names")
     for i, (checksum, names) in enumerate(rows, start):
-        table.add_row(str(i), checksum[:12] + "…", ", ".join(names))
+        table.add_row(str(i), checksum[:12] + "…", ", ".join(_display(n) for n in names))
     return table
 
 
@@ -754,7 +789,7 @@ def _render_find_payload(payload: dict) -> None:
             table.add_row(
                 str(i),
                 match["checksum"][:12] + "…",
-                ", ".join(match["names"]),
+                ", ".join(_display(n) for n in match["names"]),
                 f"[{color}]{score:.2f}[/{color}]",
             )
         _echo(table)
@@ -813,13 +848,16 @@ def serve(
     except (ValueError, IndexBuildError) as e:
         # ValueError: another serve process already owns this database;
         # IndexBuildError: the warm-up migration/index build failed.
-        err_console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
     except OSError as e:
         # e.g. --port already in use by another process.
-        err_console.print(f"[red]Error:[/red] could not bind {host}:{port}: {e.strerror or e}")
+        err_console.print(
+            f"[red]Error:[/red] could not bind {_display(host)}:{port}: "
+            f"{_display(str(e.strerror or e))}"
+        )
         raise typer.Exit(code=1) from e
-    _echo(f"[dim]resembl server listening on {host}:{httpd.server_address[1]}[/dim]")
+    _echo(f"[dim]resembl server listening on {_display(host)}:{httpd.server_address[1]}[/dim]")
 
     # Service managers (systemd, Docker stop, kill) send SIGTERM, whose
     # default disposition kills the process without running the atexit
@@ -867,7 +905,7 @@ def _fail(
     if _output_choice.get() == "json":
         _write_error(resolved, message, hint)
     else:
-        err_console.print(f"[red]Error:[/red] {message}")
+        err_console.print(f"[red]Error:[/red] {_display(message)}")
     raise typer.Exit(code=code)
 
 
@@ -876,7 +914,7 @@ def _emit_kept_error(message: str) -> None:
     if _output_choice.get() == "json":
         _write_error("failure", message, "")
         return
-    err_console.print(f"[red]Error:[/red] {message}")
+    err_console.print(f"[red]Error:[/red] {_display(message)}")
 
 
 def _confirm(prompt: str, force: bool) -> None:
@@ -889,7 +927,7 @@ def _confirm(prompt: str, force: bool) -> None:
             kind="confirmation_required",
             hint="Pass --force to proceed without a prompt.",
         )
-    typer.confirm(prompt, abort=True)
+    typer.confirm(_strip_controls(prompt), abort=True)
 
 
 def _validate_find_params(
@@ -978,14 +1016,14 @@ def _resolve_checksum(prefix: str) -> str | None:
     ).all()
 
     if len(candidate_checksums) == 0:
-        err_console.print(f"[red]Error:[/red] No snippet found matching '{prefix}'.")
+        err_console.print(f"[red]Error:[/red] No snippet found matching '{_display(prefix)}'.")
         return None
     if len(candidate_checksums) > 1:
         total = state.session.exec(
             select(func.count(SnippetModel.checksum)).where(like_expr)  # type: ignore[arg-type]
         ).one()
         err_console.print(
-            f"[red]Error:[/red] Ambiguous prefix '{prefix}' matches {total} snippets."
+            f"[red]Error:[/red] Ambiguous prefix '{_display(prefix)}' matches {total} snippets."
         )
         return None
     return candidate_checksums[0]
@@ -1019,7 +1057,7 @@ def _apply_snippet_field_mutation(
     else:
         _echo(
             f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-            f"now has {plural}: {values}"
+            f"now has {plural}: {', '.join(_display(v) for v in values)}"
         )
 
 
@@ -1145,7 +1183,8 @@ def app_callback(
         # renderers branch on this value, so an unrecognized one used to
         # print a table the caller had asked not to get, with exit 0.
         err_console.print(
-            f"[red]Error:[/red] --format must be one of {', '.join(FORMATS)}, got '{state.format}'."
+            f"[red]Error:[/red] --format must be one of {', '.join(FORMATS)}, "
+            f"got '{_display(state.format)}'."
         )
         raise typer.Exit(code=2)
     if state.format == "json":
@@ -1157,7 +1196,7 @@ def app_callback(
     try:
         state.tz = _zone_get(tz_name)
     except ValueError as e:
-        err_console.print(f"[red]Error:[/red] {e}.")
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}.")
         raise typer.Exit(code=2) from e
     # serve opens the database itself, and not at all under --stateless.
     if ctx.invoked_subcommand != "serve":
@@ -1178,7 +1217,8 @@ def _db_open() -> None:
         # from the same resolver the engine used, so the message names the
         # database that actually failed.
         err_console.print(
-            f"[red]Error:[/red] cannot open the database ({db_url_mask(db_url_get())}): {e}"
+            f"[red]Error:[/red] cannot open the database "
+            f"({_display(db_url_mask(db_url_get()))}): {_display(str(e))}"
         )
         raise typer.Exit(code=1) from e
     _close_active_session()
@@ -1218,7 +1258,7 @@ def add(
         else:
             _echo(
                 f"[green]✓[/green] Snippet [bold]{snippet.checksum[:12]}…[/bold] "
-                f"now has names: {snippet.name_list}"
+                f"now has names: {', '.join(_display(n) for n in snippet.name_list)}"
             )
     else:
         if state.format in ("json", "csv"):
@@ -1239,7 +1279,7 @@ def export_cmd(
     try:
         result = snippet_export(state.session, directory)
     except OSError as e:
-        err_console.print(f"[red]Error:[/red] Export failed: {e}")
+        err_console.print(f"[red]Error:[/red] Export failed: {_display(str(e))}")
         raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
@@ -1270,7 +1310,7 @@ def export_yara_cmd(
     try:
         result = snippet_export_yara(state.session, output_file)
     except OSError as e:
-        err_console.print(f"[red]Error:[/red] YARA export failed: {e}")
+        err_console.print(f"[red]Error:[/red] YARA export failed: {_display(str(e))}")
         raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
@@ -1348,7 +1388,7 @@ def import_cmd(
             )
         file_paths.sort()
     else:
-        err_console.print(f"[red]Error:[/red] Directory not found: {path}")
+        err_console.print(f"[red]Error:[/red] Directory not found: {_display(path)}")
         raise typer.Exit(code=1)
 
     if not file_paths:
@@ -1358,7 +1398,7 @@ def import_cmd(
         # user meant to load.  The same error the missing-directory case
         # gives, with the reason spelled out.
         err_console.print(
-            f"[red]Error:[/red] No .asm or .txt files found in {path} "
+            f"[red]Error:[/red] No .asm or .txt files found in {_display(path)} "
             "(searched recursively, case-insensitive)."
         )
         raise typer.Exit(code=1)
@@ -1537,13 +1577,14 @@ def list_cmd(
         if len(parts) != 2 or not all(part.isdigit() for part in parts):
             err_console.print(
                 "[red]Error:[/red] Invalid --range: use start-end (e.g., 10-30), "
-                f"got '{range_str}'."
+                f"got '{_display(range_str)}'."
             )
             raise typer.Exit(code=USAGE_ERROR)
         start, end = map(int, parts)
         if end < start:
             err_console.print(
-                f"[red]Error:[/red] Invalid --range '{range_str}': start must not exceed end."
+                f"[red]Error:[/red] Invalid --range '{_display(range_str)}': "
+                "start must not exceed end."
             )
             raise typer.Exit(code=USAGE_ERROR)
 
@@ -1616,7 +1657,9 @@ def show(
 
     snippet = snippet_get(state.session, resolved)
     if not snippet:
-        err_console.print(f"[red]Error:[/red] Snippet with checksum {resolved} not found.")
+        err_console.print(
+            f"[red]Error:[/red] Snippet with checksum {_display(resolved)} not found."
+        )
         raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
@@ -1636,7 +1679,7 @@ def show(
         _echo(
             Panel(
                 syntax,
-                title=f"[bold]{', '.join(snippet.name_list)}[/bold]",
+                title=f"[bold]{', '.join(_display(n) for n in snippet.name_list)}[/bold]",
                 subtitle=snippet.checksum[:16] + "…",
                 border_style=ACCENT,
             )
@@ -1657,7 +1700,9 @@ def rm(
         force,
     )
     if not snippet_delete(state.session, resolved, quiet=state.quiet):
-        err_console.print(f"[red]Error:[/red] Snippet with checksum '{resolved}' not found.")
+        err_console.print(
+            f"[red]Error:[/red] Snippet with checksum '{_display(resolved)}' not found."
+        )
         raise typer.Exit(code=1)
 
 
@@ -1670,7 +1715,7 @@ def stats() -> None:
         # e.g. fingerprints written at mixed permutation counts (a merge
         # clears the stamps; the healing reindex runs on `find`, not here).
         # Report cleanly instead of a traceback — same contract as compare.
-        err_console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -1720,9 +1765,9 @@ def verify() -> None:
         table.add_row("Fingerprint version", str(result["fingerprint_version"]))
         _echo(table)
         for warning in result["warnings"]:
-            _echo(f"[yellow]• {warning}[/yellow]")
+            _echo(f"[yellow]• {_display(warning)}[/yellow]")
         for issue in result["issues"]:
-            _echo(f"[red]• {issue}[/red]")
+            _echo(f"[red]• {_display(issue)}[/red]")
         if result["issues"]:
             raise typer.Exit(code=1)
         if not result["warnings"]:
@@ -1756,7 +1801,7 @@ def reindex(
         ),
     )
     if "error" in result:
-        err_console.print(f"[red]Error:[/red] {result['error']}")
+        err_console.print(f"[red]Error:[/red] {_display(str(result['error']))}")
         raise typer.Exit(code=1)
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -1877,7 +1922,7 @@ def find(
             progress=build_progress,
         )
     except IndexBuildError as e:
-        err_console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
 
     _render_find_payload(snippet_matches_payload(num_candidates, matches))
@@ -1955,14 +2000,14 @@ def find_batch(
                     }
                 )
         except IndexBuildError as e:
-            err_console.print(f"[red]Error:[/red] {e}")
+            err_console.print(f"[red]Error:[/red] {_display(str(e))}")
             raise typer.Exit(code=1) from e
 
     if state.format in ("json", "csv"):
         _echo_format(results)
     else:
         for i, result in enumerate(results, 1):
-            _echo(f"[bold]{i}. {result['query']}[/bold]")
+            _echo(f"[bold]{i}. {_display(result['query'])}[/bold]")
             if "error" in result:
                 # A per-query server-side failure (isolated by /find-batch)
                 # must render as that query's error, not crash the whole
@@ -1987,7 +2032,7 @@ def search(
         _echo_format([{"checksum": s.checksum, "names": s.name_list} for s in snippets])
     else:
         found = f"{len(snippets)}+" if len(snippets) >= limit else str(len(snippets))
-        _echo(f"[dim]Found {found} snippets matching '{pattern}'.[/dim]")
+        _echo(f"[dim]Found {found} snippets matching '{_display(pattern)}'.[/dim]")
         if snippets:
             _echo(_snippet_table(((s.checksum, s.name_list) for s in snippets), "Search Results"))
         elif not found.endswith("+"):
@@ -2012,7 +2057,7 @@ def compare(
         comparison = snippet_compare(state.session, resolved1, resolved2)
     except ValueError as e:
         # e.g. a corrupt fingerprint (disk rot) — report cleanly, no traceback.
-        err_console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
     if not comparison:
         err_console.print("[red]Error:[/red] One or both snippets could not be found.")
@@ -2028,8 +2073,10 @@ def compare(
 
     _echo(
         Panel(
-            f"[bold]Snippet 1:[/bold] {s1['names']} [dim]({s1['checksum'][:12]}…)[/dim]\n"
-            f"[bold]Snippet 2:[/bold] {s2['names']} [dim]({s2['checksum'][:12]}…)[/dim]",
+            f"[bold]Snippet 1:[/bold] {_display(str(s1['names']))} "
+            f"[dim]({s1['checksum'][:12]}…)[/dim]\n"
+            f"[bold]Snippet 2:[/bold] {_display(str(s2['names']))} "
+            f"[dim]({s2['checksum'][:12]}…)[/dim]",
             title="Snippet Comparison",
             border_style=ACCENT,
         )
@@ -2110,13 +2157,13 @@ def backup(
     try:
         result = db_backup(state.session, directory, keep=keep)
     except (ValueError, OSError) as e:
-        err_console.print(f"[red]Error:[/red] Backup failed: {e}")
+        err_console.print(f"[red]Error:[/red] Backup failed: {_display(str(e))}")
         raise typer.Exit(code=1) from e
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
         rows = [
-            ("Backup", result["backup"]),
+            ("Backup", _display(result["backup"])),
             ("Snippets", str(result["num_snippets"])),
         ]
         if result.get("verified") is False:
@@ -2139,7 +2186,7 @@ def verify_backup_cmd(
 ) -> None:
     """Check a backup opens and holds its manifest's snippet count."""
     if not os.path.isfile(backup_path):
-        err_console.print(f"[red]Error:[/red] File not found: {backup_path}")
+        err_console.print(f"[red]Error:[/red] File not found: {_display(backup_path)}")
         raise typer.Exit(code=1)
     result = db_verify_backup(state.session, backup_path)
     if state.format in ("json", "csv"):
@@ -2147,7 +2194,7 @@ def verify_backup_cmd(
     else:
         rows = [("Snippets", str(result["num_snippets"]))]
         rows.append(("OK", "[green]yes[/green]" if result["ok"] else "[red]no[/red]"))
-        rows.extend(("Issue", issue) for issue in result["issues"])
+        rows.extend(("Issue", _display(issue)) for issue in result["issues"])
         _echo_kv_table("Backup Verification", rows)
     if not result["ok"]:
         raise typer.Exit(code=1)
@@ -2165,16 +2212,16 @@ def merge(
     if "://" not in source:
         source_path = os.path.abspath(source)
         if not os.path.exists(source_path):
-            err_console.print(f"[red]Error:[/red] File not found: {source_path}")
+            err_console.print(f"[red]Error:[/red] File not found: {_display(source_path)}")
             raise typer.Exit(code=1)
 
     if state.format not in ("json", "csv"):
         # A full source URL may embed credentials; mask them for display.
-        _echo(f"Merging from [bold]{db_url_mask(source_path)}[/bold]...")
+        _echo(f"Merging from [bold]{_display(db_url_mask(source_path))}[/bold]...")
     result = db_merge(state.session, source_path)
 
     if "error" in result:
-        err_console.print(f"[red]Error:[/red] {result['error']}")
+        err_console.print(f"[red]Error:[/red] {_display(str(result['error']))}")
         raise typer.Exit(code=1)
 
     if state.format in ("json", "csv"):
@@ -2296,12 +2343,12 @@ def collection_create_cmd(
         # Driver text carries the SQL statement and its bind parameters, which
         # must not reach the terminal; the name is the caller's own input.
         logger.error("Could not create collection %r: %s", name, e)
-        err_console.print(f"[red]Error:[/red] could not create collection '{name}'.")
+        err_console.print(f"[red]Error:[/red] could not create collection '{_display(name)}'.")
         raise typer.Exit(code=1) from e
     if already_existed:
-        _echo(f"[green]✓[/green] Collection [bold]{col.name}[/bold] already exists.")
+        _echo(f"[green]✓[/green] Collection [bold]{_display(col.name)}[/bold] already exists.")
     else:
-        _echo(f"[green]✓[/green] Created collection [bold]{col.name}[/bold]")
+        _echo(f"[green]✓[/green] Created collection [bold]{_display(col.name)}[/bold]")
 
 
 @collection_app.command("delete")
@@ -2310,9 +2357,9 @@ def collection_delete_cmd(
 ) -> None:
     """Delete a collection (snippets are kept but unassigned)."""
     if collection_delete(state.session, name, quiet=state.quiet):
-        _echo(f"[green]✓[/green] Deleted collection [bold]{name}[/bold]")
+        _echo(f"[green]✓[/green] Deleted collection [bold]{_display(name)}[/bold]")
     else:
-        err_console.print(f"[red]Error:[/red] Collection '{name}' not found.")
+        err_console.print(f"[red]Error:[/red] Collection '{_display(name)}' not found.")
         raise typer.Exit(code=1)
 
 
@@ -2338,8 +2385,8 @@ def collection_list_cmd() -> None:
     table.add_column("Created", style="dim")
     for col in cols:
         table.add_row(
-            col["name"],
-            col["description"],
+            _display(col["name"]),
+            _display(col["description"]),
             str(col["snippet_count"]),
             _format_created_at(col["created_at"], "%Y-%m-%d", state.tz),
         )
@@ -2366,7 +2413,7 @@ def collection_show_cmd(
             # Keep the structured forms a document even when empty.
             _echo_format([])
         else:
-            _echo(f"[dim]No snippets in collection '{name}'.[/dim]")
+            _echo(f"[dim]No snippets in collection '{_display(name)}'.[/dim]")
         return
 
     def rows() -> Iterator[tuple[str, str]]:
@@ -2397,11 +2444,11 @@ def collection_show_cmd(
     else:
         # The table is built from the streamed (checksum, names) rows; the
         # ORM objects and their ``code`` strings never enter memory.
-        table = Table(title=f"Collection: {name}", title_style=f"bold {ACCENT}")
+        table = Table(title=f"Collection: {_display(name)}", title_style=f"bold {ACCENT}")
         table.add_column("Checksum", style="dim")
         table.add_column("Names", style="bold")
         for checksum, raw in rows():
-            table.add_row(checksum[:12] + "…", ", ".join(json.loads(raw)))
+            table.add_row(checksum[:12] + "…", ", ".join(_display(n) for n in json.loads(raw)))
         _echo(table)
 
 
@@ -2418,8 +2465,8 @@ def collection_add_cmd(
     if snippet:
         names = ", ".join(snippet.name_list)
         _echo(
-            f"[green]✓[/green] Added [bold]{names}[/bold] to collection "
-            f"[bold]{collection_name}[/bold]"
+            f"[green]✓[/green] Added [bold]{_display(names)}[/bold] to collection "
+            f"[bold]{_display(collection_name)}[/bold]"
         )
     else:
         if not state.quiet:
@@ -2440,7 +2487,7 @@ def collection_remove_cmd(
     snippet = collection_remove_snippet(state.session, resolved, quiet=state.quiet)
     if snippet:
         names = ", ".join(snippet.name_list)
-        _echo(f"[green]✓[/green] Removed [bold]{names}[/bold] from its collection")
+        _echo(f"[green]✓[/green] Removed [bold]{_display(names)}[/bold] from its collection")
     else:
         if not state.quiet:
             err_console.print("[red]Error:[/red] Failed to remove snippet from collection.")
@@ -2511,7 +2558,7 @@ def config_get_cmd(
         # Same rule as `config set`: an unknown key is a typo, not a value.
         # getattr's default would have answered "None" and exited 0.
         err_console.print(
-            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"[red]Error:[/red] Invalid configuration key: '{_display(key)}'. "
             f"Valid keys: {', '.join(DEFAULTS)}."
         )
         raise typer.Exit(code=USAGE_ERROR)
@@ -2520,7 +2567,7 @@ def config_get_cmd(
     if state.format in ("json", "csv"):
         _echo_format({key: value})
     else:
-        _echo(str(value))
+        _echo(_display(str(value)))
 
 
 @config_app.command("set")
@@ -2531,7 +2578,7 @@ def config_set_cmd(
     """Set a configuration value."""
     if key not in DEFAULTS:
         err_console.print(
-            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"[red]Error:[/red] Invalid configuration key: '{_display(key)}'. "
             f"Valid keys: {', '.join(DEFAULTS)}."
         )
         raise typer.Exit(code=USAGE_ERROR)
@@ -2540,8 +2587,8 @@ def config_set_cmd(
         typed_value: int | float | str = type(default_value)(value)
     except (TypeError, ValueError, OverflowError) as exc:
         err_console.print(
-            f"[red]Error:[/red] Invalid value for '{key}': expected "
-            f"{type(default_value).__name__}, got '{value}'."
+            f"[red]Error:[/red] Invalid value for '{_display(key)}': expected "
+            f"{type(default_value).__name__}, got '{_display(value)}'."
         )
         raise typer.Exit(code=USAGE_ERROR) from exc
     # "nan"/"inf" coerce to a float cleanly but would poison every downstream
@@ -2551,14 +2598,17 @@ def config_set_cmd(
     # with the same checker the config file is read through (config.validate_value).
     problem = validate_value(key, typed_value)
     if problem is not None:
-        err_console.print(f"[red]Error:[/red] Invalid value for '{key}': {problem}, got '{value}'.")
+        err_console.print(
+            f"[red]Error:[/red] Invalid value for '{_display(key)}': "
+            f"{_display(problem)}, got '{_display(value)}'."
+        )
         raise typer.Exit(code=USAGE_ERROR)
     try:
         new_config = update_config(key, typed_value)
     except OSError as e:
-        err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
+        err_console.print(f"[red]Error:[/red] cannot write the config file: {_display(str(e))}")
         raise typer.Exit(code=1) from e
-    _echo(f"[green]✓[/green] Set [bold]{key}[/bold] to {new_config[key]}")
+    _echo(f"[green]✓[/green] Set [bold]{_display(key)}[/bold] to {_display(str(new_config[key]))}")
     state.config.update(new_config)
 
 
@@ -2569,16 +2619,16 @@ def config_unset_cmd(
     """Unset a configuration value."""
     if key not in DEFAULTS:
         err_console.print(
-            f"[red]Error:[/red] Invalid configuration key: '{key}'. "
+            f"[red]Error:[/red] Invalid configuration key: '{_display(key)}'. "
             f"Valid keys: {', '.join(DEFAULTS)}."
         )
         raise typer.Exit(code=USAGE_ERROR)
     try:
         new_config = remove_config_key(key)
     except OSError as e:
-        err_console.print(f"[red]Error:[/red] cannot write the config file: {e}")
+        err_console.print(f"[red]Error:[/red] cannot write the config file: {_display(str(e))}")
         raise typer.Exit(code=1) from e
-    _echo(f"[green]✓[/green] Unset [bold]{key}[/bold], returning to default.")
+    _echo(f"[green]✓[/green] Unset [bold]{_display(key)}[/bold], returning to default.")
     state.config.update(new_config)
 
 

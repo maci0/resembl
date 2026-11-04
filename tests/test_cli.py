@@ -1031,5 +1031,45 @@ class TestSessionLifecycle(unittest.TestCase):
         register.assert_not_called()
 
 
+class TestDisplaySanitization(unittest.TestCase):
+    """Untrusted names reach the terminal as text, never as control codes."""
+
+    def test_markup_is_escaped_not_interpreted(self):
+        evil = "x " + chr(91) + "bold red" + chr(93) + "INJECTED" + chr(91) + "/" + chr(93) + " y"
+        escaped = cli._display(evil)
+        self.assertNotEqual(escaped, evil)
+        self.assertIn(chr(92) + chr(91), escaped)
+        self.assertIn("INJECTED", escaped)
+
+    def test_ansi_and_carriage_return_are_dropped(self):
+        hostile = "a" + chr(27) + "[31mRED" + chr(27) + "[0m" + chr(13) + "b" + chr(7)
+        cleaned = cli._strip_controls(hostile)
+        self.assertEqual(cleaned, "a[31mRED[0mb")
+        self.assertNotIn(chr(27), cleaned)
+        self.assertNotIn(chr(13), cleaned)
+        self.assertNotIn(chr(7), cleaned)
+
+    def test_plain_text_and_newlines_survive(self):
+        self.assertEqual(cli._strip_controls("plain name"), "plain name")
+        self.assertEqual(
+            cli._strip_controls("a" + chr(9) + "b" + chr(10) + "c"),
+            "a" + chr(9) + "b" + chr(10) + "c",
+        )
+        self.assertEqual(cli._display("plain"), "plain")
+
+    def test_snippet_table_renders_hostile_name_literally(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        evil = "x " + chr(91) + "bold red" + chr(93) + "INJECTED" + chr(91) + "/" + chr(93)
+        table = cli._snippet_table([("a" * 64, [evil])], "Snippets")
+        sink = StringIO()
+        Console(file=sink, force_terminal=True, width=80, highlight=False).print(table)
+        out = sink.getvalue()
+        self.assertIn("INJECTED", out)
+        self.assertIn(chr(91) + "bold red" + chr(93), out, "brackets must survive as literal text")
+
+
 if __name__ == "__main__":
     unittest.main()
