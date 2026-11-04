@@ -187,11 +187,13 @@ def _db_content_hash(session: Session) -> str:
     keyed by checksum, so they need no separate hashing.
     """
     digest = hashlib.sha256()
+    # Stream: the old ``.all()`` materialized every row (O(corpus) memory)
+    # just to hash it.  Iterating the result keeps this O(1) extra memory.
     rows = session.exec(
         select(Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection).order_by(
             Snippet.checksum
         )
-    ).all()
+    )
     for checksum, names, tags, collection in rows:
         for value in (checksum, names, tags, collection or ""):
             digest.update(value.encode("utf-8"))
@@ -1680,11 +1682,12 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     so a broad pattern does not drag every match's code through the
     ORM before verification.
     """
+    if limit <= 0:
+        # ``checksums[:-1]`` would silently drop only the last match, so a
+        # non-positive limit must bound the result to zero rows.
+        return []
     target = name_normalize(pattern)
     folded_target = target.casefold()
-    candidates = session.exec(
-        select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum)
-    ).all()
     # Verification is case-insensitive, as the probe is: candidate
     # generation and this check must agree on what "matches" means, or an
     # upper-case pattern finds no row its own probe admitted.  casefold
@@ -1695,18 +1698,34 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     # A non-ASCII alias may still be the decomposed spelling (a row from
     # before names were composed, or from macOS), and a substring of that
     # raw spelling is not a substring of the composed form.
-    if limit <= 0:
-        # ``checksums[:-1]`` would silently drop only the last match, so a
-        # non-positive limit must bound the result to zero rows.
-        return []
-    checksums = [
-        checksum
-        for checksum, names in candidates
-        if any(
-            folded_target in (stored if stored.isascii() else name_normalize(stored)).casefold()
-            for stored in json.loads(names)
+    # Stream in keyset batches (as _names_stream does) and stop as soon as
+    # ``limit`` verified matches are found: the old ``.all()`` materialized
+    # every (checksum, names) row, decoded every name and built the full
+    # match list before slicing to ``limit`` — O(corpus) memory and CPU for
+    # a page that needs the first ``limit`` hits.
+    checksums: list[str] = []
+    last: str | None = None
+    while len(checksums) < limit:
+        stmt = (
+            select(Snippet.checksum, Snippet.names)
+            .order_by(Snippet.checksum)
+            .limit(2000)
         )
-    ][:limit]
+        if last is not None:
+            stmt = stmt.where(Snippet.checksum > last)
+        rows = session.exec(stmt).all()
+        if not rows:
+            break
+        for checksum, names in rows:
+            if any(
+                folded_target
+                in (stored if stored.isascii() else name_normalize(stored)).casefold()
+                for stored in json.loads(names)
+            ):
+                checksums.append(checksum)
+                if len(checksums) >= limit:
+                    break
+        last = rows[-1][0]
     if not checksums:
         return []
     snippets_by_checksum = _snippets_by_checksums(session, checksums)
@@ -2473,9 +2492,11 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             # not the rows promised (half-overwritten, truncated-then-padded
             # copy).
             digest = hashlib.sha256()
+            # Streamed, not fetchall(): a large backup would otherwise be
+            # materialized whole just to hash it (same fix as _db_content_hash).
             for row in connection.execute(
                 "SELECT checksum, names, tags, collection FROM snippet ORDER BY checksum"
-            ).fetchall():
+            ):
                 for value in row:
                     digest.update(str(value or "").encode("utf-8"))
                     digest.update(b"\0")
