@@ -1134,6 +1134,17 @@ class _FindHandler(BaseHTTPRequestHandler):
             return 0.0
         return time.monotonic() - self._request_start
 
+    server_version = "Resembl"
+    sys_version = ""
+
+    def version_string(self) -> str:
+        """Return a generic server banner with no interpreter version.
+
+        The stdlib banner names the exact Python version, which is
+        fingerprinting material for any client that can reach the port.
+        """
+        return self.server_version
+
     def send_response(self, code: int, message: str | None = None) -> None:
         """Answer with *code*, counting the request and its latency first.
 
@@ -1143,6 +1154,18 @@ class _FindHandler(BaseHTTPRequestHandler):
         """
         _METRICS.record_request(self.route or self.path, code, self.request_seconds())
         super().send_response(code, message)
+
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """Answer a stdlib error with the JSON envelope, never HTML.
+
+        ``BaseHTTPRequestHandler.send_error`` emits an HTML page with no
+        hardening headers, which a browser pointed at the port would render
+        and a JSON client could not parse.  Malformed request lines reach
+        here before any handler runs, so the envelope is the only answer
+        that carries the same headers as :meth:`_respond`.
+        """
+        del explain
+        self._respond(code, {"error": message or "error"})
 
     def __getattr__(self, name: str) -> Any:
         """Answer every unhandled method with the JSON 405 envelope.
@@ -1631,6 +1654,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         # object sources outright.
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         # Keep cached copies of snippet-derived responses out of browser and
         # intermediary caches.
         self.send_header("Cache-Control", "no-store")
