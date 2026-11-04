@@ -680,9 +680,6 @@ def code_tokenize(code_snippet: str, normalize: bool = True) -> list[str]:
     return code_tokenize_lexed(get_lexer().get_tokens(normalize_unicode(code_snippet)), normalize)
 
 
-# Weighted Shingling
-
-
 def _shingle_weight_tokens(tokens: Sequence[str]) -> int:
     """Return the insertion weight for a shingle given its token list.
 
@@ -710,9 +707,6 @@ def shingle_weight(shingle: str) -> int:
     return _shingle_weight_tokens(shingle.split())
 
 
-# Hybrid Scoring
-
-
 def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4) -> float:
     """Combine Jaccard (0-1) and Levenshtein (0-100) into a single 0-100 score.
 
@@ -738,9 +732,6 @@ def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4
     if not 0.0 <= jaccard_weight <= 1.0:
         raise ValueError(f"jaccard_weight must be in range, got {jaccard_weight!r}")
     return (jaccard * 100 * jaccard_weight) + (levenshtein * (1 - jaccard_weight))
-
-
-# CFG Extraction & Similarity
 
 
 def cfg_extract(code: str) -> dict:
@@ -817,14 +808,6 @@ def cfg_extract(code: str) -> dict:
 
     adj: dict[int, list[int]] = {i: [] for i in range(len(blocks))}
     for i, block in enumerate(blocks):
-        if not block:
-            # Defensive: the parser never emits a block with no lines (a
-            # label-only line creates no block at all, see above), so this
-            # guard is unreachable today.
-            if i + 1 < len(blocks):
-                adj[i].append(i + 1)
-            continue
-
         last_line = block[-1]
         words = last_line.split()
         mnemonic = words[0].upper() if words else ""
@@ -925,9 +908,6 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
         cosine_sim = dot / (mag1 * mag2)
 
     return (block_ratio + edge_ratio + cosine_sim) / 3.0
-
-
-# MinHash helpers
 
 
 def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:

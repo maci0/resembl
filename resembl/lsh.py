@@ -675,8 +675,6 @@ class ResemblLSH:
             )
         _ensure_tables_once(session)
 
-    # -- helpers -----------------------------------------------------------
-
     @staticmethod
     def _as_packed(value: bytes | MinHash) -> bytes:
         """Normalize a MinHash object or packed blob to packed bytes."""
@@ -686,8 +684,6 @@ class ResemblLSH:
 
     def _buckets(self, packed: bytes) -> list[str]:
         return band_buckets(packed, self.num_perm, self.b, self.r)
-
-    # -- mutation ----------------------------------------------------------
 
     def insert(self, key: str, value: bytes | MinHash, *, commit: bool = True) -> None:
         """Insert one fingerprint under *key* (MinHash or packed bytes).
@@ -764,8 +760,6 @@ class ResemblLSH:
         :func:`resembl.cache.lsh_index_purge`.
         """
         self.session.execute(text("DELETE FROM lsh_bucket WHERE checksum = :c"), {"c": checksum})
-
-    # -- query -------------------------------------------------------------
 
     def query(self, value: bytes | MinHash) -> list[str]:
         """Return the keys whose fingerprints share a band bucket with *value*.
