@@ -92,6 +92,24 @@ class TestDuckDBIntegration(unittest.TestCase):
         # start from a clean table so the counts are order-independent.
         lsh_index_clear(self.session)
 
+        # lsh_bucket.checksum is a foreign key to snippet.checksum, so the
+        # parent snippet rows must exist before their bucket rows.
+        from resembl.models import Snippet as _Snippet
+
+        self.session.add_all(
+            [
+                _Snippet(
+                    checksum=f"{i:064x}",
+                    names='["x"]',
+                    code="ret",
+                    minhash=b"123",
+                    tags="[]",
+                    collection=None,
+                )
+                for i in range(2500)
+            ]
+        )
+        self.session.commit()
         rows = [
             {
                 "band": i % 5,
@@ -168,13 +186,23 @@ class TestDuckDBIntegration(unittest.TestCase):
             max_size=200,
         )
         checksum = st.text(alphabet="0123456789abcdef", min_size=64, max_size=64)
+        # collection.name is VARCHAR(128) and the FK target, so the random
+        # collection value must fit that bound (the snippet column itself
+        # is TEXT, but the parent row is not).
+        col_strategy = st.none() | st.text(
+            alphabet=st.characters(
+                blacklist_categories=("Cs",),
+                blacklist_characters="\x00",
+            ),
+            max_size=20,
+        )
 
         @given(
             code=arbitrary,
             name=arbitrary,
             checksum=checksum,
             blob=st.binary(max_size=64),
-            col=st.none() | arbitrary,
+            col=col_strategy,
         )
         # No deadline: each example is a real DuckDB commit round-trip, so
         # wall-clock speed is a property of the machine and its load, not of
@@ -188,6 +216,22 @@ class TestDuckDBIntegration(unittest.TestCase):
             self.session.execute(
                 sqltext("DELETE FROM snippet WHERE checksum = :c"), {"c": checksum}
             )
+            self.session.commit()
+            # snippet.collection is a foreign key to collection.name, so a
+            # non-null collection needs its parent row first; repeat
+            # examples may reuse the same name, hence the duplicate guard.
+            if col is not None:
+                try:
+                    self.session.execute(
+                        sqltext(
+                            "INSERT INTO collection (name, description, created_at) "
+                            "VALUES (:n, '', '2024-01-01T00:00:00+00:00')"
+                        ),
+                        {"n": col},
+                    )
+                    self.session.commit()
+                except Exception:
+                    self.session.rollback()
             # Go through the real production fast path — this is the exact
             # statement builder that import/merge use, so escaping bugs (and
             # text() bind-marker misreads of literal ``$1`` / ``:0``) surface

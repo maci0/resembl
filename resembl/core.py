@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, func, select, text
 
@@ -1190,6 +1190,12 @@ def snippet_delete(session: Session, checksum: str, quiet: bool = False) -> bool
     # no later find would repair it.  The index metadata is read before the
     # writes because an unbuilt index has nothing to purge.
     purge_threshold = lsh_index_purge(session, checksum)
+    # Version history dies with its snippet (the foreign key without a
+    # database-level cascade — DuckDB's FK parser rejects ON DELETE
+    # actions — so the cleanup is explicit and in the same transaction).
+    session.execute(
+        delete(SnippetVersion).where(SnippetVersion.snippet_checksum == checksum)  # type: ignore[arg-type]
+    )
     session.delete(snippet)
     session.commit()
     if not quiet:
@@ -2850,6 +2856,26 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             if _source_lists_or_none(source_snippet) is None:
                 skipped += 1
                 return
+            # A source row may name a collection the source has no row for
+            # (a legacy database written before referential integrity was
+            # enforced).  The destination's foreign key would reject the
+            # insert, so materialize the collection row first — exactly as
+            # the collections pass above does for rows it can see.
+            if source_snippet.collection:
+                coll_name = name_normalize(source_snippet.collection)
+                if coll_name not in local_collections:
+                    new_col = Collection(
+                        name=coll_name,
+                        description="",
+                        created_at=timestamp_now(),
+                    )
+                    session.add(new_col)
+                    local_collections[coll_name] = new_col
+                    logger.warning(
+                        "Source snippet %s names missing collection %s; created it on merge.",
+                        source_snippet.checksum,
+                        coll_name,
+                    )
             try:
                 packed = minhash_ensure_packed(source_snippet.minhash)
             except ValueError:
@@ -2944,7 +2970,18 @@ def db_merge(session: Session, source_db_path: str) -> dict:
 
                 # Assign collection if the existing snippet doesn't have one
                 if not existing.collection and source_snippet.collection:
-                    existing.collection = source_snippet.collection
+                    # Same missing-collection guard as record_new: the
+                    # destination foreign key rejects a dangling name.
+                    coll_name = name_normalize(source_snippet.collection)
+                    if coll_name not in local_collections:
+                        new_col = Collection(
+                            name=coll_name,
+                            description="",
+                            created_at=timestamp_now(),
+                        )
+                        session.add(new_col)
+                        local_collections[coll_name] = new_col
+                    existing.collection = coll_name
                     session.add(existing)
             merge_chunk.clear()
 
