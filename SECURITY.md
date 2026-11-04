@@ -1,9 +1,10 @@
 # Security policy
 
-Last reviewed: 2026-11-04, against the tree at version 3.12.0
+Last reviewed: 2026-11-05, against the tree at version 3.12.0
 (`pyproject.toml:3`). This review covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
-risks R13-R16 in `docs/THREAT_MODEL.md` record the Go surface.
+risks R13-R17 in `docs/THREAT_MODEL.md` record the Go surface and the
+`backup` / `verify-backup` commands.
 
 The `serve` controls below (the loopback `Host` check, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, and the 1000-row
@@ -93,5 +94,13 @@ relies on, not configuration options.
   recomputed rather than unpickled. The failure path is not closed: a source
   that will not open makes `merge` print the driver's own error text, which
   can name the host and port it dialled.
+- **Backup directories are trusted.** `resembl backup` writes a full copy of
+  the SQLite corpus plus a per-backup manifest into a caller-chosen
+  directory, pruning to the newest `--keep` (default 7). `verify-backup`
+  checks tables and a snippet-count manifest, but there is no hash or
+  signature: a tampered backup with an edited manifest passes. Keep the
+  backup directory private (the manifest is mode `0600`, the backup file
+  is not) and treat any backup whose manifest you did not write as
+  untrusted (THREAT_MODEL.md R17).
 
 - note: see docs/THREAT_MODEL.md B9 and R13-R16 for the Go service. Experimental, deny-all by default, single shared bearer token, no per-caller audit, rotation by restart, engine must stay on loopback, runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.

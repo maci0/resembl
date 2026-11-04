@@ -1,12 +1,13 @@
 # resembl threat model
 
-Last reviewed: 2026-11-04, against the code at version 3.12.0
+Last reviewed: 2026-11-05, against the code at version 3.12.0
 (`pyproject.toml:3`). Every reference below was re-read in that tree on that
 date. The `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
 model has been re-reviewed for this release; the Go experimental service in
-`service/` (see `service/README.md`) is now in scope alongside the Python
-surfaces.
+`service/` (see `service/README.md`) is in scope alongside the Python
+surfaces, and the `backup` / `verify-backup` commands (`resembl/core.py:1922`,
+`resembl/core.py:2111`) are now modeled below (R17, assets).
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -45,6 +46,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`resembl/server.py:1416`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, and uptime | B1, B9 | Process internals (traffic volume, hit rate) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:730`); Go `GET /healthz` (`service/service.go:60`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:42`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:90`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with no integrity check beyond a snippet-count comparison | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, and compares the live snippet count against the per-backup manifest (`resembl/core.py:2111`); a missing manifest is an issue, not a failure, and a count mismatch is a hard failure |
 
 ## Attack surface
 
@@ -72,7 +74,7 @@ answers `404` (`resembl/server.py:728`).
 
 ### CLI surface
 
-`resembl` (`resembl/cli.py:113`) exposes 18 commands plus four
+`resembl` (`resembl/cli.py:113`) exposes 21 commands plus four
 sub-applications (`config` 5, `name` 2, `tag` 2, `collection` 6) registered at
 `resembl/cli.py:122`. The ones that take untrusted input from outside the
 tool's own process:
@@ -91,6 +93,13 @@ tool's own process:
   (`resembl/cli.py:896`, `resembl/cli.py:926`).
 - `add`, `show`, `rm`, `name *`, `tag *`, `collection *` write to the
   database.
+- `backup <dir>` writes a consistent SQLite copy of the corpus plus a
+  per-backup manifest (`<backup-stem>.json`, mode `0600`) into a
+  caller-chosen directory, pruning to the newest `--keep` (default 7)
+  (`resembl/cli.py:2032`, `resembl/core.py:1922`); `verify-backup <path>`
+  opens a backup read-only, checks the expected tables, and compares the
+  live snippet count against that manifest (`resembl/cli.py:2059`,
+  `resembl/core.py:2111`).
 
 `list` (`resembl/cli.py:1198`) prints every snippet in the corpus to stdout
 unless `--range` narrows it, and `verify` (`resembl/cli.py:1361`) counts
@@ -121,7 +130,7 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `RESEMBL_RUNTIME_MANIFEST` | `_handle_find_pinned` in `resembl/server.py` | Trusted verbatim; selects the file `resembl/runtime_attestation.py` checks loaded code against. The supervisor must keep it and the interpreter environment write-protected. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
-| `RESEMBL_SEED` | `resembl/core.py:1328`, `resembl/core.py:1368` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |
+| `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |
 | `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row. Refused unless it parses as ISO 8601. |
 | `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). |
 
@@ -137,8 +146,9 @@ server, and the standalone client cannot disagree about where they read from
 ### Files the tool writes
 
 The port file (`resembl/server.py:1012`), the config file
-(`resembl/config.py:222`), exported YARA rules (`resembl/core.py:1041`), and
-the database itself. Each is published with write-temp-then-rename
+(`resembl/config.py:222`), exported YARA rules (`resembl/core.py:1041`), the
+database itself, and database backups with their per-backup manifests
+(`resembl/core.py:1922`). Each is published with write-temp-then-rename
 (`resembl/config.py:245`, `resembl/server.py:1145`, `resembl/core.py:1043`).
 
 ## Trust boundaries
@@ -161,7 +171,7 @@ export it is embedded in generated YARA rules (`resembl/core.py:1028`).
 **B3, environment to runtime.** The variables above are read at call time and
 are never validated beyond being non-empty. `RESEMBL_SEED` and
 `RESEMBL_NOW` are the sharp two: neither is a path, and both change results
-without changing what the operator can see (`resembl/core.py:1368`,
+without changing what the operator can see (`resembl/diagnostics.py:61`,
 `resembl/models.py:48`).
 
 **B4, application to database.** The ORM parameterizes every query, so
@@ -247,6 +257,7 @@ network fetch at import.
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`resembl/server.py:1423`) |
+| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`resembl/core.py:1922`), per-backup manifest `<backup-stem>.json` mode `0600` |
 
 ## Threats per boundary
 
@@ -313,6 +324,14 @@ that is not private to the host.
 *Tampering.* `merge` accepts any source. Its rows, including names, tags,
 and collections, are written into the local corpus.
 
+*Tampering / information disclosure.* A backup in the backup directory is
+trusted on the strength of its filename and a snippet-count manifest. `verify-backup`
+(`resembl/core.py:2111`) opens the file read-only, checks expected tables, and
+compares the live count against the manifest, but there is no hash or signature:
+a tampered backup whose manifest is edited to match passes (R17). The manifest
+itself is written mode `0600` (`resembl/core.py:2050`) but is otherwise
+unauthenticated, so anyone who can write the backup directory can forge both.
+
 *Denial of service.* `import` has no cap on file count or file size: the
 walk materialises every matching path into a list (`resembl/cli.py:1010`),
 sizes a spawn-based worker pool from the file count and CPU count
@@ -331,7 +350,7 @@ controls where the port file is read from and can therefore redirect
 `RESEMBL_CONFIG_DIR` does the same for thresholds and permutation counts,
 which changes match results silently rather than failing.
 
-*Tampering.* `RESEMBL_SEED` (`resembl/core.py:1368`) changes the generator
+*Tampering.* `RESEMBL_SEED` (`resembl/diagnostics.py:61`) changes the generator
 every MinHash sample in the process draws from, and so the fingerprints that
 process produces, and `RESEMBL_NOW` (`resembl/models.py:48`) changes every
 recorded creation time. Neither is a path, so neither is visible in the
