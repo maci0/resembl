@@ -113,6 +113,9 @@ class TestCSVFormulaGuard(unittest.TestCase):
 
         for payload in ("=1+1", "+2", "-x", "@SUM(A1)", "\tTAB", "\r\nCRLF"):
             self.assertEqual(_csv_safe(payload), "'" + payload)
+        # A formula hiding behind any Unicode space is just as live.
+        for payload in ("\u00a0=1+1", "\u3000=1+1", "\u200b=1+1", "\ufeff=1+1"):
+            self.assertEqual(_csv_safe(payload), "'" + payload, repr(payload))
         # Safe values pass through unchanged (including non-strings).
         self.assertEqual(_csv_safe("plain name"), "plain name")
         self.assertEqual(_csv_safe(""), "")

@@ -530,6 +530,12 @@ def normalize_unicode(text: str) -> str:
     Every path that lexes raw text (checksum, fingerprint, query) goes through
     here, so hashing and comparison always see the same form.
     """
+    if text.startswith("\ufeff"):
+        # A UTF-8 BOM decoded as text (every file/stdin reader here names
+        # ``utf-8``, not ``utf-8-sig``) is not part of the snippet: it
+        # survives NFC, so code stored from a BOM-carrying file starts
+        # with U+FEFF a query without one does not, for one checksum.
+        text = text.lstrip("\ufeff")
     if text.isascii():
         # Fast path: NFC is the identity on ASCII, and snippet lexing is the
         # import hot path.

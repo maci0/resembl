@@ -260,6 +260,11 @@ class TestYaraStringEscape(unittest.TestCase):
     def test_tab_is_escaped(self):
         self.assertEqual(_yara_string_escape("a\tb"), "a\\tb")
 
+    def test_a_lone_surrogate_does_not_become_a_short_escape(self):
+        """A surrogate must not render as a four-digit hex escape, which
+        parses as a two-digit escape plus two literal characters."""
+        self.assertEqual(_yara_string_escape("bad\udcff"), "bad?")
+
     def test_printable_text_passes_through_unchanged(self):
         for text in ("mov eax, 1", "café", "日本語", "\U0001f600", ""):
             self.assertEqual(_yara_string_escape(text), text)

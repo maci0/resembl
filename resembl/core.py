@@ -1217,10 +1217,25 @@ def _yara_string_escape(text: str) -> str:
     """
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     escaped = escaped.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-    return "".join(
-        ch if 0x20 <= ord(ch) != 0x7F and not 0xD800 <= ord(ch) <= 0xDFFF else f"\\x{ord(ch):02x}"
-        for ch in escaped
-    )
+    parts: list[str] = []
+    for ch in escaped:
+        code = ord(ch)
+        if 0x20 <= code != 0x7F and not 0xD800 <= code <= 0xDFFF:
+            parts.append(ch)
+        elif code < 0x100:
+            # YARA ``\xNN`` takes exactly two hex digits: ``f"\x{ord:02x}"``
+            # on a surrogate (e.g. U+DCFF) would parse as ``\xdc`` plus the
+            # literal ``ff``, corrupting the pattern.
+            parts.append(f"\\x{code:02x}")
+        else:
+            # No two-digit escape names a code point above U+00FF; write
+            # its UTF-8 bytes instead.  A lone surrogate has no UTF-8
+            # encoding, so it becomes ``?``.
+            try:
+                parts.extend(f"\\x{byte:02x}" for byte in ch.encode("utf-8"))
+            except UnicodeEncodeError:
+                parts.append("?")
+    return "".join(parts)
 
 
 def snippet_export_yara(session: Session, output_file: str) -> dict:

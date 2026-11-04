@@ -82,6 +82,15 @@ class TestNormalizeUnicode(unittest.TestCase):
     def test_ascii_is_unchanged(self):
         self.assertEqual(normalize_unicode("MOV EAX, 1"), "MOV EAX, 1")
 
+    def test_a_leading_bom_is_not_part_of_the_text(self):
+        """A UTF-8 file read as utf-8 carries its BOM as U+FEFF.
+
+        It survives NFC, so code stored from such a file started with a
+        character a query without one did not, for one checksum.
+        """
+        self.assertEqual(normalize_unicode("\ufeffmov eax, 1"), "mov eax, 1")
+        self.assertEqual(normalize_unicode("a\ufeffb"), "a\ufeffb")
+
     def test_compatibility_characters_are_not_folded(self):
         """NFKC would rewrite these; NFC must leave them alone.
 

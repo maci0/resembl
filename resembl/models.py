@@ -75,7 +75,9 @@ def name_normalize(name: str) -> str:
     before this existed still resolve, because the lookup compares
     normalized spellings.
     """
-    return unicodedata.normalize("NFC", name)
+    # A leading BOM (a UTF-8 file read as ``utf-8``) is not part of the
+    # name, for the same reason as in ``normalize_unicode``.
+    return unicodedata.normalize("NFC", name.lstrip("\ufeff"))
 
 
 def timestamp_now() -> str:
