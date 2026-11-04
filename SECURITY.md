@@ -99,7 +99,9 @@ relies on, not configuration options.
 - **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` (default `http://127.0.0.1:8081`) and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest into a caller-chosen
-  directory, pruning to the newest `--keep` (default 7). `verify-backup`
+  directory, pruning to the newest `--keep` (default 7), and re-verifies
+  the published file before reporting success (removing it on failure;
+  exits 1 when the manifest could not be written). `verify-backup`
   checks tables, runs `PRAGMA integrity_check`, and compares the snippet
   count and content hash against the manifest, but the manifest is
   unauthenticated: a tampered backup with an edited manifest passes. Keep the

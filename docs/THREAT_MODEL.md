@@ -6,13 +6,21 @@ date. The `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
 model has been re-reviewed for this release; the Go experimental service in
 `service/` (see `service/README.md`) is in scope alongside the Python
-surfaces, and the `backup` / `verify-backup` commands (`resembl/core.py:1922`,
-`resembl/core.py:2111`) are now modeled below (R17, assets).
+surfaces, and the `backup` / `verify-backup` commands (`db_backup` in
+`resembl/core.py`, `db_verify_backup` in `resembl/core.py`) are now modeled
+below (R17, assets).
 
 This pass re-checked the unimplemented-verb and threading claims against
 `resembl/server.py` (`send_error`, `__getattr__`, `_MAX_HANDLER_THREADS`)
 and modeled the Lambda event adapter (`service/internal/lambdaproxy/`,
-R18); the corrections land in B1, B2, B8, B9 and Mitigations below.
+R18); the corrections land in B1, B2, B8, B9 and Mitigations below. A
+follow-up pass on the same date re-checked the backup, LSH-metadata, CSV/YARA
+export, and Go engine-adapter paths added after that review: `db_backup`
+now re-verifies before reporting success, `lsh_meta_get` fails instead of
+rebuilding on a transient lock, the CSV guard covers Unicode leading
+characters, the YARA escape covers code points above U+00FF, and the Go
+adapter surfaces engine error detail in the operator log only. Those land in
+R17, B2, B9, and Mitigations below.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -51,7 +59,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`resembl/server.py:1416`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, latency, and uptime. The Python `GET /health` additionally reports database reachability and probe latency; the Go `GET /healthz` is liveness only | B1, B9 | Process internals (traffic volume, hit rate, latency) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:767`); Python `GET /metrics` (`resembl/server.py:1459`) exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` latency and `resembl_server_result_cache_total` hit/miss, and `GET /health` (`resembl/server.py:1405`) returns database status plus `latency_ms`; Go `GET /metrics` (`service/service.go:212`) exposes `resembl_service_up`, `resembl_service_uptime_seconds`, `resembl_service_requests_total` by path and status, and `resembl_service_request_duration_seconds` histogram, and `GET /healthz` (`service/service.go:203`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:123`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:261`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
-| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`resembl/core.py:2310`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, writes backup and manifest mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup` |
 | R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
@@ -269,7 +277,7 @@ network fetch at import.
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`resembl/server.py:1423`) |
-| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`resembl/core.py:1922`), per-backup manifest `<backup-stem>.json` mode `0600` |
+| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup and per-backup manifest `<backup-stem>.json` mode `0600` |
 
 ## Threats per boundary
 
@@ -329,12 +337,16 @@ and collections, are written into the local corpus.
 *Tampering / information disclosure.* A backup in the backup directory is
 trusted on the strength of its filename and a snippet-count plus
 content-hash manifest. `verify-backup`
-(`resembl/core.py:2310`) opens the file read-only, checks expected tables,
-runs `PRAGMA integrity_check`, and compares the live count and
-`content_hash` against the manifest: a tampered backup whose manifest is
-edited to match passes (R17). The manifest itself is written mode `0600`
-(`resembl/core.py:2232`) but is otherwise
-unauthenticated, so anyone who can write the backup directory can forge both.
+(`db_verify_backup` in `resembl/core.py`) opens the file read-only, checks
+expected tables, runs `PRAGMA integrity_check`, and compares the live
+count and `content_hash` against the manifest: a tampered backup whose
+manifest is edited to match passes (R17). Backup and manifest are written
+mode `0600` (`db_backup` in `resembl/core.py`) but the manifest is otherwise
+unauthenticated, so anyone who can write the backup directory can forge
+both. `db_backup` re-verifies the just-published file and deletes it on
+failure, so a backup that `backup` reported as success has verified at
+write time; that does not make a later `verify-backup` of a hand-supplied
+pair trustworthy.
 
 *Denial of service.* `import` has no cap on file count or file size: the
 walk materialises every matching path into a list (`resembl/cli.py:1010`),
@@ -410,7 +422,7 @@ Custody slots are claimed before dispatch and retained after an uncertain backen
 
 The runtime manifest is the trust anchor for find-pinned. If an attacker can write the manifest or the interpreter files it covers, they can attest tampered loaded code. The supervisor must keep the manifest and interpreter environment write-protected (resembl/runtime_attestation.py:3, service/README.md:13). The verify check hashes every loaded module file before and after the query (resembl/server.py:1443, resembl/server.py:1467), bounded by MAX_FILES 10000 and MAX_BYTES 512MiB (resembl/runtime_attestation.py:16).
 
-Results are not cacheable (Cache-Control: no-store, service/service.go:178). The Python engine behind it is unauthenticated, so the Go service authentication is the only gate on that path.
+Results are not cacheable (Cache-Control: no-store, `service/service.go`). The Python engine behind it is unauthenticated, so the Go service authentication is the only gate on that path. When the engine rejects a request, the Go adapter (`LocalEngine.find` in `service/http_engine.go`) surfaces the engine's `error` detail (or the raw body, capped at 1 MiB) in its own error, which `service/service.go` logs at the operator boundary and answers to the caller only as the generic `engine unavailable` — so the detail reaches the operator log, not the caller response.
 
 ### B8, build to release
 
@@ -443,6 +455,11 @@ workflow does not re-run either.
 | Result-cache key is a query digest | `resembl/server.py:71` | Query text retained by the result cache, and an entry count standing in for a memory bound |
 | Per-key compute lock | `resembl/server.py:117` | A burst of identical queries multiplying one find across connections |
 | Content-Type check, 415 | `resembl/server.py:705` | B1 request shape |
+| Backup published only after verification | A truncated or page-flipped copy must not be handed to a restore drill as the newest restore point | `db_backup` in `resembl/core.py` re-verifies with `db_verify_backup` and removes the file and manifest on failure; `backup` CLI in `resembl/cli.py` exits 1 when `manifest_written` is false |
+| LSH metadata read is fail-closed | A transient `database is locked` read must not trigger a rebuild that overwrites a live index's metadata mid-build | `lsh_meta_get` in `resembl/lsh.py` returns `None` only for a missing table; any other `OperationalError` is logged and re-raised |
+| CSV export formula guard covers Unicode leading characters | A formula hiding behind any Unicode space, BOM, or invisible character is as live in a spreadsheet as a bare `=1+1` | `_csv_safe` in `resembl/cli.py` strips whitespace and BOM/zero-width characters before checking `_CSV_FORMULA_PREFIXES` |
+| YARA export escapes code points above U+00FF | A hex escape on a surrogate or high code point parses as two hex digits plus literal text, corrupting the emitted pattern | `_yara_string_escape` in `resembl/core.py` writes UTF-8 bytes for code points above U+00FF and `?` for lone surrogates |
+| Engine error detail stays in the operator log | A caller must not learn internals the engine puts in its `error` field, while operators must see why a request failed | `LocalEngine.find` in `service/http_engine.go` folds the engine's `error` into its error; `service/service.go` logs it and answers the caller only `engine unavailable` |
 | Generic 500 body, details to log | `resembl/server.py:815` | B1 error-text disclosure of SQL, bind parameters, and paths |
 | Response hardening headers | `resembl/server.py:900` | Browser reinterpretation of a snippet-derived response; caching of that response. Every response, including an unhandled verb (`resembl/server.py:1180`) and a stdlib error (`resembl/server.py:1168`), goes through this block |
 | Handler-thread bound, 96 | `resembl/server.py:117`, `resembl/server.py:1787` | A stalled-client flood accumulating unbounded handler threads; excess connections stay in the listen backlog |
