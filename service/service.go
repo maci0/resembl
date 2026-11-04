@@ -54,35 +54,57 @@ func (s *Service) SetCustody(c Custody) error {
 	s.custody = c
 	return nil
 }
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if r.URL.Path == "/healthz" && r.Method == http.MethodGet {
+	if r.URL.Path == "/healthz" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if r.URL.RawQuery != "" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if (r.URL.Path != "/v1/find" && r.URL.Path != "/v1/find-batch") || r.URL.RawQuery != "" {
-		http.NotFound(w, r)
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
+	}
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		media := strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
+		if !strings.EqualFold(media, "application/json") {
+			writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
 	defer cancel()
 	allowed, err := s.Authority.Allow(ctx, r.Header.Get("Authorization"), s.Resource, "query")
 	if err != nil {
-		http.Error(w, "authority unavailable", http.StatusServiceUnavailable)
+		writeError(w, http.StatusServiceUnavailable, "authority unavailable")
 		return
 	}
 	if !allowed {
-		http.Error(w, "forbidden", http.StatusForbidden)
+		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 	if s.custody == nil {
-		http.Error(w, "custody unavailable", http.StatusServiceUnavailable)
+		writeError(w, http.StatusServiceUnavailable, "custody unavailable")
 		return
 	}
 	dispatched := false
@@ -95,17 +117,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	default:
-		http.Error(w, "busy", http.StatusServiceUnavailable)
+		writeError(w, http.StatusServiceUnavailable, "busy")
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	if err != nil {
-		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		writeError(w, http.StatusRequestEntityTooLarge, "request too large")
 		return
 	}
 	var body map[string]json.RawMessage
 	if json.Unmarshal(raw, &body) != nil || body == nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid request")
 		return
 	}
 	var result json.RawMessage
@@ -113,7 +135,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.custody != nil {
 		release, err = s.custody.Claim()
 		if err != nil {
-			http.Error(w, "capacity unavailable", http.StatusServiceUnavailable)
+			writeError(w, http.StatusServiceUnavailable, "capacity unavailable")
 			return
 		}
 	}
@@ -126,7 +148,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/find" {
 		var query string
 		if json.Unmarshal(body["query"], &query) != nil || strings.TrimSpace(query) == "" {
-			http.Error(w, "query required", http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "query required")
 			return
 		}
 		dispatched = true
@@ -134,24 +156,24 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		batch, ok := s.Engine.(BatchEngine)
 		if !ok {
-			http.Error(w, "batch unavailable", http.StatusNotImplemented)
+			writeError(w, http.StatusNotImplemented, "batch unavailable")
 			return
 		}
 		var queries []json.RawMessage
 		if json.Unmarshal(body["queries"], &queries) != nil || queries == nil || len(queries) > 1000 {
-			http.Error(w, "invalid queries", http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "invalid queries")
 			return
 		}
 		dispatched = true
 		result, err = batch.FindBatch(ctx, raw)
 	}
 	if err != nil {
-		http.Error(w, "engine unavailable", http.StatusServiceUnavailable)
+		writeError(w, http.StatusServiceUnavailable, "engine unavailable")
 		return
 	}
 	completed = true
 	if !json.Valid(result) {
-		http.Error(w, "invalid engine response", http.StatusBadGateway)
+		writeError(w, http.StatusBadGateway, "invalid engine response")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

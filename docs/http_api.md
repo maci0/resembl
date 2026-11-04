@@ -71,14 +71,16 @@ resembl serve --stateless --host 0.0.0.0 --port 8080
 | `GET` | `/health` | Whether this process can still serve a find, or, under `--stateless`, answer at all. |
 | `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
 
-The `POST` endpoints are read-only, and the path is matched verbatim: a
-query string makes `/find?x=1` an unknown path, answered `404`. `PUT`,
-`DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405` on any path (with
-an `Allow: POST` header), as is a `GET` to any path other than `/health`, `/scheme`,
-`/metrics` and `/runtime-generation`. A `HEAD` answer carries those headers and no body bytes, as
-`HEAD` requires. Any other verb is answered by the stdlib base class with
-`501` and an HTML body. Every response this server produces itself, success or
-error, is `Content-Type: application/json`, except `/metrics`.
+The `POST` endpoints are read-only. The path is matched with any query
+string removed, so `/find?x=1` is `/find` (parameters are read from the
+body). `PUT`, `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405`
+on any known path (with an `Allow` header naming the verb that path
+serves), as is a `GET` to any `POST` path and a `POST` to any `GET` path
+(`/health`, `/scheme`, `/metrics`, `/runtime-generation`). A `HEAD`
+answer carries those headers and no body bytes, as `HEAD` requires. Any
+other verb is answered by the stdlib base class with `501` and an HTML
+body. Every response this server produces itself, success or error, is
+`Content-Type: application/json`, except `/metrics`.
 
 A connection is closed after 30 s idle, which bounds how long a keep-alive
 connection holds its handler thread. The client side gives up sooner: 5 s for
@@ -325,7 +327,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health`, `/scheme`, `/metrics` and `/runtime-generation`. |
+| `405` | A known path addressed with the wrong verb (including `HEAD` and `OPTIONS`, which carry the same headers without a body), with an `Allow` header naming the verb the path serves. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
 | `409` | `/find-pinned` only: the index digest does not match. |

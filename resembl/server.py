@@ -1080,7 +1080,8 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
 _METRICS = _ServerMetrics()
 #: The paths this server serves, each POST-only except the four GET paths.
 _POST_PATHS = ("/find", "/find-batch", "/find-pinned", "/score", "/band-keys")
-_ALL_PATHS = (*_POST_PATHS, "/runtime-generation", "/scheme", "/health", "/metrics")
+_GET_PATHS = ("/runtime-generation", "/scheme", "/health", "/metrics")
+_ALL_PATHS = (*_POST_PATHS, *_GET_PATHS)
 #: The paths that serve a database find, and the process pin ``/find-pinned``
 #: checks; a stateless server answers them 501.
 _DATABASE_PATHS = ("/find", "/find-batch", "/find-pinned", "/runtime-generation")
@@ -1244,6 +1245,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
             return
+        if self.route in _GET_PATHS:
+            self._method_not_allowed()
+            return
         if self.route not in _POST_PATHS:
             self._respond(404, {"error": f"unknown path: {self.route}"})
             return
@@ -1291,7 +1295,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         return True
 
     def _method_not_allowed(self, *, send_body: bool = True) -> None:
-        """Answer a non-POST request with the same JSON error envelope.
+        """Answer a request with the wrong verb with the same JSON envelope.
 
         *send_body* is false for ``HEAD``, which carries the status and headers
         of the answer a ``GET`` would have produced and no body bytes.
@@ -1302,10 +1306,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         if self.route not in _ALL_PATHS:
             self._respond(404, {"error": f"unknown path: {self.route}"}, send_body=send_body)
             return
+        allowed = "GET" if self.route in _GET_PATHS else "POST"
         self._respond(
             405,
-            {"error": f"method not allowed: {self.command} (use POST)"},
-            extra_headers={"Allow": "POST"},
+            {"error": f"method not allowed: {self.command} (use {allowed})"},
+            extra_headers={"Allow": allowed},
             send_body=send_body,
         )
 
