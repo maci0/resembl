@@ -9,6 +9,11 @@ model has been re-reviewed for this release; the Go experimental service in
 surfaces, and the `backup` / `verify-backup` commands (`resembl/core.py:1922`,
 `resembl/core.py:2111`) are now modeled below (R17, assets).
 
+This pass re-checked the unimplemented-verb and threading claims against
+`resembl/server.py` (`send_error`, `__getattr__`, `_MAX_HANDLER_THREADS`)
+and modeled the Lambda event adapter (`service/internal/lambdaproxy/`,
+R18); the corrections land in B1, B2, B8, B9 and Mitigations below.
+
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
 that carries it so a review pass can re-verify it.
@@ -47,6 +52,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, and uptime | B1, B9 | Process internals (traffic volume, hit rate) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:730`); Go `GET /healthz` (`service/service.go:60`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:42`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:90`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
 | R17 | A tampered backup file or manifest is accepted as a restore candidate with no integrity check beyond a snippet-count comparison | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, and compares the live snippet count against the per-backup manifest (`resembl/core.py:2111`); a missing manifest is an issue, not a failure, and a count mismatch is a hard failure |
+| R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
 
@@ -62,10 +68,11 @@ Every entry point below is present in the code at the cited location.
 | `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
 | `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are cached in an LRU of `_SCHEME_CACHE_MAX` (64) entries, so a client cycling `normalize`, `bands` and `rows` cannot grow it. |
 | `POST /v1/find`, `POST /v1/find-batch` (Go) | `service/service.go:60` (`ServeHTTP`) | Experimental portable boundary in `service/`. Requires an `Authorizer` (`service/service.go:15`); the shipped binary defaults to deny-all (`service/service.go:31`, `cmd/resembl-service/main.go`) unless `-token-file` supplies a bearer credential (`service/token_authority.go:54`). 8 MiB body cap (`service/service.go:101`), concurrency 1..64 (`service/service.go:42`), per-request timeout. Not a deployable public service (`service/README.md:3`). |
-| `GET /healthz` (Go) | `service/service.go:60` | Local process liveness only; no dependency I/O, no authentication. |
+| `GET /healthz` (Go) | `service/service.go:60` | Local process liveness only; no dependency I/O, no authentication. Under the Lambda bootstrap the same liveness answers an API Gateway event, and every query stays refused. |
+| API Gateway HTTP API v2 event (Lambda) | `service/internal/lambdaproxy/proxy.go` (`Handle`), `service/cmd/resembl-lambda/main.go` | The Lambda bootstrap wraps the same `http.Handler` behind `DenyAll`; `lambdaproxy.Handle` translates an API Gateway v2 event into a request, caps input at 8 MiB and output at 4 MiB before base64, rejects duplicate or malformed headers, and never treats gateway identity claims as a grant (`service/internal/lambdaproxy/README.md`). `GET /healthz` answers liveness; every query is refused until an owner-backed authorizer is supplied. |
 | `resembl serve --stateless` | `_stateless_serve` in `resembl/server.py` | Holds no database, so the listener exposes no snippet corpus: only `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` answer, the find paths answer `501`. Still unauthenticated; a non-loopback bind needs a network gate in front of it. |
 | `resembl serve` bind | `resembl/cli.py:578` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:603`). `--port` accepts `0`, which lets the OS assign a port (`resembl/cli.py:580`). |
-| Any other verb | `resembl/server.py:771` | Not implemented by the handler, so `BaseHTTPRequestHandler` answers `501` with its own HTML body. That answer is the only one this server emits that bypasses `_respond`, and so the only one carrying no `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, or `Cache-Control` header (`resembl/server.py:894`). |
+| Any other verb | `__getattr__` and `send_error` in `resembl/server.py` | The handler resolves any unhandled `do_*` name to the JSON `405` envelope (`resembl/server.py:1180`) and answers stdlib errors, including malformed request lines, with the same JSON body through `_respond` (`resembl/server.py:1168`), so no response bypasses the hardening headers. The only `501` left is the deliberate one: a `--stateless` server answering a database path (`resembl/server.py:1311`). |
 
 `GET`, `PUT`, `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are implemented and
 answer `405` with the same JSON error envelope (`resembl/server.py:752`); a
@@ -128,6 +135,7 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `RESEMBL_DATABASE_URL`, then `DATABASE_URL` | `resembl/paths.py:33`, `resembl/paths.py:57` | Trusted verbatim; may carry a password. |
 | `RESEMBL_CACHE_DIR` | `resembl/paths.py:81` | Trusted verbatim; selects where the port file is written and read. |
 | `RESEMBL_RUNTIME_MANIFEST` | `_handle_find_pinned` in `resembl/server.py` | Trusted verbatim; selects the file `resembl/runtime_attestation.py` checks loaded code against. The supervisor must keep it and the interpreter environment write-protected. |
+| `RESEMBL_ENGINE_URL` (Lambda only) | `service/cmd/resembl-lambda/main.go:17` | Trusted verbatim; selects the loopback engine the adapter dials. `NewLocalEngine` refuses a non-loopback host. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
 | `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |
@@ -210,7 +218,7 @@ only enables `TokenAuthority` when `-token-file` is given
 credential, read once at startup, with no per-caller identity and no
 revocation short of restart (`service/token_authority.go:15`,
 `service/README.md:9`). The Lambda bootstrap (`cmd/resembl-lambda/main.go`)
-is deny-all with no token path. The engine behind the service is reached over
+is deny-all with no token path; its adapter (`service/internal/lambdaproxy/proxy.go`) caps input at 8 MiB and output at 4 MiB, rejects duplicate or malformed headers (including a comma-bearing `Authorization` and a `Cookie` with cookies), and never treats API Gateway identity claims as a grant (`service/internal/lambdaproxy/README.md`). The engine behind the service is reached over
 loopback only: `NewLocalEngine` (`service/http_engine.go:29`) refuses
 non-loopback hosts, refuses redirects, and caps responses at 8 MiB. The pinned
 path adds three pins: index digest, artifact digest, and generation
@@ -227,7 +235,7 @@ verify the engine stopped before repairing a slot.
 **B8, build to release.** The published wheel carries the runtime surface
 above plus whatever the release pipeline admits. An SBOM workflow exports a
 CycloneDX 1.5 inventory of the runtime graph on a push to `main` and on a
-`v*` tag (`.github/workflows/sbom.yml:9`). CodeQL runs the Python SAST suite
+`v*` tag (`.github/workflows/sbom.yml:9`). CodeQL runs only the Python SAST suite (`language: [ 'python' ]` in `.github/workflows/codeql.yml:29`), so the Go tree in `service/` is never statically analyzed; CodeQL runs the Python suite
 on a push to `main`, a pull request to `main`, and a weekly cron
 (`.github/workflows/codeql.yml:4`), and dependency review runs on pull
 requests to `main` only, failing on moderate severity
@@ -254,6 +262,7 @@ network fetch at import.
 | Exported YARA rules | Downstream detection artifacts | caller-chosen output file |
 | Config file | Thresholds and match settings, applied with no on-screen report that they are in force | `config.toml` |
 | Release artifacts | The only thing a consumer installs; a substituted one runs with the operator's database credentials | PyPI, attested per B8 |
+| Lambda engine address | Selects the loopback engine the adapter dials; a hostile value points it at an attacker listener once an authorizer is supplied | `RESEMBL_ENGINE_URL` (`service/cmd/resembl-lambda/main.go:17`) |
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`resembl/server.py:1423`) |
@@ -291,19 +300,9 @@ preflight is refused. The `Host` a rebound page carries is still its own
 name, which is what the check reads. The auto-assigned port
 (`resembl/cli.py:580`) remains enumerable by a page that probes the port
 range, and a non-loopback bind is unrestricted, since it is reached by
-whatever name resolves to it. A verb the handler does not implement is
-answered `501` with a header-less HTML body by the stdlib base class
-(`resembl/server.py:771`), the one response that skips the hardening header
-block at `resembl/server.py:894` and the only one a browser can be pointed
-at and have markup returned.
+whatever name resolves to it. A verb the handler does not implement is answered with the JSON `405` envelope instead: `__getattr__` resolves any unhandled `do_*` name to the shared not-allowed answer (`resembl/server.py:1180`), and `send_error` answers stdlib errors, including malformed request lines, through `_respond` (`resembl/server.py:1168`), so no response skips the hardening header block. Earlier revisions of this model carried the stdlib's header-less HTML `501` as a live finding; the code no longer emits it.
 
-*Denial of service.* `ThreadingHTTPServer` spawns a thread per connection
-with no cap; each thread holds a 30-second idle timeout
-(`resembl/server.py:653`). The engine pool is 32 plus 64 overflow
-(`resembl/server.py:1032`). A client that opens connections faster than
-requests complete exhausts threads, pool connections, and file descriptors
-before any of the three limits is a policy decision. There is no request
-accounting of any kind.
+*Denial of service.* `ThreadingHTTPServer` spawns a thread per connection, and `_FindServer` bounds that with a 96-slot semaphore (`_MAX_HANDLER_THREADS`, `resembl/server.py:117`, acquired in `process_request` at `resembl/server.py:1787`): excess connections wait in the listen backlog rather than pinning a thread. Each thread holds a 30-second idle timeout (`resembl/server.py:653`). The engine pool is 32 plus 64 overflow (`resembl/server.py:1032`). A client that opens connections faster than requests complete therefore exhausts pool connections and file descriptors, but not handler threads; there is still no per-caller rate limit or request accounting, so the backlog and the pool are the policy.
 
 *Repudiation.* `log_message` writes at DEBUG (`resembl/server.py:924`,
 `resembl/server.py:926`), which is quiet unless the server was started with
@@ -440,7 +439,8 @@ workflow does not re-run either.
 | Per-key compute lock | `resembl/server.py:117` | A burst of identical queries multiplying one find across connections |
 | Content-Type check, 415 | `resembl/server.py:705` | B1 request shape |
 | Generic 500 body, details to log | `resembl/server.py:815` | B1 error-text disclosure of SQL, bind parameters, and paths |
-| Response hardening headers | `resembl/server.py:900` | Browser reinterpretation of a snippet-derived response; caching of that response. Not applied to the stdlib `501` path (`resembl/server.py:771`) |
+| Response hardening headers | `resembl/server.py:900` | Browser reinterpretation of a snippet-derived response; caching of that response. Every response, including an unhandled verb (`resembl/server.py:1180`) and a stdlib error (`resembl/server.py:1168`), goes through this block |
+| Handler-thread bound, 96 | `resembl/server.py:117`, `resembl/server.py:1787` | A stalled-client flood accumulating unbounded handler threads; excess connections stay in the listen backlog |
 | Thread timeout, 30s | `resembl/server.py:653` | Connections parked open by an idle client |
 | Engine pool, 32 + 64 | `resembl/server.py:1032` | Pool exhaustion; the overflow is what a client that outruns requests consumes first |
 | Disconnect failures swallowed | `resembl/server.py:983` | Traceback spam from connection churn, not a security control |
@@ -450,6 +450,8 @@ workflow does not re-run either.
 | Port file created `0o600` | `resembl/server.py:1142` | The same, for the file inside it. Neither checks a directory that already existed |
 | Fingerprint magic check | `resembl/scoring.py:1315` | Deserialization of attacker-controlled bytes from a hostile database or merge source |
 | Legacy cache files never deserialized | `resembl/cache.py:8`, `resembl/cache.py:316` | Code execution from a planted cache file |
+| Backup filename percent-encoded before SQLite URI | `resembl/core.py:2129` | A `?`/`#` in a backup filename injecting SQLite URI params (e.g. `?mode=rwc`) and escaping the read-only mode |
+| Go container runs unprivileged | `service/Dockerfile` (`FROM scratch`, `USER 65532:65532`) | A compromised service process holding root in the image |
 | YARA string escaping | `resembl/core.py:989` | A snippet name breaking out of a generated rule string |
 | Config value coercion and range check | `resembl/config.py:157`, `resembl/config.py:74` | A hand-edited config putting a raw TOML type or an out-of-range value into a numeric field |
 | `LIKE` metacharacter escaping | `resembl/cli.py:726`, `resembl/models.py:180` | A checksum prefix like `%` resolving to an arbitrary snippet |
@@ -459,6 +461,7 @@ workflow does not re-run either.
 | CI static analysis and dependency review | `.github/workflows/codeql.yml:4`, `.github/workflows/dependency-review.yml:11` | Static analysis and dependency review of `main` and of pull requests. Neither runs on a release tag (R11) |
 | Release SBOM | `.github/workflows/sbom.yml:9` | An inventory of the runtime graph attached to the build, on `main` and on `v*` tags |
 | Go Authorizer gate | service/service.go:75 | B9 caller authentication; fails closed on error or missing authority |
+| Lambda event adapter caps | `service/internal/lambdaproxy/proxy.go` | B9 Lambda input/output bound (8 MiB in, 4 MiB out), duplicate-header and malformed-event rejection; gateway identity claims never treated as a grant |
 | TokenAuthority constant-time compare | service/token_authority.go:54 | B9 credential verification |
 | Custody slots channel | service/service.go:90 | B9 concurrency bound, busy 503 on overflow |
 | Loopback engine enforcement | service/http_engine.go:29 | B9 engine must be loopback |
@@ -531,15 +534,7 @@ loopback dial at `resembl/find_client.py:152`.
 repeated. Each response is a fresh 1000-row page, served from a
 `ThreadingHTTPServer` with no request accounting.
 
-**Browser pointed at the port.** A page on the host issues a verb the handler
-does not implement. The stdlib base class answers `501` with an HTML body and
-none of the `X-Content-Type-Options`, `X-Frame-Options`, or
-`Content-Security-Policy` headers the server sets on every response it builds
-itself (`resembl/server.py:771`, `resembl/server.py:894`). This is a
-markup-returning surface on a port a page is known to be able to reach, and
-it is the one response shape the `Host` check also does not reach, since the
-check lives in `do_POST` and the shared method handlers
-(`resembl/server.py:723`).
+**Browser pointed at the port.** A page on the host issues a verb the handler does not implement. The handler answers the JSON `405` envelope through the same `_respond` path as every other response (`resembl/server.py:1180`, `resembl/server.py:1168`), with the hardening headers intact; earlier revisions of this model recorded the stdlib's header-less HTML `501` here, and the code no longer emits it. The `Host` check on a loopback bind still refuses the names a rebound page carries (`resembl/server.py:707`).
 
 **Resource exhaustion through import.** Pointing `resembl import` at a
 directory holding a very large number of `.txt` files drives one worker
@@ -608,8 +603,7 @@ ties a report to.
 ## Related
 
 - `SECURITY.md` for the reporting channel and supported versions.
-- `docs/http_api.md` for the endpoint contract, including the `501` path
-  that the handler does not implement.
+- `docs/http_api.md` for the endpoint contract, including the `501` a `--stateless` server answers on a database path.
 - `docs/adr/003-checksum-as-pk.md`, `docs/adr/004-database-backed-lsh-index.md`,
   `docs/adr/005-vendored-minhash.md` for the decisions that removed pickle
   deserialization from the data path.

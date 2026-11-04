@@ -78,9 +78,9 @@ on any known path (with an `Allow` header naming the verb that path
 serves), as is a `GET` to any `POST` path and a `POST` to any `GET` path
 (`/health`, `/scheme`, `/metrics`, `/runtime-generation`). A `HEAD`
 answer carries those headers and no body bytes, as `HEAD` requires. Any
-other verb is answered by the stdlib base class with `501` and an HTML
-body. Every response this server produces itself, success or error, is
-`Content-Type: application/json`, except `/metrics`.
+other verb is answered `405` with the same JSON error envelope. Every
+response, success or error, is `Content-Type: application/json`, except
+`/metrics`.
 
 A connection is closed after 30 s idle, which bounds how long a keep-alive
 connection holds its handler thread. The client side gives up sooner: 5 s for

@@ -16,7 +16,14 @@ project follows [Semantic Versioning](https://semver.org/).
   of truncating the live export file first. Added , a
   restore runbook covering instance loss, logical corruption, stale WAL
   sidecars, and periodic verify-backup scheduling.
-
+- `docs/http_api.md` and `docs/THREAT_MODEL.md` no longer describe the
+  stdlib's header-less HTML `501` as the answer to an unimplemented verb;
+  the handler answers the JSON `405` envelope for any unhandled verb
+  (`resembl/server.py:1180` and `resembl/server.py:1168`), and the
+  threat model now records the 96 handler-thread bound
+  (`resembl/server.py:117`) and the Lambda event adapter
+  (`service/internal/lambdaproxy/`, R18) instead of the removed claims.
+  `SECURITY.md` now points at R13-R18.
 - `CONTRIBUTING.md` now matches `AGENTS.md` on trunk-based development
   (commit straight to `main`, branch only for work that must not land
   yet) instead of requiring a feature branch for every contribution;

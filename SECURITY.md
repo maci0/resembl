@@ -3,12 +3,14 @@
 Last reviewed: 2026-11-05, against the tree at version 3.12.0
 (`pyproject.toml:3`). This review covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
-risks R13-R17 in `docs/THREAT_MODEL.md` record the Go surface and the
+risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
+the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 `backup` / `verify-backup` commands.
 
 The `serve` controls below (the loopback `Host` check, `serve -v` request
-logging, the `0700` cache directory, the `0600` port file, and the 1000-row
-`top_n` cap) are documented in `CHANGELOG.md`.
+logging, the `0700` cache directory, the `0600` port file, the 1000-row
+`top_n` cap, the 96 handler-thread bound in `resembl/server.py`, and the
+JSON `405` envelope for any unhandled verb) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
 
@@ -94,6 +96,7 @@ relies on, not configuration options.
   recomputed rather than unpickled. The failure path is not closed: a source
   that will not open makes `merge` print the driver's own error text, which
   can name the host and port it dialled.
+- **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` (default `http://127.0.0.1:8081`) and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest into a caller-chosen
   directory, pruning to the newest `--keep` (default 7). `verify-backup`
@@ -103,4 +106,4 @@ relies on, not configuration options.
   is not) and treat any backup whose manifest you did not write as
   untrusted (THREAT_MODEL.md R17).
 
-- note: see docs/THREAT_MODEL.md B9 and R13-R16 for the Go service. Experimental, deny-all by default, single shared bearer token, no per-caller audit, rotation by restart, engine must stay on loopback, runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
+- Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
