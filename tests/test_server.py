@@ -179,10 +179,27 @@ class TestServerMode(_ServeTestCase):
 
         from resembl import server as server_mod
 
-        with patch.object(server_mod, "lsh_index_build") as mock_build:
+        with patch.object(server_mod, "lsh_index_build", return_value=object()) as mock_build:
             httpd = server_mod.serve(f"sqlite:///{self._db}", port=0)
             httpd.server_close()
         mock_build.assert_called_once()
+
+    def test_startup_fails_when_index_build_fails(self):
+        """A failed startup index build raises instead of serving no matches.
+
+        Ignoring the ``None`` would leave the server answering every find
+        with zero matches while ``lsh_meta`` still advertises a complete
+        index — the silent-data-loss shape the reindex-failure check
+        already refuses.
+        """
+        from unittest.mock import patch
+
+        from resembl import server as server_mod
+        from resembl.core import IndexBuildError
+
+        with patch.object(server_mod, "lsh_index_build", return_value=None):
+            with self.assertRaises(IndexBuildError):
+                server_mod.serve(f"sqlite:///{self._db}", port=0)
 
     def test_startup_does_not_resolve_the_bind_address(self):
         """serve must not block on a reverse-DNS lookup to fill server_name.

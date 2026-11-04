@@ -2031,7 +2031,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
 
     try:
         num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
-    except Exception:
+    except Exception as e:
+        # The backup file itself is complete; only the count is unknown.  A
+        # 0 would be read as "empty database" by db_verify_backup and fail a
+        # healthy backup, so say what happened instead of fabricating it.
+        logger.warning("Could not count snippets for the backup manifest: %s", e)
         num_snippets = 0
     manifest = {
         "backup": backup_name,
