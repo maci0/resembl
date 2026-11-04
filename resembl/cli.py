@@ -420,8 +420,14 @@ def _csv_safe(value: object) -> object:
     evaluate the cell as a formula gets a text-forcing apostrophe prefix
     (the standard mitigation; the apostrophe is not part of the value's
     meaning).  Non-strings and safe strings pass through unchanged.
+    Whitespace and invisible characters before the trigger are stripped
+    for the check, because spreadsheets ignore them when parsing a
+    formula, so ``" =1+1"`` is as live as ``"=1+1"``.
     """
-    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+    if isinstance(value, str) and (
+        value.startswith(_CSV_FORMULA_PREFIXES)
+        or value.lstrip(" ﻿").startswith(_CSV_FORMULA_PREFIXES)
+    ):
         return "'" + value
     return value
 
@@ -1320,7 +1326,7 @@ def import_cmd(
             file_paths.extend(
                 os.path.join(root, fname)
                 for fname in files
-                if fname.lower().endswith((".asm", ".txt"))
+                if fname.casefold().endswith((".asm", ".txt"))
             )
         file_paths.sort()
     else:
@@ -1783,6 +1789,9 @@ def find(
 
     query_string: str | None = None
     if query:
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in query):
+            err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+            raise typer.Exit(code=USAGE_ERROR)
         # Single-line ';' separates statements (see
         # ``_query_inline_statements``); multi-line input keeps NASM comments.
         query_string = _query_inline_statements(query)

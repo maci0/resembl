@@ -149,7 +149,7 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
 
 def _encoding_is_utf8(encoding: str) -> bool:
     """Whether *encoding* names UTF-8 under any of its usual spellings."""
-    return encoding.lower().replace("-", "").replace("_", "") == "utf8"
+    return encoding.casefold().replace("-", "").replace("_", "") == "utf8"
 
 
 def console_utf8_reconfigure() -> None:

@@ -661,7 +661,7 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
     protecting them.  A loopback bind is only ever addressed by the names
     below, so the check costs nothing there and closes the rebinding path.
     """
-    is_loopback = host.lower() == "localhost"
+    is_loopback = host.casefold() == "localhost"
     if not is_loopback:
         try:
             import ipaddress
@@ -1289,7 +1289,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         either way); an explicit non-JSON media type is refused rather than
         silently parsed.
         """
-        declared = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        declared = (self.headers.get("Content-Type") or "").split(";")[0].strip().casefold()
         return declared in ("", "application/json")
 
     def _host_allowed(self) -> bool:
@@ -1306,7 +1306,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         allowed = self.server.allowed_hosts  # type: ignore[attr-defined]
         if not allowed:
             return True
-        return (self.headers.get("Host") or "").strip().lower() in allowed
+        return (self.headers.get("Host") or "").strip().casefold() in allowed
 
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
         if not self._host_allowed():

@@ -1209,7 +1209,8 @@ def _yara_string_escape(text: str) -> str:
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     escaped = escaped.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
     return "".join(
-        ch if ord(ch) >= 0x20 and ord(ch) != 0x7F else f"\\x{ord(ch):02x}" for ch in escaped
+        ch if 0x20 <= ord(ch) != 0x7F and not 0xD800 <= ord(ch) <= 0xDFFF else f"\\x{ord(ch):02x}"
+        for ch in escaped
     )
 
 
