@@ -103,8 +103,7 @@ from .paths import (
     server_port_path,
 )
 from .scoring import MAX_NUM_PERM
-from .status_colors import RICH_STYLES
-from .theme import ACCENT, score_color
+from .theme import ACCENT, RICH_STYLES, score_color
 
 if TYPE_CHECKING:
     from .models import Snippet

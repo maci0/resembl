@@ -259,7 +259,6 @@ resembl/
 │   ├── paths.py
 │   ├── scoring.py
 │   ├── server.py
-│   ├── status_colors.py
 │   └── theme.py
 ├── docs/            # listed under Documentation above
 ├── fuzzers/
