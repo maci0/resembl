@@ -44,6 +44,7 @@ Every entry point below is present in the code at the cited location.
 | Entry point | Location | Notes |
 | ----------- | -------- | ----- |
 | `POST /find` | `resembl/server.py:727` | Unauthenticated, read-only. |
+| `POST /find-pinned`, `GET /runtime-generation` | `_handle_find_pinned` in `resembl/server.py` | Experimental, unauthenticated like the other routes; the Go service in `service/` is the intended caller. `/find-pinned` reads the whole SQLite index to hash it, bounded by `resembl/pinned_snapshot.py` (1,000,000 rows, 64 MiB) while holding a writer fence, so a caller that reaches it can stall writers. Keep it on loopback behind the service. |
 | `POST /find-batch` | `resembl/server.py:727` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:550`). |
 | `resembl serve` bind | `resembl/cli.py:578` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:603`). `--port` accepts `0`, which lets the OS assign a port (`resembl/cli.py:580`). |
 | Any other verb | `resembl/server.py:771` | Not implemented by the handler, so `BaseHTTPRequestHandler` answers `501` with its own HTML body. That answer is the only one this server emits that bypasses `_respond`, and so the only one carrying no `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, or `Cache-Control` header (`resembl/server.py:894`). |
@@ -101,6 +102,7 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | ----- | -------- | ----- |
 | `RESEMBL_DATABASE_URL`, then `DATABASE_URL` | `resembl/paths.py:33`, `resembl/paths.py:57` | Trusted verbatim; may carry a password. |
 | `RESEMBL_CACHE_DIR` | `resembl/paths.py:81` | Trusted verbatim; selects where the port file is written and read. |
+| `RESEMBL_RUNTIME_MANIFEST` | `_handle_find_pinned` in `resembl/server.py` | Trusted verbatim; selects the file `resembl/runtime_attestation.py` checks loaded code against. The supervisor must keep it and the interpreter environment write-protected. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
 | `RESEMBL_SEED` | `resembl/core.py:1328`, `resembl/core.py:1368` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |

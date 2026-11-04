@@ -1,0 +1,31 @@
+name: Go service
+
+# The experimental query service in service/ is a separate Go module, so the
+# Python workflows never build it.  Scoped to main like every other workflow.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: service-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: service/go.mod
+          cache-dependency-path: service/go.sum
+      - name: Check formatting, vet and test
+        run: make service-check

@@ -11,3 +11,24 @@ The candidate also forwards `/v1/find-batch` with the existing engine batch sema
 Run `go test -race ./...` here. To exercise the real local engine, start a disposable `resembl serve` and set `RESEMBL_TEST_ENGINE_URL` to its loopback URL for `go test -run TestActualWarmEngine`.
 
 The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm engine. That endpoint takes a canonical SHA-256 over the actual SQLite snippet, LSH and metadata rows while holding a SQLite writer fence, checks the supplied digest, and performs the query under the same fence. It rejects a stale index rather than rebuilding it under the proof, and limits the identity scan to one million rows and 64 MiB of encoded data. It does not support non-SQLite databases or batch requests. The pinned protocol also requires a trusted runtime-manifest digest and the warm process generation from `/runtime-generation`. Before and after the query, the backend checks its executable and every currently loaded module file against the owner-provided manifest. The VM command requires all three pins and remains deny-all. This is file integrity under an immutable, trusted supervisor and filesystem, not remote or hardware attestation: the owner must qualify manifest construction before startup, dependencies loaded later, native libraries and binary identity. It is not a production activation.
+
+## `resembl-service` flags
+
+`resembl-service -h` prints the same list. `-resource`, `-index-sha256`, `-artifact-sha256`, `-generation` and `-custody` are required; the process exits at startup when one is missing or invalid.
+
+| Flag | Default | Meaning |
+| ---- | ------- | ------- |
+| `-listen` | `127.0.0.1:8080` | Listen address. |
+| `-engine` | `http://127.0.0.1:8081` | Loopback `resembl serve` URL. |
+| `-resource` | none | Server-owned name of the index; the credential is scoped to it. |
+| `-index-sha256` | none | Expected SQLite index digest (64 lowercase hex). |
+| `-artifact-sha256` | none | Digest of the runtime manifest the engine reads from `RESEMBL_RUNTIME_MANIFEST` (64 lowercase hex). |
+| `-generation` | none | Value from the engine's `GET /runtime-generation`; a restarted engine has a new one. |
+| `-custody` | none | Private (mode 0700 or stricter), pre-created, persistent directory. |
+| `-token-file` | none | Bearer credential file; without it every query is refused. |
+| `-concurrency` | `4` | Concurrent queries and custody slots, 1 to 64. |
+| `-timeout` | `30s` | Per-request timeout. |
+
+`/v1/find-batch` answers `501` on this binary, because the pinned protocol has no batch form.
+
+Run the checks with `make service-check` from the repository root (needs Go 1.25 or newer).

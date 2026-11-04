@@ -52,6 +52,13 @@ make check                         # hygiene, mypy, ruff, black --check, pylint,
 make coverage                      # the same pytest-cov invocation the codecov workflow runs
 ```
 
+`service/` is a separate Go module (the experimental query service) and is not
+part of `make check`; `make service-check` runs gofmt, `go vet` and
+`go test -race` there, and the `Go service` workflow runs the same target. Run
+it for any change under `service/`, and for a change to `/find-pinned`,
+`/runtime-generation`, `resembl/pinned_snapshot.py` or
+`resembl/runtime_attestation.py`, whose tests also drive the Go tests.
+
 Coverage may rise, never fall; CI reports the number to Codecov from
 `.github/workflows/coverage.yml`, so that file is the ratchet's record, not a
 local threshold. mypy's incremental cache is not safe against concurrent

@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test coverage db-test fuzz check dist dist-verify sbom
+.PHONY: help install format lint types hygiene test coverage db-test service-check fuzz check dist dist-verify sbom
 
 PYTEST_ARGS ?=
 
@@ -135,6 +135,15 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 		exit 1; \
 	fi
 	uv run --locked pytest -q $(DB_TESTS) $(PYTEST_ARGS)
+
+# The experimental Go query service in service/ has its own module and its own
+# CI job (.github/workflows/service.yml).  It is not part of `check` so a
+# Python-only contributor needs no Go toolchain.
+service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.25+)
+	@unformatted=$$(gofmt -l service); \
+	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
+	cd service && go vet ./...
+	cd service && go test -race -count=1 ./...
 
 # Isolate the maintained Python 3.15 Atheris build from normal development.
 # atheris lives in the `fuzz` extra, so the target asks uv for it instead of

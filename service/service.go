@@ -134,7 +134,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		batch, ok := s.Engine.(BatchEngine)
 		if !ok {
-			http.Error(w, "batch unavailable", http.StatusServiceUnavailable)
+			http.Error(w, "batch unavailable", http.StatusNotImplemented)
 			return
 		}
 		var queries []json.RawMessage

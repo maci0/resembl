@@ -207,3 +207,24 @@ func TestCancelledBeforeDispatchReleasesInMemorySlot(t *testing.T) {
 		t.Fatal("undispatched request retained in-memory capacity")
 	}
 }
+
+func TestBatchOnEngineWithoutBatchIsNotImplemented(t *testing.T) {
+	pin := strings.Repeat("a", 64)
+	engine, err := NewPinnedSQLiteEngine("http://127.0.0.1:1", pin, pin, "generation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), engine, "index", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = handler.SetCustody(testCustody{}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/find-batch", strings.NewReader(`{"queries":["ret"]}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotImplemented {
+		t.Fatalf("status %d, want 501", recorder.Code)
+	}
+}

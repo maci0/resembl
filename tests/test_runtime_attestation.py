@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,8 @@ def test_real_warm_engine_with_runtime_manifest(tmp_path, monkeypatch) -> None:
         with urllib.request.urlopen(request, timeout=20) as response:
             result = json.load(response)
         assert result["artifact_sha256"] == pin and result["index_sha256"] == index
+        if shutil.which("go") is None:
+            pytest.skip("Python half passed; the Go half needs a go toolchain")
         env = os.environ.copy()
         env.update(
             RESEMBL_TEST_ENGINE_URL=url,
@@ -121,3 +124,50 @@ def test_real_warm_engine_with_runtime_manifest(tmp_path, monkeypatch) -> None:
         httpd.server_close()
         thread.join(5)
         engine.dispose()
+
+
+def _manifest(tmp_path: Path, document: object) -> tuple[str, str]:
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(document))
+    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        ({}, "invalid runtime manifest"),
+        ([], "invalid runtime manifest"),
+        ({"/not/the/executable": "0" * 64}, "unverified runtime module"),
+    ],
+)
+def test_manifest_must_cover_the_runtime(tmp_path: Path, document: object, message: str) -> None:
+    path, digest = _manifest(tmp_path, document)
+    with patch.dict(sys.modules, {}, clear=True):
+        with pytest.raises(ValueError, match=message):
+            verify_runtime(path, digest)
+
+
+def test_manifest_digest_must_be_a_sha256_string(tmp_path: Path) -> None:
+    executable = str(Path(sys.executable).resolve())
+    path, digest = _manifest(tmp_path, {executable: "short"})
+    with patch.dict(sys.modules, {}, clear=True):
+        with pytest.raises(ValueError, match="invalid runtime digest"):
+            verify_runtime(path, digest)
+
+
+def test_oversized_manifest_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "big.json"
+    path.write_bytes(b" " * (2 * 1024 * 1024 + 1))
+    with pytest.raises(ValueError, match="manifest mismatch"):
+        verify_runtime(str(path), hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def test_verification_byte_limit(tmp_path: Path, monkeypatch) -> None:
+    executable = str(Path(sys.executable).resolve())
+    path, digest = _manifest(
+        tmp_path, {executable: hashlib.sha256(Path(executable).read_bytes()).hexdigest()}
+    )
+    monkeypatch.setattr("resembl.runtime_attestation.MAX_BYTES", 1)
+    with patch.dict(sys.modules, {}, clear=True):
+        with pytest.raises(ValueError, match="runtime verification limit"):
+            verify_runtime(path, digest)

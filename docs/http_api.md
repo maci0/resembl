@@ -131,6 +131,42 @@ key and the other queries still return results, so the response is always
 ]}
 ```
 
+### `POST /find-pinned`
+
+Experimental, for the Go query service in `service/`. It takes the
+`/find` body plus three fields, all required:
+
+| Field | Type | Constraint |
+| ----- | ---- | ---------- |
+| `index_sha256` | string | 64 lowercase hex digits: the digest of the SQLite snippet, LSH and metadata rows |
+| `artifact_sha256` | string | SHA-256 of the runtime manifest named by `RESEMBL_RUNTIME_MANIFEST` |
+| `generation` | string | the value `GET /runtime-generation` returned for this process |
+
+The server verifies the manifest against its executable and every loaded
+module file, takes a SQLite writer fence (`BEGIN IMMEDIATE`), recomputes the
+index digest, runs the find under the same fence, verifies the manifest again,
+and echoes the three values with the result:
+
+```json
+{"index_sha256": "...", "artifact_sha256": "...", "generation": "...", "result": {"lsh_candidates": 0, "matches": []}}
+```
+
+| Status | When |
+| ------ | ---- |
+| `400` | A malformed `index_sha256`, a missing or blank `query`, or a find parameter error. |
+| `409` | The index digest differs from `index_sha256`. |
+| `503` | `RESEMBL_RUNTIME_MANIFEST` is unset, `artifact_sha256` or `generation` is missing or stale, the manifest check failed, the database is not SQLite, or the index needs a rebuild. The index is never rebuilt under the proof. |
+
+The digest scan is limited to one million rows and 64 MiB of encoded data.
+This is file integrity under a trusted supervisor, not remote attestation; see
+`service/README.md`.
+
+### `GET /runtime-generation`
+
+`{"generation": "<32 hex digits>"}`: a random id fixed when this server
+process starts. A restarted server has a new one, so a pin taken from an
+earlier process is refused by `/find-pinned`.
+
 ### `GET /health`
 
 For a supervisor, a load balancer or a shell check. It runs one `SELECT 1`
@@ -181,10 +217,11 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health` and `/metrics`. |
+| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health`, `/metrics` and `/runtime-generation`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
-| `503` | `/health` only: the served database did not answer its probe. |
+| `409` | `/find-pinned` only: the index digest does not match. |
+| `503` | `/health`: the served database did not answer its probe. `/find-pinned`: see its table. |
 
 ## Other response headers
 

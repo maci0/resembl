@@ -48,3 +48,19 @@ updates:
       actions:
         patterns:
           - "*"
+
+  # The Go query service in service/ is its own module.
+  - package-ecosystem: gomod
+    directory: /service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+    groups:
+      go:
+        patterns:
+          - "*"

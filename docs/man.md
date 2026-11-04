@@ -296,6 +296,12 @@ Linux or Windows are one name.
     write is a way to redirect queries to a listener of their own.  Keep it
     private to the user.
 
+**RESEMBL_RUNTIME_MANIFEST**
+:   Path to a JSON object mapping absolute file paths to SHA-256 digests,
+    read by `serve` for the experimental `/find-pinned` endpoint, which
+    refuses without it. The manifest must list the interpreter and every
+    loaded module file. See the HTTP API reference.
+
 **RESEMBL_DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
     Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)

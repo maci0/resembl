@@ -114,6 +114,7 @@ uv run --locked resembl find-batch --file queries.txt --top-n 5
 - [Tutorial](./docs/tutorial.md): a reference library, collections, tags, YARA export and library use, end to end.
 - [User Stories](./docs/user_stories.md): each command's acceptance criteria.
 - [HTTP API](./docs/http_api.md): the `resembl serve` endpoints.
+- [Go query service](./service/README.md): an experimental HTTP front for one pinned SQLite index (`resembl serve` stays the supported server).
 - [API Reference](./docs/api_reference.md): the Python library.
 - [Using a Custom Database](./docs/custom_database.md): backends, drivers, and embedding resembl in your own database.
 - [Flowcharts](./docs/flowcharts.md): the add, find, import and export workflows.

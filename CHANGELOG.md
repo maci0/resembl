@@ -6,6 +6,22 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl-service` takes `-concurrency` and `-timeout` flags and requires
+  `-resource`. The flag reference is in `service/README.md`.
+- `docs/http_api.md` documents `POST /find-pinned` and `GET /runtime-generation`,
+  and `docs/man.md` documents `RESEMBL_RUNTIME_MANIFEST`.
+- `make service-check` and a `Go service` workflow run gofmt, `go vet` and
+  `go test -race` on `service/`.
+
+### Changed
+
+- `resembl-service` exits at startup without `-resource` instead of serving
+  under the name `unconfigured`.
+- `/v1/find-batch` on the pinned service answers `501` instead of `503`, since
+  the pinned protocol has no batch form.
+
 ## [3.11.0] - 2026-11-04
 
 ### Added
