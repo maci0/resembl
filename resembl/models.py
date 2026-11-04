@@ -52,10 +52,22 @@ def parse_instant(value: str) -> datetime | None:
     anything else is unparseable for our purposes and left verbatim.
     """
     text = value.strip()
-    if len(text) < 19 or text[4] != "-" or text[7] != "-" or text[10] not in ("T", " "):
+    if len(text) < 19 or text[4] != "-" or text[7] != "-" or text[10] not in ("T", "t", " "):
         return None
     if text[13] != ":" or text[16] != ":":
         return None
+    # ``fromisoformat`` accepts a trailing ``Z`` but not the lowercase
+    # ``z`` that ISO 8601 also allows; a foreign ``...z`` value would
+    # otherwise pass the gate above, fail to parse, and be left verbatim
+    # by ``timestamp_normalize`` -- breaking the string ordering
+    # ``SnippetVersion.get_by_checksum`` relies on (``z`` sorts after
+    # every ``+00:00`` value, so a newer row could sort oldest).
+    if text.endswith(("z", "Z")):
+        text = text[:-1] + "+00:00"
+    # A lowercase ``t`` separator is valid ISO 8601 and parsed above,
+    # but the canonical stored form uses uppercase ``T``.
+    if text[10] == "t":
+        text = text[:10] + "T" + text[11:]
     try:
         return datetime.fromisoformat(text)
     except ValueError:

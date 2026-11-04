@@ -254,6 +254,24 @@ class TestTimestampNormalize(unittest.TestCase):
             timestamp_normalize("2024-06-01T10:00:00+00:00"), "2024-06-01T10:00:00+00:00"
         )
 
+    def test_lowercase_z_is_normalized_to_utc(self):
+        """A lowercase ``z`` (valid ISO 8601) is not left verbatim.
+
+        ``datetime.fromisoformat`` rejects ``z`` while accepting ``Z``;
+        leaving a foreign ``...z`` row verbatim would break the string
+        ordering ``SnippetVersion.get_by_checksum`` relies on, because
+        ``z`` sorts after every ``+00:00`` value.
+        """
+        self.assertEqual(timestamp_normalize("2024-06-01T10:00:00z"), "2024-06-01T10:00:00+00:00")
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T10:00:00.123z"),
+            "2024-06-01T10:00:00.123000+00:00",
+        )
+
+    def test_lowercase_t_separator_is_normalized(self):
+        """A lowercase ``t`` separator (valid ISO 8601) parses to UTC."""
+        self.assertEqual(timestamp_normalize("2024-06-01t10:00:00Z"), "2024-06-01T10:00:00+00:00")
+
     def test_offset_converted_to_utc(self):
         """A foreign offset is re-expressed in UTC so ordering stays valid.
 
