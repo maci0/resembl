@@ -1124,7 +1124,7 @@ class _FindHandler(BaseHTTPRequestHandler):
     command: str = ""
 
     def handle_one_request(self) -> None:
-        """Stamp the request with a correlation id and start its clock.
+        """Run one request, draining any body the handler left unread.
 
         One per request, not per connection: ``BaseHTTPRequestHandler.handle``
         calls this again for every request on a keep-alive connection, which
@@ -1132,7 +1132,37 @@ class _FindHandler(BaseHTTPRequestHandler):
         """
         self.request_id = _seeded_uuid_hex()[:12]
         self._request_start = time.monotonic()
+        self._body_read = False
         super().handle_one_request()
+        if not self._body_read and not self.close_connection:
+            # Handlers that answer before ``_read_body`` (host, route,
+            # content-type and verb refusals) leave body bytes on the
+            # stream; the next request would parse them as a request
+            # line.  Drain them here, keeping the connection reusable, or
+            # close it when the declared length cannot be trusted.
+            if not self._drain_body():
+                self.close_connection = True
+
+    def _drain_body(self) -> bool:
+        """Read and discard an unread request body; False if none remains.
+
+        Bounded by :data:`_MAX_BODY_BYTES` — a larger or malformed
+        length cannot be trusted to bound the read, so the connection
+        is closed instead of reading until EOF.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return False
+        if length < 0 or length > _MAX_BODY_BYTES:
+            return False
+        remaining = length
+        while remaining:
+            chunk = self.rfile.read(min(remaining, 65536))
+            if not chunk:
+                return False
+            remaining -= len(chunk)
+        return True
 
     #: Set by :meth:`handle_one_request`; the class default keeps a record
     #: made outside a request (a connection that never parsed one) readable.
@@ -1146,6 +1176,10 @@ class _FindHandler(BaseHTTPRequestHandler):
 
     server_version = "Resembl"
     sys_version = ""
+
+    # Set by :meth:`handle_one_request` before dispatch; read after it to
+    # decide whether the request body still needs draining.
+    _body_read: bool = False
 
     def version_string(self) -> str:
         """Return a generic server banner with no interpreter version.
@@ -1242,6 +1276,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             return None
         if length < 0 or length > _MAX_BODY_BYTES:
             return None
+        self._body_read = True
         try:
             body = json.loads((self.rfile.read(length) or b"{}").decode("utf-8"))
         except ValueError, KeyError, RecursionError:

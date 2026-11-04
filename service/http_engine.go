@@ -49,11 +49,21 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// Consume the error body (discarding it) so the connection is
+		// reusable; the message carries nothing the caller needs.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, errors.New("engine rejected request")
 	}
+	// Read up to one byte past the cap so an oversized body is detected
+	// without allocating unboundedly, then discard any remainder so the
+	// connection can be reused.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
-	if err != nil || len(data) > 8<<20 {
-		return nil, errors.New("invalid engine response")
+	if err == nil && len(data) > 8<<20 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		err = errors.New("invalid engine response")
+	}
+	if err != nil {
+		return nil, err
 	}
 	return data, nil
 }
