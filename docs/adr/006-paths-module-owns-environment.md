@@ -36,8 +36,10 @@ for a path:
 - `db_url_get()` resolves at call time over `DB_URL_ENV_VARS`
   (`RESEMBL_DATABASE_URL` first, the unprefixed `DATABASE_URL` next, an empty
   value counting as unset).
-- `cache_dir_get()`, `config_dir_get()` and `server_port_path(db_url,
-  cache_dir)` own their defaults and their `RESEMBL_*` overrides.
+- `cache_dir_get()`, `config_dir_get()`, `config_path_get()` and
+  `server_port_path(db_url, cache_dir)` own their defaults and their
+  `RESEMBL_*` overrides. `paths.py` also owns `console_utf8_reconfigure()`,
+  the shared output-encoding rule both entry points apply.
 
 The CLI, the server and the standalone client resolve through `resembl.paths`
 instead of keeping copies. The superseded accessors are gone rather than
@@ -51,13 +53,13 @@ re-exported; the changelog records the migration for each.
   embedder that changes the environment after `import resembl` gets the value
   it set.
 - The public names that moved (`db_url_get`, `db_url_mask`, `cache_dir_get`,
-  `config_dir_get`, `DEFAULT_DB_URL`, `DEFAULT_CACHE_DIR`, `DEFAULT_CONFIG_DIR`,
-  `server_port_path`) are breaking removals from their old modules; this is a
-  major release.
+  `config_dir_get`, `config_path_get`, `DEFAULT_DB_URL`, `DEFAULT_CACHE_DIR`,
+  `DEFAULT_CONFIG_DIR`, `server_port_path`) are breaking removals from their
+  old modules; this is a major release.
 - `resembl.paths` imports only the standard library, so the import-light
   client contract (roughly 50 ms of startup) keeps holding.
 - Two environment variables stay with the modules that own their behavior,
   because they are replay seams rather than paths: `CLOCK_ENV_VAR` in
   `resembl.models.timestamp_now` fixes the clock a stored stamp is read from,
-  and `SEED_ENV_VAR` in `resembl.core` seeds the sampling stream. Neither
+  and `SEED_ENV_VAR` in `resembl.diagnostics` seeds the sampling stream. Neither
   names a filesystem location, so neither moved.

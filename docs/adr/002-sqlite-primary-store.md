@@ -22,11 +22,12 @@ lookup order.
 
 ## Consequences
 - SQLite has limited concurrent write support. Every `resembl serve` endpoint
-  is read-only: `POST /find` and `POST /find-batch` search, `GET /health` runs
-  one `SELECT 1`, and `GET /metrics` reads counters held in the process
-  (`docs/http_api.md`). The served API therefore never issues writes;
-  concurrent writers serialize instead, with a 30 s busy timeout applied as a
-  pragma.
+  is read-only: `POST /find`, `POST /find-batch` and `POST /find-pinned`
+  search, `GET /runtime-generation` reads the process generation,
+  `GET /health` runs one `SELECT 1`, and `GET /metrics` reads counters held
+  in the process (`docs/http_api.md`). The served API therefore never issues
+  writes; concurrent writers serialize instead, with a 30 s busy timeout
+  applied as a pragma.
 - Teams needing shared databases should set `RESEMBL_DATABASE_URL` to a
   PostgreSQL, MySQL/MariaDB or DuckDB connection string.
 - SQLite-specific pragmas (WAL, synchronous, busy timeout) are applied
