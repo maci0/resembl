@@ -414,18 +414,18 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
     return value if isinstance(value, list) else None
 
 
-def _source_lists_or_none(src_snippet: Snippet) -> tuple[list[str], list[str]] | None:
+def _source_lists_or_none(source_snippet: Snippet) -> tuple[list[str], list[str]] | None:
     """Return a merge source's ``(names, tags)``, or ``None`` if either is corrupt.
 
     Both columns are copied verbatim into the destination, so unreadable
     metadata is rejected (with the same warning the merge paths emit) before
     it poisons the destination.
     """
-    names = _string_list_or_none(src_snippet.names)
-    tags = _string_list_or_none(src_snippet.tags)
+    names = _string_list_or_none(source_snippet.names)
+    tags = _string_list_or_none(source_snippet.tags)
     if names is None or tags is None:
         logger.warning(
-            "Skipping source snippet %s: corrupt names/tags metadata.", src_snippet.checksum
+            "Skipping source snippet %s: corrupt names/tags metadata.", source_snippet.checksum
         )
         return None
     return names, tags
@@ -2480,13 +2480,13 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             new_rows.clear()
             added_minhashes.clear()
 
-        def record_new(src_snippet: Snippet) -> None:
+        def record_new(source_snippet: Snippet) -> None:
             nonlocal added, skipped
-            if _source_lists_or_none(src_snippet) is None:
+            if _source_lists_or_none(source_snippet) is None:
                 skipped += 1
                 return
             try:
-                packed = minhash_ensure_packed(src_snippet.minhash)
+                packed = minhash_ensure_packed(source_snippet.minhash)
             except ValueError:
                 # A non-packed fingerprint (legacy format or corrupt) is
                 # never deserialized — that would execute attacker-controlled
@@ -2495,30 +2495,30 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                 # code either is skipped.
                 logger.warning(
                     "Recomputing fingerprint for source snippet %s (unsupported format).",
-                    src_snippet.checksum,
+                    source_snippet.checksum,
                 )
                 try:
-                    packed = minhash_pack(code_create_minhash(src_snippet.code))
+                    packed = minhash_pack(code_create_minhash(source_snippet.code))
                 except Exception:
                     logger.warning(
                         "Skipping source snippet %s: corrupt fingerprint and "
                         "no recomputable code.",
-                        src_snippet.checksum,
+                        source_snippet.checksum,
                     )
                     skipped += 1
                     return
             new_rows.append(
                 {
-                    "checksum": src_snippet.checksum,
-                    "names": src_snippet.names,
-                    "code": src_snippet.code,
+                    "checksum": source_snippet.checksum,
+                    "names": source_snippet.names,
+                    "code": source_snippet.code,
                     "minhash": packed,
-                    "tags": src_snippet.tags,
-                    "collection": src_snippet.collection,
+                    "tags": source_snippet.tags,
+                    "collection": source_snippet.collection,
                 }
             )
             added += 1
-            added_minhashes.append((src_snippet.checksum, packed))
+            added_minhashes.append((source_snippet.checksum, packed))
             if len(new_rows) >= merge_flush_size:
                 flush_new_rows()
 
@@ -2527,14 +2527,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             if not merge_chunk:
                 return
             local_rows = _snippets_by_checksums(session, [s.checksum for s in merge_chunk])
-            for src_snippet in merge_chunk:
-                existing = local_rows.get(src_snippet.checksum)
+            for source_snippet in merge_chunk:
+                existing = local_rows.get(source_snippet.checksum)
                 if existing is None:
                     # Not in the local database (or vanished concurrently) —
                     # treat as new, matching the old fallback.
-                    record_new(src_snippet)
+                    record_new(source_snippet)
                     continue
-                src_lists = _source_lists_or_none(src_snippet)
+                src_lists = _source_lists_or_none(source_snippet)
                 if src_lists is None:
                     skipped += 1
                     continue
@@ -2567,14 +2567,14 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     skipped += 1
 
                 # Assign collection if the existing snippet doesn't have one
-                if not existing.collection and src_snippet.collection:
-                    existing.collection = src_snippet.collection
+                if not existing.collection and source_snippet.collection:
+                    existing.collection = source_snippet.collection
                     session.add(existing)
             merge_chunk.clear()
 
         # Import snippets (streaming, so memory stays bounded for big sources)
-        for src_snippet in Snippet.stream_all(source_session):
-            merge_chunk.append(src_snippet)
+        for source_snippet in Snippet.stream_all(source_session):
+            merge_chunk.append(source_snippet)
             if len(merge_chunk) >= _CHECKSUM_CHUNK_SIZE:
                 flush_merge_chunk()
         flush_merge_chunk()

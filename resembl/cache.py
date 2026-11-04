@@ -155,6 +155,23 @@ def lsh_index_build(
     return None
 
 
+def _flush_band(
+    session: Session,
+    insert_sql: str,
+    band_rows: list[list[tuple[str, str]]],
+    band: int,
+) -> None:
+    """Insert one band's buffered rows, sorted by bucket, and clear the buffer."""
+    pairs = sorted(band_rows[band])
+    insert_rows(
+        session,
+        insert_sql,
+        [{"band": band, "bucket": bucket, "checksum": checksum} for bucket, checksum in pairs],
+    )
+    session.commit()
+    band_rows[band].clear()
+
+
 def _build_once(
     lsh: ResemblLSH,
     threshold: float,
@@ -184,16 +201,6 @@ def _build_once(
     # (measured ~4x slower by the tail of a 12.5M-row build).
     band_rows: list[list[tuple[str, str]]] = [[] for _ in range(lsh.b)]
 
-    def flush_band(band: int) -> None:
-        pairs = sorted(band_rows[band])
-        insert_rows(
-            session,
-            insert_sql,
-            [{"band": band, "bucket": bucket, "checksum": checksum} for bucket, checksum in pairs],
-        )
-        session.commit()
-        band_rows[band].clear()
-
     total_snippets = session.exec(
         select(func.count(Snippet.checksum))  # type: ignore[arg-type]
     ).one()
@@ -203,28 +210,16 @@ def _build_once(
         for checksum, minhash in batch:
             try:
                 packed = minhash_ensure_packed(minhash)
-            except ValueError:
-                # A corrupt fingerprint (disk rot, a bad merge source) must
-                # not brick the whole build — every find would crash.  Skip
-                # the snippet; a reindex recomputes its fingerprint from the
-                # code and heals it.
-                skipped_corrupt += 1
-                logger.warning("Skipping snippet %s: corrupt fingerprint.", checksum)
-                continue
-            try:
                 buckets = band_buckets(packed, num_perm, lsh.b, lsh.r)
             except ValueError:
-                # A well-formed blob written at a different permutation count
-                # is stale for this build (mixed-perm databases from config
-                # flips between writes).  Skip it like a corrupt blob instead
-                # of crashing the build; a reindex at the requested count
-                # recomputes it from the snippet's code.
+                # A corrupt fingerprint (disk rot, a bad merge source) or a
+                # well-formed blob written at a different permutation count
+                # (mixed-perm databases from config flips between writes)
+                # must not brick the whole build — every find would crash.
+                # Skip the snippet; a reindex recomputes its fingerprint
+                # from the code and heals it.
                 skipped_corrupt += 1
-                logger.warning(
-                    "Skipping snippet %s: fingerprint permutation count does not match %d.",
-                    checksum,
-                    num_perm,
-                )
+                logger.warning("Skipping snippet %s: corrupt fingerprint.", checksum)
                 continue
             for band, bucket in enumerate(buckets):
                 band_rows[band].append((bucket, checksum))
@@ -233,10 +228,10 @@ def _build_once(
             progress(processed, total_snippets)
         for band in range(lsh.b):
             if len(band_rows[band]) >= _BAND_CHUNK:
-                flush_band(band)
+                _flush_band(session, insert_sql, band_rows, band)
     for band in range(lsh.b):
         if band_rows[band]:
-            flush_band(band)
+            _flush_band(session, insert_sql, band_rows, band)
     if skipped_corrupt:
         logger.warning(
             "Index build skipped %d snippet(s) with unusable fingerprints "

@@ -831,6 +831,18 @@ def cfg_extract(code: str) -> dict:
     }
 
 
+def _min_max_ratio(a: int, b: int) -> float:
+    """Return ``min(a, b) / max(a, b)`` with the zero cases named.
+
+    Both zero is a perfect match (1.0); exactly one zero is no match (0.0).
+    """
+    if a == 0 and b == 0:
+        return 1.0
+    if a == 0 or b == 0:
+        return 0.0
+    return min(a, b) / max(a, b)
+
+
 def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     """Compute structural similarity between two CFGs (0.0-1.0).
 
@@ -849,16 +861,8 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     if b1 == 0 or b2 == 0:
         return 0.0  # One is empty
 
-    # Sub-metric 1: block count ratio
-    block_ratio = min(b1, b2) / max(b1, b2)
-
-    # Sub-metric 2: edge count ratio
-    if e1 == 0 and e2 == 0:
-        edge_ratio = 1.0
-    elif e1 == 0 or e2 == 0:
-        edge_ratio = 0.0
-    else:
-        edge_ratio = min(e1, e2) / max(e1, e2)
+    block_ratio = _min_max_ratio(b1, b2)
+    edge_ratio = _min_max_ratio(e1, e2)
 
     # Sub-metric 3: block-size histogram cosine similarity
     sizes1 = cfg1["block_sizes"]
@@ -1003,11 +1007,13 @@ def require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:
 def minhash_jaccard(packed_a: bytes, packed_b: bytes) -> float:
     """Jaccard similarity of two stored MinHash byte blobs (0.0-1.0).
 
-    Fast path: when both blobs use the compact packed format, similarity is
-    computed directly from the uint32 arrays, bypassing the ``MinHash``
+    Fast path: when the first blob uses the compact packed format, similarity
+    is computed directly from the uint32 arrays, bypassing the ``MinHash``
     constructor — which dominates the cost when scoring thousands of
-    candidates (the constructor is ~300 µs per object).  Blobs in any other
-    format raise ``ValueError`` (they are never deserialized — see
+    candidates (the constructor is ~300 µs per object).  When only the
+    second blob is packed, the first is unpacked and compared against it
+    directly.  When neither is packed, both are unpacked.  Blobs in any
+    other format raise ``ValueError`` (they are never deserialized — see
     :func:`minhash_unpack`).
 
     The metric matches :meth:`datasketch.MinHash.jaccard` exactly: the
