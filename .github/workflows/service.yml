@@ -29,3 +29,8 @@ jobs:
           cache-dependency-path: service/go.sum
       - name: Check formatting, vet and test
         run: make service-check
+      - name: Build the service image
+        # The Dockerfile is the deployment artifact for service/; a build
+        # that only runs `go test` would let a broken Dockerfile merge
+        # undetected until an operator builds it by hand.
+        run: docker build -f service/Dockerfile -t resembl-service:ci .
