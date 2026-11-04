@@ -452,14 +452,6 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # export of the snippet table.
     if top_n > _MAX_TOP_N:
         raise BadRequestError(f"top_n must be at most {_MAX_TOP_N}")
-    # Same rule as ``config.VALUE_BOUNDS["top_n"]`` (Range(1.0)): a
-    # non-positive top_n does not fail, it truncates the ranking to nothing and
-    # answers ``200`` with an empty ``matches``, which a client reads as "this
-    # snippet has no duplicates" rather than as a bad request. The CLI refuses
-    # the same value at the config boundary, so the endpoint refusing it too is
-    # what keeps one request from meaning two different things.
-    if top_n < 1:
-        raise BadRequestError("top_n must be at least 1")
     # Reject an unbuildable threshold up front: the banding needs b >= 2
     # bands, and an unbuildable one would make the find return zero matches
     # silently.  (The thin client cannot run the banding search without
