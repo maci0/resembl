@@ -1969,7 +1969,14 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     # (legacy local stamps sort 01:30 EDT and 01:30 EST identically across
     # a fall-back, so the hour that was taken second can sort oldest and
     # be deleted).  ``gmtime`` keeps the sort chronological in any zone.
-    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f"-{time.time_ns() % 1_000_000:06d}"
+    # One clock read feeds both fields: two reads can straddle a second
+    # boundary and stamp a microsecond from the next second onto this one,
+    # which sorts the backup before one taken earlier in the same second.
+    _now_ns = time.time_ns()
+    stamp = (
+        time.strftime("%Y%m%dT%H%M%S", time.gmtime(_now_ns // 1_000_000_000))
+        + f"-{(_now_ns % 1_000_000_000) // 1000:06d}"
+    )
     backup_name = f"assembly-{stamp}.db"
     final_path = os.path.join(backup_dir, backup_name)
     # ``backup`` refuses a destination that is the source connection's own

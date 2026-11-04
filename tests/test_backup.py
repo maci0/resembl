@@ -136,6 +136,31 @@ class TestDbBackup(FileDBTest):
         self.assertLessEqual(epoch_from_stamp, time.time() + 60)
         self.assertGreater(epoch_from_stamp, time.time() - 60)
 
+    def test_backup_stamp_second_and_microsecond_come_from_one_read(self):
+        """A stamp's microsecond belongs to its own second field.
+
+        Regression: the stamp combined two clock reads (``gmtime()`` for
+        the second, ``time_ns()`` for the microsecond); straddling a second
+        boundary stamped the next second's microsecond onto this second, so
+        a backup could sort before one taken earlier in the same second and
+        prune could delete the newer file.
+        """
+        import calendar
+        from unittest import mock
+
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        epoch_s = calendar.timegm((2024, 6, 1, 12, 0, 0, 0, 0, 0))
+        with mock.patch.object(
+            time, "time_ns", return_value=(epoch_s + 1) * 1_000_000_000 + 123_456_000
+        ):
+            result = db_backup(self.session, backup_dir)
+        backup_name = os.path.basename(result["backup"])
+        self.assertTrue(
+            backup_name.endswith("T120001-123456.db"),
+            f"stamp must be one consistent instant, got {backup_name}",
+        )
+
     def test_backup_rejects_non_sqlite(self):
         """Non-SQLite backends must use their own backup tooling."""
         engine = create_engine("sqlite:///:memory:")
