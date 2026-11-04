@@ -2000,31 +2000,33 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     dbapi_connection = bind.raw_connection()  # type: ignore[union-attr]
     if dbapi_connection is None:
         raise ValueError("db_backup: no database connection available")
-    sqlite_connection = dbapi_connection.dbapi_connection
-    if not isinstance(sqlite_connection, sqlite3.Connection):
-        raise ValueError("db_backup: the SQLite driver did not yield a sqlite3 connection")
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=backup_dir, prefix=".assembly-", suffix=".tmp")
-    os.close(tmp_fd)
     try:
-        # Remove the empty placeholder: sqlite3.connect creates the file
-        # itself, and ``backup`` requires a path it may create.
-        os.unlink(tmp_path)
-        destination = sqlite3.connect(tmp_path)
+        sqlite_connection = dbapi_connection.dbapi_connection
+        if not isinstance(sqlite_connection, sqlite3.Connection):
+            raise ValueError("db_backup: the SQLite driver did not yield a sqlite3 connection")
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=backup_dir, prefix=".assembly-", suffix=".tmp")
+        os.close(tmp_fd)
         try:
-            sqlite_connection.backup(destination)
-        finally:
-            destination.close()
-        os.replace(tmp_path, final_path)
-    except BaseException:
-        try:
+            # Remove the empty placeholder: sqlite3.connect creates the file
+            # itself, and ``backup`` requires a path it may create.
             os.unlink(tmp_path)
-        except OSError:
+            destination = sqlite3.connect(tmp_path)
+            try:
+                sqlite_connection.backup(destination)
+            finally:
+                destination.close()
+            os.replace(tmp_path, final_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    finally:
+        try:
+            dbapi_connection.close()
+        except Exception:
             pass
-        raise
-    try:
-        dbapi_connection.close()
-    except Exception:
-        pass
     session.rollback()
 
     try:

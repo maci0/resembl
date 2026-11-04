@@ -106,6 +106,16 @@ _RESULT_CACHE_MAX_CHARS = 256 * 1024
 #: handler threads, and OrderedDict is not thread-safe.
 _RESULT_CACHE_LOCK = threading.Lock()
 
+#: Maximum concurrent request-handler threads.  ``ThreadingHTTPServer``
+#: spawns one thread per accepted connection with no bound, so a client
+#: that opens many connections and stalls the request body (or a burst
+#: that exhausts the engine pool, whose checkout blocks) accumulated
+#: threads without limit for the life of the process — each thread pins
+#: its stack, socket and session.  Bounding handler threads to the
+#: engine pool size (32 + 64) keeps excess connections in the listen
+#: backlog, where they time out, instead of in a thread.
+_MAX_HANDLER_THREADS = 96
+
 
 def _query_cache_key(query: str) -> str:
     """Return the result-cache key component standing in for *query*.
@@ -1719,10 +1729,18 @@ class _FindServer(ThreadingHTTPServer):
     leaving them to interpreter exit: a stopped server generation must not
     pin up to ``pool_size + max_overflow`` SQLite handles in a process that
     starts and stops servers repeatedly (tests, embedded callers).
+
+    Handler threads are bounded by ``_handler_slots``: the stdlib spawns
+    one thread per connection, so without a bound a stalled-client flood
+    accumulated threads (and their sessions) without limit.  Excess
+    connections wait in the listen backlog instead.
     """
 
     engine: Any
     runtime_generation: str
+    _handler_slots: threading.BoundedSemaphore = threading.BoundedSemaphore(
+        _MAX_HANDLER_THREADS
+    )
     #: ``Host`` values this generation answers to; empty means unrestricted
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()
@@ -1764,6 +1782,27 @@ class _FindServer(ThreadingHTTPServer):
         host, port = self.server_address[:2]
         self.server_name = str(host)
         self.server_port = port
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Run one request, bounded by ``_handler_slots``.
+
+        Acquired in the accept loop, released when the handler thread
+        finishes: excess connections queue in the listen backlog rather
+        than spawning unbounded threads.
+        """
+        self._handler_slots.acquire()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._handler_slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        """Run the handler thread body, releasing its slot on exit."""
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._handler_slots.release()
 
     def server_close(self) -> None:
         super().server_close()

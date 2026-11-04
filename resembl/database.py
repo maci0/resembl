@@ -58,13 +58,15 @@ def create_db_engine(
             connection_record: ConnectionPoolEntry,  # pylint: disable=unused-argument
         ) -> None:
             cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            # 30s busy wait: concurrent writers (two CLI processes, or an
-            # import while a find builds the index) serialize instead of
-            # failing immediately with "database is locked".
-            cursor.execute("PRAGMA busy_timeout=30000")
-            cursor.close()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                # 30s busy wait: concurrent writers (two CLI processes, or an
+                # import while a find builds the index) serialize instead of
+                # failing immediately with "database is locked".
+                cursor.execute("PRAGMA busy_timeout=30000")
+            finally:
+                cursor.close()
 
     return eng
 
