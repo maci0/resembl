@@ -217,6 +217,18 @@ class TestNameNormalization(BaseDBTest):
         self.assertEqual(added.collection, _NFC_NAME)
         self.assertTrue(collection_delete(self.session, _NFD_NAME))
 
+    def test_padded_and_unicode_space_spellings_are_one_name(self):
+        snippet = snippet_add(self.session, " café ", "MOV EAX, 1")
+        self.assertEqual(snippet.name_list, ["café"])
+        self.assertIsNotNone(Snippet.get_by_name(self.session, " café "))
+        self.assertIsNotNone(Snippet.get_by_name(self.session, "\u00a0café\u00a0"))
+        self.assertEqual(
+            [s.name_list for s in snippet_search_by_name(self.session, " café ")],
+            [["café"]],
+        )
+        collection_create(self.session, "foo")
+        self.assertTrue(collection_delete(self.session, " foo "))
+
     def test_merge_does_not_duplicate_a_decomposed_name(self):
         """Merging a macOS-written database creates no second alias."""
         snippet = snippet_add(self.session, "unused", "MOV EAX, 1")

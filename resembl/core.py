@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -1712,11 +1713,7 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     checksums: list[str] = []
     last: str | None = None
     while len(checksums) < limit:
-        stmt = (
-            select(Snippet.checksum, Snippet.names)
-            .order_by(Snippet.checksum)
-            .limit(2000)
-        )
+        stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(2000)
         if last is not None:
             stmt = stmt.where(Snippet.checksum > last)
         rows = session.exec(stmt).all()
@@ -1724,8 +1721,7 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
             break
         for checksum, names in rows:
             if any(
-                folded_target
-                in (stored if stored.isascii() else name_normalize(stored)).casefold()
+                folded_target in (stored if stored.isascii() else name_normalize(stored)).casefold()
                 for stored in json.loads(names)
             ):
                 checksums.append(checksum)
@@ -1791,13 +1787,15 @@ def _export_safe_filename(name: str) -> str:
     """
     cleaned = _INVALID_FILENAME_CHARS.sub("_", name.replace("..", "_"))
     cleaned = os.path.basename(cleaned)
+    cleaned = unicodedata.normalize("NFC", cleaned)
     if len(cleaned.encode("utf-8")) > _EXPORT_STEM_MAX_BYTES:
         # Cut by bytes, then drop any partial multi-byte character left at
-        # the end ("ignore") so the stem stays a valid string.  The truncation
-        # can land inside a grapheme cluster (a base character separated from
-        # its combining mark); that costs a combining mark at the very end of
-        # a 230-byte stem, and dropping the mark would mangle the character
-        # before it, so the boundary is left where the byte count falls.
+        # the end ("ignore") so the stem stays a valid string.  Normalizing
+        # to NFC first is what keeps the cut on a grapheme boundary: a
+        # decomposed ``e`` + combining acute is one 2-byte code point, so
+        # the partial character the cut discards is the whole grapheme
+        # rather than its combining mark (which would mangle it into a
+        # different character).
         cleaned = cleaned.encode("utf-8")[:_EXPORT_STEM_MAX_BYTES].decode("utf-8", errors="ignore")
     cleaned = cleaned.rstrip(" .")
     if not cleaned:

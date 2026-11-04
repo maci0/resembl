@@ -88,8 +88,13 @@ def name_normalize(name: str) -> str:
     normalized spellings.
     """
     # A leading BOM (a UTF-8 file read as ``utf-8``) is not part of the
-    # name, for the same reason as in ``normalize_unicode``.
-    return unicodedata.normalize("NFC", name.lstrip("\ufeff"))
+    # name, for the same reason as in ``normalize_unicode``.  Surrounding
+    # whitespace (including Unicode spaces such as U+00A0, which
+    # ``str.strip`` removes) is not part of the name either: every other
+    # ingestion path (``snippet_name_add``, ``collection_create``) strips
+    # it, so a name that kept it would be stored under a spelling no
+    # lookup strips its way to.
+    return unicodedata.normalize("NFC", name.strip().lstrip("\ufeff"))
 
 
 def timestamp_now() -> str:

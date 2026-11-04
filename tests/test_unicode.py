@@ -241,6 +241,11 @@ class TestSafeFilenameSurrogates(unittest.TestCase):
         stem = _export_safe_filename("界" * 300)
         self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
 
+    def test_truncation_does_not_split_a_decomposed_grapheme(self):
+        stem = _export_safe_filename("a" * 228 + "e\u0301")
+        self.assertNotEqual(stem[-1], "e")
+        self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+
 
 class TestCollectionIdentity(_InMemoryDbTestCase):
     """A collection name is a primary key, so its form is part of its identity."""
