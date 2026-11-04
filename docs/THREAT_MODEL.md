@@ -49,9 +49,9 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R12 | The vulnerability reporting channel the documentation names is not enabled on the repository | Outside the process | A reporter following `SECURITY.md` finds no private channel and is pushed toward a public issue | none; the one working route is a public issue, which the same document forbids for an unfixed vulnerability |
 | R13 | The Go service's only shipped credential is a single shared bearer token, with no per-caller identity, no audit trail, and no rotation without a restart | B9 | Any holder can query the whole index; a leaked token cannot be revoked short of restart, and there is no trail of who used it | `TokenAuthority` (`service/token_authority.go:54`) with a constant-time digest compare; credential read once at startup (`service/token_authority.go:15`); `service/README.md` documents that rotation requires restart. The binary default is deny-all (`service/service.go:31`) |
 | R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`resembl/server.py:1416`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
-| R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, and uptime | B1, B9 | Process internals (traffic volume, hit rate) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:730`); Go `GET /healthz` (`service/service.go:60`) is liveness only, no dependency I/O |
+| R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, and uptime | B1, B9 | Process internals (traffic volume, hit rate) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:730`); Go `GET /metrics` (`service/service.go:178`) exposes `resembl_service_up` and `resembl_service_requests_total` by path and status, and `GET /healthz` (`service/service.go:165`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:42`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:90`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
-| R17 | A tampered backup file or manifest is accepted as a restore candidate with no integrity check beyond a snippet-count comparison | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, and compares the live snippet count against the per-backup manifest (`resembl/core.py:2111`); a missing manifest is an issue, not a failure, and a count mismatch is a hard failure |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`resembl/core.py:2310`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure |
 | R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
@@ -68,7 +68,8 @@ Every entry point below is present in the code at the cited location.
 | `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
 | `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are cached in an LRU of `_SCHEME_CACHE_MAX` (64) entries, so a client cycling `normalize`, `bands` and `rows` cannot grow it. |
 | `POST /v1/find`, `POST /v1/find-batch` (Go) | `service/service.go:60` (`ServeHTTP`) | Experimental portable boundary in `service/`. Requires an `Authorizer` (`service/service.go:15`); the shipped binary defaults to deny-all (`service/service.go:31`, `cmd/resembl-service/main.go`) unless `-token-file` supplies a bearer credential (`service/token_authority.go:54`). 8 MiB body cap (`service/service.go:101`), concurrency 1..64 (`service/service.go:42`), per-request timeout. Not a deployable public service (`service/README.md:3`). |
-| `GET /healthz` (Go) | `service/service.go:60` | Local process liveness only; no dependency I/O, no authentication. Under the Lambda bootstrap the same liveness answers an API Gateway event, and every query stays refused. |
+| `GET /healthz` (Go) | `service/service.go:165` | Local process liveness only; no dependency I/O, no authentication. Under the Lambda bootstrap the same liveness answers an API Gateway event, and every query stays refused. |
+| `GET /metrics` (Go) | `service/service.go:178` | Unauthenticated; exposes `resembl_service_up` and `resembl_service_requests_total` by path (`/v1/find`, `/v1/find-batch`, `/healthz`, `/metrics`, other) and status. No user-controlled label values, so cardinality is bounded by fixed paths and status codes. |
 | API Gateway HTTP API v2 event (Lambda) | `service/internal/lambdaproxy/proxy.go` (`Handle`), `service/cmd/resembl-lambda/main.go` | The Lambda bootstrap wraps the same `http.Handler` behind `DenyAll`; `lambdaproxy.Handle` translates an API Gateway v2 event into a request, caps input at 8 MiB and output at 4 MiB before base64, rejects duplicate or malformed headers, and never treats gateway identity claims as a grant (`service/internal/lambdaproxy/README.md`). `GET /healthz` answers liveness; every query is refused until an owner-backed authorizer is supplied. |
 | `resembl serve --stateless` | `_stateless_serve` in `resembl/server.py` | Holds no database, so the listener exposes no snippet corpus: only `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` answer, the find paths answer `501`. Still unauthenticated; a non-loopback bind needs a network gate in front of it. |
 | `resembl serve` bind | `resembl/cli.py:578` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:603`). `--port` accepts `0`, which lets the OS assign a port (`resembl/cli.py:580`). |
@@ -235,11 +236,11 @@ verify the engine stopped before repairing a slot.
 **B8, build to release.** The published wheel carries the runtime surface
 above plus whatever the release pipeline admits. An SBOM workflow exports a
 CycloneDX 1.5 inventory of the runtime graph on a push to `main` and on a
-`v*` tag (`.github/workflows/sbom.yml:9`). CodeQL runs only the Python SAST suite (`language: [ 'python' ]` in `.github/workflows/codeql.yml:29`), so the Go tree in `service/` is never statically analyzed; CodeQL runs the Python suite
+`v*` tag (`.github/workflows/sbom.yml:9`). CodeQL runs only the Python SAST suite (`language: [ 'python' ]` in `.github/workflows/codeql.yml:29`), so the Go tree in `service/` is never statically analyzed; the image build in `.github/workflows/service.yml:36` produces only the Go binary. CodeQL runs the Python suite
 on a push to `main`, a pull request to `main`, and a weekly cron
 (`.github/workflows/codeql.yml:4`), and dependency review runs on pull
 requests to `main` only, failing on moderate severity
-(`.github/workflows/dependency-review.yml:11`). None of the two has a
+(`.github/workflows/dependency-review.yml:50`). None of the two has a
 `tags:` trigger, so a release is not statically analyzed and not
 dependency-reviewed at the moment it is cut; R11 records that as a gap rather
 than a control. The Pygments floor sits above the ReDoS advisory
@@ -324,11 +325,13 @@ that is not private to the host.
 and collections, are written into the local corpus.
 
 *Tampering / information disclosure.* A backup in the backup directory is
-trusted on the strength of its filename and a snippet-count manifest. `verify-backup`
-(`resembl/core.py:2111`) opens the file read-only, checks expected tables, and
-compares the live count against the manifest, but there is no hash or signature:
-a tampered backup whose manifest is edited to match passes (R17). The manifest
-itself is written mode `0600` (`resembl/core.py:2050`) but is otherwise
+trusted on the strength of its filename and a snippet-count plus
+content-hash manifest. `verify-backup`
+(`resembl/core.py:2310`) opens the file read-only, checks expected tables,
+runs `PRAGMA integrity_check`, and compares the live count and
+`content_hash` against the manifest: a tampered backup whose manifest is
+edited to match passes (R17). The manifest itself is written mode `0600`
+(`resembl/core.py:2232`) but is otherwise
 unauthenticated, so anyone who can write the backup directory can forge both.
 
 *Denial of service.* `import` has no cap on file count or file size: the
@@ -458,7 +461,7 @@ workflow does not re-run either.
 | Password masking | `resembl/paths.py:63` | Credentials in a printed URL |
 | Config file lock | `resembl/config.py:185` | Lost updates between concurrent CLI processes |
 | Dependency CVE floor | `pyproject.toml:34` | The Pygments ReDoS advisory |
-| CI static analysis and dependency review | `.github/workflows/codeql.yml:4`, `.github/workflows/dependency-review.yml:11` | Static analysis and dependency review of `main` and of pull requests. Neither runs on a release tag (R11) |
+| CI static analysis and dependency review | `.github/workflows/codeql.yml:29` (`language: [ 'python' ]`), `.github/workflows/dependency-review.yml:50` (`fail-on-severity: moderate`) | Static analysis and dependency review of `main` and of pull requests. Neither runs on a release tag (R11) |
 | Release SBOM | `.github/workflows/sbom.yml:9` | An inventory of the runtime graph attached to the build, on `main` and on `v*` tags |
 | Go Authorizer gate | service/service.go:75 | B9 caller authentication; fails closed on error or missing authority |
 | Lambda event adapter caps | `service/internal/lambdaproxy/proxy.go` | B9 Lambda input/output bound (8 MiB in, 4 MiB out), duplicate-header and malformed-event rejection; gateway identity claims never treated as a grant |

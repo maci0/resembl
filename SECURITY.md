@@ -100,8 +100,9 @@ relies on, not configuration options.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest into a caller-chosen
   directory, pruning to the newest `--keep` (default 7). `verify-backup`
-  checks tables and a snippet-count manifest, but there is no hash or
-  signature: a tampered backup with an edited manifest passes. Keep the
+  checks tables, runs `PRAGMA integrity_check`, and compares the snippet
+  count and content hash against the manifest, but the manifest is
+  unauthenticated: a tampered backup with an edited manifest passes. Keep the
   backup directory private (the manifest is mode `0600`, the backup file
   is not) and treat any backup whose manifest you did not write as
   untrusted (THREAT_MODEL.md R17).
