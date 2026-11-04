@@ -1673,14 +1673,15 @@ def _export_stale_remove(export_dir: str, previous: set[str], written: set[str])
     return removed
 
 
-def _export_manifest_write(export_dir: str, written: set[str]) -> None:
+def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
     """Record *written* as the file list the next export run may prune.
 
     Published through a same-directory temp and one rename (the pattern
     :func:`snippet_export_yara` uses for its rules), so a crash or a
-    concurrent reader never sees a half-written manifest.  Bookkeeping only:
-    a failure is logged and skipped, because the files themselves are
-    already on disk and the export has otherwise succeeded.
+    concurrent reader never sees a half-written manifest.  Returns whether
+    the manifest landed: the files are on disk either way, but a missing
+    manifest disables stale-file pruning on the next run, which the caller
+    reports instead of silently accepting a non-convergent directory.
     """
     tmp_path = os.path.join(export_dir, f"{_EXPORT_MANIFEST_NAME}.{os.getpid()}.tmp")
     try:
@@ -1694,6 +1695,8 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> None:
             os.remove(tmp_path)
         except OSError:
             pass
+        return False
+    return True
 
 
 def snippet_export(session: Session, export_dir: str) -> dict:
@@ -1773,7 +1776,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     # Both steps are bookkeeping over files this export owns, and neither can
     # fail the export (a failed write inside the loop already raised).
     num_removed = _export_stale_remove(export_dir, previous_exports, written)
-    _export_manifest_write(export_dir, written)
+    manifest_written = _export_manifest_write(export_dir, written)
 
     end_time = time.monotonic()
     time_elapsed = end_time - start_time
@@ -1782,6 +1785,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
         "avg_time_per_snippet": (time_elapsed / num_exported if num_exported > 0 else 0),
+        "manifest_written": manifest_written,
     }
     if num_removed:
         result["num_removed"] = num_removed
@@ -2036,17 +2040,21 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             pass
     session.rollback()
 
+    count_known = True
     try:
         num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
     except Exception as e:
         # The backup file itself is complete; only the count is unknown.  A
         # 0 would be read as "empty database" by db_verify_backup and fail a
         # healthy backup, so say what happened instead of fabricating it.
+        # Record the absence (None, not 0) so verify knows the count was
+        # never taken and skips the cross-check rather than failing it.
         logger.warning("Could not count snippets for the backup manifest: %s", e)
-        num_snippets = 0
+        num_snippets = None
+        count_known = False
     manifest = {
         "backup": backup_name,
-        "num_snippets": int(num_snippets),
+        "num_snippets": int(num_snippets) if num_snippets is not None else None,
         "fingerprint_version": fingerprint_version_get(session),
         "created_at": timestamp_now(),
     }
@@ -2064,13 +2072,28 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             os.unlink(tmp_manifest)
         except OSError:
             pass
+        # The backup file is complete but unverifiable: a restore checked
+        # against a manifest that was never written would pass on contents
+        # alone. Say so in the result instead of leaving the caller to
+        # discover it at verify time.
+        removed = _db_backup_prune(backup_dir, keep)
+        return {
+            "backup": final_path,
+            "num_snippets": manifest["num_snippets"],
+            "snippet_count_known": count_known,
+            "fingerprint_version": manifest["fingerprint_version"],
+            "num_removed": removed,
+            "manifest_written": False,
+        }
 
     removed = _db_backup_prune(backup_dir, keep)
     return {
         "backup": final_path,
         "num_snippets": manifest["num_snippets"],
+        "snippet_count_known": count_known,
         "fingerprint_version": manifest["fingerprint_version"],
         "num_removed": removed,
+        "manifest_written": True,
     }
 
 
@@ -2193,6 +2216,12 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         if isinstance(data, dict) and isinstance(data.get("num_snippets"), int):
             manifest_snippets = data["num_snippets"]
             manifest_present = True
+        elif isinstance(data, dict) and data.get("num_snippets") is None:
+            # The count was never taken at backup time (the count query
+            # failed but the file is complete): record it as not
+            # cross-checked, not as a mismatch against a fabricated 0.
+            issues.append("backup manifest records no snippet count; count not cross-checked")
+            break
         break
     if not manifest_present:
         issues.append("no readable backup manifest; snippet count not cross-checked")

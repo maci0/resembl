@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -127,7 +128,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "request too large")
+		if ctx.Err() != nil {
+			writeError(w, http.StatusServiceUnavailable, "request timed out")
+			return
+		}
+		if errors.Is(err, http.ErrBodyReadAfterClose) || strings.Contains(err.Error(), "request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "request too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "request body unreadable")
 		return
 	}
 	var body map[string]json.RawMessage
@@ -147,7 +156,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	completed := false
 	defer func() {
 		if (completed || !dispatched) && release != nil {
-			_ = release()
+			// Error paths only: the success path releases inline below so
+			// its failure still changes the status. Here the response is
+			// already decided; a failed release is logged, not swallowed.
+			if err := release(); err != nil {
+				log.Printf("capacity release failed: %v", err)
+			}
 		}
 	}()
 	if r.URL.Path == "/v1/find" {
@@ -181,6 +195,21 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "invalid engine response")
 		return
 	}
+	// Release now, while the status can still be changed: a failed release
+	// leaves durable capacity unaccounted, so the answer must say so.
+	if release != nil {
+		err := release()
+		release = nil
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "capacity release failed")
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(result)
+	if _, err := w.Write(result); err != nil {
+		// Response may be truncated on the wire; the claim is already
+		// released, so the client must retry against fresh capacity.
+		writeError(w, http.StatusServiceUnavailable, "response write failed")
+		return
+	}
 }
