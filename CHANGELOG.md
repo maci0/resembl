@@ -106,6 +106,50 @@ project follows [Semantic Versioning](https://semver.org/).
   relative to the working directory.
 - `resembl collection create` prints the `ValueError` message for an
   empty name and exits 1 instead of propagating a traceback.
+- `snippet_list` with a negative `start` and `snippet_search_by_name`
+  with a non-positive `limit` now return an empty result instead of
+  leaking rows from the start of the table (SQLite reads a negative
+  `OFFSET` as 0 and a negative `LIMIT` as unbounded).
+- `update_config` and `remove_config_key` now raise `ValueError` for an
+  unknown key or a value outside the range `validate_value` allows,
+  instead of persisting a misconfiguration the CLI would refuse; a
+  present but malformed config file now raises `ConfigError` (an
+  `OSError`) instead of being silently overwritten with defaults.
+- `snippet_add` dedupes aliases by normalized name, so an alias that
+  differs only in case or Unicode composition no longer creates a
+  duplicate entry.
+- Piped and HTTP text is decoded as UTF-8 instead of the locale
+  encoding, and tags and stdin are case-folded and NFC-normalized
+  before storage and lookup.
+- Degenerate numeric inputs are guarded in the MinHash, config and
+  stats paths: negative CFG block sizes raise `ValueError` instead of
+  aliasing histogram buckets, and non-finite config values are
+  rejected instead of propagating NaN into scores.
+- `cfg_similarity` and average-similarity sampling skip stale
+  fingerprints instead of counting them as zero-similarity pairs.
+- The server now surfaces a startup index-build failure instead of
+  serving an empty result set, and startup manifest and custody/release
+  failures are no longer silently ignored.
+- API error envelopes and method handling are unified across the Python
+  and Go servers: unhandled verbs answer the JSON `405` envelope
+  instead of the stdlib's header-less HTML `501`.
+- The result cache is isolated from caller mutation, the singleflight
+  race is fixed, and server threads are bounded with leaked connections
+  closed.
+- `tzdata` is now installed on Windows only (`sys_platform == 'win32'`)
+  instead of on every platform; Linux and macOS continue to read the
+  system zoneinfo database.
+- Blank environment variables (`RESEMBL_NOW`, `RESEMBL_SEED`,
+  `DATABASE_URL`, `RESEMBL_CACHE_DIR`, `RESEMBL_CONFIG_DIR`) are
+  treated as unset, and unknown configuration keys are logged as
+  ignored instead of silently accepted.
+- A SQLite URI injection through a crafted database URL is blocked.
+- `db_backup` filenames are stamped in UTC instead of local time, and
+  backup verification now checks integrity and content hash against
+  the backup's own manifest.
+- `resembl-find` bound-checks its config values and rejects a
+  non-positive batch size instead of sending an out-of-range value to
+  the server.
 
 ### Added
 
