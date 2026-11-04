@@ -208,6 +208,59 @@ def test_warm_restart_rejects_previous_generation(tmp_path, monkeypatch):
         engine.dispose()
 
 
+def test_seeded_server_ids_replay_byte_for_byte(tmp_path, monkeypatch):
+    """RESEMBL_SEED pins request and generation ids for replay.
+
+    Two servers started with the same seed draw the same generation, and a
+    request handler draws the same first request_id, so a recorded server
+    run can be replayed byte-for-byte instead of leaking OS entropy into
+    the generation endpoint and log correlation ids.
+    """
+    from resembl import diagnostics
+    from resembl.diagnostics import SEED_ENV_VAR
+
+    db = tmp_path / "seeded.db"
+    monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
+
+    def _run() -> tuple[str, str]:
+        saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+        diagnostics._SAMPLE_RNG = None
+        diagnostics._SAMPLE_SEED = None
+        try:
+            with patch.dict("os.environ", {SEED_ENV_VAR: "1234"}):
+                engine = create_engine(f"sqlite:///{db}")
+                SQLModel.metadata.create_all(engine)
+                httpd = server.serve(f"sqlite:///{db}", port=0)
+                try:
+                    gen = httpd.runtime_generation
+                    first_id = server._seeded_uuid_hex()[:12]
+                    return gen, first_id
+                finally:
+                    httpd.server_close()
+                    engine.dispose()
+        finally:
+            diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
+
+    first_gen, first_id = _run()
+    second_gen, second_id = _run()
+    assert first_gen == second_gen
+    assert first_id == second_id
+    # unseeded path still unique
+    with patch.dict("os.environ"):
+        import os as _os
+
+        _os.environ.pop(SEED_ENV_VAR, None)
+        saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+        diagnostics._SAMPLE_RNG = None
+        diagnostics._SAMPLE_SEED = None
+        try:
+            a = server._seeded_uuid_hex()
+            b = server._seeded_uuid_hex()
+            assert a != b
+        finally:
+            diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
+
+
 def test_snapshot_distinguishes_blob_from_text(tmp_path):
     db = tmp_path / "types.db"
     engine = create_engine(f"sqlite:///{db}")

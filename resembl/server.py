@@ -27,7 +27,6 @@ import socketserver
 import sys
 import threading
 import time
-import uuid
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
@@ -61,6 +60,24 @@ from .scoring import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _seeded_uuid_hex() -> str:
+    """Return a hex id drawn from the run's seeded stream when seeded.
+
+    ``RESEMBL_SEED`` (see :mod:`resembl.diagnostics`) pins one generator for
+    the whole run; ids drawn from it replay byte-for-byte, so a recorded
+    server run can be reproduced.  Unset, fall back to OS randomness — these
+    values are correlation ids and a generation marker, not secrets.
+    """
+    from .diagnostics import SEED_ENV_VAR, sample_rng
+
+    if os.environ.get(SEED_ENV_VAR) is not None:
+        return sample_rng().randbytes(16).hex()
+    import uuid
+
+    return uuid.uuid4().hex
+
 
 #: Version-guarded result cache: key -> (db_version, payload).  SQLite's
 #: ``PRAGMA data_version`` increments on every commit, so a cached result is
@@ -1086,7 +1103,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         calls this again for every request on a keep-alive connection, which
         is the only place the id can be attached before any record is made.
         """
-        self.request_id = uuid.uuid4().hex[:12]
+        self.request_id = _seeded_uuid_hex()[:12]
         self._request_start = time.monotonic()
         super().handle_one_request()
 
@@ -1896,7 +1913,7 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     # Per-instance shared state (see _FindHandler.engine): each server
     # generation carries its own engine and find defaults.
     httpd.engine = engine
-    httpd.runtime_generation = uuid.uuid4().hex
+    httpd.runtime_generation = _seeded_uuid_hex()
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     tmp_port_path = f"{port_file}.{os.getpid()}.tmp"
