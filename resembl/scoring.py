@@ -42,6 +42,12 @@ from pygments.token import Comment, Name, Number, Punctuation, Text
 #: Number of permutation functions for MinHash (higher = more accurate, slower).
 NUM_PERMUTATIONS = 128
 
+#: Seed of the MinHash permutation stream (``numpy.random.RandomState``).
+#: Every stored fingerprint and band key depends on it, so changing it makes
+#: them incomparable with new ones; ``serve`` reports it in the fingerprint
+#: scheme (``docs/http_api.md``).
+MINHASH_SEED = 1
+
 #: Magic prefix for the compact MinHash byte format.  Every stored fingerprint
 #: must start with this prefix (``struct``-packed uint32 hash values,
 #: self-describing).  Blobs in any other format are rejected: they are never
@@ -1220,8 +1226,8 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
     Constructing a MinHash draws the permutation arrays from a numpy random
     stream on every call (~260 µs at 128 perms — most of the import
     worker's CPU).  Cloning a cached template (deepcopy of two small numpy
-    arrays) is ~15x faster and yields identical permutations (seed 1), so
-    fingerprints are byte-for-byte the same.
+    arrays) is ~15x faster and yields identical permutations (seed
+    :data:`MINHASH_SEED`), so fingerprints are byte-for-byte the same.
     """
     import copy
 
@@ -1234,7 +1240,7 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
         with _MINHASH_TEMPLATES_LOCK:
             template = _MINHASH_TEMPLATES.get(num_perm)
             if template is None:
-                template = MinHash(num_perm=num_perm)
+                template = MinHash(num_perm=num_perm, seed=MINHASH_SEED)
                 # Materialize the permutation table on the template before
                 # it is cached.  ``MinHash.permutations`` is lazy, so a clone
                 # that inherited ``_permutations = None`` regenerated the
@@ -1306,7 +1312,7 @@ def minhash_unpack(data: bytes) -> MinHash:
 
     num_perm = minhash_num_perm(data)
     values = struct.unpack(f">{num_perm}I", data[8 : 8 + 4 * num_perm])
-    return MinHash(num_perm=num_perm, hashvalues=list(values))
+    return MinHash(num_perm=num_perm, seed=MINHASH_SEED, hashvalues=list(values))
 
 
 def require_same_num_perm(num_perm_a: int, num_perm_b: int) -> None:

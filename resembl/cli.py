@@ -735,12 +735,21 @@ def serve(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Log every served request (DEBUG)."
     ),
+    stateless: bool = typer.Option(
+        False,
+        "--stateless",
+        help=(
+            "Open no database: serve only /score, /band-keys, /scheme, /health and "
+            "/metrics, for replicas that share no state. Find paths answer 501."
+        ),
+    ),
 ) -> None:
     """Serve find queries from a warm process (instant warm finds).
 
     Start this once per database; ``resembl find`` then talks to it over
     localhost instead of paying ~450 ms of interpreter startup per query.
     The port is written to the cache directory and removed on exit.
+    With ``--stateless`` no database is opened and no port file is written.
     """
     from .server import serve as serve_start
 
@@ -752,13 +761,17 @@ def serve(
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    db_url = _session_db_url(state.session)
+    db_url: str | None = None
+    if not stateless:
+        _db_open()
+        db_url = _session_db_url(state.session)
     if host not in ("127.0.0.1", "localhost", "::1"):
         _echo(
             "[yellow]Warning: binding a non-loopback interface exposes an "
             "unauthenticated find service.[/yellow]"
         )
-    _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
+    if not stateless:
+        _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
     try:
         httpd = serve_start(db_url, host=host, port=port)
     except (ValueError, IndexBuildError) as e:
@@ -1013,7 +1026,7 @@ def app_callback(
 
     ``resembl schema`` prints the clispec 0.3 document and does not open a database.
     """
-    global console, err_console, _active_session
+    global console, err_console
 
     if version:
         # Eager: answer before the database is opened, so `resembl --version`
@@ -1079,6 +1092,17 @@ def app_callback(
     except ValueError as e:
         err_console.print(f"[red]Error:[/red] {e}.")
         raise typer.Exit(code=2) from e
+    # serve opens the database itself, and not at all under --stateless.
+    if ctx.invoked_subcommand != "serve":
+        _db_open()
+
+
+def _db_open() -> None:
+    """Create the configured database's tables and bind ``state.session`` to it.
+
+    Exits 1 with the URL (password masked) when the database cannot be opened.
+    """
+    global _active_session
     try:
         db_create()
     except SQLAlchemyError as e:

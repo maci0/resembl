@@ -350,6 +350,11 @@ Key properties that keep these numbers flat as the database grows:
   library startup a fresh process pays (measured 74 ms end to end at 5k snippets on a loaded machine,
   which includes the client's own startup).  `find` and `find-batch` fall back to the in-process
   path when no server answers.  The endpoints are in the [HTTP API](./docs/http_api.md).
+- **Stateless scoring replicas**: `resembl serve --stateless` opens no database and answers only
+  `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, so any number of replicas can run
+  behind a load balancer.  `/score` and `/band-keys` report the fingerprint scheme (seed,
+  permutations, shingling, normalization, band layout) as an `id` that changes with any of them, so
+  a caller storing band keys can tell when they stop being comparable.
 
 The absolute numbers above are from a busy machine (average load ~40 during these runs, with other
 jobs competing for I/O); expect proportionally faster runs on an idle one.  The test data uses

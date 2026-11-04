@@ -12,6 +12,17 @@ project follows [Semantic Versioning](https://semver.org/).
   listings in the request with the find blend and an optional Jaccard floor,
   and `POST /band-keys`, which returns the LSH band keys of listings in the
   request. Neither reads the database. See `docs/http_api.md`.
+- `/score` and `/band-keys` answer a `scheme` object, and `GET /scheme` answers
+  the one a `/score` with the server's defaults uses: the fingerprint version,
+  hash, permutation seed, `num_permutations`, `ngram_size`, `normalize` and,
+  for band keys, `bands` and `rows`, plus an `id` derived from all of them and
+  from a probe listing's real fingerprint. Store the `id` with band keys and
+  recompute keys whose `id` differs from the server's.
+- `resembl serve --stateless` opens no database and writes no port file. It
+  answers `/score`, `/band-keys`, `/scheme`, `/health` (`"mode": "stateless"`,
+  always `200`) and `/metrics`; `/find`, `/find-batch`, `/find-pinned` and
+  `GET /runtime-generation` answer `501`.
+- `GET /health` carries `"mode": "database"` on a server with a database.
 
 ## [3.12.0] - 2026-11-04
 

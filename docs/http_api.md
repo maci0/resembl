@@ -43,6 +43,20 @@ curl -s "http://127.0.0.1:$port/find" \
   -d '{"query": "push ebx\nmov eax, 5\npop ebx\nret"}'
 ```
 
+## Stateless mode
+
+`resembl serve --stateless` opens no database: no migration, no LSH index
+build, no port file, and `resembl find` never discovers it. It answers
+`/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, which read no
+database; `/find`, `/find-batch`, `/find-pinned` and `GET /runtime-generation`
+answer `501`. The fingerprint defaults still come from `config.toml`. Replicas
+share no state, so a load balancer can spread `/score` and `/band-keys` over
+any number of them, and `/health` reports only that the process answers.
+
+```bash
+resembl serve --stateless --host 0.0.0.0 --port 8080
+```
+
 ## Endpoints
 
 | Method | Path | Purpose |
@@ -53,13 +67,14 @@ curl -s "http://127.0.0.1:$port/find" \
 | `POST` | `/score` | Score one listing against caller-supplied listings. Reads no database. |
 | `POST` | `/band-keys` | LSH band keys of caller-supplied listings. Reads no database. |
 | `GET` | `/runtime-generation` | Experimental: the process generation that `/find-pinned` requires. |
-| `GET` | `/health` | Whether this process can still serve a find. |
+| `GET` | `/scheme` | The fingerprint scheme a `/score` with the server defaults uses. Reads no database. |
+| `GET` | `/health` | Whether this process can still serve a find, or, under `--stateless`, answer at all. |
 | `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
 
 The `POST` endpoints are read-only, and the path is matched verbatim: a
 query string makes `/find?x=1` an unknown path, answered `404`. `PUT`,
 `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405` on any path (with
-an `Allow: POST` header), as is a `GET` to any path other than `/health`,
+an `Allow: POST` header), as is a `GET` to any path other than `/health`, `/scheme`,
 `/metrics` and `/runtime-generation`. A `HEAD` answer carries those headers and no body bytes, as
 `HEAD` requires. Any other verb is answered by the stdlib base class with
 `501` and an HTML body. Every response this server produces itself, success or
@@ -151,12 +166,16 @@ The `/find` parameters `normalize`, `ngram_size`, `num_permutations` and
 validated and unused.
 
 ```json
-{"scores": [97.5, null, 0.0]}
+{"scores": [97.5, null, 0.0],
+ "scheme": {"id": "08905d3f77ba73b598d2bbb30c501682", "version": 3, "hash": "sha1-le32", "seed": 1,
+            "num_permutations": 128, "ngram_size": 3, "normalize": true}}
 ```
 
 `scores` holds one entry per candidate, in request order. A candidate whose
 Jaccard is below `jaccard_floor` is `null`, and its text ratio is not
 computed. A blank candidate scores `0.0`, or `null` under a positive floor.
+`scheme` is the [fingerprint scheme](#fingerprint-scheme) the scores were
+computed under.
 
 ### `POST /band-keys`
 
@@ -174,8 +193,44 @@ characters.
 The `/find` fingerprint parameters apply as on `/score`.
 
 ```json
-{"keys": [["0a1b…", "93c4…"], ["0a1b…", "77e0…"]]}
+{"keys": [["0a1b…", "93c4…"], ["0a1b…", "77e0…"]],
+ "scheme": {"id": "e4bd8fdd0017dea8499109ae47eacda3", "version": 3, "hash": "sha1-le32", "seed": 1,
+            "num_permutations": 128, "ngram_size": 3, "normalize": true,
+            "bands": 2, "rows": 8}}
 ```
+
+### `GET /scheme`
+
+`{"scheme": {...}}`: the scheme a `/score` that names no fingerprint parameter
+uses on this server, which carries no band layout. A client can read it at
+startup to see which settings the server computes with; the scheme of a
+`/band-keys` answer adds `bands` and `rows`, so its `id` differs.
+
+### Fingerprint scheme
+
+Scores and band keys are comparable only when both sides were computed under
+one fingerprint scheme. `/score` and `/band-keys` answer the scheme they used,
+so a caller that stores band keys can store the scheme `id` with them and
+refuse to compare keys whose ids differ.
+
+```json
+{"id": "82f09df515ac6a71875fc6bb6276ae41", "version": 3, "hash": "sha1-le32", "seed": 1,
+ "num_permutations": 128, "ngram_size": 3, "normalize": true,
+ "bands": 64, "rows": 2}
+```
+
+| Field | Meaning |
+| ----- | ------- |
+| `id` | 32 hex digits: SHA-256 over the other fields and the fingerprint (and, with `bands`, the band keys) of a fixed probe listing. |
+| `version` | `resembl.models.FINGERPRINT_VERSION`, bumped whenever stored fingerprints or band keys would differ from a recomputation (algorithm, tokenization, normalization). |
+| `hash`, `seed` | The MinHash element hash and the permutation stream's seed (`resembl.scoring.MINHASH_SEED`). |
+| `num_permutations`, `ngram_size`, `normalize` | The request's fingerprint parameters. |
+| `bands`, `rows` | `/band-keys` only: the band layout. |
+
+Any change to a field changes `id`. Because the probe listing is fingerprinted
+for real, a change to tokenization, normalization or shingle weighting also
+changes `id` when no field changed. Two ids that differ mean the keys behind
+them must not be compared; recompute the stored side.
 
 ### `POST /find-pinned`
 
@@ -222,22 +277,29 @@ report a slow server as an unhealthy one, and the engine is the only
 dependency that can stop a find from being answered.
 
 ```json
-{"status": "ok", "database": "ok", "uptime_seconds": 1284.31, "latency_ms": 0.21}
+{"status": "ok", "mode": "database", "database": "ok", "uptime_seconds": 1284.31, "latency_ms": 0.21}
 ```
 
 A database that cannot be reached answers `503` with
-`{"status": "degraded", "database": "unavailable", "error": "OperationalError",
+`{"status": "degraded", "mode": "database", "database": "unavailable", "error": "OperationalError",
 "uptime_seconds": ...}`: `error` is the exception's *type*, never its message,
 which carries SQL and file paths. A failed probe is a normal answer, not an
 incident, so it is logged at WARNING once per poll rather than raising a
 traceback.
+
+A `--stateless` server has no database to probe: answering is its readiness,
+and the reply is always `200`:
+
+```json
+{"status": "ok", "mode": "stateless", "uptime_seconds": 1284.31}
+```
 
 ### `GET /metrics`
 
 Counters for the served request path, in the Prometheus text exposition
 format (`Content-Type: text/plain; version=0.0.4`). The only label is the
 request path, and a path outside `/find`, `/find-batch`, `/score`,
-`/band-keys`, `/health` and `/metrics` is folded into `other`, so a crafted
+`/band-keys`, `/scheme`, `/health` and `/metrics` is folded into `other`, so a crafted
 path cannot grow the series count.
 
 | Metric | Type | Meaning |
@@ -263,11 +325,12 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health`, `/metrics` and `/runtime-generation`. |
+| `405` | A method other than `POST` (including `HEAD` and `OPTIONS`, which carry the same headers without a body), or a `GET` to a path other than `/health`, `/scheme`, `/metrics` and `/runtime-generation`. |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
 | `409` | `/find-pinned` only: the index digest does not match. |
 | `503` | `/health`: the served database did not answer its probe. `/find-pinned`: see its table. |
+| `501` | A `--stateless` server: `/find`, `/find-batch`, `/find-pinned` and `GET /runtime-generation`. The message names the mode. |
 
 ## Other response headers
 

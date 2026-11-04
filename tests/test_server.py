@@ -2049,6 +2049,207 @@ class TestScoreEndpoints(_ServeTestCase):
         self.assertIn('resembl_server_requests_total{path="/score",status="200"}', metrics)
         self.assertIn('path="/band-keys"', metrics)
 
+    def _scheme(self, port: int) -> dict:
+        """``GET /scheme``'s scheme object."""
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/scheme", timeout=10) as response:
+            return json.loads(response.read())["scheme"]
+
+    def test_score_and_band_keys_report_their_scheme(self):
+        from resembl.models import FINGERPRINT_VERSION
+        from resembl.scoring import MINHASH_SEED
+
+        port = self._start_server()
+        served = self._scheme(port)
+        self.assertEqual(
+            {k: v for k, v in served.items() if k != "id"},
+            {
+                "version": FINGERPRINT_VERSION,
+                "hash": "sha1-le32",
+                "seed": MINHASH_SEED,
+                "num_permutations": 128,
+                "ngram_size": 3,
+                "normalize": True,
+            },
+        )
+        self.assertRegex(served["id"], r"^[0-9a-f]{32}$")
+        scored = _post_json(port, "/score", {"source": "ret", "candidates": ["ret"]})
+        self.assertEqual(scored["scheme"], served)
+        raw = _post_json(port, "/score", {"source": "ret", "candidates": [], "normalize": False})
+        self.assertFalse(raw["scheme"]["normalize"])
+        self.assertNotEqual(raw["scheme"]["id"], served["id"])
+        keyed = _post_json(port, "/band-keys", {"texts": ["ret"], "bands": 4, "rows": 2})
+        self.assertEqual(keyed["scheme"]["bands"], 4)
+        self.assertEqual(keyed["scheme"]["rows"], 2)
+        self.assertEqual(
+            {k: v for k, v in keyed["scheme"].items() if k not in ("id", "bands", "rows")},
+            {k: v for k, v in served.items() if k != "id"},
+        )
+        other_layout = _post_json(port, "/band-keys", {"texts": ["ret"], "bands": 2, "rows": 4})
+        ids = {served["id"], keyed["scheme"]["id"], other_layout["scheme"]["id"]}
+        self.assertEqual(len(ids), 3)
+        again = _post_json(port, "/band-keys", {"texts": ["mov eax, 1"], "bands": 4, "rows": 2})
+        self.assertEqual(again["scheme"], keyed["scheme"])
+
+    def test_scheme_id_follows_the_computation_not_only_the_parameters(self):
+        from resembl import server as server_mod
+
+        port = self._start_server()
+        before = self._scheme(port)["id"]
+        server_mod._scheme_id.cache_clear()
+        self.addCleanup(server_mod._scheme_id.cache_clear)
+        # Same parameters, different shingle weighting: the probe listing
+        # fingerprints differently, so the id must move.
+        with patch("resembl.scoring._shingle_weight_tokens", return_value=1):
+            changed = self._scheme(port)["id"]
+        server_mod._scheme_id.cache_clear()
+        with patch.object(server_mod, "FINGERPRINT_VERSION", 999):
+            bumped = self._scheme(port)
+        server_mod._scheme_id.cache_clear()
+        self.assertEqual(self._scheme(port)["id"], before)
+        self.assertNotEqual(changed, before)
+        self.assertEqual(bumped["version"], 999)
+        self.assertNotEqual(bumped["id"], before)
+
+    def test_scheme_id_follows_the_seed(self):
+        from resembl import scoring
+        from resembl import server as server_mod
+
+        port = self._start_server()
+        before = self._scheme(port)
+        self.addCleanup(server_mod._scheme_id.cache_clear)
+        self.addCleanup(scoring._MINHASH_TEMPLATES.clear)
+        server_mod._scheme_id.cache_clear()
+        scoring._MINHASH_TEMPLATES.clear()
+        with patch.object(scoring, "MINHASH_SEED", 7), patch.object(server_mod, "MINHASH_SEED", 7):
+            seeded = self._scheme(port)
+        scoring._MINHASH_TEMPLATES.clear()
+        self.assertEqual(seeded["seed"], 7)
+        self.assertNotEqual(seeded["id"], before["id"])
+
+
+class TestStatelessServe(unittest.TestCase):
+    """``serve(None)``: no database, only the endpoints that need none."""
+
+    def setUp(self):
+        workdir = tempfile.TemporaryDirectory()
+        self.addCleanup(workdir.cleanup)
+        self._cache_dir = os.path.join(workdir.name, "cache")
+        # A database path in a directory that does not exist: opening it
+        # fails, so any database access in stateless mode would show up.
+        self._db = os.path.join(workdir.name, "missing", "assembly.db")
+        env = patch.dict(
+            os.environ,
+            {"RESEMBL_CACHE_DIR": self._cache_dir, "DATABASE_URL": f"sqlite:///{self._db}"},
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _start_server(self, config: ResemblConfig | None = None) -> int:
+        """Serve without a database on a background thread; return the port."""
+        from resembl.server import serve
+
+        with patch("resembl.config.load_config", return_value=config or ResemblConfig()):
+            httpd = serve(None, port=0)
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(thread.join, 10)
+        self.addCleanup(httpd.shutdown)
+        return httpd.server_address[1]
+
+    def _get_status(self, port: int, path: str) -> tuple[int, dict]:
+        """GET *path* and return ``(status, decoded JSON body)``."""
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_scores_and_band_keys_without_a_database(self):
+        port = self._start_server()
+        reply = _post_json(port, "/score", {"source": "ret", "candidates": ["ret"]})
+        self.assertEqual(reply["scores"], [100.0])
+        keys = _post_json(port, "/band-keys", {"texts": ["push ebx\nret"], "bands": 4, "rows": 2})
+        self.assertEqual(len(keys["keys"][0]), 4)
+        self.assertEqual(keys["scheme"]["bands"], 4)
+        self.assertFalse(os.path.exists(os.path.dirname(self._db)))
+        # Nothing advertises a stateless server to `resembl find`.
+        self.assertFalse(os.path.exists(self._cache_dir))
+
+    def test_health_reports_process_readiness(self):
+        port = self._start_server()
+        status, payload = self._get_status(port, "/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["mode"], "stateless")
+        self.assertNotIn("database", payload)
+        self.assertGreaterEqual(payload["uptime_seconds"], 0.0)
+        status, _ = self._get_status(port, "/scheme")
+        self.assertEqual(status, 200)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=10) as response:
+            self.assertIn('path="/health",status="200"', response.read().decode())
+
+    def test_database_endpoints_answer_501(self):
+        port = self._start_server()
+        for path, body in (
+            ("/find", {"query": "ret"}),
+            ("/find-batch", {"queries": ["ret"]}),
+            ("/find-pinned", {"query": "ret"}),
+        ):
+            with self.subTest(path=path):
+                status, reply = _post_json_status(port, path, body)
+                self.assertEqual(status, 501)
+                self.assertIn("--stateless", reply["error"])
+        status, reply = self._get_status(port, "/runtime-generation")
+        self.assertEqual(status, 501)
+        self.assertIn("--stateless", reply["error"])
+
+    def test_serves_the_configured_fingerprint_settings(self):
+        port = self._start_server(ResemblConfig(num_permutations=64, ngram_size=4))
+        _, payload = self._get_status(port, "/scheme")
+        self.assertEqual(payload["scheme"]["num_permutations"], 64)
+        self.assertEqual(payload["scheme"]["ngram_size"], 4)
+        status, reply = _post_json_status(
+            port, "/band-keys", {"texts": ["ret"], "bands": 64, "rows": 2}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("num_permutations (64)", reply["error"])
+
+    def test_cli_serve_stateless_opens_no_database(self):
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.path.abspath("."),
+            "DATABASE_URL": f"sqlite:///{self._db}",
+            "RESEMBL_CACHE_DIR": self._cache_dir,
+        }
+        server = subprocess.Popen(
+            [sys.executable, "-m", "resembl.cli", "serve", "--stateless", "--port", "0"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            **serve_stop_flags(),
+        )
+        self.addCleanup(server.wait, 10)
+        self.addCleanup(process_stop, server)
+        assert server.stdout is not None
+        line = ""
+        for line in server.stdout:
+            if "listening on" in line:
+                break
+        if "listening on" not in line:
+            server.wait(timeout=10)
+            self.fail(f"serve --stateless did not start: {server.stderr.read()}")
+        port = int(line.strip().rsplit(":", 1)[1])
+        reply = _post_json(port, "/score", {"source": "ret", "candidates": ["ret"]})
+        self.assertEqual(reply["scores"], [100.0])
+        status, payload = self._get_status(port, "/health")
+        self.assertEqual((status, payload["mode"]), (200, "stateless"))
+        self.assertFalse(os.path.exists(os.path.dirname(self._db)))
+
 
 class TestServerObservability(_ServeTestCase):
     """Health, metrics and the per-request trail a served query leaves."""
@@ -2066,6 +2267,7 @@ class TestServerObservability(_ServeTestCase):
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["database"], "ok")
+        self.assertEqual(payload["mode"], "database")
         self.assertGreaterEqual(payload["uptime_seconds"], 0.0)
 
     def test_health_reports_degraded_when_the_database_answers_no_query(self):

@@ -147,7 +147,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
 
 ### Database
 
-**serve** [--host HOST] [--port PORT]
+**serve** [--host HOST] [--port PORT] [--stateless]
 :   Start a warm server for this database (default: loopback, auto-assigned
     port).  `find` then talks to it over localhost in a few milliseconds
     instead of paying ~450 ms of interpreter startup per query; the port file
@@ -172,6 +172,10 @@ Global options go before the subcommand: `resembl --format json find ...`.
     loopback bind it answers `403` to a request whose `Host` header is not
     `127.0.0.1`, `localhost` or `::1`, so a page that rebinds its hostname
     onto 127.0.0.1 cannot reach the endpoints.
+    `--stateless` opens no database and writes no port file: the server
+    answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, and
+    `501` to the find paths, so replicas behind a load balancer share no
+    state.
     The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, `GET
     /health`, `GET /metrics`, JSON requests, `{"error": ...}` bodies) are
     documented in [http_api.md](http_api.md).

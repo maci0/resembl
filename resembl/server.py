@@ -49,8 +49,10 @@ from .core import (
     snippet_matches_payload,
 )
 from .lsh import band_buckets
+from .models import FINGERPRINT_VERSION
 from .paths import cache_dir_get, db_url_mask, server_port_path
 from .scoring import (
+    MINHASH_SEED,
     code_tokenize,
     minhash_from_tokens,
     minhash_jaccard,
@@ -708,6 +710,91 @@ def _text_fingerprint(text: str, request: _FindRequest) -> bytes:
     return minhash_pack(minhash_from_tokens(tokens, request.ngram_size, request.num_permutations))
 
 
+#: The element hash :class:`resembl.minhash.MinHash` folds shingles with:
+#: the first 32 bits of SHA-1, little-endian.  Named in the scheme so a
+#: reader can tell which family the fingerprint belongs to.
+_SCHEME_HASH = "sha1-le32"
+
+#: A fixed listing fingerprinted into every scheme id.  It has a label,
+#: registers, immediates, a memory operand and a rare instruction, so a change
+#: to tokenization, normalization or shingle weighting moves its fingerprint
+#: (and the id) even when no parameter and no version changed.
+_SCHEME_PROBE = (
+    "probe_top:\n"
+    "  push ebp\n"
+    "  mov ebp, esp\n"
+    "  mov eax, dword ptr [ebp+0x8]\n"
+    "  cpuid\n"
+    "  add eax, 5\n"
+    "  jnz probe_top\n"
+    "  pop ebp\n"
+    "  ret"
+)
+
+#: Scheme ids remembered at once.  Each distinct parameter set costs one probe
+#: fingerprint; requests choose ``normalize``, ``bands`` and ``rows``, so the
+#: bound keeps a client cycling them from growing the cache.
+_SCHEME_CACHE_MAX = 64
+
+#: Hex digits of the SHA-256 kept as the scheme id.
+_SCHEME_ID_HEX = 32
+
+
+@functools.lru_cache(maxsize=_SCHEME_CACHE_MAX)
+def _scheme_id(canonical: str) -> str:
+    """Return the id of the scheme whose fields are the JSON *canonical*.
+
+    The digest covers the fields and what they produce: the probe listing's
+    packed fingerprint and, for a band layout, its band keys.  Two schemes
+    share an id only when they name the same parameters and compute the same
+    bytes from them.
+    """
+    fields = json.loads(canonical)
+    num_perm = fields["num_permutations"]
+    tokens = code_tokenize(_SCHEME_PROBE, normalize=fields["normalize"])
+    packed = minhash_pack(minhash_from_tokens(tokens, fields["ngram_size"], num_perm))
+    digest = hashlib.sha256(canonical.encode("utf-8"))
+    digest.update(packed)
+    if "bands" in fields:
+        keys = band_buckets(packed, num_perm, fields["bands"], fields["rows"])
+        digest.update(",".join(keys).encode("ascii"))
+    return digest.hexdigest()[:_SCHEME_ID_HEX]
+
+
+def _scheme_payload(
+    request: _FindRequest, bands: int | None = None, rows: int | None = None
+) -> dict:
+    """Return the fingerprint scheme *request* computes with, plus its ``id``.
+
+    Fingerprints, scores and band keys are comparable only within one scheme:
+    the fingerprint version (algorithm, tokenization and normalization), the
+    permutation seed and hash, ``num_permutations``, ``ngram_size``,
+    ``normalize``, and for band keys the ``bands`` x ``rows`` layout.  A change
+    to any of them changes ``id`` (see :func:`_scheme_id`).
+    """
+    fields: dict[str, Any] = {
+        "version": FINGERPRINT_VERSION,
+        "hash": _SCHEME_HASH,
+        "seed": MINHASH_SEED,
+        "num_permutations": request.num_permutations,
+        "ngram_size": request.ngram_size,
+        "normalize": request.normalize,
+    }
+    if bands is not None and rows is not None:
+        fields |= {"bands": bands, "rows": rows}
+    canonical = json.dumps(fields, sort_keys=True, separators=(",", ":"))
+    return {"id": _scheme_id(canonical), **fields}
+
+
+def _scheme_get_payload(body: dict, params: ResemblConfig) -> dict:
+    """Answer ``GET /scheme``: the scheme a ``/score`` with *params* defaults uses.
+
+    *body* is empty (a ``GET`` carries none); the signature is the one
+    ``_handle_computed`` calls.
+    """
+    return {"scheme": _scheme_payload(_parse_find_request(body, params))}
+
+
 def _score_payload(body: dict, params: ResemblConfig) -> dict:
     """Answer ``POST /score``: ``source`` scored against each of ``candidates``.
 
@@ -743,7 +830,7 @@ def _score_payload(body: dict, params: ResemblConfig) -> dict:
         scores.append(
             score_hybrid(jaccard, float(fuzz.ratio(source, candidate)), request.jaccard_weight)
         )
-    return {"scores": scores}
+    return {"scores": scores, "scheme": _scheme_payload(request)}
 
 
 def _band_keys_payload(body: dict, params: ResemblConfig) -> dict:
@@ -769,7 +856,8 @@ def _band_keys_payload(body: dict, params: ResemblConfig) -> dict:
         "keys": [
             band_buckets(_text_fingerprint(text, request), request.num_permutations, bands, rows)
             for text in texts
-        ]
+        ],
+        "scheme": _scheme_payload(request, bands, rows),
     }
 
 
@@ -807,6 +895,7 @@ _METRIC_PATHS: tuple[str, ...] = (
     "/find-batch",
     "/score",
     "/band-keys",
+    "/scheme",
     "/health",
     "/metrics",
 )
@@ -956,9 +1045,12 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
 
 
 _METRICS = _ServerMetrics()
-#: The paths this server serves, each POST-only except the three GET paths.
+#: The paths this server serves, each POST-only except the four GET paths.
 _POST_PATHS = ("/find", "/find-batch", "/find-pinned", "/score", "/band-keys")
-_ALL_PATHS = (*_POST_PATHS, "/runtime-generation", "/health", "/metrics")
+_ALL_PATHS = (*_POST_PATHS, "/runtime-generation", "/scheme", "/health", "/metrics")
+#: The paths that serve a database find, and the process pin ``/find-pinned``
+#: checks; a stateless server answers them 501.
+_DATABASE_PATHS = ("/find", "/find-batch", "/find-pinned", "/runtime-generation")
 
 
 class _FindHandler(BaseHTTPRequestHandler):
@@ -1122,6 +1214,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         if self.route not in _POST_PATHS:
             self._respond(404, {"error": f"unknown path: {self.route}"})
             return
+        if self._stateless_refused():
+            return
         if not self._content_type_ok():
             self._respond(415, {"error": "content type must be application/json"})
             return
@@ -1143,6 +1237,26 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         self._handle_find_batch(body)
 
+    def _stateless_refused(self) -> bool:
+        """Answer ``501`` to a database path on a stateless server.
+
+        Returns whether it answered.  A stateless server (``serve(None)``,
+        ``resembl serve --stateless``) holds no engine, so a find has nothing to
+        search; the refusal names the mode so a caller knows to reach a server
+        with a database.
+        """
+        if self.engine is not None or self.route not in _DATABASE_PATHS:
+            return False
+        self._respond(
+            501,
+            {
+                "error": f"{self.route} needs a database; this server runs "
+                "--stateless and answers /score, /band-keys, /scheme, /health "
+                "and /metrics only"
+            },
+        )
+        return True
+
     def _method_not_allowed(self, *, send_body: bool = True) -> None:
         """Answer a non-POST request with the same JSON error envelope.
 
@@ -1163,13 +1277,17 @@ class _FindHandler(BaseHTTPRequestHandler):
         )
 
     def do_GET(self) -> None:  # pylint: disable=invalid-name; http.server API
-        # The two endpoints a supervisor and a scraper read; every other path
-        # keeps the verb answer, so a stray GET cannot look like a find.
+        # The endpoints a supervisor, a scraper and a client read; every other
+        # path keeps the verb answer, so a stray GET cannot look like a find.
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
             return
         if self.route == "/runtime-generation":
-            self._respond(200, {"generation": self.server.runtime_generation})  # type: ignore[attr-defined]
+            if not self._stateless_refused():
+                self._respond(200, {"generation": self.server.runtime_generation})  # type: ignore[attr-defined]
+            return
+        if self.route == "/scheme":
+            self._handle_computed(_scheme_get_payload, {})
             return
         if self.route == "/health":
             self._handle_health()
@@ -1187,9 +1305,20 @@ class _FindHandler(BaseHTTPRequestHandler):
         startup, so a health check that re-ran them would report a slow
         server as an unhealthy one.  The engine is the only dependency that
         can stop a find from being answered, so it is the only one probed.
+        A stateless server has no database: answering at all is its readiness.
         """
         from sqlmodel import select
 
+        if self.engine is None:
+            self._respond(
+                200,
+                {
+                    "status": "ok",
+                    "mode": "stateless",
+                    "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
+                },
+            )
+            return
         started = time.monotonic()
         try:
             with Session(self.engine) as session:
@@ -1204,6 +1333,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                 503,
                 {
                     "status": "degraded",
+                    "mode": "database",
                     "database": "unavailable",
                     "error": type(exc).__name__,
                     "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
@@ -1214,6 +1344,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             200,
             {
                 "status": "ok",
+                "mode": "database",
                 "database": "ok",
                 "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
                 "latency_ms": round((time.monotonic() - started) * 1000, 3),
@@ -1361,7 +1492,7 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": str(exc)})
             return
         except Exception:  # pragma: no cover - defensive, as in _handle_find
-            logger.exception("[%s] POST %s failed", self.request_id, self.path)
+            logger.exception("[%s] %s %s failed", self.request_id, self.command, self.path)
             self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, payload)
@@ -1604,13 +1735,73 @@ class _FindServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+def _find_defaults_load() -> ResemblConfig:
+    """Return the find defaults this server answers with, from the CLI config.
+
+    The server answers with the same threshold / permutation count as
+    in-process find, so clients using the same config get warm cache hits
+    instead of per-request rebuilds.  The values are carried on the server
+    *instance* (like ``engine``): module globals would leak into any older
+    server still serving another database in this process.
+    """
+    from .config import load_config
+
+    cfg = load_config()
+    # The config layer leaves ``top_n`` unbounded (only the request path needs
+    # a bound), so a config above ``_MAX_TOP_N`` would become a default the
+    # endpoint refuses: every request that omitted ``top_n`` was answered 400
+    # for a value the caller never sent.  The served default is clamped, and
+    # the clamp is reported, since a client then gets fewer rows than
+    # ``resembl find`` would return locally.
+    served_top_n = min(cfg.top_n, _MAX_TOP_N)
+    if served_top_n != cfg.top_n:
+        logger.warning(
+            "config top_n is %d, above the %d this server returns per "
+            "request; requests that omit top_n are served with %d. "
+            "Lower top_n in the config, or use the in-process find.",
+            cfg.top_n,
+            _MAX_TOP_N,
+            served_top_n,
+        )
+    return ResemblConfig(
+        lsh_threshold=cfg.lsh_threshold,
+        top_n=served_top_n,
+        num_permutations=cfg.num_permutations,
+        ngram_size=cfg.ngram_size,
+        jaccard_weight=cfg.jaccard_weight,
+    )
+
+
+def _stateless_serve(host: str, port: int) -> ThreadingHTTPServer:
+    """Bind a server that holds no database; see :func:`serve`."""
+    find_defaults = _find_defaults_load()
+    httpd = _FindServer((host, port), _FindHandler)
+    httpd.engine = None
+    httpd.find_defaults = find_defaults
+    httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
+    logger.debug(
+        "serving without a database on %s:%d, find defaults %s",
+        host,
+        int(httpd.server_address[1]),
+        ", ".join(f"{k}={v}" for k, v in find_defaults.items()),
+    )
+    return httpd
+
+
+def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     """Start the find server for *db_url* and return the bound HTTP server.
 
     The fingerprint migration (if any) and the LSH index build run once at
     startup so serving is read-only; the port file is written on startup and
     removed on exit.
+
+    A *db_url* of ``None`` serves without a database (``resembl serve
+    --stateless``): nothing is opened, migrated or advertised, ``/score``,
+    ``/band-keys``, ``/scheme``, ``/health`` and ``/metrics`` answer, and the
+    find paths answer ``501``.  Replicas of such a server share no state.
     """
+    if db_url is None:
+        return _stateless_serve(host, port)
     from .database import create_db_engine
 
     # Refuse to double-serve: if a port file exists for this database and a
@@ -1642,46 +1833,16 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
     engine = create_db_engine(db_url, pool_size=32, max_overflow=64)
     try:
         with Session(engine) as session:
-            # Honor the CLI config: the server answers with the same threshold /
-            # permutation count as in-process find, so clients using the same
-            # config get warm cache hits instead of per-request rebuilds.  The
-            # values are carried on the server *instance* (like ``engine``):
-            # module globals would leak into any older server still serving
-            # another database in this process.
-            from .config import load_config
-
-            cfg = load_config()
-            # The config layer leaves ``top_n`` unbounded (only the request
-            # path needs a bound), so a config above ``_MAX_TOP_N`` would
-            # become a default the endpoint refuses: every request that
-            # omitted ``top_n`` — the ones a plain third-party client sends —
-            # was answered 400 for a value the caller never sent.  The served
-            # default is clamped, and the clamp is reported, since a client
-            # then gets fewer rows than ``resembl find`` would return locally.
-            served_top_n = min(cfg.top_n, _MAX_TOP_N)
-            if served_top_n != cfg.top_n:
-                logger.warning(
-                    "config top_n is %d, above the %d this server returns per "
-                    "request; requests that omit top_n are served with %d. "
-                    "Lower top_n in the config, or use the in-process find.",
-                    cfg.top_n,
-                    _MAX_TOP_N,
-                    served_top_n,
-                )
-            find_defaults = ResemblConfig(
-                lsh_threshold=cfg.lsh_threshold,
-                top_n=served_top_n,
-                num_permutations=cfg.num_permutations,
-                ngram_size=cfg.ngram_size,
-                jaccard_weight=cfg.jaccard_weight,
-            )
+            find_defaults = _find_defaults_load()
 
             # One-time migration + index build, before any request is served.
             # The migration worker count scales with the database (spawning a
             # worker per CPU for a small database costs more than the work).
             from .core import adaptive_worker_count, fingerprints_need_reindex
 
-            if fingerprints_need_reindex(session, cfg.ngram_size, cfg.num_permutations):
+            if fingerprints_need_reindex(
+                session, find_defaults.ngram_size, find_defaults.num_permutations
+            ):
                 from sqlmodel import func, select
 
                 from .models import Snippet
@@ -1692,8 +1853,8 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
                 reindex_result = db_reindex(
                     session,
                     jobs=adaptive_worker_count(num_snippets, os.cpu_count() or 1),
-                    ngram_size=cfg.ngram_size,
-                    num_perm=cfg.num_permutations,
+                    ngram_size=find_defaults.ngram_size,
+                    num_perm=find_defaults.num_permutations,
                 )
                 if "error" in reindex_result:
                     # Serving over the unmigrated fingerprints would let the
@@ -1708,8 +1869,12 @@ def serve(db_url: str, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPS
             from .lsh import lsh_meta_get, lsh_meta_matches
 
             meta = lsh_meta_get(session)
-            if not lsh_meta_matches(meta, cfg.lsh_threshold, cfg.num_permutations):
-                lsh_index_build(session, cfg.lsh_threshold, cfg.num_permutations)
+            if not lsh_meta_matches(
+                meta, find_defaults.lsh_threshold, find_defaults.num_permutations
+            ):
+                lsh_index_build(
+                    session, find_defaults.lsh_threshold, find_defaults.num_permutations
+                )
     except BaseException:
         # A warm-up failure (e.g. a database error during the migration
         # reindex or index build) must not leak the engine either: it holds
