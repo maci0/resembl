@@ -18,7 +18,7 @@ import unittest
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from resembl.core import db_backup, db_verify_backup, snippet_add
+from resembl.core import db_backup, db_verify_backup, snippet_add, snippet_name_add
 from tests.test_collections_merge import BaseDBTest
 
 
@@ -301,6 +301,16 @@ class TestDbBackup(FileDBTest):
         backup_dir = os.path.join(self._tmpdir.name, "backups")
         first = db_backup(self.session, backup_dir, keep=7)
         snippet_add(self.session, "bar", "xor ebx, ebx\nret")
+        second = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(second["backup"], first["backup"])
+        self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+
+    def test_backup_after_a_metadata_change_writes_a_new_file(self):
+        """An alias/tag change is a content change: the old backup is stale."""
+        snippet = snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        snippet_name_add(self.session, snippet.checksum, "alias")
         second = db_backup(self.session, backup_dir, keep=7)
         self.assertNotEqual(second["backup"], first["backup"])
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])

@@ -176,17 +176,26 @@ def _db_backup_manifest_name(backup_path: str) -> str:
 def _db_content_hash(session: Session) -> str:
     """Return a stable identity for the snippet corpus in *session*.
 
-    The SHA-256 hex digest over the checksums in primary-key order.  Two
-    databases holding the same snippets — however their files happen to be
-    paged — hash identically, which is what makes a re-executed backup
-    recognizable as the same logical backup instead of a new one.  Only the
-    (indexed) ``checksum`` column is read, not the code or fingerprint
-    payloads, so the scan is cheaper than the file copy that follows it.
+    The SHA-256 hex digest over ``(checksum, names, tags, collection)`` in
+    primary-key order.  Two databases holding the same snippets — however
+    their files happen to be paged — hash identically, which is what makes a
+    re-executed backup recognizable as the same logical backup instead of a
+    new one.  The metadata columns are part of the identity: an alias, tag,
+    or collection change alters the corpus a restore would hand back, so a
+    backup taken before it must not be reused after it (that reuse returned
+    a stale copy as if it were current).  Code and fingerprint payloads are
+    keyed by checksum, so they need no separate hashing.
     """
     digest = hashlib.sha256()
-    for checksum in session.exec(select(Snippet.checksum).order_by(Snippet.checksum)).all():
-        digest.update(checksum.encode("utf-8"))
-        digest.update(b"\0")
+    rows = session.exec(
+        select(Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection).order_by(
+            Snippet.checksum
+        )
+    ).all()
+    for checksum, names, tags, collection in rows:
+        for value in (checksum, names, tags, collection or ""):
+            digest.update(value.encode("utf-8"))
+            digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -2378,17 +2387,18 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         if "snippet" in tables:
             row = connection.execute("SELECT COUNT(*) FROM snippet").fetchone()
             num_snippets = int(row[0]) if row else 0
-            # Corpus identity: SHA-256 over checksums in PK order (the
-            # same digest _db_content_hash computes).  Catches a backup
-            # whose row count matches its manifest but whose rows are
-            # not the rows promised (half-overwritten, truncated-then-
-            # padded copy).
+            # Corpus identity: SHA-256 over (checksum, names, tags, collection)
+            # in PK order (the same digest _db_content_hash computes).  Catches
+            # a backup whose row count matches its manifest but whose rows are
+            # not the rows promised (half-overwritten, truncated-then-padded
+            # copy).
             digest = hashlib.sha256()
-            for (checksum,) in connection.execute(
-                "SELECT checksum FROM snippet ORDER BY checksum"
+            for row in connection.execute(
+                "SELECT checksum, names, tags, collection FROM snippet ORDER BY checksum"
             ).fetchall():
-                digest.update(str(checksum).encode("utf-8"))
-                digest.update(b"\0")
+                for value in row:
+                    digest.update(str(value or "").encode("utf-8"))
+                    digest.update(b"\0")
             content_hash = digest.hexdigest()
         # integrity_check: a flipped or zeroed page that still answers
         # COUNT(*) must not pass as restorable.
