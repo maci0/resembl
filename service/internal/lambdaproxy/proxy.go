@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -46,7 +47,23 @@ func (r *response) Write(p []byte) (int, error) {
 // treats API Gateway identity claims as a grant and does not establish durable stop.
 func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	bad := func(code int) (events.APIGatewayV2HTTPResponse, error) {
-		return events.APIGatewayV2HTTPResponse{StatusCode: code}, nil
+		// Same JSON error envelope as the HTTP service's writeError, so
+		// an API Gateway caller parses one shape on every path instead
+		// of an empty body here.
+		msg := "bad request"
+		switch code {
+		case http.StatusRequestEntityTooLarge:
+			msg = "request too large"
+		case http.StatusBadGateway:
+			msg = "response too large"
+		}
+		body, _ := json.Marshal(map[string]string{"error": msg})
+		return events.APIGatewayV2HTTPResponse{
+			StatusCode:      code,
+			Headers:         map[string]string{"Content-Type": "application/json"},
+			Body:            base64.StdEncoding.EncodeToString(body),
+			IsBase64Encoded: true,
+		}, nil
 	}
 	if h == nil || event.Version != "2.0" || !strings.HasPrefix(event.RawPath, "/") || strings.HasPrefix(event.RawPath, "//") || strings.ContainsAny(event.RawPath, "?#\r\n") || strings.ContainsAny(event.RawQueryString, "\r\n#") {
 		return bad(http.StatusBadRequest)

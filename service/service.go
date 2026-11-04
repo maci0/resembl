@@ -334,6 +334,24 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result, err = batch.FindBatch(ctx, raw)
 	}
 	if err != nil {
+		var engErr *EngineError
+		if errors.As(err, &engErr) {
+			if engErr.Status >= 400 && engErr.Status < 500 {
+				// A client-caused rejection from the warm engine (bad
+				// parameter, index mismatch) is the caller's 4xx,
+				// relayed with its envelope text instead of a 503
+				// that claims the engine is down.
+				msg := engErr.Message
+				if msg == "" {
+					msg = "engine rejected request"
+				}
+				writeError(w, engErr.Status, msg)
+				return
+			}
+			log.Printf("[%s] engine unavailable: %v", reqID, err)
+			writeError(w, http.StatusServiceUnavailable, "engine unavailable")
+			return
+		}
 		log.Printf("[%s] engine unavailable: %v", reqID, err)
 		writeError(w, http.StatusServiceUnavailable, "engine unavailable")
 		return

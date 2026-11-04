@@ -24,6 +24,22 @@ type LocalEngine struct {
 	transport *http.Transport
 }
 
+// EngineError is a non-2xx answer from the warm engine. Status is its HTTP
+// status and Message its JSON error envelope text, so Service can relay a
+// client-caused rejection (400/409/...) instead of masking every rejection
+// as 503 "engine unavailable".
+type EngineError struct {
+	Status  int
+	Message string
+}
+
+func (e *EngineError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("engine rejected request: %s", e.Message)
+	}
+	return fmt.Sprintf("engine rejected request: status %d", e.Status)
+}
+
 func NewLocalEngine(endpoint string) (*LocalEngine, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -92,9 +108,9 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 			detail = strings.TrimSpace(string(data))
 		}
 		if detail != "" {
-			return nil, fmt.Errorf("engine rejected request: %s", detail)
+			return nil, &EngineError{Status: resp.StatusCode, Message: detail}
 		}
-		return nil, fmt.Errorf("engine rejected request: %s", resp.Status)
+		return nil, &EngineError{Status: resp.StatusCode, Message: resp.Status}
 	}
 	// Read up to one byte past the cap so an oversized body is detected
 	// without allocating unboundedly, then discard any remainder so the

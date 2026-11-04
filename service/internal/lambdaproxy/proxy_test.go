@@ -101,8 +101,13 @@ func TestAmbiguousAuthorizationAndLargeResponseRefused(t *testing.T) {
 	}
 	e.Headers = nil
 	out, _ = Handle(context.Background(), h, e)
-	if out.StatusCode != http.StatusBadGateway || out.Body != "" {
+	if out.StatusCode != http.StatusBadGateway {
 		t.Fatal("oversized output escaped bound")
+	}
+	body, _ := base64.StdEncoding.DecodeString(out.Body)
+	var env map[string]string
+	if json.Unmarshal(body, &env) != nil || env["error"] != "response too large" {
+		t.Fatal("oversized output did not answer the JSON error envelope")
 	}
 }
 

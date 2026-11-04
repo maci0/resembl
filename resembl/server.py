@@ -354,6 +354,21 @@ def _as_int(value: object, name: str) -> int:
     raise BadRequestError(f"{name} must be a whole number, got {value!r}")
 
 
+def _as_float(value: object, name: str) -> float:
+    """Return *value* as a float, or raise :class:`BadRequestError`.
+
+    ``float()`` alone is not a type check: it turns a boolean into 1.0/0.0
+    and a numeric string into a number, so ``threshold: true`` silently
+    searched as 1.0 and ``jaccard_weight: "0.5"`` as 0.5.  The integer
+    fields already reject a boolean with :func:`_as_int`; the float fields
+    now reject both a boolean and a string with the same clean 400,
+    matching ``/score``'s ``jaccard_floor`` which never accepted either.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BadRequestError(f"{name} must be a number, got {value!r}")
+    return float(value)
+
+
 def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     """Validate *body*'s find parameters, or raise :class:`BadRequestError`.
 
@@ -380,13 +395,15 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
         # raise TypeError at the range check below and surface as a 500
         # echoing internal error text.
         threshold_raw = provided.get("threshold", params.lsh_threshold)
-        threshold = float(threshold_raw) if threshold_raw is not None else None
+        threshold = _as_float(threshold_raw, "threshold") if threshold_raw is not None else None
         normalize = bool(provided.get("normalize", True))
         ngram_size = _as_int(provided.get("ngram_size", params.ngram_size), "ngram_size")
         num_permutations = _as_int(
             provided.get("num_permutations", params.num_permutations), "num_permutations"
         )
-        jaccard_weight = float(provided.get("jaccard_weight", params.jaccard_weight))
+        jaccard_weight = _as_float(
+            provided.get("jaccard_weight", params.jaccard_weight), "jaccard_weight"
+        )
     except BadRequestError:
         # A whole-number count already failed :func:`_as_int`; its message
         # names the value, so keep it instead of the generic one below.

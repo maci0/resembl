@@ -37,6 +37,9 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A `config.toml` containing invalid UTF-8 or deeply nested TOML now yields the documented empty-config-plus-error answer instead of an uncaught `UnicodeDecodeError` or `RecursionError` traceback: `resembl/config.py:_read_config_file` and the thin client's `_load_config` catch both, matching their never-raise contract.
+- The Go service no longer masks a warm-engine `4xx` (bad parameter, index mismatch) as `503 "engine unavailable"`: it relays the engine's status and `{"error": ...}` text, so a client-caused rejection is the caller's `400`/`409` again; engine `5xx` and transport failures still answer `503`.
+- The Lambda event adapter now answers its own refusals (bad path/header, oversized body, oversized response) with the same `{"error": ...}` JSON envelope and `application/json` content type as the HTTP service, instead of an empty body.
+- The Python server now rejects a boolean or numeric-string `threshold` / `jaccard_weight` (`true`, `"0.5"`) with `400`, matching the strictness the integer fields (`top_n`, `ngram_size`, `num_permutations`) and `/score`'s `jaccard_floor` already enforced instead of silently coercing them via `float()`.
 - `docs/THREAT_MODEL.md` now records the Go service `/v1/find-batch` `501` on the pinned binary (the handler's `BatchEngine` assertion against `PinnedSQLiteEngine`, which implements `Find` only), the Go latency histogram and uptime gauges in `/metrics`, and the Python `GET /health` database probe; it also states that the Go tree gets `gofmt`/`go vet`/`go test -race` via `service.yml`, not CodeQL SAST.
 - CLI logging now writes ISO-8601 timestamps (`%(asctime)s %(levelname)s %(name)s %(message)s`) instead of the bare `LEVEL:name:message` default, so log aggregators can parse and order records; unhandled server errors now log with traceback instead of relying on the stdlib default.
 
