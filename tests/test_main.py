@@ -13,7 +13,7 @@ class TestMain(unittest.TestCase):
         """Test that running the module calls cli.main."""
         with patch("sys.argv", ["resembl", "stats"]):
             runpy.run_module("resembl", run_name="__main__")
-        mock_main.assert_called_once()
+        mock_main.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -35,27 +35,34 @@ _LARGE_CODE = "\n".join(open(p, encoding="utf-8").read() for p in _SAMPLE_FILES[
 
 def test_bench_tokenize(benchmark):
     """Benchmark tokenizing a real assembly sample."""
-    benchmark(code_tokenize, _SAMPLE_CODE)
+    result = benchmark(code_tokenize, _SAMPLE_CODE)
+    assert isinstance(result, list) and result, "tokenize returned no tokens"
+    assert all(isinstance(t, str) and t for t in result)
 
 
 def test_bench_tokenize_no_normalize(benchmark):
     """Benchmark tokenizing without normalization."""
-    benchmark(code_tokenize, _SAMPLE_CODE, False)
+    result = benchmark(code_tokenize, _SAMPLE_CODE, False)
+    assert isinstance(result, list) and result, "unnormalized tokenize returned no tokens"
+    assert all(isinstance(t, str) and t for t in result)
 
 
 def test_bench_normalize(benchmark):
     """Benchmark string normalization."""
-    benchmark(string_normalize, _SAMPLE_CODE)
+    result = benchmark(string_normalize, _SAMPLE_CODE)
+    assert isinstance(result, str) and result.strip(), "normalize returned empty text"
 
 
 def test_bench_minhash_small(benchmark):
     """Benchmark MinHash creation on a small snippet."""
-    benchmark(code_create_minhash, _SAMPLE_CODE)
+    result = benchmark(code_create_minhash, _SAMPLE_CODE)
+    assert result.jaccard(result) == 1.0, "minhash must be self-identical"
 
 
 def test_bench_minhash_large(benchmark):
     """Benchmark MinHash creation on a larger combined snippet."""
-    benchmark(code_create_minhash, _LARGE_CODE)
+    result = benchmark(code_create_minhash, _LARGE_CODE)
+    assert result.jaccard(result) == 1.0, "minhash must be self-identical"
 
 
 # --- DB-backed benchmarks ---
@@ -78,4 +85,6 @@ def db_session():
 
 def test_bench_find_matches(benchmark, db_session):
     """Benchmark finding matches in a populated database."""
-    benchmark(snippet_find_matches, db_session, _SAMPLE_CODE, top_n=5)
+    _count, result = benchmark(snippet_find_matches, db_session, _SAMPLE_CODE, top_n=5)
+    assert isinstance(result, list) and result, "find_matches returned no matches"
+    assert all(score > 0 for _snippet, score in result), "match scores must be positive"
