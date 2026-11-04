@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from resembl.config import (
     DEFAULTS,
+    ConfigError,
     ResemblConfig,
     load_config,
     remove_config_key,
@@ -159,25 +160,34 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.top_n, DEFAULTS.get("top_n"))
 
     def test_update_with_malformed_config(self):
-        """Test that update_config works with a malformed config file."""
+        """update_config fails closed on a malformed file, leaving it untouched.
+
+        A read-modify-write update that treats a malformed file as empty
+        overwrites it and silently discards every existing override, so the
+        update must raise (an ``OSError`` subclass) and leave the bytes
+        alone instead of reporting success.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = os.path.join(temp_dir, "config.toml")
             with open(config_path, "w", encoding="utf-8") as f:
                 f.write("this is not valid toml")
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
-                config = update_config("top_n", 10)
-        self.assertEqual(config["top_n"], 10)
-        self.assertEqual(config["lsh_threshold"], DEFAULTS.get("lsh_threshold"))
+                with self.assertRaises(ConfigError):
+                    update_config("top_n", 10)
+            with open(config_path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "this is not valid toml")
 
     def test_remove_with_malformed_config(self):
-        """Test that remove_config_key works with a malformed config file."""
+        """remove_config_key fails closed on a malformed file, leaving it untouched."""
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = os.path.join(temp_dir, "config.toml")
             with open(config_path, "w", encoding="utf-8") as f:
                 f.write("this is not valid toml")
             with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
-                config = remove_config_key("top_n")
-        self.assertEqual(config, DEFAULTS)
+                with self.assertRaises(ConfigError):
+                    remove_config_key("top_n")
+            with open(config_path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "this is not valid toml")
 
     def test_remove_nonexistent_key(self):
         """Test that remove_config_key does nothing for a nonexistent key."""

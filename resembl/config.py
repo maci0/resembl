@@ -194,6 +194,16 @@ DEFAULTS = ResemblConfig().to_dict()
 logger = logging.getLogger(__name__)
 
 
+class ConfigError(OSError):  # pylint: disable=too-few-public-methods
+    """A config file exists but cannot be read or parsed.
+
+    Subclasses ``OSError`` so existing ``except OSError`` handlers in the
+    CLI surface it as a write/read failure; the message names the file and
+    the parse/IO failure so a malformed file is never silently discarded
+    by a read-modify-write update.
+    """
+
+
 @contextlib.contextmanager
 def _config_file_lock() -> Iterator[None]:
     """Hold an exclusive cross-process lock around a config-file update.
@@ -271,9 +281,11 @@ def _read_config_file() -> tuple[dict, Exception | None]:
 
     The one reader behind every config access: a missing, malformed, or
     unreadable file yields an empty config rather than an exception, so a
-    broken file never takes down ``load_config`` or a read-modify-write
-    update.  The error travels with the data so :func:`load_config` can
-    report it instead of silently running on defaults.
+    broken file never takes down ``load_config``.  The error travels with
+    the data so :func:`load_config` can report it instead of silently
+    running on defaults.  Read-modify-write callers go through
+    :func:`_read_config_dict`, which raises instead of overwriting a
+    broken file.
     """
     cfg_path = config_path_get()
     if not os.path.exists(cfg_path):
@@ -286,12 +298,28 @@ def _read_config_file() -> tuple[dict, Exception | None]:
 
 
 def _read_config_dict() -> dict:
-    """Read the raw config file as a dict (empty when missing or malformed)."""
-    return _read_config_file()[0]
+    """Read the raw config file as a dict (empty only when missing).
+
+    A present but unreadable/malformed file raises :class:`ConfigError`
+    instead of returning ``{}``: a read-modify-write caller that proceeds
+    with an empty dict would overwrite the file and silently discard every
+    existing override.  Callers that must tolerate a broken file use
+    :func:`_read_config_file` / :func:`load_config`, which surface the
+    error instead of overwriting it.
+    """
+    config, error = _read_config_file()
+    if error is not None:
+        raise ConfigError(f"cannot read config file {config_path_get()}: {error}") from error
+    return config
 
 
 def update_config(key: str, value: int | float | str) -> dict:
-    """Update ``key`` in the config file with ``value`` and return the new config."""
+    """Update ``key`` in the config file with ``value`` and return the new config.
+
+    Raises :class:`ConfigError` (an ``OSError``) when the existing file
+    cannot be read or parsed, so the update fails closed instead of
+    overwriting and discarding the file's previous contents.
+    """
     with _config_file_lock():
         config = _read_config_dict()
         config[key] = value
@@ -303,7 +331,12 @@ def update_config(key: str, value: int | float | str) -> dict:
 
 
 def remove_config_key(key: str) -> dict:
-    """Remove ``key`` from the config file and return the new config."""
+    """Remove ``key`` from the config file and return the new config.
+
+    Raises :class:`ConfigError` (an ``OSError``) when the existing file
+    cannot be read or parsed, so the removal fails closed instead of
+    overwriting and discarding the file's previous contents.
+    """
     with _config_file_lock():
         config = _read_config_dict()
         if key in config:
