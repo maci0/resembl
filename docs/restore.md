@@ -27,17 +27,25 @@ its restore the same way.
 
 ```bash
 # 1. Stop every process using the database (serve, other CLI sessions).
+#    The live DB path is the sqlite:// URL in RESEMBL_DATABASE_URL /
+#    DATABASE_URL (default: assembly.db in the working directory) — every
+#    path below is relative to that file, not necessarily "assembly.db".
+DB=<live-db-path>   # e.g. /srv/resembl/assembly.db
 # 2. Pick the newest backup that verifies:
 resembl verify-backup backups/assembly-<stamp>.db
 
 # 3. Remove any stale WAL sidecars from the live file — a leftover
-#    assembly.db-wal would replay old pages over the restored file.
-rm -f assembly.db-wal assembly.db-shm
+#    <live>-wal would replay old pages over the restored file.
+rm -f "$DB-wal" "$DB-shm"
 
 # 4. Copy the backup to the live path and prove it:
-cp backups/assembly-<stamp>.db assembly.db
+cp backups/assembly-<stamp>.db "$DB"
 resembl verify
 ```
+
+If `config.toml` existed, restore it from your own copy (it is not in
+the backup) or re-apply overrides with `resembl config set`; defaults
+are sane but not identical to a tuned config.
 
 ## Restore (logical corruption — bad code wrote bad data for hours)
 
@@ -55,17 +63,26 @@ resembl verify-backup backups/assembly-<newest>.db   # exit 1 = unrestorable
 
 Alert on: non-zero exit, a zero-byte `assembly-*.db`, or a backup directory
 whose newest file is older than your RPO target. A missing manifest is an
-issue (contents still verify); a count mismatch or missing table is a
-hard failure.
+issue (contents still verify); a count mismatch, content-hash mismatch,
+`integrity_check` failure, or missing table is a hard failure.
+
+Before any destructive operation in the next section, run the backup and
+`verify-backup` on the result — a backup that has never been verified is
+not a pre-delete snapshot:
 
 ## Deletion paths
 
 `resembl rm`, `collection delete`, `clean`, and `export`'s stale-file prune
-are destructive with no soft-delete window. Take a backup first:
+are destructive with no soft-delete window. Take a backup *and verify it*
+first:
 
 ```bash
 resembl backup DIR --force
+resembl verify-backup DIR/assembly-<stamp>.db
 ```
+
+Only proceed when `verify-backup` exits 0; for `clean`, the LSH index is
+rebuildable, so the pre-clean backup protects the corpus it vacuums.
 
 ## Failure-domain notes
 

@@ -296,6 +296,41 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertTrue(check["ok"], check["issues"])
         self.assertTrue(any("manifest" in issue for issue in check["issues"]))
 
+    def test_content_hash_mismatch_fails(self):
+        """A manifest whose content_hash does not match the rows fails.
+
+        Regression: verify compared only the snippet count, so a backup
+        whose rows were replaced (half-overwritten copy, truncated-then-
+        padded file) passed as long as the count agreed.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        manifest_name = os.path.splitext(os.path.basename(result["backup"]))[0] + ".json"
+        manifest_path = os.path.join(backup_dir, manifest_name)
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        manifest["content_hash"] = "0" * 64
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertFalse(check["ok"], check)
+        self.assertTrue(any("hash" in issue for issue in check["issues"]))
+
+    def test_corrupted_page_fails(self):
+        """A backup with a corrupt page fails even when COUNT(*) answers."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        with open(result["backup"], "r+b") as f:
+            data = bytearray(f.read())
+        for i in range(len(data) // 2, len(data) // 2 + 16):
+            data[i] ^= 0xFF
+        with open(result["backup"], "wb") as f:
+            f.write(data)
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertFalse(check["ok"], check)
+
 
 if __name__ == "__main__":
     unittest.main()

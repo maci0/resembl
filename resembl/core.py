@@ -183,9 +183,7 @@ def _db_content_hash(session: Session) -> str:
     payloads, so the scan is cheaper than the file copy that follows it.
     """
     digest = hashlib.sha256()
-    for checksum in session.exec(
-        select(Snippet.checksum).order_by(Snippet.checksum)
-    ).all():
+    for checksum in session.exec(select(Snippet.checksum).order_by(Snippet.checksum)).all():
         digest.update(checksum.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
@@ -2218,7 +2216,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         fd = os.open(tmp_manifest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(manifest, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_manifest, manifest_path)
+        _sync_dir(backup_dir)
     except OSError:
         try:
             os.unlink(tmp_manifest)
@@ -2293,19 +2294,25 @@ def _db_backup_prune(backup_dir: str, keep: int) -> int:
 def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: disable=unused-argument
     """Check that *backup_path* opens and holds the data its manifest promised.
 
-    Opens the backup as a read-only SQLite database, confirms every table
-    the schema creates is present, and compares the live snippet count
-    against the manifest :func:`db_backup` wrote beside it.  A backup whose
-    own manifest disagrees with its contents is reported, not trusted: a
-    copy that silently lost rows (a raw file copy paired with a stale WAL,
-    a truncated transfer) must fail verification rather than pass on the
-    strength of having been written.
+    Opens the backup as a read-only SQLite database, runs
+    ``PRAGMA integrity_check`` (a flipped or zeroed page that still
+    answers ``COUNT(*)``
+    must not pass as restor-able), confirms every table the schema
+    creates is present, and compares the live snippet count and —
+    when the manifest records one — the corpus ``content_hash``
+    against the manifest :func:`db_backup` wrote beside it.  A backup
+    whose own manifest disagrees with its contents is reported, not
+    trusted: a copy that silently lost rows (a raw file copy paired
+    with a stale WAL, a truncated transfer, a bit-rotted page) must
+    fail verification rather than pass on the strength of having
+    been written.
 
     Returns ``{"ok": bool, "num_snippets": int, "issues": [...]}``; ``ok``
     is false — and the caller should treat the backup as unrestorable —
-    whenever the file cannot be opened, a table is missing, or the counts
-    disagree.  A missing manifest is an issue but not a failure: the file
-    may predate manifests, and its contents are what matter.
+    whenever the file cannot be opened, a table is missing, the
+    integrity check fails, or the counts/hashes disagree.  A missing
+    manifest is an issue but not a failure: the file may predate
+    manifests, and its contents are what matter.
     """
     import sqlite3
     from urllib.parse import quote
@@ -2340,9 +2347,29 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         if missing:
             issues.append(f"missing tables: {', '.join(missing)}")
         num_snippets = 0
+        content_hash = None
         if "snippet" in tables:
             row = connection.execute("SELECT COUNT(*) FROM snippet").fetchone()
             num_snippets = int(row[0]) if row else 0
+            # Corpus identity: SHA-256 over checksums in PK order (the
+            # same digest _db_content_hash computes).  Catches a backup
+            # whose row count matches its manifest but whose rows are
+            # not the rows promised (half-overwritten, truncated-then-
+            # padded copy).
+            digest = hashlib.sha256()
+            for (checksum,) in connection.execute(
+                "SELECT checksum FROM snippet ORDER BY checksum"
+            ).fetchall():
+                digest.update(str(checksum).encode("utf-8"))
+                digest.update(b"\0")
+            content_hash = digest.hexdigest()
+        # integrity_check: a flipped or zeroed page that still answers
+        # COUNT(*) must not pass as restorable.
+        integrity_rows = [
+            str(row[0]) for row in connection.execute("PRAGMA integrity_check").fetchall()
+        ]
+        if integrity_rows != ["ok"]:
+            issues.append(f"integrity_check failed: {'; '.join(integrity_rows[:3])}")
     except sqlite3.Error as e:
         return {"ok": False, "num_snippets": 0, "issues": [f"cannot read backup: {e}"]}
     finally:
@@ -2352,6 +2379,7 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     per_backup_path = os.path.join(manifest_dir, _db_backup_manifest_name(backup_path))
     shared_path = os.path.join(manifest_dir, DB_BACKUP_MANIFEST_NAME)
     manifest_snippets: int | None = None
+    manifest_hash: str | None = None
     manifest_present = False
     for manifest_path in (per_backup_path, shared_path):
         try:
@@ -2367,6 +2395,9 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
                 continue
         if isinstance(data, dict) and isinstance(data.get("num_snippets"), int):
             manifest_snippets = data["num_snippets"]
+            manifest_hash = (
+                data.get("content_hash") if isinstance(data.get("content_hash"), str) else None
+            )
             manifest_present = True
         elif isinstance(data, dict) and data.get("num_snippets") is None:
             # The count was never taken at backup time (the count query
@@ -2382,10 +2413,14 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             f"snippet count mismatch: backup holds {num_snippets}, "
             f"manifest records {manifest_snippets}"
         )
+    if manifest_hash is not None and content_hash is not None and manifest_hash != content_hash:
+        issues.append("content hash mismatch: backup contents differ from manifest")
     # A missing manifest alone does not fail verification: the file may
-    # predate manifests, and its contents are what matter.  A missing table
-    # or a count mismatch does.
-    hard_failures = [i for i in issues if "mismatch" in i or "missing tables" in i]
+    # predate manifests, and its contents are what matter.  A missing table,
+    # a failed integrity_check, or a count/hash mismatch does.
+    hard_failures = [
+        i for i in issues if "mismatch" in i or "missing tables" in i or "integrity_check" in i
+    ]
     return {"ok": not hard_failures, "num_snippets": num_snippets, "issues": issues}
 
 
