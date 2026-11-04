@@ -1965,7 +1965,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     backup_dir = os.path.realpath(backup_dir)
     # Microseconds keep two backups in the same second distinct, so prune
     # counts backups rather than overwriting one.
-    stamp = time.strftime("%Y%m%dT%H%M%S") + f"-{time.time_ns() % 1_000_000:06d}"
+    # Stamped in UTC, not local time: the name is a sort key for prune
+    # (legacy local stamps sort 01:30 EDT and 01:30 EST identically across
+    # a fall-back, so the hour that was taken second can sort oldest and
+    # be deleted).  ``gmtime`` keeps the sort chronological in any zone.
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + f"-{time.time_ns() % 1_000_000:06d}"
     backup_name = f"assembly-{stamp}.db"
     final_path = os.path.join(backup_dir, backup_name)
     # ``backup`` refuses a destination that is the source connection's own

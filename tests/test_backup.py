@@ -13,6 +13,7 @@ verification rather than pass on the strength of having been written.
 import json
 import os
 import tempfile
+import time
 import unittest
 
 from sqlmodel import Session, SQLModel, create_engine
@@ -103,6 +104,37 @@ class TestDbBackup(FileDBTest):
         """``keep=0`` would delete the backup just taken."""
         with self.assertRaises(ValueError):
             db_backup(self.session, os.path.join(self._tmpdir.name, "backups"), keep=0)
+
+    def test_backup_name_uses_utc_regardless_of_local_zone(self):
+        """``db_backup`` filenames are UTC so prune sorting stays chronological across DST.
+
+        Regression: stamps used local time, so the repeated wall-clock hour
+        at a fall-back (2024-11-03 01:30 EDT and 01:30 EST) produced
+        identical timestamp prefixes and the second backup could sort
+        oldest, making prune delete the newest backup.
+        """
+        import calendar
+
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        original_localtime = time.localtime
+
+        def located_localtime(epoch=None):
+            if epoch is None:
+                epoch = time.time()
+            return time.gmtime(epoch - 14400)
+
+        time.localtime = located_localtime
+        try:
+            result = db_backup(self.session, backup_dir)
+        finally:
+            time.localtime = original_localtime
+        backup_name = os.path.basename(result["backup"])
+        stamp_str = backup_name.removesuffix(".db").removeprefix("assembly-").rsplit("-", 1)[0]
+        parsed = time.strptime(stamp_str, "%Y%m%dT%H%M%S")
+        epoch_from_stamp = calendar.timegm(parsed)
+        self.assertLessEqual(epoch_from_stamp, time.time() + 60)
+        self.assertGreater(epoch_from_stamp, time.time() - 60)
 
     def test_backup_rejects_non_sqlite(self):
         """Non-SQLite backends must use their own backup tooling."""
