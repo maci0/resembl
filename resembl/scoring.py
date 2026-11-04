@@ -1130,7 +1130,15 @@ def minhash_from_tokens(
     Shingles are deduplicated as token tuples — no per-shingle string join —
     and the weight check runs directly on the tokens instead of re-splitting
     the joined string.
+
+    ``ngram_size`` below 1 raises ``ValueError``: every window would be
+    the empty tuple, so every snippet would fingerprint identically and
+    match every other one without any error — the degenerate shape the
+    config and request bounds refuse at their own layers, enforced here
+    too so no caller can reach it unchecked.
     """
+    if ngram_size < 1:
+        raise ValueError("ngram_size must be at least 1")
     m = minhash_new(num_perm)
     if not tokens:
         return m
