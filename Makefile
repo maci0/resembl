@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test coverage db-test service-check fuzz check dist dist-verify sbom
+.PHONY: help install format lint types hygiene test coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom
 
 PYTEST_ARGS ?=
 
@@ -149,6 +149,20 @@ service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.2
 	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	cd service && go vet ./...
 	cd service && go test -race -count=1 ./...
+
+# Go fuzz targets (service/fuzz_service_test.go, service/internal/lambdaproxy).
+# `go test -fuzz` is the native tool; the Python `fuzz` target below is the
+# Atheris one. FUZZER names a target (e.g. FuzzServeHTTP); FUZZ_SECONDS bounds it.
+service-fuzz:  ## Fuzz the Go service targets for FUZZ_SECONDS, or one via FUZZER=<name>
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo "make service-fuzz needs Go 1.25+ (see service/go.mod)."; \
+		exit 1; \
+	fi
+	@for t in $(if $(FUZZER),$(FUZZER),FuzzHandle FuzzServeHTTP); do \
+		case $$t in FuzzHandle) d=service/internal/lambdaproxy ;; *) d=service ;; esac; \
+		echo "== fuzz $$t in $$d for $(FUZZ_SECONDS)s"; \
+		cd $$d && go test -run=$$t -fuzz=$$t -fuzztime=$(FUZZ_SECONDS)s . || exit $$?; \
+	done
 
 # Isolate the maintained Python 3.15 Atheris build from normal development.
 # atheris lives in the `fuzz` extra, so the target asks uv for it instead of
