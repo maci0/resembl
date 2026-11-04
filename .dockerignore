@@ -1,0 +1,17 @@
+# Keep the service image build context small: only service/ is COPY'd.
+# Without this, docker build -f service/Dockerfile . transfers .venv,
+# dist/ and .git as well.
+.git
+.venv
+.venv-fuzz
+dist
+build
+__pycache__
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.scratch
+docs
+tests
+fuzzers
