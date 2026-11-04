@@ -193,7 +193,7 @@ def _db_content_hash(session: Session) -> str:
         select(Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection).order_by(
             Snippet.checksum
         )
-    )
+    ).yield_per(1000)
     for checksum, names, tags, collection in rows:
         for value in (checksum, names, tags, collection or ""):
             digest.update(value.encode("utf-8"))

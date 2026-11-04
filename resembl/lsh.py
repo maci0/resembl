@@ -789,7 +789,7 @@ class ResemblLSH:
             for i, bucket in enumerate(chunk):
                 params[f"b{i}"] = start + i
                 params[f"k{i}"] = bucket
-            keys.update(row[0] for row in self.session.execute(text(sql), params).all())
+            keys.update(row[0] for row in self.session.execute(text(sql), params))
         return sorted(keys)
 
 
