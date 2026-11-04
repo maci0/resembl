@@ -36,6 +36,15 @@ project follows [Semantic Versioning](https://semver.org/).
 - `AGENTS.md` no longer carries the historical 3.7.0 exception that
   released the Python 3.14 floor migration as a minor; the section now
   states the SemVer rule without that one-time exemption.
+- `make service-check` now names the missing Go 1.25+ toolchain and where
+  to install it, instead of failing with a bare `gofmt: command not found`
+  on a machine without Go.
+- `CONTRIBUTING.md` lists `service-check` among the `make help` targets
+  and shows the `make test PYTEST_ARGS=...` form of the single-test loop.
+- `mypy`, `pylint` and `black` gates pass again: `serve`'s return type
+  no longer hides the server's `runtime_generation`, a long `config`
+  line is split, and the semaphore acquire in `serve` carries its
+  scoped `consider-using-with` disable.
 
 ### Changed
 

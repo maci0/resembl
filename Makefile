@@ -140,6 +140,11 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a
 # Python-only contributor needs no Go toolchain.
 service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.25+)
+	@if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then \
+		echo "make service-check needs Go 1.25+ (go and gofmt on PATH; see service/go.mod)."; \
+		echo "Install Go from https://go.dev/dl/ and re-run 'make service-check'."; \
+		exit 1; \
+	fi
 	@unformatted=$$(gofmt -l service); \
 	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	cd service && go vet ./...

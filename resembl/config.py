@@ -157,11 +157,8 @@ class ResemblConfig:
             # int() truncates (2.9 -> 2), silently accepting a fractional
             # count the file never asked for.  Reject fractional floats for
             # int fields before coercion; integral floats (128.0) stay legal.
-            if (
-                isinstance(default, int)
-                and not isinstance(default, bool)
-                and isinstance(value, float)
-            ):
+            is_int_field = isinstance(default, int) and not isinstance(default, bool)
+            if is_int_field and isinstance(value, float):
                 if not value.is_integer():
                     logger.warning(
                         "Ignoring %s: expected %s, got %r.",

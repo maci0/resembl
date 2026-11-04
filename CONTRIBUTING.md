@@ -100,8 +100,9 @@ resembl is developed test-first.
     uv run --locked pytest tests/test_cli.py                                    # one file
     uv run --locked pytest tests/test_cli.py -k config_set                      # by name
     uv run --locked pytest tests/test_cli.py::TestCLIConfig::test_config_unset  # one test
+    make test PYTEST_ARGS="tests/test_cli.py -k config_set"                     # same, via the Makefile
     ```
-    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `coverage`, `db-test`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`.
+    `make help` lists every target: `install`, `format`, `lint`, `types`, `hygiene`, `test`, `coverage`, `db-test`, `service-check`, `fuzz`, `check`, `dist`, `dist-verify`, `sbom`.
 
 - **Database Integration Tests:** `tests/test_pg_integration.py` and `tests/test_mysql_integration.py` skip themselves unless `RESEMBL_TEST_PG_URL` and `RESEMBL_TEST_MYSQL_URL` are set, so the suite is green without a database server. CI sets both and runs them, which means a local `uv run --locked pytest` covers strictly less than CI. If your change touches the PostgreSQL or MySQL dialects, point the variables at your own servers and run those two modules:
     ```bash

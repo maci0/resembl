@@ -1,5 +1,6 @@
 """Exercise recipe shell flags through the shipped Makefile on real shells."""
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -64,3 +65,24 @@ class MakefileShellTests(unittest.TestCase):
     def test_bash_retains_pipeline_failure(self) -> None:
         """Bash still refuses a pipeline whose first command fails."""
         self.shell_check("bash", True)
+
+    def test_service_check_names_missing_go(self) -> None:
+        """Without Go on PATH, service-check names Go 1.25+ instead of a bare shell error."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ)
+            env["PATH"] = directory
+            result = subprocess.run(
+                [make, "service-check"],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("needs Go 1.25+", result.stdout + result.stderr)
+        self.assertIn("https://go.dev/dl/", result.stdout + result.stderr)

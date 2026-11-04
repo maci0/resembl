@@ -1,5 +1,7 @@
 """The opt-in snapshot stays fenced from identity through execution."""
 
+# pylint: disable=protected-access  # tests exercise private internals
+
 import json
 import threading
 import urllib.error
@@ -232,7 +234,7 @@ def test_seeded_server_ids_replay_byte_for_byte(tmp_path, monkeypatch):
                 SQLModel.metadata.create_all(engine)
                 httpd = server.serve(f"sqlite:///{db}", port=0)
                 try:
-                    gen = httpd.runtime_generation
+                    gen = httpd.runtime_generation  # type: ignore[attr-defined]
                     first_id = server._seeded_uuid_hex()[:12]
                     return gen, first_id
                 finally:

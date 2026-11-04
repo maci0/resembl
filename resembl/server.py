@@ -1788,7 +1788,7 @@ class _FindServer(ThreadingHTTPServer):
         finishes: excess connections queue in the listen backlog rather
         than spawning unbounded threads.
         """
-        self._handler_slots.acquire()
+        self._handler_slots.acquire()  # pylint: disable=consider-using-with  # slot released in process_request_thread
         try:
             super().process_request(request, client_address)
         except BaseException:
