@@ -3,7 +3,7 @@
 Last reviewed: 2026-09-28, against the tree at version 3.1.0
 (`pyproject.toml:3`).
 
-This policy is kept current through the 3.11.0 release, but the last security
+This policy is kept current through the 3.12.0 release, but the last security
 review (above) was against 3.1.0; changes released since then have not had
 one. The `serve`
 controls below (the loopback `Host` check, `serve -v` request logging, the
@@ -34,7 +34,7 @@ The repository is <https://github.com/maci0/resembl>.
 | 3.x (current release line) | yes |
 | 2.x and earlier | no |
 
-The current release is 3.11.0. Older lines receive no fixes; upgrade to the
+The current release is 3.12.0. Older lines receive no fixes; upgrade to the
 current line before reporting an issue against them.
 
 ## Threat model

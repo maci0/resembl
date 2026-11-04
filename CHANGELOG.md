@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.12.0] - 2026-11-04
+
 ### Added
 
 - `resembl-service` takes `-concurrency` and `-timeout` flags and requires
@@ -973,7 +975,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.11.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v3.12.0...HEAD
+[3.12.0]: https://github.com/maci0/resembl/compare/v3.11.0...v3.12.0
 [3.11.0]: https://github.com/maci0/resembl/compare/v3.10.2...v3.11.0
 [3.10.1]: https://github.com/maci0/resembl/compare/v3.10.0...v3.10.1
 [3.10.0]: https://github.com/maci0/resembl/compare/v3.9.0...v3.10.0
