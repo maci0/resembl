@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -50,9 +51,23 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		// Consume the error body (discarding it) so the connection is
-		// reusable; the message carries nothing the caller needs.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, errors.New("engine rejected request")
+		// reusable. Surface its detail: callers and operators relay
+		// this error, and a generic message hides bad-request reasons
+		// the engine already sent.
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var detail string
+		var probe struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(data, &probe) == nil && probe.Error != "" {
+			detail = probe.Error
+		} else if len(data) > 0 {
+			detail = strings.TrimSpace(string(data))
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("engine rejected request: %s", detail)
+		}
+		return nil, fmt.Errorf("engine rejected request: %s", resp.Status)
 	}
 	// Read up to one byte past the cap so an oversized body is detected
 	// without allocating unboundedly, then discard any remainder so the

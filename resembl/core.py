@@ -2131,11 +2131,15 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     if reused is not None:
         try:
             num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
-        except Exception:
-            num_snippets = 0
+        except Exception as e:
+            # As in the fresh-backup path below: never fabricate a 0 count,
+            # which db_verify_backup reads as an empty database.
+            logger.warning("Could not count snippets for the reused backup: %s", e)
+            num_snippets = None  # type: ignore[assignment]
         return {
             "backup": reused,
-            "num_snippets": int(num_snippets),
+            "num_snippets": num_snippets,
+            "snippet_count_known": num_snippets is not None,
             "fingerprint_version": fingerprint_version_get(session),
             "num_removed": 0,
         }
