@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,7 +38,11 @@ type Service struct {
 	Resource  string
 	slots     chan struct{}
 	timeout   time.Duration
-	custody   Custody
+	custody   atomic.Pointer[custodyHolder]
+}
+
+type custodyHolder struct {
+	custody Custody
 }
 
 func New(authority Authorizer, engine Engine, resource string, concurrency int, timeout time.Duration) (*Service, error) {
@@ -52,7 +57,14 @@ func (s *Service) SetCustody(c Custody) error {
 	if c == nil {
 		return errors.New("custody required")
 	}
-	s.custody = c
+	s.custody.Store(&custodyHolder{custody: c})
+	return nil
+}
+
+func (s *Service) getCustody() Custody {
+	if h := s.custody.Load(); h != nil {
+		return h.custody
+	}
 	return nil
 }
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -109,7 +121,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	if s.custody == nil {
+	custody := s.getCustody()
+	if custody == nil {
 		writeError(w, http.StatusServiceUnavailable, "custody unavailable")
 		return
 	}
@@ -146,8 +159,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var result json.RawMessage
 	var release func() error
-	if s.custody != nil {
-		release, err = s.custody.Claim()
+	if custody != nil {
+		release, err = custody.Claim()
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "capacity unavailable")
 			return

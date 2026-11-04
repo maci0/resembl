@@ -1773,7 +1773,17 @@ class _FindServer(ThreadingHTTPServer):
 
     engine: Any
     runtime_generation: str
-    _handler_slots: threading.BoundedSemaphore = threading.BoundedSemaphore(_MAX_HANDLER_THREADS)
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        RequestHandlerClass: type[BaseHTTPRequestHandler],  # noqa: N803
+    ) -> None:
+        super().__init__(server_address, RequestHandlerClass)
+        self._handler_slots: threading.BoundedSemaphore = threading.BoundedSemaphore(
+            _MAX_HANDLER_THREADS
+        )
+
     #: ``Host`` values this generation answers to; empty means unrestricted
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()
