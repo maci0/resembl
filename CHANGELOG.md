@@ -40,6 +40,11 @@ project follows [Semantic Versioning](https://semver.org/).
   of truncating the live export file first. Added `docs/restore.md`, a
   restore runbook covering instance loss, logical corruption, stale WAL
   sidecars, and periodic verify-backup scheduling.
+- Backup files are now written mode `0600` (matching their manifests),
+  and `resembl backup` exits 1 when the backup's manifest could not be
+  written, so a complete-but-unverifiable backup is never reported as
+  success; the restore runbook now requires removing stale WAL sidecars
+  after the copy and recording each restore drill.
 - `docs/http_api.md` and `docs/THREAT_MODEL.md` no longer describe the
   stdlib's header-less HTML `501` as the answer to an unimplemented verb;
   the handler answers the JSON `405` envelope for any unhandled verb

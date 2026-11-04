@@ -12,6 +12,8 @@ verification rather than pass on the strength of having been written.
 
 import json
 import os
+import stat
+import sys
 import tempfile
 import time
 import unittest
@@ -68,6 +70,16 @@ class TestDbBackup(FileDBTest):
 
             names = sorted(name for snippet in snippet_list(restored) for name in snippet.name_list)
         self.assertEqual(names, ["bar", "foo"])
+
+    def test_backup_file_permissions_are_private(self):
+        """The backup file holding the full corpus is mode 0600 like its manifest."""
+        if sys.platform == "win32":
+            self.skipTest("POSIX file modes do not apply on Windows")
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        mode = stat.S_IMODE(os.stat(result["backup"]).st_mode)
+        self.assertEqual(mode, 0o600)
 
     def test_backup_prunes_to_keep(self):
         """Old backups beyond ``keep`` are removed, newest retained.

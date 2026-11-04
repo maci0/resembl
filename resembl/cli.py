@@ -2106,6 +2106,12 @@ def backup(
         if result.get("num_removed"):
             rows.append(("Old backups removed", str(result["num_removed"])))
         _echo_kv_table("Backup Complete", rows)
+    if result.get("manifest_written") is False:
+        err_console.print(
+            "[red]Error:[/red] Backup file is complete but its manifest could not be "
+            "written; verify-backup cannot cross-check it. Treat it as unverified."
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command("verify-backup")

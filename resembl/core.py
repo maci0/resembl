@@ -2238,6 +2238,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             # before the file's data hits disk leaves a backup that looks
             # complete but restores empty/corrupt — ack'd-but-not-durable.
             _sync_path(tmp_path)
+            try:
+                os.chmod(tmp_path, 0o600)
+            except OSError:
+                pass
             os.replace(tmp_path, final_path)
             _sync_dir(backup_dir)
         except BaseException:

@@ -38,9 +38,15 @@ resembl verify-backup backups/assembly-<stamp>.db
 #    <live>-wal would replay old pages over the restored file.
 rm -f "$DB-wal" "$DB-shm"
 
-# 4. Copy the backup to the live path and prove it:
+# 4. Copy the backup to the live path, remove any WAL sidecars the copy
+#    cannot have brought with it, and prove the restored database:
 cp backups/assembly-<stamp>.db "$DB"
+rm -f "$DB-wal" "$DB-shm"
 resembl verify
+# Record the drill (date, backup filename, verify result) so the next
+# operator knows restore was last proven; without that record the backup
+# is a hypothesis. Re-run this restore at least quarterly and after any
+# change to the database URL, backend, or backup tooling.
 ```
 
 If `config.toml` existed, restore it from your own copy (it is not in

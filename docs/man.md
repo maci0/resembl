@@ -211,7 +211,10 @@ Global options go before the subcommand: `resembl --format json find ...`.
     the current binary can open — not a raw copy of `assembly.db`
     paired with a stale WAL.  Also writes a manifest (snippet count,
     fingerprint version) beside it.  SQLite only; other backends use
-    their own backup tooling.  RPO is the time since the last backup;
+    their own backup tooling.  Backup and manifest files are mode `0600`.
+    Exits 1 when the backup file is complete but its manifest could not
+    be written — such a backup is unverified, not safe.  RPO is the time
+    since the last backup;
     RTO is the time to copy the file back to `assembly.db` and run
     `verify` (the index is rebuilt by the next `find` if it is stale).
     The full restore procedure, including removing stale `-wal`/`-shm`

@@ -103,8 +103,8 @@ relies on, not configuration options.
   checks tables, runs `PRAGMA integrity_check`, and compares the snippet
   count and content hash against the manifest, but the manifest is
   unauthenticated: a tampered backup with an edited manifest passes. Keep the
-  backup directory private (the manifest is mode `0600`, the backup file
-  is not) and treat any backup whose manifest you did not write as
-  untrusted (THREAT_MODEL.md R17).
+  backup directory private (backup and manifest are mode `0600`) and
+  treat any backup whose manifest you did not write as untrusted
+  (THREAT_MODEL.md R17).
 
 - Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
