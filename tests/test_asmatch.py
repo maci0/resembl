@@ -96,7 +96,10 @@ class TestResembl(unittest.TestCase):
         code2 = "mov eax, [esp+4]"
         minhash1 = code_create_minhash(code1)
         minhash2 = code_create_minhash(code2)
-        self.assertGreater(minhash1.jaccard(minhash2), 0.99)
+        # Normalization must make these byte-identical, not merely close:
+        # a drift to 0.99 would silently change every stored fingerprint.
+        self.assertEqual(minhash1.jaccard(minhash2), 1.0)
+        self.assertEqual(code_tokenize(code1), code_tokenize(code2))
 
     def test_find_matches(self):
         """Test finding top matches for a query."""
@@ -145,20 +148,32 @@ class TestResembl(unittest.TestCase):
         checksum_large = string_checksum(large_code)
         checksum_unicode = string_checksum(unicode_code)
 
-        self.assertIsNotNone(snippet_get(self.session, checksum_large))
-        self.assertIsNotNone(snippet_get(self.session, checksum_unicode))
+        # IsNotNone alone would pass if the rows stored truncated or
+        # mangled code under the right checksum; pin the round-trip.
+        big = snippet_get(self.session, checksum_large)
+        self.assertIsNotNone(big)
+        self.assertEqual(big.code, large_code)
+        self.assertEqual(big.name_list, ["big"])
+        uni = snippet_get(self.session, checksum_unicode)
+        self.assertIsNotNone(uni)
+        self.assertEqual(uni.code, unicode_code)
+        self.assertEqual(uni.name_list, ["unicode"])
 
     def test_find_no_matches(self):
         """Test that find returns an empty list when no matches are found."""
         snippet_add(self.session, "test", "MOV EAX, 1")
-        _num, matches = snippet_find_matches(self.session, "JMP 0x42")
-        self.assertEqual(len(matches), 0)
+        num, matches = snippet_find_matches(self.session, "JMP 0x42")
+        # Zero matches must come from zero candidates, not from a
+        # candidate set that was scored and then dropped.
+        self.assertEqual(num, 0)
+        self.assertEqual(matches, [])
 
     def test_empty_query(self):
         """Test that an empty query returns no matches."""
         snippet_add(self.session, "test", "MOV EAX, 1")
-        _num, matches = snippet_find_matches(self.session, "")
-        self.assertEqual(len(matches), 0)
+        num, matches = snippet_find_matches(self.session, "")
+        self.assertEqual(num, 0)
+        self.assertEqual(matches, [])
 
     def test_add_empty_snippet(self):
         """Test that adding an empty snippet does nothing."""

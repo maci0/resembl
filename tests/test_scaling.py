@@ -201,10 +201,18 @@ class TestMinHashTemplateBound(BaseScalingTest):
     def test_template_cache_is_bounded(self):
         from resembl.scoring import _MINHASH_TEMPLATES, _MINHASH_TEMPLATES_MAX, minhash_new
 
+        # A cache that never stores anything is also "bounded": pin that
+        # a template is actually held, then that cycling past the cap
+        # evicts instead of growing without limit.
+        minhash_new(64)
+        self.assertIn(64, _MINHASH_TEMPLATES)
+        self.assertGreater(len(_MINHASH_TEMPLATES), 0)
+
         counts = [_MINHASH_TEMPLATES_MAX + 10, *range(64, 64 + _MINHASH_TEMPLATES_MAX + 10)]
         for num_perm in counts:
             minhash_new(num_perm)
         self.assertLessEqual(len(_MINHASH_TEMPLATES), _MINHASH_TEMPLATES_MAX)
+        self.assertGreater(len(_MINHASH_TEMPLATES), 0)
 
     def test_evicted_template_is_rebuilt_identically(self):
         from resembl.scoring import (
@@ -601,8 +609,11 @@ class TestFindScaling(BaseScalingTest):
         self.session.add(victim)
         self.session.commit()
 
-        _, matches = snippet_find_matches(self.session, "MOV EAX, 1; ADD EBX, 1; RET", top_n=4)
-        self.assertGreater(len(matches), 0)
+        num, matches = snippet_find_matches(self.session, "MOV EAX, 1; ADD EBX, 1; RET", top_n=4)
+        # Exactly the three healthy candidates survive; the corrupt row
+        # is excluded, not scored as a partial or zero match.
+        self.assertEqual(num, 4)
+        self.assertEqual(len(matches), 3)
         self.assertNotIn(checksum, [s.checksum for s, _score in matches])
 
     def test_exact_score_tie_keeps_earliest_candidate(self):
@@ -1435,10 +1446,16 @@ class TestFingerprintVersion(BaseScalingTest):
         # simulate a legacy database whose blobs predate stamping.
         fingerprint_version_clear(self.session)
         self.assertIsNone(fingerprint_version_get(self.session))
-        _, matches = snippet_find_matches(
+        num, matches = snippet_find_matches(
             self.session, "push ebx\nmov eax, 5\npop ebx\nret", top_n=3
         )
-        self.assertGreater(len(matches), 0)
+        # The query is f5's exact code, so the migrated index must route
+        # to real candidates and rank that snippet first at a perfect
+        # score — not merely return *something* non-empty.
+        self.assertGreater(num, 0)
+        self.assertEqual(len(matches), 3)
+        self.assertEqual(matches[0][0].name_list, ["f5"])
+        self.assertEqual(matches[0][1], 100.0)
         self.assertEqual(fingerprint_version_get(self.session), FINGERPRINT_VERSION)
 
     def test_find_fixes_stale_stamp(self):
@@ -1842,7 +1859,11 @@ class TestFingerprintPermStamp(BaseScalingTest):
         _n1, matches = snippet_find_matches(
             self.session, "push ebx\nmov eax, 1\npop ebx\nret", top_n=4
         )
+        # The exact-code snippet (f1) must rank first; the stale-perm
+        # victim is excluded rather than scored or crashing the query.
         self.assertGreater(len(matches), 0)
+        self.assertEqual(matches[0][0].name_list, ["f1"])
+        self.assertEqual(matches[0][1], 100.0)
         self.assertNotIn(victim, [s.checksum for s, _score in matches])
 
     def test_merge_clears_perm_stamp(self):
