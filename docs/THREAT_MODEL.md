@@ -1,10 +1,12 @@
 # resembl threat model
 
-Last reviewed: 2026-09-27, against the code at `resembl/` version 2.0.0
+Last reviewed: 2026-11-04, against the code at version 3.12.0
 (`pyproject.toml:3`). Every reference below was re-read in that tree on that
 date. The `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
-model has not been re-reviewed since.
+model has been re-reviewed for this release; the Go experimental service in
+`service/` (see `service/README.md`) is now in scope alongside the Python
+surfaces.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -14,7 +16,12 @@ resembl is a single-user developer tool. It has no accounts, no
 multi-tenancy, and no authorization concept anywhere in the codebase. Every
 "user" in this model is a human or process already holding the same OS
 account as the tool, except for the loopback HTTP boundary, which is the one
-place where a peer need not be the same user.
+place where a peer need not be the same user. The experimental Go service in
+`service/` is the one exception: it is a portable HTTP boundary built to be
+deployed in front of a pinned index, with an `Authorizer` interface
+(`service/service.go:15`) that the application must supply. Its default
+binary (`cmd/resembl-service`) and Lambda bootstrap
+(`cmd/resembl-lambda/main.go`) are deny-all by default; see B9 below.
 
 ## Risk summary
 
@@ -34,6 +41,10 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R10 | `find-batch --file` reads the whole query file into a list before chunking it into requests | B2 | Memory exhaustion from an oversized input file | Chunking on the wire only (`resembl/cli.py:1571`, `resembl/cli.py:526`) |
 | R11 | A release tag is not statically analyzed or dependency-reviewed when it is cut; only the SBOM runs on the tag | B8 | A tagged release ships whatever the tag's tree contains, with no pre-release SAST or CVE gate on the tag itself | SAST on push and pull request to `main` plus a weekly cron (`.github/workflows/codeql.yml:4`), dependency review on pull requests to `main` only (`.github/workflows/dependency-review.yml:11`), SBOM on `main` and on `v*` (`.github/workflows/sbom.yml:9`) |
 | R12 | The vulnerability reporting channel the documentation names is not enabled on the repository | Outside the process | A reporter following `SECURITY.md` finds no private channel and is pushed toward a public issue | none; the one working route is a public issue, which the same document forbids for an unfixed vulnerability |
+| R13 | The Go service's only shipped credential is a single shared bearer token, with no per-caller identity, no audit trail, and no rotation without a restart | B9 | Any holder can query the whole index; a leaked token cannot be revoked short of restart, and there is no trail of who used it | `TokenAuthority` (`service/token_authority.go:54`) with a constant-time digest compare; credential read once at startup (`service/token_authority.go:15`); `service/README.md` documents that rotation requires restart. The binary default is deny-all (`service/service.go:31`) |
+| R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`resembl/server.py:1416`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
+| R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, and uptime | B1, B9 | Process internals (traffic volume, hit rate) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:730`); Go `GET /healthz` (`service/service.go:60`) is liveness only, no dependency I/O |
+| R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:42`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:90`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
 
 ## Attack surface
 
@@ -48,6 +59,8 @@ Every entry point below is present in the code at the cited location.
 | `POST /find-batch` | `resembl/server.py:727` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:550`). |
 | `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
 | `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are cached in an LRU of `_SCHEME_CACHE_MAX` (64) entries, so a client cycling `normalize`, `bands` and `rows` cannot grow it. |
+| `POST /v1/find`, `POST /v1/find-batch` (Go) | `service/service.go:60` (`ServeHTTP`) | Experimental portable boundary in `service/`. Requires an `Authorizer` (`service/service.go:15`); the shipped binary defaults to deny-all (`service/service.go:31`, `cmd/resembl-service/main.go`) unless `-token-file` supplies a bearer credential (`service/token_authority.go:54`). 8 MiB body cap (`service/service.go:101`), concurrency 1..64 (`service/service.go:42`), per-request timeout. Not a deployable public service (`service/README.md:3`). |
+| `GET /healthz` (Go) | `service/service.go:60` | Local process liveness only; no dependency I/O, no authentication. |
 | `resembl serve --stateless` | `_stateless_serve` in `resembl/server.py` | Holds no database, so the listener exposes no snippet corpus: only `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` answer, the find paths answer `501`. Still unauthenticated; a non-loopback bind needs a network gate in front of it. |
 | `resembl serve` bind | `resembl/cli.py:578` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:603`). `--port` accepts `0`, which lets the OS assign a port (`resembl/cli.py:580`). |
 | Any other verb | `resembl/server.py:771` | Not implemented by the handler, so `BaseHTTPRequestHandler` answers `501` with its own HTML body. That answer is the only one this server emits that bypasses `_respond`, and so the only one carrying no `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, or `Cache-Control` header (`resembl/server.py:894`). |
@@ -178,6 +191,29 @@ to open the connection. The in-process result cache keys on the rendered
 engine URL (`resembl/server.py:433`), which SQLAlchemy renders with the
 password replaced by `***`, so credentials do not persist in the cache keys.
 
+**B9, Go service to pinned engine.** The Go service (`service/service.go:60`)
+is the only boundary that authenticates a caller: it calls
+`Authorizer.Allow` (`service/service.go:75`) before dispatch and fails closed
+on error or missing authority. The shipped binary is deny-all by default and
+only enables `TokenAuthority` when `-token-file` is given
+(`cmd/resembl-service/main.go`); that token is a single shared 256-bit hex
+credential, read once at startup, with no per-caller identity and no
+revocation short of restart (`service/token_authority.go:15`,
+`service/README.md:9`). The Lambda bootstrap (`cmd/resembl-lambda/main.go`)
+is deny-all with no token path. The engine behind the service is reached over
+loopback only: `NewLocalEngine` (`service/http_engine.go:29`) refuses
+non-loopback hosts, refuses redirects, and caps responses at 8 MiB. The pinned
+path adds three pins: index digest, artifact digest, and generation
+(`service/pinned_engine.go:29`), verified against the Python `/find-pinned`
+endpoint (`resembl/server.py:1416`) which holds a SQLite writer fence from
+identity through the query and re-checks the runtime manifest before and after
+(`resembl/server.py:1443`, `resembl/server.py:1467`). That manifest check
+(`resembl/runtime_attestation.py:20`) is file integrity under a trusted
+supervisor, not remote attestation (`service/README.md:13`). Custody slots
+(`service/custody.go:24`) are claimed before dispatch and retained after an
+uncertain backend outcome, including across restarts; the operator must
+verify the engine stopped before repairing a slot.
+
 **B8, build to release.** The published wheel carries the runtime surface
 above plus whatever the release pipeline admits. An SBOM workflow exports a
 CycloneDX 1.5 inventory of the runtime graph on a push to `main` and on a
@@ -208,6 +244,9 @@ network fetch at import.
 | Exported YARA rules | Downstream detection artifacts | caller-chosen output file |
 | Config file | Thresholds and match settings, applied with no on-screen report that they are in force | `config.toml` |
 | Release artifacts | The only thing a consumer installs; a substituted one runs with the operator's database credentials | PyPI, attested per B8 |
+| Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
+| Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
+| Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`resembl/server.py:1423`) |
 
 ## Threats per boundary
 
@@ -340,6 +379,16 @@ error path in the codebase that returns unsanitized text to a caller; the
 HTTP handlers replaced theirs with a fixed body (`resembl/server.py:728`,
 `resembl/server.py:752`).
 
+### B9, Go service to pinned engine
+
+Authentication is a single shared bearer token, so any holder is indistinguishable from any other holder, and the engine behind it (find-pinned) authenticates no one at all. A token holder can query the whole index; a local process that reaches the Python port directly bypasses the token entirely (R14). The token is compared in constant time (service/token_authority.go:54), but there is no per-caller identity, no audit trail, and no revocation short of restart, so a leaked token is a standing credential.
+
+Custody slots are claimed before dispatch and retained after an uncertain backend outcome (R16, service/custody.go:24). A client that triggers timeouts without the backend stopping can permanently consume the 1 to 64 slots (service/service.go:42). The slots channel returns busy 503 on overflow (service/service.go:90), which bounds concurrent work but not the permanent loss of slots.
+
+The runtime manifest is the trust anchor for find-pinned. If an attacker can write the manifest or the interpreter files it covers, they can attest tampered loaded code. The supervisor must keep the manifest and interpreter environment write-protected (resembl/runtime_attestation.py:3, service/README.md:13). The verify check hashes every loaded module file before and after the query (resembl/server.py:1443, resembl/server.py:1467), bounded by MAX_FILES 10000 and MAX_BYTES 512MiB (resembl/runtime_attestation.py:16).
+
+Results are not cacheable (Cache-Control: no-store, service/service.go:58). The Python engine behind it is unauthenticated, so the Go service authentication is the only gate on that path.
+
 ### B8, build to release
 
 *Repudiation of provenance.* The attestation recorded by the `attest` job
@@ -390,11 +439,17 @@ workflow does not re-run either.
 | Dependency CVE floor | `pyproject.toml:34` | The Pygments ReDoS advisory |
 | CI static analysis and dependency review | `.github/workflows/codeql.yml:4`, `.github/workflows/dependency-review.yml:11` | Static analysis and dependency review of `main` and of pull requests. Neither runs on a release tag (R11) |
 | Release SBOM | `.github/workflows/sbom.yml:9` | An inventory of the runtime graph attached to the build, on `main` and on `v*` tags |
+| Go Authorizer gate | service/service.go:75 | B9 caller authentication; fails closed on error or missing authority |
+| TokenAuthority constant-time compare | service/token_authority.go:54 | B9 credential verification |
+| Custody slots channel | service/service.go:90 | B9 concurrency bound, busy 503 on overflow |
+| Loopback engine enforcement | service/http_engine.go:29 | B9 engine must be loopback |
+| Pinned index digest and writer fence | resembl/server.py:1416, resembl/pinned_snapshot.py:9 | B9 index identity and writer fence; bounded scan |
+| Runtime manifest verification | resembl/runtime_attestation.py:20 | B9 file integrity of loaded code under a trusted supervisor |
 | Release provenance | `.github/workflows/build.yml:93` (the `attest` job) | An artifact published under this project's name that this repository did not build |
 
 ### Threats with no mitigation
 
-Ranked as in the summary. R3 (unauthenticated port file) and R10 (unbounded
+Ranked as in the summary. R13, R14, R15, and R16 are the Go service gaps: R13 and R14 have no mitigation beyond the loopback isolation that service/README.md requires, R15 has none beyond the loopback default, and R16 is mitigated only by operator repair of custody slots. R3 (unauthenticated port file) and R10 (unbounded
 `--file` read) have no control at all. R1's `top_n` cap bounds one response
 but not a sequence of them, R2's is a `Host` check that a non-loopback bind
 does not get, and R4's is a log level the operator has to ask for. R5 and R6
@@ -499,6 +554,10 @@ reviewed, ranked by similarity alongside genuine findings.
 **Merge error as an information leak.** Pointing `merge` at a URL whose host
 answers with a slow or hostile handshake makes the driver raise; the raw
 text of that error is returned and printed (`resembl/core.py:2064`).
+
+Token holder reuse. A holder of the Go service bearer token (service/token_authority.go:54) can query the whole pinned index repeatedly; the token grants all holders the same access, is read once at startup, and cannot be revoked short of restart, so a leaked token is a standing credential with no per-caller audit trail.
+
+Custody slot exhaustion. A client that triggers uncertain backend outcomes can permanently consume custody slots (service/custody.go:24), denying service until an operator repairs them after verifying the engine stopped.
 
 A scenario that a previous revision of this model named, **warm-server
 growth by cycling `num_permutations`**, no longer holds: such a request is

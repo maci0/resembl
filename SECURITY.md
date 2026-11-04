@@ -1,14 +1,13 @@
 # Security policy
 
-Last reviewed: 2026-09-28, against the tree at version 3.1.0
-(`pyproject.toml:3`).
+Last reviewed: 2026-11-04, against the tree at version 3.12.0
+(`pyproject.toml:3`). This review covers the Python surfaces and the
+experimental Go service in `service/`; the threat-model boundaries B9 and
+risks R13-R16 in `docs/THREAT_MODEL.md` record the Go surface.
 
-This policy is kept current through the 3.12.0 release, but the last security
-review (above) was against 3.1.0; changes released since then have not had
-one. The `serve`
-controls below (the loopback `Host` check, `serve -v` request logging, the
-`0700` cache directory, the `0600` port file, and the 1000-row `top_n` cap)
-are documented in `CHANGELOG.md`.
+The `serve` controls below (the loopback `Host` check, `serve -v` request
+logging, the `0700` cache directory, the `0600` port file, and the 1000-row
+`top_n` cap) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
 
@@ -94,3 +93,5 @@ relies on, not configuration options.
   recomputed rather than unpickled. The failure path is not closed: a source
   that will not open makes `merge` print the driver's own error text, which
   can name the host and port it dialled.
+
+- note: see docs/THREAT_MODEL.md B9 and R13-R16 for the Go service. Experimental, deny-all by default, single shared bearer token, no per-caller audit, rotation by restart, engine must stay on loopback, runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
