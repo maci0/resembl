@@ -309,7 +309,7 @@ def _read_config_file() -> tuple[dict, Exception | None]:
     try:
         with open(cfg_path, "rb") as f:
             return tomllib.load(f), None
-    except (tomllib.TOMLDecodeError, OSError) as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, RecursionError, OSError) as e:
         return {}, e
 
 

@@ -9,6 +9,7 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Go service `GET /metrics` now exposes `resembl_service_uptime_seconds` and a `resembl_service_request_duration_seconds` histogram (same buckets as the Python server); failure paths that previously answered `503` without a log record (custody unavailable, busy, capacity claim/release, invalid engine response, response write) now log with the request correlation id.
+- Two new Atheris fuzz harnesses: `fuzzers/fuzz_yara_escape.py` covers the YARA export escaping (`_yara_string_escape`) and filename sanitizer (`_export_safe_filename`) with round-trip and traversal invariants, and `fuzzers/fuzz_config_file.py` covers the `config.toml` TOML reader (`_read_config_file`) over raw bytes, truncation, invalid UTF-8, and deeply nested documents. Both run via `make fuzz FUZZER=<name>`.
 
 ### Changed
 
@@ -29,6 +30,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A `config.toml` containing invalid UTF-8 or deeply nested TOML now yields the documented empty-config-plus-error answer instead of an uncaught `UnicodeDecodeError` or `RecursionError` traceback: `resembl/config.py:_read_config_file` and the thin client's `_load_config` catch both, matching their never-raise contract.
 - `docs/THREAT_MODEL.md` now records the Go service `/v1/find-batch` `501` on the pinned binary (the handler's `BatchEngine` assertion against `PinnedSQLiteEngine`, which implements `Find` only), the Go latency histogram and uptime gauges in `/metrics`, and the Python `GET /health` database probe; it also states that the Go tree gets `gofmt`/`go vet`/`go test -race` via `service.yml`, not CodeQL SAST.
 - CLI logging now writes ISO-8601 timestamps (`%(asctime)s %(levelname)s %(name)s %(message)s`) instead of the bare `LEVEL:name:message` default, so log aggregators can parse and order records; unhandled server errors now log with traceback instead of relying on the stdlib default.
 

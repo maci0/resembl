@@ -60,7 +60,7 @@ def _load_config() -> dict:
             return tomllib.load(f)
     except FileNotFoundError:
         return {}  # no config file: the documented default run
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError, RecursionError) as exc:
         # A malformed or unreadable file must not be mistaken for an absent
         # one: the client answers on defaults, so a `top_n` the user set would
         # silently stop applying and the query would return a different result
