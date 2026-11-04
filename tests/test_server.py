@@ -2634,12 +2634,14 @@ class TestLazyPackageInit(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        # Lazy exports still resolve.
+        # Lazy exports still resolve and are the real symbols, not Nones.
         from resembl import Snippet, code_tokenize, snippet_add
 
         self.assertTrue(callable(code_tokenize))
         self.assertTrue(callable(snippet_add))
-        self.assertTrue(Snippet is not None)
+        self.assertIs(Snippet, __import__("resembl.models", fromlist=["Snippet"]).Snippet)
+        # The resolved export is usable: tokenizing and adding work.
+        self.assertEqual(code_tokenize("MOV EAX, 1\nRET"), ["MOV", "REG", "IMM", "RET"])
 
     def test_submodule_access(self):
         import resembl

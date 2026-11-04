@@ -120,6 +120,7 @@ class TestDbBackup(FileDBTest):
         oldest, making prune delete the newest backup.
         """
         import calendar
+        from unittest import mock
 
         snippet_add(self.session, "foo", "mov eax, 1\nret")
         backup_dir = os.path.join(self._tmpdir.name, "backups")
@@ -130,17 +131,24 @@ class TestDbBackup(FileDBTest):
                 epoch = time.time()
             return time.gmtime(epoch - 14400)
 
+        # Pin the logical clock to a fixed instant so the stamp is exact and
+        # the test does not depend on wall-clock timing (the old ±60s window
+        # was flaky under CI load and second-boundary straddles).
+        pinned_epoch = calendar.timegm((2024, 6, 1, 12, 0, 0, 0, 0, 0))
         time.localtime = located_localtime
         try:
-            result = db_backup(self.session, backup_dir)
+            with mock.patch.dict(
+                os.environ,
+                {"RESEMBL_NOW": "2024-06-01T12:00:00+00:00"},
+            ):
+                result = db_backup(self.session, backup_dir)
         finally:
             time.localtime = original_localtime
         backup_name = os.path.basename(result["backup"])
         stamp_str = backup_name.removesuffix(".db").removeprefix("assembly-").rsplit("-", 1)[0]
         parsed = time.strptime(stamp_str, "%Y%m%dT%H%M%S")
         epoch_from_stamp = calendar.timegm(parsed)
-        self.assertLessEqual(epoch_from_stamp, time.time() + 60)
-        self.assertGreater(epoch_from_stamp, time.time() - 60)
+        self.assertEqual(epoch_from_stamp, pinned_epoch)
 
     def test_backup_stamp_second_and_microsecond_come_from_one_read(self):
         """A stamp's microsecond belongs to its own second field.
