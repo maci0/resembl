@@ -22,6 +22,7 @@ import sys
 import tomllib
 import urllib.error
 import urllib.request
+from typing import NoReturn
 
 from .paths import (
     cache_dir_get,
@@ -204,7 +205,27 @@ def _main(argv: list[str] | None = None) -> int:
                 output = token.split("=", 1)[1]
         return _print_schema(schema_words, json_on=_json_on(output, json_flag))
 
-    parser = argparse.ArgumentParser(
+    # JSON mode must be known before argparse reports a usage error, so
+    # argparse's own error path can emit the stderr envelope instead of
+    # its usage text. Scan argv the same way the schema path does.
+    _pre_output = "auto"
+    _pre_json = "--json" in args_list
+    for _i, _t in enumerate(args_list):
+        if _t in {"-o", "--output"} and _i + 1 < len(args_list):
+            _pre_output = args_list[_i + 1]
+        elif _t.startswith("--output="):
+            _pre_output = _t.split("=", 1)[1]
+    _pre_json_on = _json_on(_pre_output, _pre_json)
+
+    class _Parser(argparse.ArgumentParser):
+        def error(self, message: str) -> NoReturn:
+            if _pre_json_on:
+                _fail(message, 2, json_on=True, kind="usage")
+                raise SystemExit(2)
+            super().error(message)
+            raise SystemExit(2)
+
+    parser = _Parser(
         prog="resembl-find",
         description=(
             "Query a running resembl server. `resembl-find schema` prints the clispec 0.3 document."

@@ -205,17 +205,32 @@ def _install_click_error_hook() -> None:
     """Usage errors in JSON mode are the stderr envelope, not a rich panel."""
     from typer._click.exceptions import ClickException
     from typer._click.exceptions import UsageError as ClickUsageError
+    from typer.rich_utils import rich_format_error
 
-    original = ClickException.show
+    original_show = ClickException.show
+    original_rich = rich_format_error
 
     def _show(self: ClickException, file: Any = None) -> None:
         if _output_choice.get() == "json":
             kind = "usage" if isinstance(self, ClickUsageError) else "failure"
             _write_error(kind, self.format_message(), "")
             return
-        original(self, file=file)
+        original_show(self, file=file)
+
+    def _rich_format_error(self: ClickException) -> None:
+        if _output_choice.get() == "json":
+            kind = "usage" if isinstance(self, ClickUsageError) else "failure"
+            _write_error(kind, self.format_message(), "")
+            return
+        original_rich(self)
 
     ClickException.show = _show  # type: ignore[method-assign]
+    # Typer's main() calls rich_utils.rich_format_error directly when rich
+    # markup is enabled (the default here), bypassing ClickException.show.
+    # Patch the function in its module so that path also emits the envelope.
+    import typer.rich_utils
+
+    typer.rich_utils.rich_format_error = _rich_format_error
 
 
 def _install_hooks() -> None:
@@ -1054,6 +1069,13 @@ def app_callback(
         # Bare `resembl` is a request for the command list, not a command;
         # print it the way `--help` does and keep the nonzero exit a missing
         # subcommand has always had.
+        if _output_choice.get() == "json":
+            _fail(
+                "No command given.",
+                code=2,
+                kind="usage",
+                hint="Run 'resembl --help' for the command list.",
+            )
         console.print(ctx.get_help())
         raise typer.Exit(code=2)
 
