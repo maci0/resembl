@@ -140,6 +140,14 @@ def _print_schema(words: list[str], *, json_on: bool) -> int:
     """Print the clispec document. No config read and no server connection."""
     from .clispec import build_find_schema
 
+    if words and words[0] in {"-h", "--help"}:
+        print(
+            "usage: resembl-find schema [command]\n"
+            "\nPrint the clispec 0.3 JSON document for resembl-find.\n"
+            "With a command path (e.g. 'query'), only that command is included.\n"
+            "\noptions:\n  -h, --help  show this help message and exit",
+        )
+        return 0
     path = " ".join(words)
     document = build_find_schema(path or None)
     if path and not document["commands"]:
@@ -184,7 +192,19 @@ def _main(argv: list[str] | None = None) -> int:
         help="Output mode: auto, text, or json. auto stays text. --json is json.",
     )
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
+    parser.add_argument("--version", action="store_true", help="Show the resembl version and exit.")
+    parser.add_argument("--quiet", "-q", action="store_true", help="Suppress informational output.")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Increase output verbosity.")
     args = parser.parse_args(args_list)
+    if args.version:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            version_str = version("resembl")
+        except PackageNotFoundError:
+            version_str = "unknown"
+        print(f"resembl-find {version_str}")
+        return 0
     json_on = _json_on(args.output, args.json)
 
     query = args.query
@@ -271,7 +291,8 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, separators=(",", ":")))
         return 0
 
-    print(f"Found {payload['lsh_candidates']} candidates via LSH.")
+    if not args.quiet:
+        print(f"Found {payload['lsh_candidates']} candidates via LSH.", file=sys.stderr)
     for i, match in enumerate(payload["matches"], 1):
         names = ", ".join(match["names"])
         print(f"{i}. {match['checksum'][:12]}…  {names}  {match['score']:.2f}")

@@ -315,6 +315,19 @@ _FIND_ARGS: list[dict[str, Any]] = [
         "type": "boolean",
         "description": "Do not fold registers and immediates.",
     },
+    {"name": "--version", "type": "boolean", "description": "Show the resembl version and exit."},
+    {
+        "name": "--quiet",
+        "short": "-q",
+        "type": "boolean",
+        "description": "Suppress informational output.",
+    },
+    {
+        "name": "--verbose",
+        "short": "-v",
+        "type": "boolean",
+        "description": "Increase output verbosity.",
+    },
 ]
 
 _FIND_ERRORS: list[dict[str, Any]] = [

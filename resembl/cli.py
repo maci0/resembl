@@ -241,15 +241,26 @@ def _accept_output(value: str) -> str:
 
 # --- Typer apps ---
 
+_HELP_OPTIONS = {"help_option_names": ["-h", "--help"]}
+
 app = typer.Typer(
     help="A CLI for finding similar assembly code snippets.",
     add_completion=False,
     rich_markup_mode="rich",
+    context_settings=_HELP_OPTIONS,
 )
-config_app = typer.Typer(help="Manage user configuration.", rich_markup_mode="rich")
-name_app = typer.Typer(help="Manage snippet names.", rich_markup_mode="rich")
-tag_app = typer.Typer(help="Manage snippet tags.", rich_markup_mode="rich")
-collection_app = typer.Typer(help="Manage snippet collections.", rich_markup_mode="rich")
+config_app = typer.Typer(
+    help="Manage user configuration.", rich_markup_mode="rich", context_settings=_HELP_OPTIONS
+)
+name_app = typer.Typer(
+    help="Manage snippet names.", rich_markup_mode="rich", context_settings=_HELP_OPTIONS
+)
+tag_app = typer.Typer(
+    help="Manage snippet tags.", rich_markup_mode="rich", context_settings=_HELP_OPTIONS
+)
+collection_app = typer.Typer(
+    help="Manage snippet collections.", rich_markup_mode="rich", context_settings=_HELP_OPTIONS
+)
 app.add_typer(config_app, name="config")
 app.add_typer(name_app, name="name")
 app.add_typer(tag_app, name="tag")
