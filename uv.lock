@@ -1,9 +1,9 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version == '3.15.*' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'",
-    "python_full_version >= '3.16' or (python_full_version == '3.15.*' and platform_machine != 'x86_64') or (python_full_version == '3.15.*' and platform_python_implementation != 'CPython') or (python_full_version == '3.15.*' and sys_platform != 'linux')",
+    "(python_full_version >= '3.15' and platform_machine != 'x86_64') or (python_full_version >= '3.16' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.15' and platform_python_implementation != 'CPython') or (python_full_version >= '3.15' and sys_platform != 'linux')",
     "python_full_version < '3.15'",
 ]
 
@@ -134,7 +134,7 @@ name = "atheris"
 version = "3.1.0+relumea.2"
 source = { url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz" }
 resolution-markers = [
-    "python_full_version >= '3.16' or (python_full_version == '3.15.*' and platform_machine != 'x86_64') or (python_full_version == '3.15.*' and platform_python_implementation != 'CPython') or (python_full_version == '3.15.*' and sys_platform != 'linux')",
+    "(python_full_version >= '3.15' and platform_machine != 'x86_64') or (python_full_version >= '3.16' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.15' and platform_python_implementation != 'CPython') or (python_full_version >= '3.15' and sys_platform != 'linux')",
 ]
 sdist = { hash = "sha256:f68bf1c9b2337df27578c89842eb32da6218efd3427a37ace0982693b907a1c6" }
 
@@ -1049,6 +1049,7 @@ dev = [
     { name = "duckdb-engine" },
     { name = "hypothesis" },
     { name = "mypy" },
+    { name = "packaging" },
     { name = "pre-commit" },
     { name = "pylint" },
     { name = "pytest" },
@@ -1063,14 +1064,14 @@ duckdb = [
 fuzz = [
     { name = "atheris", version = "3.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.15'" },
     { name = "atheris", version = "3.1.0+relumea.2", source = { url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2-cp315-cp315-linux_x86_64.whl" }, marker = "python_full_version == '3.15.*' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux'" },
-    { name = "atheris", version = "3.1.0+relumea.2", source = { url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz" }, marker = "python_full_version >= '3.16' or (python_full_version == '3.15.*' and platform_machine != 'x86_64') or (python_full_version == '3.15.*' and platform_python_implementation != 'CPython') or (python_full_version == '3.15.*' and sys_platform != 'linux')" },
+    { name = "atheris", version = "3.1.0+relumea.2", source = { url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz" }, marker = "(python_full_version >= '3.15' and platform_machine != 'x86_64') or (python_full_version >= '3.16' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux') or (python_full_version >= '3.15' and platform_python_implementation != 'CPython') or (python_full_version >= '3.15' and sys_platform != 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "atheris", marker = "python_full_version < '3.15' and extra == 'fuzz'", specifier = ">=3.1.0" },
     { name = "atheris", marker = "python_full_version == '3.15.*' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'fuzz'", url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2-cp315-cp315-linux_x86_64.whl" },
-    { name = "atheris", marker = "(python_full_version == '3.15.*' and platform_machine != 'x86_64' and extra == 'fuzz') or (python_full_version == '3.15.*' and platform_python_implementation != 'CPython' and extra == 'fuzz') or (python_full_version == '3.15.*' and sys_platform != 'linux' and extra == 'fuzz') or (python_full_version >= '3.16' and extra == 'fuzz')", url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz" },
+    { name = "atheris", marker = "(python_full_version >= '3.16' and platform_machine == 'x86_64' and platform_python_implementation == 'CPython' and sys_platform == 'linux' and extra == 'fuzz') or (python_full_version >= '3.15' and platform_machine != 'x86_64' and extra == 'fuzz') or (python_full_version >= '3.15' and platform_python_implementation != 'CPython' and extra == 'fuzz') or (python_full_version >= '3.15' and sys_platform != 'linux' and extra == 'fuzz')", url = "https://github.com/maci0/atheris/releases/download/atheris-v3.1.0-relumea.2/atheris-3.1.0%2Brelumea.2.tar.gz" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=26.5.1" },
     { name = "datasketch", marker = "extra == 'dev'", specifier = ">=2" },
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.5.5" },
@@ -1078,6 +1079,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.168.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.3.1" },
     { name = "numpy", specifier = ">=2.5.3" },
+    { name = "packaging", marker = "extra == 'dev'", specifier = ">=26.0" },
     { name = "pg8000", specifier = ">=1.31.5" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.2" },
     { name = "pygments", specifier = ">=2.21.0" },

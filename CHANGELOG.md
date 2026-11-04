@@ -13,6 +13,9 @@ project follows [Semantic Versioning](https://semver.org/).
   database image that was reviewed rather than whatever the tag points
   at on the day. Dependabot's `docker` ecosystem watches those images
   (and the service Dockerfile's) for new upstream releases.
+- `packaging` is declared as an explicit dev dependency: the fuzz-extra
+  marker test imports it directly and no longer relies on it arriving
+  transitively via `black` or `duckdb-engine`.
 
 ### Added
 
