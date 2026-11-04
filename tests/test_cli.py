@@ -814,6 +814,18 @@ class TestFormatCreatedAt(unittest.TestCase):
         """A NULL created_at column has no instant to show, and must not crash."""
         self.assertEqual(_format_created_at(None, "%Y-%m-%d", self.TOKYO), "")
 
+    def test_date_only_shown_verbatim_not_shifted(self):
+        """A bare date is not an instant: it must not shift a day by zone.
+
+        Converting ``2024-06-01`` as midnight UTC shows ``2024-05-31`` in
+        Los Angeles; the stored value names no time of day, so it is shown
+        as written.
+        """
+        self.assertEqual(
+            _format_created_at("2024-06-01", "%Y-%m-%d", ZoneInfo("America/Los_Angeles")),
+            "2024-06-01",
+        )
+
     def test_spring_forward_gap_is_skipped(self):
         """A UTC instant inside a zone's DST gap renders at the shifted wall time.
 

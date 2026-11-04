@@ -39,6 +39,29 @@ if TYPE_CHECKING:
 CLOCK_ENV_VAR = "RESEMBL_NOW"
 
 
+def _parse_instant(value: str) -> datetime | None:
+    """Parse *value* as a full ISO 8601 instant, or return ``None``.
+
+    ``datetime.fromisoformat`` also accepts date-only (``2024-06-01``),
+    week-date (``2024-W01-1``), basic-format (``20240601T100000``) and
+    minute-precision (``...T10:00``) forms.  None of those names an instant
+    with an explicit time, so a stored ``created_at`` in one of them would
+    silently become midnight UTC on normalize, corrupting the string
+    ordering ``SnippetVersion.get_by_checksum`` relies on.  Only the
+    extended ``YYYY-MM-DDTHH:MM:SS[.ffffff][offset]`` shape counts here;
+    anything else is unparseable for our purposes and left verbatim.
+    """
+    text = value.strip()
+    if len(text) < 19 or text[4] != "-" or text[7] != "-" or text[10] not in ("T", " "):
+        return None
+    if text[13] != ":" or text[16] != ":":
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
 def name_normalize(name: str) -> str:
     """Return *name* in NFC, the one form names are stored and compared in.
 
@@ -66,10 +89,10 @@ def timestamp_now() -> str:
     override = os.environ.get(CLOCK_ENV_VAR)
     if override is None or not override.strip():
         return datetime.now(UTC).isoformat()
-    try:
-        moment = datetime.fromisoformat(override)
-    except ValueError as exc:
-        raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant") from exc
+    parsed = _parse_instant(override)
+    if parsed is None:
+        raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant")
+    moment = parsed
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(UTC).isoformat()
@@ -89,9 +112,8 @@ def timestamp_normalize(value: str | None) -> str | None:
     """
     if not isinstance(value, str):
         return value
-    try:
-        moment = datetime.fromisoformat(value)
-    except ValueError:
+    moment = _parse_instant(value)
+    if moment is None:
         return value
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)

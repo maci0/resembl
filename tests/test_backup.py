@@ -239,6 +239,27 @@ class TestDbBackup(FileDBTest):
         self.assertEqual(os.path.basename(first["backup"]), "assembly-20240601T120000-000000.db")
         self.assertEqual(os.path.basename(second["backup"]), "assembly-20240601T120000-000001.db")
 
+    def test_pinned_clock_microsecond_overflow_carries_into_next_second(self):
+        """Bumping past 999999 microseconds carries into the next second.
+
+        The old loop incremented the microsecond counter past 999999 and
+        formatted it as a 7-digit field (``-1000000``), which sorts after
+        every 6-digit stamp of the original second: a backup taken at
+        12:00:00.999999+1 bump could sort as the newest and prune could
+        delete a genuinely newer backup.  Carrying into the next second
+        keeps the fixed width, so lexicographic order stays chronological.
+        """
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-01T12:00:00.999999+00:00"}):
+            backup_dir = os.path.join(self._tmpdir.name, "backups")
+            snippet_add(self.session, "foo", "mov eax, 1\nret")
+            first = db_backup(self.session, backup_dir)
+            snippet_add(self.session, "bar", "xor ebx, ebx\nret")
+            second = db_backup(self.session, backup_dir)
+        self.assertEqual(os.path.basename(first["backup"]), "assembly-20240601T120000-999999.db")
+        self.assertEqual(os.path.basename(second["backup"]), "assembly-20240601T120001-000000.db")
+
     def test_backup_rejects_non_sqlite(self):
         """Non-SQLite backends must use their own backup tooling."""
         engine = create_engine("sqlite:///:memory:")

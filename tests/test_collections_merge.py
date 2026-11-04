@@ -291,6 +291,27 @@ class TestTimestampNormalize(unittest.TestCase):
         """A NULL column has no instant to convert and is not a parse error."""
         self.assertIsNone(timestamp_normalize(None))
 
+    def test_date_only_is_not_an_instant(self):
+        """A bare date names no time of day, so it is never midnight UTC.
+
+        ``datetime.fromisoformat`` accepts ``2024-06-01`` and would fabricate
+        ``2024-06-01T00:00:00+00:00``, inventing an instant (and a sort
+        position) the foreign row never stated.
+        """
+        self.assertEqual(timestamp_normalize("2024-06-01"), "2024-06-01")
+
+    def test_week_date_and_basic_format_are_not_instants(self):
+        """Week dates and basic format are left verbatim, not fabricated."""
+        self.assertEqual(timestamp_normalize("2024-W01-1"), "2024-W01-1")
+        self.assertEqual(timestamp_normalize("20240601T100000"), "20240601T100000")
+
+    def test_nanoseconds_truncate_to_microseconds(self):
+        """Sub-microsecond precision cannot be stored; it truncates."""
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T10:00:00.999999999+00:00"),
+            "2024-06-01T10:00:00.999999+00:00",
+        )
+
 
 class TestTimestampNow(unittest.TestCase):
     """Tests for the injectable clock behind every created_at value."""

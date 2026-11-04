@@ -18,7 +18,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
@@ -2141,7 +2141,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     _micro = _moment.microsecond
     backup_name = f"assembly-{_base_stamp}-{_micro:06d}.db"
     while os.path.exists(os.path.join(backup_dir, backup_name)):
-        _micro += 1
+        # Carry into the next second instead of overflowing the fixed-width
+        # microsecond field: a 7-digit field sorts after every 6-digit one
+        # of the same second, so prune could delete the newest backup first.
+        _moment += timedelta(microseconds=1)
+        _base_stamp = _moment.strftime("%Y%m%dT%H%M%S")
+        _micro = _moment.microsecond
         backup_name = f"assembly-{_base_stamp}-{_micro:06d}.db"
     final_path = os.path.join(backup_dir, backup_name)
     # ``backup`` refuses a destination that is the source connection's own
