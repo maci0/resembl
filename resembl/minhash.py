@@ -35,6 +35,7 @@ Jaccard values and banding parameters against datasketch's ``legacy`` scheme
 from __future__ import annotations
 
 import hashlib
+import math
 import struct
 from collections.abc import Iterable
 
@@ -68,12 +69,16 @@ class MinHash:
     ) -> None:
         if num_perm > _HASH_RANGE:
             raise ValueError(f"Cannot have more than {_HASH_RANGE} number of permutation functions")
+        if num_perm < 1:
+            raise ValueError("Cannot have fewer than 1 permutation function")
         self.seed = seed
         self.num_perm = num_perm
         if hashvalues is not None:
             # Materialize once: consuming *hashvalues* twice (e.g. when a
             # generator is passed) would leave this array empty.
             values = list(hashvalues)
+            if not values:
+                raise ValueError("Cannot have an empty hashvalues sequence")
             self.num_perm = len(values)
             self.hashvalues = np.array(values, dtype=np.uint64)
         else:
@@ -157,7 +162,22 @@ def optimal_param(
     probability ``∫₀ᵗ 1-(1-sʳ)ᵇ ds`` and the false-negative probability
     ``∫ₜ¹ 1-(1-(1-sʳ)ᵇ) ds``.  Ties keep the first candidate in ``(b``
     ascending, ``r`` ascending``)`` order, matching the reference loop.
+
+    Raises ``ValueError`` for a non-finite or out-of-range *threshold*, a
+    *num_perm* below 1, or a non-finite or negative weight: a NaN threshold
+    or weight otherwise propagates through the error integrals and the
+    argmin silently returns an arbitrary ``(1, 1)`` banding.
     """
+    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold must be in [0.0, 1.0], got {threshold!r}")
+    if num_perm < 1:
+        raise ValueError("num_perm must be at least 1")
+    for label, weight in (
+        ("false_positive_weight", false_positive_weight),
+        ("false_negative_weight", false_negative_weight),
+    ):
+        if not math.isfinite(weight) or weight < 0.0:
+            raise ValueError(f"{label} must be a finite non-negative number, got {weight!r}")
     nodes, weights = np.polynomial.legendre.leggauss(_QUAD_NODES)
     bs = np.concatenate([np.full(num_perm // b, b, dtype=np.int64) for b in range(1, num_perm + 1)])
     rs = np.concatenate(

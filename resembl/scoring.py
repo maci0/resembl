@@ -868,25 +868,28 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     block_ratio = _min_max_ratio(b1, b2)
     edge_ratio = _min_max_ratio(e1, e2)
 
-    # Sub-metric 3: block-size histogram cosine similarity
+    # Sub-metric 3: block-size histogram cosine similarity.  Counts are kept
+    # in dicts keyed by block size rather than a dense list indexed by size:
+    # a dense histogram allocates ``max(block_sizes) + 1`` slots, so one
+    # large block (a long straight-line basic block) made the allocation
+    # proportional to the block length, and a negative size — impossible
+    # from :func:`cfg_extract`, possible in a hand-built CFG dict — wrapped
+    # around and aliased another bucket instead of being rejected.
     sizes1 = cfg1["block_sizes"]
     sizes2 = cfg2["block_sizes"]
-    # Element-wise max of each list, then combined (max(sizes1, sizes2)
-    # would compare the lists, not their elements).
-    widest1 = max(sizes1, default=0)
-    widest2 = max(sizes2, default=0)
-    max_size = max(widest1, widest2) + 1
-
-    hist1 = [0] * max_size
-    hist2 = [0] * max_size
+    for size in (*sizes1, *sizes2):
+        if size < 0:
+            raise ValueError(f"block sizes must be non-negative, got {size!r}")
+    hist1: dict[int, int] = {}
     for s in sizes1:
-        hist1[s] += 1
+        hist1[s] = hist1.get(s, 0) + 1
+    hist2: dict[int, int] = {}
     for s in sizes2:
-        hist2[s] += 1
+        hist2[s] = hist2.get(s, 0) + 1
 
-    dot = sum(a * b for a, b in zip(hist1, hist2, strict=True))
-    mag1 = sum(a * a for a in hist1) ** 0.5
-    mag2 = sum(b * b for b in hist2) ** 0.5
+    dot = sum(count * hist2[size] for size, count in hist1.items() if size in hist2)
+    mag1 = sum(a * a for a in hist1.values()) ** 0.5
+    mag2 = sum(b * b for b in hist2.values()) ** 0.5
 
     if mag1 == 0 or mag2 == 0:
         cosine_sim = 0.0

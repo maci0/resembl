@@ -329,6 +329,19 @@ class TestCfgSimilarity(unittest.TestCase):
         cfg2 = cfg_extract(code)
         self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), 1.0)
 
+    def test_negative_block_size_rejected(self):
+        """A negative block size raises instead of wrapping the histogram."""
+        cfg1 = {"num_blocks": 1, "num_edges": 0, "block_sizes": [1], "adj": {}}
+        cfg2 = {"num_blocks": 1, "num_edges": 0, "block_sizes": [-1], "adj": {}}
+        with self.assertRaises(ValueError):
+            cfg_similarity(cfg1, cfg2)
+
+    def test_huge_block_size_no_dense_histogram(self):
+        """One huge block does not allocate a histogram of that size."""
+        cfg1 = {"num_blocks": 1, "num_edges": 0, "block_sizes": [1], "adj": {}}
+        cfg2 = {"num_blocks": 1, "num_edges": 0, "block_sizes": [10**8], "adj": {}}
+        self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), 2.0 / 3.0)
+
 
 # ---------------------------------------------------------------------------
 # Integration: snippet_compare with new metrics

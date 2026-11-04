@@ -159,6 +159,14 @@ class TestConstructorFromHashvalues(unittest.TestCase):
         with self.assertRaises(ValueError):
             MinHash(num_perm=(1 << 32) + 1)
 
+    def test_rejects_degenerate_num_perm(self):
+        """Zero/negative permutation counts are rejected, not ZeroDivision."""
+        for num_perm in (0, -1):
+            with self.assertRaises(ValueError):
+                MinHash(num_perm=num_perm)
+        with self.assertRaises(ValueError):
+            MinHash(hashvalues=[])
+
 
 class TestOptimalParamMatchesDatasketch(unittest.TestCase):
     """Banding search must pick datasketch's exact (b, r) parameters.
@@ -188,6 +196,19 @@ class TestOptimalParamMatchesDatasketch(unittest.TestCase):
         from datasketch.lsh import _optimal_param
 
         self.assertEqual(optimal_param(0.5, 128, 0.5, 0.5), _optimal_param(0.5, 128, 0.5, 0.5))
+
+    def test_rejects_non_finite_and_out_of_range_inputs(self):
+        """NaN/inf thresholds or weights raise instead of returning (1, 1)."""
+        for threshold in (float("nan"), float("inf"), -0.1, 1.1):
+            with self.assertRaises(ValueError):
+                optimal_param(threshold, 128, 0.5, 0.5)
+        for weight in (float("nan"), float("inf"), -0.5):
+            with self.assertRaises(ValueError):
+                optimal_param(0.5, 128, weight, 0.5)
+            with self.assertRaises(ValueError):
+                optimal_param(0.5, 128, 0.5, weight)
+        with self.assertRaises(ValueError):
+            optimal_param(0.5, 0, 0.5, 0.5)
 
 
 if __name__ == "__main__":

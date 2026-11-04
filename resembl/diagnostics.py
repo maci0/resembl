@@ -139,7 +139,15 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
 
 
 def db_calculate_average_similarity(session: Session, sample_size: int = 100) -> float:
-    """Estimate average Jaccard similarity from a random sample."""
+    """Estimate average Jaccard similarity from a random sample.
+
+    Raises ``ValueError`` for a *sample_size* below 1: a zero size samples
+    nothing and would report perfect similarity (1.0) for an empty sample,
+    and a negative size is passed to SQL ``LIMIT`` as-is, where SQLite
+    treats ``LIMIT -1`` as "no limit" and loads the whole table.
+    """
+    if sample_size < 1:
+        raise ValueError(f"sample_size must be at least 1, got {sample_size!r}")
     count = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
     if count < 2:
         return 1.0

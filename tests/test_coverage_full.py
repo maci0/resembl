@@ -280,6 +280,12 @@ class TestAverageSimilarity(BaseDBTest):
         self.assertGreaterEqual(result, 0.0)
         self.assertLessEqual(result, 1.0)
 
+    def test_avg_similarity_rejects_non_positive_sample_size(self):
+        """Sample sizes below 1 raise instead of reporting 1.0 / no limit."""
+        for sample_size in (0, -1):
+            with self.assertRaises(ValueError):
+                db_calculate_average_similarity(self.session, sample_size=sample_size)
+
 
 # ---------------------------------------------------------------------------
 # snippet_export — covers lines 735, 740-744
