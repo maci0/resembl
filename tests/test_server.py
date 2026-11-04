@@ -2405,6 +2405,31 @@ class TestServerObservability(_ServeTestCase):
         # a client report naming one id reaches both.
         self.assertEqual(len(ids), 1, captured.output)
 
+    def test_response_carries_request_id_header_matching_logs(self):
+        port = self._start_server()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=json.dumps({"query": "push ebx"}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertLogs("resembl.server", level="DEBUG") as captured:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                header_id = response.headers.get("X-Request-Id")
+        self.assertTrue(header_id and header_id != "-")
+        self.assertTrue(any(f"[{header_id}]" in line for line in captured.output))
+
+    def test_metrics_include_find_pinned_and_runtime_generation_labels(self):
+        port = self._start_server()
+        self._get(port, "/runtime-generation")
+        _, _, body = self._get(port, "/metrics")
+        self.assertIn(
+            'resembl_server_requests_total{path="/runtime-generation",status="200"}', body
+        )
+        from resembl.server import _metric_path_label
+
+        self.assertEqual(_metric_path_label("/find-pinned"), "/find-pinned")
+        self.assertEqual(_metric_path_label("/runtime-generation"), "/runtime-generation")
+
 
 class TestResultCacheCoherence(unittest.TestCase):
     """The version guard holds across the connections of a pool."""

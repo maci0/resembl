@@ -936,11 +936,13 @@ _SLOW_REQUEST_SECONDS = 1.0
 _METRIC_PATHS: tuple[str, ...] = (
     "/find",
     "/find-batch",
+    "/find-pinned",
     "/score",
     "/band-keys",
     "/scheme",
     "/health",
     "/metrics",
+    "/runtime-generation",
 )
 
 
@@ -1583,7 +1585,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         except BadRequestError as exc:
             self._respond(400, {"error": str(exc)})
         except Exception:
-            logger.exception("pinned query failed")
+            logger.exception("[%s] POST %s pinned query failed", self.request_id, self.path)
             self._respond(503, {"error": "pinned index unavailable"})
 
     def _handle_computed(self, compute: Callable[[dict, ResemblConfig], dict], body: dict) -> None:
@@ -1651,12 +1653,14 @@ class _FindHandler(BaseHTTPRequestHandler):
                         # the batch still completes.
                         results.append({"query": query, "error": str(exc)})
                     except Exception as exc:  # isolate per-query failures
+                        # Exception type + truncated message only: the query
+                        # text is client-controlled, keep it out of logs.
                         logger.warning(
-                            "[%s] find-batch query %.200r failed after %.3fs: %s",
+                            "[%s] find-batch query failed after %.3fs: %s: %s",
                             self.request_id,
-                            query,
                             time.monotonic() - query_started,
-                            exc,
+                            type(exc).__name__,
+                            str(exc)[:200],
                         )
                         # Like the 500 path below: the exception text (SQL,
                         # paths) is for the log, not the wire.
@@ -1691,6 +1695,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         )
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        # Echo the correlation id so a client report can name the exact
+        # log records for this request (MELT investigative path).
+        if self.request_id != "-":
+            self.send_header("X-Request-Id", self.request_id)
         # The payload is always JSON; forbid content-type sniffing so a
         # response can never be reinterpreted as HTML/script by a browser
         # pointed at the endpoint.

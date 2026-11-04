@@ -3,12 +3,17 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -39,17 +44,49 @@ type Service struct {
 	slots     chan struct{}
 	timeout   time.Duration
 	custody   atomic.Pointer[custodyHolder]
+	metrics   *serviceMetrics
 }
 
 type custodyHolder struct {
 	custody Custody
 }
 
+// serviceMetrics holds in-process counters exposed at GET /metrics.
+// No user-controlled label values: cardinality is bounded by fixed paths
+// and status codes, mirroring the Python server.
+type serviceMetrics struct {
+	mu       sync.Mutex
+	requests map[[2]string]int64
+	started  time.Time
+}
+
+func (m *serviceMetrics) record(path string, status int) {
+	label := path
+	if label != "/v1/find" && label != "/v1/find-batch" && label != "/healthz" && label != "/metrics" {
+		label = "other"
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requests[[2]string{label, strconv.Itoa(status)}]++
+}
+
+func (m *serviceMetrics) render() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var b strings.Builder
+	b.WriteString("# HELP resembl_service_up 1 while this process is answering requests.\n# TYPE resembl_service_up gauge\nresembl_service_up 1\n")
+	b.WriteString("# HELP resembl_service_requests_total Requests answered, by path and status.\n# TYPE resembl_service_requests_total counter\n")
+	for key, count := range m.requests {
+		fmt.Fprintf(&b, "resembl_service_requests_total{path=%q,status=%q} %d\n", key[0], key[1], count)
+	}
+	return b.String()
+}
+
 func New(authority Authorizer, engine Engine, resource string, concurrency int, timeout time.Duration) (*Service, error) {
 	if authority == nil || engine == nil || resource == "" || concurrency < 1 || concurrency > 64 || timeout <= 0 {
 		return nil, errors.New("invalid service configuration")
 	}
-	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout}, nil
+	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), started: time.Now()}}, nil
 }
 
 // SetCustody installs an owner-supplied durable capacity store before serving.
@@ -73,8 +110,52 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
+func newRequestID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "-"
+	}
+	return hex.EncodeToString(b)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return s.ResponseWriter.Write(b)
+}
+
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqID := newRequestID()
+	started := time.Now()
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Request-Id", reqID)
+	rec := &statusRecorder{ResponseWriter: w}
+	defer func() {
+		status := rec.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		if s.metrics != nil {
+			s.metrics.record(r.URL.Path, status)
+		}
+		if status >= 500 {
+			log.Printf("[%s] %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, time.Since(started))
+		} else if time.Since(started) >= time.Second {
+			log.Printf("[%s] slow %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, time.Since(started))
+		}
+	}()
+	w = rec
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
@@ -92,6 +173,24 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.URL.Path == "/metrics" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if r.URL.RawQuery != "" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		if s.metrics != nil {
+			_, _ = w.Write([]byte(s.metrics.render()))
+		} else {
+			_, _ = w.Write([]byte("resembl_service_up 1\n"))
+		}
 		return
 	}
 	if (r.URL.Path != "/v1/find" && r.URL.Path != "/v1/find-batch") || r.URL.RawQuery != "" {
@@ -114,6 +213,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	allowed, err := s.Authority.Allow(ctx, r.Header.Get("Authorization"), s.Resource, "query")
 	if err != nil {
+		log.Printf("[%s] authority unavailable: %v", reqID, err)
 		writeError(w, http.StatusServiceUnavailable, "authority unavailable")
 		return
 	}
@@ -200,6 +300,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result, err = batch.FindBatch(ctx, raw)
 	}
 	if err != nil {
+		log.Printf("[%s] engine unavailable: %v", reqID, err)
 		writeError(w, http.StatusServiceUnavailable, "engine unavailable")
 		return
 	}
