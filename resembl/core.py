@@ -104,9 +104,7 @@ from .diagnostics import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 #: Default LSH similarity threshold for candidate filtering.
 LSH_THRESHOLD = 0.5
@@ -313,9 +311,7 @@ def snippet_tag_remove(
     return snippet
 
 
-# ---------------------------------------------------------------------------
 # Snippet CRUD
-# ---------------------------------------------------------------------------
 
 
 def snippet_lex(code: str) -> tuple[str, list[str]] | None:
@@ -2196,9 +2192,7 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     return {"ok": not hard_failures, "num_snippets": num_snippets, "issues": issues}
 
 
-# ---------------------------------------------------------------------------
 # Collection Functions
-# ---------------------------------------------------------------------------
 
 
 def collection_create(session: Session, name: str, description: str = "") -> Collection:
@@ -2336,9 +2330,7 @@ def collection_remove_snippet(
     return snippet
 
 
-# ---------------------------------------------------------------------------
 # Version Functions
-# ---------------------------------------------------------------------------
 
 
 def snippet_version_list(session: Session, checksum: str) -> list[dict]:
@@ -2364,9 +2356,7 @@ def snippet_version_list(session: Session, checksum: str) -> list[dict]:
     ]
 
 
-# ---------------------------------------------------------------------------
 # Merge Functions
-# ---------------------------------------------------------------------------
 
 
 def _fingerprint_stamps_clear(session: Session) -> None:
