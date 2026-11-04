@@ -1512,11 +1512,21 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     an accented name.  The fetched rows are then verified against the
     decoded names, so ``%``/``_`` in a pattern cannot pull in rows that do
     not contain it.
+
+    Only the two decision columns are fetched for the LIKE candidates
+    (``code`` dominates the table); the verified survivors' full rows are
+    fetched afterwards, so a broad pattern does not drag every match's
+    code through the ORM before verification.
     """
     target = name_normalize(pattern)
     probe = name_json_escape(target)
-    rows = session.exec(
-        select(Snippet)
+    # Only (checksum, names) are fetched: the LIKE can match many rows
+    # before one verifies, and full rows would pull each match's ``code``
+    # (the column that dominates the table) through the ORM for nothing.
+    # The survivors' full rows are fetched afterwards via the identity map,
+    # so callers still receive the usual ORM objects.
+    candidates = session.exec(
+        select(Snippet.checksum, Snippet.names)
         .where(Snippet.names.ilike(f"%{probe}%"))  # type: ignore[attr-defined]
         .order_by(Snippet.checksum)
         .limit(limit)
@@ -1526,14 +1536,18 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
     # A non-ASCII alias may still be the decomposed spelling (a row from
     # before names were composed, or from macOS), and a substring of that
     # raw spelling is not a substring of the composed form.
-    return [
-        row
-        for row in rows
+    checksums = [
+        checksum
+        for checksum, names in candidates
         if any(
             target in (stored if stored.isascii() else name_normalize(stored))
-            for stored in row.name_list
+            for stored in json.loads(names)
         )
     ]
+    if not checksums:
+        return []
+    snippets_by_checksum = _snippets_by_checksums(session, checksums)
+    return [snippets_by_checksum[c] for c in checksums if c in snippets_by_checksum]
 
 
 #: Characters invalid in filenames on at least one major filesystem:
@@ -2282,15 +2296,25 @@ def collection_remove_snippet(
 
 
 def snippet_version_list(session: Session, checksum: str) -> list[dict]:
-    """Return version history for a snippet."""
-    versions = SnippetVersion.get_by_checksum(session, checksum)
+    """Return version history for a snippet.
+
+    Only ``(id, snippet_checksum, created_at)`` are fetched: :meth:`SnippetVersion.get_by_checksum`
+    loads the full row (``code`` + ``minhash``) ORM objects, but the caller
+    renders only the three metadata columns — a large version history would
+    drag every version's code through the ORM for nothing.
+    """
+    rows = session.exec(
+        select(
+            SnippetVersion.id,
+            SnippetVersion.snippet_checksum,
+            SnippetVersion.created_at,
+        )
+        .where(SnippetVersion.snippet_checksum == checksum)
+        .order_by(SnippetVersion.created_at.desc())  # type: ignore[attr-defined]
+    ).all()
     return [
-        {
-            "id": v.id,
-            "snippet_checksum": v.snippet_checksum,
-            "created_at": v.created_at,
-        }
-        for v in versions
+        {"id": vid, "snippet_checksum": s_checksum, "created_at": created_at}
+        for vid, s_checksum, created_at in rows
     ]
 
 
