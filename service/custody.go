@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 var ErrCapacity = errors.New("no execution capacity")
@@ -42,23 +43,32 @@ func (f *FileCustody) Claim() (func() error, error) {
 		}
 		d, err := os.Open(f.directory)
 		if err != nil {
+			_ = os.Remove(slot)
 			return nil, err
 		}
 		err = d.Sync()
 		_ = d.Close()
 		if err != nil {
+			_ = os.Remove(slot)
 			return nil, err
 		}
+		var once sync.Once
+		var releaseErr error
 		return func() error {
-			if err := os.Remove(slot); err != nil {
-				return err
-			}
-			d, err := os.Open(f.directory)
-			if err != nil {
-				return err
-			}
-			defer d.Close()
-			return d.Sync()
+			once.Do(func() {
+				if err := os.Remove(slot); err != nil {
+					releaseErr = err
+					return
+				}
+				d, err := os.Open(f.directory)
+				if err != nil {
+					releaseErr = err
+					return
+				}
+				defer d.Close()
+				releaseErr = d.Sync()
+			})
+			return releaseErr
 		}, nil
 	}
 	return nil, ErrCapacity
