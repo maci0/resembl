@@ -402,6 +402,30 @@ class TestConfigValueRanges(unittest.TestCase):
         # An in-range value in the same update still applies.
         self.assertEqual(cfg.lsh_threshold, 0.8)
 
+    def test_update_rejects_booleans_and_boolean_strings(self):
+        """A bool or "true"/"false" string must not become 1/0.
+
+        ``int(True)`` silently turned a hand-edited ``top_n = true`` into
+        1, so the run searched with a threshold the user never typed
+        instead of keeping its default.
+        """
+        cfg = ResemblConfig()
+        with self.assertLogs("resembl.config", level="WARNING"):
+            cfg.update({"top_n": True, "jaccard_weight": "true", "lsh_threshold": "false"})
+        self.assertEqual(cfg.top_n, DEFAULTS["top_n"])
+        self.assertEqual(cfg.jaccard_weight, DEFAULTS["jaccard_weight"])
+        self.assertEqual(cfg.lsh_threshold, DEFAULTS["lsh_threshold"])
+
+    def test_validate_value_rejects_unknown_key_and_wrong_type(self):
+        """An unknown key or a cross-type value reports a reason, not None."""
+        self.assertIsNotNone(validate_value("bogus_key", 1))
+        self.assertIsNotNone(validate_value("top_n", 1.5))
+        self.assertIsNotNone(validate_value("top_n", "5"))
+        self.assertIsNotNone(validate_value("top_n", True))
+        self.assertIsNone(validate_value("top_n", 5))
+        self.assertIsNone(validate_value("format", "json"))
+        self.assertIsNotNone(validate_value("format", "yaml"))
+
 
 class TestDatabaseUrlEnv(unittest.TestCase):
     """Which environment variable names the database, and in what order."""
@@ -429,6 +453,17 @@ class TestDatabaseUrlEnv(unittest.TestCase):
             clear=False,
         ):
             self.assertEqual(db_url_get(), DEFAULT_DB_URL)
+
+    def test_padded_url_is_trimmed(self):
+        """Surrounding whitespace is not part of the URL the engine parses.
+
+        A URL exported as ``" sqlite:///x.db "`` reached SQLAlchemy verbatim
+        and failed with an obscure driver error instead of opening the
+        database the operator named, so the whitespace is stripped the way
+        the blank check already treated it.
+        """
+        with patch.dict(os.environ, {"RESEMBL_DATABASE_URL": " sqlite:///x.db "}):
+            self.assertEqual(db_url_get(), "sqlite:///x.db")
 
     def test_default_when_unset(self):
         """With neither variable set the URL is the local assembly.db."""

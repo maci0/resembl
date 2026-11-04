@@ -61,7 +61,7 @@ def db_url_get() -> str:
     for var in DB_URL_ENV_VARS:
         url = os.environ.get(var)
         if url and url.strip():
-            return url
+            return url.strip()
     return DEFAULT_DB_URL
 
 
@@ -107,7 +107,7 @@ def cache_dir_get() -> str:
     """
     override = os.environ.get("RESEMBL_CACHE_DIR")
     if override and override.strip():
-        return _expand_home(override)
+        return _expand_home(override.strip())
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg and os.path.isabs(xdg):
         return os.path.join(xdg, "resembl")
@@ -124,7 +124,7 @@ def config_dir_get() -> str:
     """
     override = os.environ.get("RESEMBL_CONFIG_DIR")
     if override and override.strip():
-        return _expand_home(override)
+        return _expand_home(override.strip())
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg and os.path.isabs(xdg):
         return os.path.join(xdg, "resembl")

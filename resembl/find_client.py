@@ -88,6 +88,14 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     """
     default = _CFG_DEFAULTS[key]
     value = cfg.get(key, default)
+    if isinstance(value, bool) or (
+        isinstance(value, str) and value.strip().lower() in ("true", "false")
+    ):
+        print(
+            f"error: ignoring config value {key} = {value!r} (not a number)",
+            file=sys.stderr,
+        )
+        return cast(default)
     try:
         number = cast(value)
     except TypeError, ValueError, OverflowError:
@@ -96,7 +104,13 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
             file=sys.stderr,
         )
         return cast(default)
-    if isinstance(value, bool) or not _within_bounds(key, number):
+    if cast is int and isinstance(value, float) and not float(value).is_integer():
+        print(
+            f"error: ignoring config value {key} = {value!r} (not an integer)",
+            file=sys.stderr,
+        )
+        return cast(default)
+    if not _within_bounds(key, number):
         print(
             f"error: ignoring config value {key} = {value!r} (out of range)",
             file=sys.stderr,

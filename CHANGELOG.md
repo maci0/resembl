@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Trimmed whitespace in database and directory environment overrides and rejected boolean-style values in `config.toml` (including `"true"`/`"false"`) and in `resembl-find`, so a padded `RESEMBL_DATABASE_URL` opens the intended database and a mistyped boolean no longer becomes `1` or `0`.
+
 ### Added
 
 - Go service `GET /metrics` now exposes `resembl_service_uptime_seconds` and a `resembl_service_request_duration_seconds` histogram (same buckets as the Python server); failure paths that previously answered `503` without a log record (custody unavailable, busy, capacity claim/release, invalid engine response, response write) now log with the request correlation id.

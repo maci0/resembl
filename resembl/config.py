@@ -87,8 +87,15 @@ def validate_value(key: str, value: object) -> str | None:
         if value not in FORMATS:
             return f"expected one of: {', '.join(FORMATS)}"
         return None
+    if key not in DEFAULTS:
+        return f"unknown configuration key: {key!r}"
+    default = DEFAULTS[key]
+    if isinstance(value, bool) or type(value) is not type(default):
+        return f"expected a {type(default).__name__}"
+    if not isinstance(value, (int, float)):
+        return None
     bounds = VALUE_BOUNDS.get(key)
-    if bounds is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+    if bounds is None:
         return None
     numeric = float(value)
     if not math.isfinite(numeric):
@@ -154,6 +161,24 @@ class ResemblConfig:
                 logger.warning("Ignoring unknown configuration key: %s.", key)
                 continue
             default = DEFAULTS[key]
+            if isinstance(value, bool):
+                logger.warning(
+                    "Ignoring %s: expected %s, got %r.",
+                    key,
+                    type(default).__name__,
+                    value,
+                )
+                continue
+            if isinstance(value, str):
+                text = value.strip().lower()
+                if text in ("true", "false"):
+                    logger.warning(
+                        "Ignoring %s: expected %s, got %r.",
+                        key,
+                        type(default).__name__,
+                        value,
+                    )
+                    continue
             # int() truncates (2.9 -> 2), silently accepting a fractional
             # count the file never asked for.  Reject fractional floats for
             # int fields before coercion; integral floats (128.0) stay legal.
