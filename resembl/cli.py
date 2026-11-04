@@ -34,7 +34,7 @@ import sys
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, tzinfo
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -1808,7 +1808,7 @@ def find(
             piped = sys.stdin.buffer.read().decode("utf-8")
         except UnicodeDecodeError:
             err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
-            raise typer.Exit(code=USAGE_ERROR)
+            raise typer.Exit(code=USAGE_ERROR) from None
         if any(0xD800 <= ord(ch) <= 0xDFFF for ch in piped):
             err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
             raise typer.Exit(code=USAGE_ERROR)
