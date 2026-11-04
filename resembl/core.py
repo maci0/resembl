@@ -2318,7 +2318,19 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     start_time = time.monotonic()
     # The source may be any backend: a full URL (e.g. duckdb:///file.db,
     # postgresql+pg8000://...) is used as-is; otherwise it is a SQLite path.
-    source_url = source_db_path if "://" in source_db_path else f"sqlite:///{source_db_path}"
+    # Build the URL from the filesystem path through SQLAlchemy's URL
+    # constructor rather than string concatenation: on Windows a path such
+    # as ``C:\Users\x\db`` pasted into ``sqlite:///{path}`` keeps its
+    # backslashes (and the drive colon is percent-encoded), so SQLite opens
+    # a different file than the one the user named.  ``URL.create`` takes
+    # the native path verbatim and renders the triple-slash absolute/relative
+    # form correctly on every platform.
+    if "://" in source_db_path:
+        source_url = source_db_path
+    else:
+        from sqlalchemy.engine.url import URL
+
+        source_url = str(URL.create("sqlite", database=source_db_path))
 
     try:
         source_engine = create_db_engine(source_url)

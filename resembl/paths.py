@@ -75,20 +75,35 @@ def db_url_mask(url: str) -> str:
     return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
 
 
+def _expand_home(path: str) -> str:
+    """Return *path* with a leading ``~`` expanded, or *path* unchanged.
+
+    ``os.path.expanduser`` returns the literal ``~``-prefixed string when it
+    cannot resolve a home directory — on Windows when neither ``USERPROFILE``
+    nor ``HOME`` is set (a service account or a scrubbed environment), and on
+    POSIX when the login name has no password-database entry.  Writing into a
+    directory literally named ``~`` in the working directory is never what the
+    user asked for, so the caller's default is used instead.
+    """
+    expanded = os.path.expanduser(path)
+    return path if expanded == path and path.startswith("~") else expanded
+
+
 def cache_dir_get() -> str:
     """Return the cache directory, respecting override environment variables.
 
     ``RESEMBL_CACHE_DIR`` wins outright.  Otherwise ``$XDG_CACHE_HOME`` is
     honored when set (freedesktop base-directory spec), falling back to the
-    historical ``~/.cache/resembl`` default.
+    historical ``~/.cache/resembl`` default.  Per that spec a relative
+    ``$XDG_CACHE_HOME`` is invalid and ignored.
     """
     override = os.environ.get("RESEMBL_CACHE_DIR")
     if override:
-        return os.path.expanduser(override)
+        return _expand_home(override)
     xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg:
+    if xdg and os.path.isabs(xdg):
         return os.path.join(xdg, "resembl")
-    return os.path.expanduser(DEFAULT_CACHE_DIR)
+    return _expand_home(DEFAULT_CACHE_DIR)
 
 
 def config_dir_get() -> str:
@@ -96,15 +111,16 @@ def config_dir_get() -> str:
 
     ``RESEMBL_CONFIG_DIR`` wins outright.  Otherwise ``$XDG_CONFIG_HOME`` is
     honored when set (freedesktop base-directory spec), falling back to the
-    historical ``~/.config/resembl`` default.
+    historical ``~/.config/resembl`` default.  Per that spec a relative
+    ``$XDG_CONFIG_HOME`` is invalid and ignored.
     """
     override = os.environ.get("RESEMBL_CONFIG_DIR")
     if override:
-        return os.path.expanduser(override)
+        return _expand_home(override)
     xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg:
+    if xdg and os.path.isabs(xdg):
         return os.path.join(xdg, "resembl")
-    return os.path.expanduser(DEFAULT_CONFIG_DIR)
+    return _expand_home(DEFAULT_CONFIG_DIR)
 
 
 def config_path_get() -> str:
