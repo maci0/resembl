@@ -101,6 +101,7 @@ from .paths import (
     console_utf8_reconfigure,
     db_url_get,
     db_url_mask,
+    port_file_cleanup,
     server_port_path,
 )
 from .scoring import MAX_NUM_PERM
@@ -612,8 +613,6 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     """
     import urllib.error
     import urllib.request
-
-    from .server import port_file_cleanup
 
     db_url = _session_db_url(state.session)
     port_file = server_port_path(db_url, cache_dir_get())

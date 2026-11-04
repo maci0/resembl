@@ -50,7 +50,7 @@ from .core import (
 )
 from .lsh import band_buckets
 from .models import FINGERPRINT_VERSION
-from .paths import cache_dir_get, db_url_mask, server_port_path
+from .paths import cache_dir_get, db_url_mask, port_file_cleanup, server_port_path
 from .scoring import (
     MINHASH_SEED,
     code_tokenize,
@@ -684,27 +684,6 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
 #: C0 and DEL, dropped from a logged request line so a crafted path cannot
 #: end the record and append forged lines to the log.
 _LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), 0x7F])
-
-
-def port_file_cleanup(port_file: str, port: int) -> None:
-    """Remove the port file only when it still advertises our own *port*.
-
-    Shared by the server's exit path (:func:`serve`) and any client that
-    verified the advertised port is dead (``cli._server_request``): the
-    double-serve check in :func:`serve` is not atomic across processes, two
-    ``serve`` invocations started close together both pass it (neither has
-    written yet), both bind, and the last writer owns the advertisement.
-    An unconditional delete on exit would then orphan the surviving server
-    for every ``find`` client, so the file is removed only while its
-    content is still the known *port*.
-    """
-    try:
-        with open(port_file, encoding="utf-8") as f:
-            if f.read().strip() != str(port):
-                return
-        os.remove(port_file)
-    except OSError:
-        pass
 
 
 def _query_field_error(query: object) -> str | None:

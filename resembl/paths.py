@@ -147,6 +147,26 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
     return os.path.join(cache_dir, f"server_{digest}.port")
 
 
+def port_file_cleanup(port_file: str, port: int) -> None:
+    """Remove the port file only when it still advertises our own *port*.
+
+    Shared by the server's exit path and any client that verified the
+    advertised port is dead: the double-serve check is not atomic across
+    processes, two invocations started close together both pass it (neither
+    has written yet), both bind, and the last writer owns the advertisement.
+    An unconditional delete on exit would then orphan the surviving server
+    for every ``find`` client, so the file is removed only while its
+    content is still the known *port*.
+    """
+    try:
+        with open(port_file, encoding="utf-8") as f:
+            if f.read().strip() != str(port):
+                return
+        os.remove(port_file)
+    except OSError:
+        pass
+
+
 def _encoding_is_utf8(encoding: str) -> bool:
     """Whether *encoding* names UTF-8 under any of its usual spellings."""
     return encoding.casefold().replace("-", "").replace("_", "") == "utf8"
