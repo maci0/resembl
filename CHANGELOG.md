@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The PostgreSQL and MySQL service containers in the test and coverage
+  workflows are now pinned by digest, so CI tests against the exact
+  database image that was reviewed rather than whatever the tag points
+  at on the day. Dependabot's `docker` ecosystem watches those images
+  (and the service Dockerfile's) for new upstream releases.
+
 ### Added
 
 - `resembl serve` answers `POST /score`, which scores one listing against

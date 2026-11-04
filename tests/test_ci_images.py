@@ -1,0 +1,49 @@
+"""The CI service containers stay digest-pinned.
+
+A tag alone moves between pulls, so an unpinned `image:` in a workflow
+would test against a different database image than the one reviewed.
+Each workflow that declares a service container must pin it by digest,
+and every pinned image must be watched by Dependabot's docker ecosystem
+so a new upstream release only arrives as a reviewed pull request.
+"""
+
+import re
+import unittest
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parents[1]
+_WORKFLOWS = sorted((_ROOT / ".github" / "workflows").glob("*.yml"))
+_PINNED = re.compile(r"image:\s*\S+@sha256:[0-9a-f]{64}\s*$", re.MULTILINE)
+_UNPINNED = re.compile(r"image:\s*\S+\s*$", re.MULTILINE)
+
+
+class CiImagePinTests(unittest.TestCase):
+    def test_service_images_are_digest_pinned(self) -> None:
+        checked = 0
+        for workflow in _WORKFLOWS:
+            text = workflow.read_text(encoding="utf-8")
+            images = _UNPINNED.findall(text)
+            with self.subTest(workflow=workflow.name):
+                for line in images:
+                    self.assertRegex(
+                        line,
+                        r"^image:\s*\S+@sha256:[0-9a-f]{64}\s*$",
+                        f"{workflow.name}: {line.strip()!r} is not digest-pinned",
+                    )
+                checked += len(images)
+        self.assertGreater(checked, 0, "no service images found to check")
+
+    def test_dependabot_watches_docker(self) -> None:
+        text = (_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn("package-ecosystem: docker", text)
+
+    def test_service_dockerfile_is_digest_pinned(self) -> None:
+        text = (_ROOT / "service" / "Dockerfile").read_text(encoding="utf-8")
+        # The build stage pins its base image through the GO_IMAGE arg;
+        # the runtime stage is `scratch` and needs no pin.
+        self.assertRegex(text, r"ARG GO_IMAGE=\S+@sha256:[0-9a-f]{64}")
+        self.assertIn("FROM ${GO_IMAGE} AS build", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

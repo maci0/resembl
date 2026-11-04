@@ -1,0 +1,17 @@
+# Build context for service/Dockerfile, whose build context is the
+# repository root (`docker build -f service/Dockerfile .`).  Only the
+# Go module is copied into the image, so everything else is excluded:
+# without this file every build ships the whole tree as its context,
+# including local databases, build output and scratch data.
+.git
+.venv
+.venv-fuzz
+build
+dist
+.scratch
+__pycache__
+*.pyc
+*.db
+*.sqlite3
+data
+scale_data

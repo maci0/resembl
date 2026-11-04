@@ -49,6 +49,27 @@ updates:
         patterns:
           - "*"
 
+  # Docker images pulled by the CI service containers and the service
+  # Dockerfile are digest-pinned, so a new upstream release only reaches a
+  # run once it is reviewed here.  `directory: /` scans every Dockerfile
+  # in the tree.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "ci"
+    groups:
+      images:
+        patterns:
+          - "*"
+
   # The Go query service in service/ is its own module.
   - package-ecosystem: gomod
     directory: /service
