@@ -1738,9 +1738,7 @@ class _FindServer(ThreadingHTTPServer):
 
     engine: Any
     runtime_generation: str
-    _handler_slots: threading.BoundedSemaphore = threading.BoundedSemaphore(
-        _MAX_HANDLER_THREADS
-    )
+    _handler_slots: threading.BoundedSemaphore = threading.BoundedSemaphore(_MAX_HANDLER_THREADS)
     #: ``Host`` values this generation answers to; empty means unrestricted
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()

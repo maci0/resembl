@@ -8,6 +8,15 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Backups, manifests, config writes, and exports are now fsynced before
+  being published (and the directory entry fsynced after the rename), so
+  an OS crash cannot leave a half-written backup or export at its final
+  name; a backup whose manifest cannot be written now fails instead of
+  silently succeeding;  writes each file atomically instead
+  of truncating the live export file first. Added , a
+  restore runbook covering instance loss, logical corruption, stale WAL
+  sidecars, and periodic verify-backup scheduling.
+
 - `CONTRIBUTING.md` now matches `AGENTS.md` on trunk-based development
   (commit straight to `main`, branch only for work that must not land
   yet) instead of requiring a feature branch for every contribution;

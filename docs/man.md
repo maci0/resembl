@@ -214,6 +214,8 @@ Global options go before the subcommand: `resembl --format json find ...`.
     their own backup tooling.  RPO is the time since the last backup;
     RTO is the time to copy the file back to `assembly.db` and run
     `verify` (the index is rebuilt by the next `find` if it is stale).
+    The full restore procedure, including removing stale `-wal`/`-shm`
+    sidecars before copying, is in `docs/restore.md`.
 
 **verify-backup** *PATH*
 :   Check that a backup file opens, holds every table, and matches its

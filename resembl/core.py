@@ -119,6 +119,46 @@ LSH_THRESHOLD = 0.5
 DB_BACKUP_MANIFEST_NAME = ".resembl-backup.json"
 
 
+def _sync_path(path: str) -> None:
+    """Flush *path*'s data to disk (fsync), ignoring filesystems that refuse it.
+
+    A backup renamed into place without an fsync is durable only in the page
+    cache: an OS crash can leave a zero-length or short file at the
+    published name.  Filesystems that do not support fsync (some network
+    mounts) must not fail an otherwise complete backup, so ``OSError`` is
+    swallowed.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _sync_dir(path: str) -> None:
+    """Flush directory *path*'s entries to disk, where the platform allows it.
+
+    fsyncing the file does not persist the directory entry that names it:
+    after an OS crash the rename can be lost even though the data survived.
+    Windows cannot open a directory for fsync, so failures are ignored.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _db_backup_manifest_name(backup_path: str) -> str:
     """Return the per-backup manifest name for *backup_path*.
 
@@ -1141,6 +1181,8 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
 """
                 f.write(yara_rule)
                 num_exported += 1
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, output_file)
     except BaseException:
         # The half-written temp must not outlive a failed export.
@@ -1766,9 +1808,23 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         # "\n" to ``os.linesep``, so the same database would export CRLF on
         # Windows and LF elsewhere, and the two exports would diff against
         # each other.  Assembly sources are LF by convention and re-import
-        # identically either way.
-        with open(file_path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(snippet.code)
+        # identically either way.  Written to a sibling temp and renamed
+        # (same pattern as ``db_backup``): ``open(file_path, "w")`` truncates
+        # the live export first, so a crash mid-export leaves a truncated
+        # file that looks like a complete export artifact.
+        tmp_path = file_path + ".tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(snippet.code)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, file_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
         num_exported += 1
 
     # Every file is on disk: drop what a previous run wrote for snippets the
@@ -2026,7 +2082,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
                 sqlite_connection.backup(destination)
             finally:
                 destination.close()
+            # fsync before publish: an OS crash after ``os.replace`` but
+            # before the file's data hits disk leaves a backup that looks
+            # complete but restores empty/corrupt — ack'd-but-not-durable.
+            _sync_path(tmp_path)
             os.replace(tmp_path, final_path)
+            _sync_dir(backup_dir)
         except BaseException:
             try:
                 os.unlink(tmp_path)
@@ -2066,8 +2127,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(manifest, f)
         os.replace(tmp_manifest, manifest_path)
-    except OSError as e:
-        logger.warning("Could not write the backup manifest: %s", e)
+    except OSError:
         try:
             os.unlink(tmp_manifest)
         except OSError:

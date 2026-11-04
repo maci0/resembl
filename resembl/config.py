@@ -156,7 +156,11 @@ class ResemblConfig:
             # int() truncates (2.9 -> 2), silently accepting a fractional
             # count the file never asked for.  Reject fractional floats for
             # int fields before coercion; integral floats (128.0) stay legal.
-            if isinstance(default, int) and not isinstance(default, bool) and isinstance(value, float):
+            if (
+                isinstance(default, int)
+                and not isinstance(default, bool)
+                and isinstance(value, float)
+            ):
                 if not value.is_integer():
                     logger.warning(
                         "Ignoring %s: expected %s, got %r.",
@@ -253,6 +257,8 @@ def save_config(config: dict | ResemblConfig) -> None:
         tmp_path = tmp.name
         try:
             tomli_w.dump(data, tmp)
+            tmp.flush()
+            os.fsync(tmp.fileno())
         except BaseException:
             # The half-written temp file must not outlive a failed save, and
             # a Ctrl-C lands here as often as a serialization error: the
@@ -266,6 +272,18 @@ def save_config(config: dict | ResemblConfig) -> None:
 
     try:
         os.replace(tmp_path, cfg_path)
+        # fsync the directory so the rename itself survives an OS crash
+        try:
+            dir_fd = os.open(cfg_dir, os.O_RDONLY)
+        except OSError:
+            dir_fd = None
+        if dir_fd is not None:
+            try:
+                os.fsync(dir_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(dir_fd)
     except OSError:
         # The temp file would otherwise accumulate in the config directory on
         # every failed save (e.g. read-only target); remove it and re-raise.
