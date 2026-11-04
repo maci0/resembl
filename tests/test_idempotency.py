@@ -146,9 +146,11 @@ class TestSnippetWrites(BaseDBTest):
     def test_name_remove_twice_is_a_noop(self):
         snippet = snippet_add(self.session, "proc", "MOV EAX, 1")
         snippet_name_add(self.session, snippet.checksum, "alias")
-        snippet_name_remove(self.session, snippet.checksum, "alias")
+        first = snippet_name_remove(self.session, snippet.checksum, "alias")
         after_first = _state(self.session)
-        self.assertIsNone(snippet_name_remove(self.session, snippet.checksum, "alias"))
+        again = snippet_name_remove(self.session, snippet.checksum, "alias")
+        self.assertIsNotNone(again)
+        self.assertEqual(again.name_list, first.name_list)
         self.assertEqual(_state(self.session), after_first)
 
     def test_tag_add_twice_is_a_noop(self):

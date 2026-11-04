@@ -579,11 +579,12 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         self.assertIsNone(result)
 
     def test_snippet_name_remove_nonexistent_name(self):
-        """Test removing a name that does not exist."""
+        """Test removing a name that does not exist: already in the end state."""
         snippet = snippet_add(self.session, "test", "MOV EAX, 1")
         self.assertIsNotNone(snippet)
         result = snippet_name_remove(self.session, snippet.checksum, "nonexistent")
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.name_list, ["test"])
 
     def test_snippet_name_remove_last_name(self):
         """Test that the last name cannot be removed from a snippet."""

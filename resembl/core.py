@@ -318,7 +318,14 @@ def snippet_name_add(
 def snippet_name_remove(
     session: Session, checksum: str, name_to_remove: str, quiet: bool = False
 ) -> Snippet | None:
-    """Remove a name from a snippet."""
+    """Remove a name from a snippet (idempotent — removing a missing name is a no-op).
+
+    Already-removed is the requested end state, same as
+    :func:`snippet_tag_remove` and the add paths: a retried remove (lost
+    response, double-click, re-run) must converge with a success
+    response instead of exiting 1.  The one-name guard below is different:
+    that state was never produced, so it stays a failure.
+    """
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
         if not quiet:
@@ -335,9 +342,7 @@ def snippet_name_remove(
     target = name_normalize(name_to_remove)
     match = next((n for n in name_list if name_normalize(n) == target), None)
     if match is None:
-        if not quiet:
-            logger.error("Name '%s' not found for this snippet.", name_to_remove)
-        return None
+        return snippet  # Idempotent: name not present
 
     if len(name_list) == 1:
         if not quiet:
