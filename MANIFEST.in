@@ -1,0 +1,9 @@
+# sdist completeness: the wheel ships only resembl/, but the sdist is the
+# documented install path for the README example (`resembl import tests/test_data`).
+# Without this graft the 689 .asm fixtures are silently absent from the sdist,
+# so an sdist install cannot run the example it documents. setuptools already
+# includes tests/*.py via package discovery; the data files need an explicit graft.
+# docs/ is grafted so the man page and tutorial referenced from the README
+# travel with the sdist as well.
+graft tests/test_data
+graft docs

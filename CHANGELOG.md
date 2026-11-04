@@ -39,6 +39,13 @@ project follows [Semantic Versioning](https://semver.org/).
   `GET /runtime-generation` answer `501`.
 - `GET /health` carries `"mode": "database"` on a server with a database.
 
+### Fixed
+
+- The sdist now includes `tests/test_data` and `docs` via `MANIFEST.in`, so
+  the README example (`resembl import tests/test_data`) works from an sdist
+  install; the wheel is unchanged. `service/Dockerfile` copies `go.sum` and
+  `service/internal`, and carries OCI labels for source and license.
+
 ## [3.12.0] - 2026-11-04
 
 ### Added
