@@ -40,6 +40,12 @@ project follows [Semantic Versioning](https://semver.org/).
   Backups written before this change carry no content hash and are
   never reused, so the first run after upgrading always writes a fresh
   backup.
+- `resembl backup` now stamps its filename from the same logical clock
+  as every other run output (`RESEMBL_NOW`), instead of a second
+  hardwired wall-clock read: a replay pinned with `RESEMBL_NOW` now
+  reproduces its backup filenames and manifests byte-for-byte, not
+  just its database rows. Distinct backups at the same pinned instant
+  keep distinct names.
 - `AGENTS.md` no longer carries the historical 3.7.0 exception that
   released the Python 3.14 floor migration as a minor; the section now
   states the SemVer rule without that one-time exemption.

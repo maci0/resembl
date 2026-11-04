@@ -18,6 +18,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import update
@@ -2114,21 +2115,25 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             "fingerprint_version": fingerprint_version_get(session),
             "num_removed": 0,
         }
-    # Microseconds keep two backups in the same second distinct, so prune
-    # counts backups rather than overwriting one.
     # Stamped in UTC, not local time: the name is a sort key for prune
     # (legacy local stamps sort 01:30 EDT and 01:30 EST identically across
     # a fall-back, so the hour that was taken second can sort oldest and
-    # be deleted).  ``gmtime`` keeps the sort chronological in any zone.
-    # One clock read feeds both fields: two reads can straddle a second
-    # boundary and stamp a microsecond from the next second onto this one,
-    # which sorts the backup before one taken earlier in the same second.
-    _now_ns = time.time_ns()
-    stamp = (
-        time.strftime("%Y%m%dT%H%M%S", time.gmtime(_now_ns // 1_000_000_000))
-        + f"-{(_now_ns % 1_000_000_000) // 1000:06d}"
-    )
-    backup_name = f"assembly-{stamp}.db"
+    # be deleted).  The stamp comes from the same logical clock as the
+    # manifest's ``created_at`` (``timestamp_now``, which honors
+    # ``RESEMBL_NOW``): a second, hardwired wall-clock read made a
+    # pinned replay's rows match byte-for-byte while its backup
+    # filenames no longer did.  When no override is set, ``timestamp_now``
+    # is still one read, converted to the backup stamp's
+    # "%Y%m%dT%H%M%S-microsecond" shape and made distinct from any
+    # backup already present (microsecond is a prune sort key, not a
+    # uniqueness guarantee at a pinned instant).
+    _moment = datetime.fromisoformat(timestamp_now())
+    _base_stamp = _moment.strftime("%Y%m%dT%H%M%S")
+    _micro = _moment.microsecond
+    backup_name = f"assembly-{_base_stamp}-{_micro:06d}.db"
+    while os.path.exists(os.path.join(backup_dir, backup_name)):
+        _micro += 1
+        backup_name = f"assembly-{_base_stamp}-{_micro:06d}.db"
     final_path = os.path.join(backup_dir, backup_name)
     # ``backup`` refuses a destination that is the source connection's own
     # file, and a same-directory temp file makes the collision explicit

@@ -350,10 +350,11 @@ Linux or Windows are one name.
 
 **RESEMBL_NOW**
 :   ISO 8601 instant to stamp `created_at` with, instead of the wall clock.
-    Every row written during the run and every timestamp printed back by
-    `collection list` and `version` takes this value, so a run replayed
-    with the same inputs produces the same database and the same output. An
-    unparseable value aborts the command.
+    Every row written during the run, every timestamp printed back by
+    `collection list` and `version`, and every backup filename and manifest
+    takes this value, so a run replayed with the same inputs produces the
+    same database and the same output. An unparseable value aborts the
+    command.
 
 ## CONFIGURATION
 

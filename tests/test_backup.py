@@ -157,8 +157,18 @@ class TestDbBackup(FileDBTest):
         snippet_add(self.session, "foo", "mov eax, 1\nret")
         backup_dir = os.path.join(self._tmpdir.name, "backups")
         epoch_s = calendar.timegm((2024, 6, 1, 12, 0, 0, 0, 0, 0))
-        with mock.patch.object(
-            time, "time_ns", return_value=(epoch_s + 1) * 1_000_000_000 + 123_456_000
+        # db_backup reads the logical clock (``timestamp_now``), not a
+        # second wall-clock source: pin it to the same instant the old
+        # ``time_ns`` mock used to return, so the second and microsecond
+        # still come from one read.
+        with (
+            mock.patch.object(
+                time, "time_ns", return_value=(epoch_s + 1) * 1_000_000_000 + 123_456_000
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"RESEMBL_NOW": "2024-06-01T12:00:01.123456+00:00"},
+            ),
         ):
             result = db_backup(self.session, backup_dir)
         backup_name = os.path.basename(result["backup"])
@@ -166,6 +176,68 @@ class TestDbBackup(FileDBTest):
             backup_name.endswith("T120001-123456.db"),
             f"stamp must be one consistent instant, got {backup_name}",
         )
+
+    def test_backup_replays_byte_for_byte_under_pinned_clock(self):
+        """``RESEMBL_NOW`` pins backup filenames and manifests, not just rows.
+
+        Regression: ``db_backup`` read ``time_ns()`` directly while
+        ``created_at`` honored ``RESEMBL_NOW``, so a pinned replay's
+        database rows matched but its backup names and manifests never
+        did — the one wall-clock read the replay could not reproduce.
+        Two fresh databases backed up under the same pinned instant must
+        produce the same backup name and the same manifest.
+        """
+        from unittest import mock
+
+        pinned = {"RESEMBL_NOW": "2024-06-01T12:00:00+00:00"}
+        results: list[tuple[str, dict]] = []
+        for _ in range(2):
+            # Fresh database per run (the filename bump for distinct
+            # content is covered by the sibling test), so the pinned
+            # instant alone decides the name.
+            with mock.patch.dict(os.environ, pinned):
+                snippet_add(self.session, "foo", "mov eax, 1\nret")
+                backup_dir = os.path.join(self._tmpdir.name, "backups")
+                result = db_backup(self.session, backup_dir)
+                manifest_name = os.path.splitext(os.path.basename(result["backup"]))[0] + ".json"
+                with open(os.path.join(backup_dir, manifest_name), encoding="utf-8") as f:
+                    manifest = json.load(f)
+                results.append((os.path.basename(result["backup"]), manifest))
+                self.session.rollback()
+                # Remove the row so the next run's content matches the
+                # first; the backup directory already holds the first
+                # backup, so clear it too.
+                from sqlmodel import delete
+
+                from resembl.models import Snippet
+
+                self.session.exec(delete(Snippet))
+                self.session.commit()
+                os.remove(result["backup"])
+                os.remove(os.path.join(backup_dir, manifest_name))
+        first = results[0]
+        second = results[1]
+        self.assertEqual(first[0], "assembly-20240601T120000-000000.db")
+        self.assertEqual(second[0], first[0])
+        self.assertEqual(first[1], second[1])
+        self.assertEqual(first[1]["created_at"], "2024-06-01T12:00:00+00:00")
+
+    def test_pinned_clock_same_instant_backups_get_distinct_names(self):
+        """A second distinct backup at a pinned instant does not overwrite.
+
+        The microsecond suffix is a prune sort key, not a uniqueness
+        guarantee at a pinned instant: bumping it keeps two distinct
+        backups from colliding while staying deterministic."""
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-01T12:00:00+00:00"}):
+            backup_dir = os.path.join(self._tmpdir.name, "backups")
+            snippet_add(self.session, "foo", "mov eax, 1\nret")
+            first = db_backup(self.session, backup_dir)
+            snippet_add(self.session, "bar", "xor ebx, ebx\nret")
+            second = db_backup(self.session, backup_dir)
+        self.assertEqual(os.path.basename(first["backup"]), "assembly-20240601T120000-000000.db")
+        self.assertEqual(os.path.basename(second["backup"]), "assembly-20240601T120000-000001.db")
 
     def test_backup_rejects_non_sqlite(self):
         """Non-SQLite backends must use their own backup tooling."""
