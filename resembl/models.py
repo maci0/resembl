@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 CLOCK_ENV_VAR = "RESEMBL_NOW"
 
 
-def _parse_instant(value: str) -> datetime | None:
+def parse_instant(value: str) -> datetime | None:
     """Parse *value* as a full ISO 8601 instant, or return ``None``.
 
     ``datetime.fromisoformat`` also accepts date-only (``2024-06-01``),
@@ -89,7 +89,7 @@ def timestamp_now() -> str:
     override = os.environ.get(CLOCK_ENV_VAR)
     if override is None or not override.strip():
         return datetime.now(UTC).isoformat()
-    parsed = _parse_instant(override)
+    parsed = parse_instant(override)
     if parsed is None:
         raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant")
     moment = parsed
@@ -112,7 +112,7 @@ def timestamp_normalize(value: str | None) -> str | None:
     """
     if not isinstance(value, str):
         return value
-    moment = _parse_instant(value)
+    moment = parse_instant(value)
     if moment is None:
         return value
     if moment.tzinfo is None:

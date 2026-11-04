@@ -95,7 +95,7 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
-from .models import _parse_instant
+from .models import parse_instant
 from .paths import (
     cache_dir_get,
     console_utf8_reconfigure,
@@ -389,7 +389,7 @@ def _format_created_at(value: object, fmt: str, tz: tzinfo | None = None) -> str
     # string is not an instant, so converting it would fabricate a
     # midnight-UTC moment and show the wrong calendar day in most zones.
     # Show such values verbatim, exactly like unparseable ones.
-    moment = _parse_instant(value)
+    moment = parse_instant(value)
     if moment is None:
         return value
     if moment.tzinfo is None:
