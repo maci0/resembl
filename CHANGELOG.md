@@ -6,6 +6,16 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The root `.dockerignore` (the context for `service/Dockerfile`, built from
+  the repository root) now also excludes local databases and benchmark
+  data, matching `service/.dockerignore`: sensitive corpus data stays
+  out of the build context even though only `service/` is COPY'd.
+- The Go service CI job now smoke-tests the built image by running
+  `resembl-service -h` and checking its usage output, so a broken
+  entrypoint or COPY path fails in CI instead of on an operator's host.
+
 ### Fixed
 
 - Backups, manifests, config writes, and exports are now fsynced before

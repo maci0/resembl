@@ -34,3 +34,10 @@ jobs:
         # that only runs `go test` would let a broken Dockerfile merge
         # undetected until an operator builds it by hand.
         run: docker build -f service/Dockerfile -t resembl-service:ci .
+      - name: Smoke-test the service image
+        # A successful build does not prove the entrypoint runs: a broken
+        # COPY path or a missing binary would only fail on an operator's
+        # host. `resembl-service -h` prints the flag list without needing a
+        # custody directory, token or engine; Go's flag package exits 1 on
+        # -h, so the check is the output, not the exit code.
+        run: docker run --rm resembl-service:ci -h 2>&1 | grep -q 'Usage of resembl-service:'

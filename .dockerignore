@@ -1,12 +1,13 @@
 # Keep the service image build context small: only service/ is COPY'd.
 # Without this, docker build -f service/Dockerfile . transfers .venv,
-# dist/ and .git as well.
+# dist/ and .git as well, plus local databases and scratch data.
 .git
 .venv
 .venv-fuzz
 dist
 build
 __pycache__
+*.pyc
 *.egg-info
 .pytest_cache
 .mypy_cache
@@ -15,3 +16,9 @@ __pycache__
 docs
 tests
 fuzzers
+# Local databases and benchmark data are sensitive corpus data and are
+# never COPY'd into the service image; keep them out of the context too.
+*.db
+*.sqlite3
+data
+scale_data
