@@ -89,10 +89,8 @@ def generate_control_flow_block(label_id: str, function_names: list[str]) -> lis
     jump_op = random.choice(CONDITIONAL_JUMPS)
     lines.append(f"    {jump_op} .label_{label_id}")
 
-    # Add some other random instructions
     lines.extend(generate_arithmetic_block(random.randint(1, 2)))
 
-    # Add a call or an unconditional jump
     if random.random() < 0.5 and function_names:
         lines.append(f"    call {random.choice(function_names)}")
     else:
@@ -130,13 +128,12 @@ def _generate_one(args: tuple[str, int, int, str, int | None]) -> None:
     ]
 
     for j in range(num_blocks):
-        # Decide whether to generate a conditional block or a standard one
         if random.random() < 0.3:  # 30% chance of a control flow block
             body.extend(generate_control_flow_block(f"{i}_{j}", function_names_sample))
         else:
             generator = random.choice(block_generators)
             body.extend(generator(random.randint(1, 3)))
-        body.append("")  # Add a blank line for spacing
+        body.append("")
 
     # --- Assemble the final file content ---
     content = [
@@ -154,7 +151,6 @@ def _generate_one(args: tuple[str, int, int, str, int | None]) -> None:
         "    ret",
     ]
 
-    # Write the file
     file_path = os.path.join(data_dir, f"{name}.asm")
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(textwrap.indent(line, "    ") for line in content))
@@ -181,7 +177,6 @@ def generate_files(
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
-    # Clean out old generated files
     for filename in os.listdir(data_dir):
         if filename.startswith("generated_func_"):
             os.remove(os.path.join(data_dir, filename))

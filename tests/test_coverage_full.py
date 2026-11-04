@@ -41,9 +41,7 @@ from resembl.diagnostics import db_calculate_average_similarity, db_stats
 from resembl.minhash import MinHash
 from tests.test_collections_merge import BaseDBTest
 
-# ---------------------------------------------------------------------------
 # Tag edge cases — covers lines 300-302, 307, 328
-# ---------------------------------------------------------------------------
 
 
 class TestTagEdgeCases(BaseDBTest):
@@ -81,9 +79,7 @@ class TestTagEdgeCases(BaseDBTest):
         self.assertIsNone(result)
 
 
-# ---------------------------------------------------------------------------
 # Batch MinHash edge cases — covers lines 420-425
-# ---------------------------------------------------------------------------
 
 
 class TestBatchMinhashEdgeCases(BaseDBTest):
@@ -113,9 +109,7 @@ class TestBatchMinhashEdgeCases(BaseDBTest):
         )
 
 
-# ---------------------------------------------------------------------------
 # snippet_find_matches with empty DB — covers line 496
-# ---------------------------------------------------------------------------
 
 
 class TestFindMatchesEmpty(BaseDBTest):
@@ -165,9 +159,7 @@ class TestFindMatchesEmpty(BaseDBTest):
         self.assertIn("could not clear the index (locked)", str(ctx.exception))
 
 
-# ---------------------------------------------------------------------------
 # snippet_export_yara — covers lines 544-580
-# ---------------------------------------------------------------------------
 
 
 class TestExportYara(BaseDBTest):
@@ -198,7 +190,6 @@ class TestExportYara(BaseDBTest):
             self.assertEqual(result["num_exported"], 1)
             with open(out_path, encoding="utf-8") as f:
                 content = f.read()
-            # Backslashes and quotes should be escaped
             self.assertNotIn('\n"', content.split("$asm")[1].split("nocase")[0])
         finally:
             os.unlink(out_path)
@@ -212,7 +203,6 @@ class TestExportYara(BaseDBTest):
             snippet_export_yara(self.session, out_path)
             with open(out_path, encoding="utf-8") as f:
                 content = f.read()
-            # Should start with "rule resembl_r_"
             self.assertIn("rule resembl_r_", content)
         finally:
             os.unlink(out_path)
@@ -244,21 +234,16 @@ class TestExportYara(BaseDBTest):
             self.assertEqual(result["num_exported"], 1)
             with open(out_path, encoding="utf-8") as f:
                 content = f.read()
-            # Exactly one rule header exists: the injected newline stayed
-            # escaped inside the quoted string instead of starting a line.
             rule_lines = [ln for ln in content.splitlines() if ln.startswith("rule ")]
             self.assertEqual(len(rule_lines), 1)
             self.assertTrue(rule_lines[0].startswith("rule resembl_"))
-            # The hostile characters are escaped within the string literal.
             self.assertIn('\\"', content)
             self.assertIn("\\n", content)
         finally:
             os.unlink(out_path)
 
 
-# ---------------------------------------------------------------------------
 # Average similarity — covers line 660
-# ---------------------------------------------------------------------------
 
 
 class TestAverageSimilarity(BaseDBTest):
@@ -287,9 +272,7 @@ class TestAverageSimilarity(BaseDBTest):
                 db_calculate_average_similarity(self.session, sample_size=sample_size)
 
 
-# ---------------------------------------------------------------------------
 # snippet_export — covers lines 735, 740-744
-# ---------------------------------------------------------------------------
 
 
 def _exported_asm_files(export_dir: str) -> list[str]:
@@ -343,17 +326,13 @@ class TestSnippetExport(BaseDBTest):
             for i, hostile in enumerate(("../evil", "..\\..\\evil", "sub/dir/evil")):
                 snippet_add(self.session, hostile, f"MOV EAX, {i}")
             result = snippet_export(self.session, tmpdir)
-            # Every file landed as a direct child of the export directory.
             written = _exported_asm_files(tmpdir)
             self.assertEqual(result["num_exported"], len(written))
             self.assertTrue(all(f.endswith(".asm") for f in written))
-            # Nothing escaped to a prefix-sharing sibling directory.
             self.assertEqual(os.listdir(sibling), [])
 
 
-# ---------------------------------------------------------------------------
 # Collection error paths — covers lines 800, 835, 841, 858
-# ---------------------------------------------------------------------------
 
 
 class TestCollectionErrorPaths(BaseDBTest):
@@ -386,9 +365,7 @@ class TestCollectionErrorPaths(BaseDBTest):
         self.assertIsNone(result)
 
 
-# ---------------------------------------------------------------------------
 # snippet_name_add / snippet_name_remove edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestNameOperations(BaseDBTest):
@@ -440,9 +417,7 @@ class TestNameOperations(BaseDBTest):
         self.assertIsNone(result)
 
 
-# ---------------------------------------------------------------------------
 # Merge edge cases — covers lines 911-913, 964-965
-# ---------------------------------------------------------------------------
 
 
 class TestMergeEdgeCases(BaseDBTest):
@@ -451,7 +426,6 @@ class TestMergeEdgeCases(BaseDBTest):
     def test_merge_assigns_collection_to_existing(self):
         """Merging should assign source collection to existing snippet without one."""
         snippet = snippet_add(self.session, "func", "MOV EAX, 1")
-        # Verify no collection
         self.assertIsNone(snippet.collection)
 
         source_path = self._create_source_db(
@@ -490,9 +464,7 @@ class TestMergeEdgeCases(BaseDBTest):
             self.assertIn("error", result)
 
 
-# ---------------------------------------------------------------------------
 # Cache functions — index build corrupt-fingerprint handling
-# ---------------------------------------------------------------------------
 
 
 class TestCacheBuildCorruptFingerprints(BaseDBTest):
@@ -513,9 +485,7 @@ class TestCacheBuildCorruptFingerprints(BaseDBTest):
         self.assertNotIn(bad.checksum, keys)
 
 
-# ---------------------------------------------------------------------------
 # Database module — covers line 49
-# ---------------------------------------------------------------------------
 
 
 class TestDatabaseModule(unittest.TestCase):
@@ -536,7 +506,6 @@ class TestDatabaseModule(unittest.TestCase):
                     db_create()
                 tables = set(inspect(engine).get_table_names())
                 self.assertGreater(len(tables), 0)
-                # The tables every command depends on must exist.
                 self.assertIn("snippet", tables)
                 self.assertIn("lsh_bucket", tables)
                 self.assertIn("lsh_meta", tables)
@@ -544,9 +513,7 @@ class TestDatabaseModule(unittest.TestCase):
                 engine.dispose()
 
 
-# ---------------------------------------------------------------------------
 # db_stats — covers stat retrieval
-# ---------------------------------------------------------------------------
 
 
 class TestDBStats(BaseDBTest):
@@ -569,9 +536,7 @@ class TestDBStats(BaseDBTest):
         self.assertGreater(stats["vocabulary_size"], 0)
 
 
-# ---------------------------------------------------------------------------
 # snippet_delete edge cases
-# ---------------------------------------------------------------------------
 
 
 class TestSnippetDeleteEdge(BaseDBTest):
@@ -640,9 +605,7 @@ class TestSnippetDeleteEdge(BaseDBTest):
         return int(row[0])
 
 
-# ---------------------------------------------------------------------------
 # snippet_add deduplication
-# ---------------------------------------------------------------------------
 
 
 class TestSnippetAddDedup(BaseDBTest):
@@ -658,9 +621,7 @@ class TestSnippetAddDedup(BaseDBTest):
         self.assertIn("name_b", refreshed.name_list)
 
 
-# ---------------------------------------------------------------------------
 # LSH cache lifecycle
-# ---------------------------------------------------------------------------
 
 
 class TestLSHCacheLifecycle(BaseDBTest):

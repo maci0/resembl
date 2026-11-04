@@ -13,7 +13,6 @@ import subprocess
 import sys
 import time
 
-# Needed for standalone execution.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from tests.generate_data import generate_files
 
@@ -78,7 +77,6 @@ def main():
 
     # --- 3. Benchmark `find` command ---
     print("\n--- Benchmarking 'find' on a single query ---")
-    # Get a random file to use as a query
     random_file = random.choice(os.listdir(DATA_DIR))
     query_file_path = os.path.join(DATA_DIR, random_file)
 

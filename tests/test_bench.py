@@ -16,17 +16,14 @@ from resembl.core import (
     string_normalize,
 )
 
-# Load a real-world .asm sample for benchmarking.
 _SAMPLE_DIR = os.path.join(os.path.dirname(__file__), "test_data")
 _SAMPLE_FILES = sorted(
     os.path.join(_SAMPLE_DIR, f) for f in os.listdir(_SAMPLE_DIR) if f.endswith(".asm")
 )
 
-# Read the first sample file for single-snippet benchmarks.
 with open(_SAMPLE_FILES[0], encoding="utf-8") as _f:
     _SAMPLE_CODE = _f.read()
 
-# Read a larger snippet for scaling benchmarks.
 _LARGE_CODE = "\n".join(open(p, encoding="utf-8").read() for p in _SAMPLE_FILES[:5])
 
 

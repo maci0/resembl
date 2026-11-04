@@ -96,9 +96,7 @@ def _seed_current_stamps(session: Session) -> None:
     fingerprint_perm_set(session, 128)
 
 
-# ---------------------------------------------------------------------------
 # Collection tests
-# ---------------------------------------------------------------------------
 
 
 class TestCollections(BaseDBTest):
@@ -109,7 +107,6 @@ class TestCollections(BaseDBTest):
         col = collection_create(self.session, "crypto", description="Crypto routines")
         self.assertEqual(col.name, "crypto")
         self.assertEqual(col.description, "Crypto routines")
-        # Confirm it's in the DB
         fetched = Collection.get_by_name(self.session, "crypto")
         self.assertIsNotNone(fetched)
 
@@ -118,12 +115,9 @@ class TestCollections(BaseDBTest):
         collection_create(self.session, "libc")
         snippet = snippet_add(self.session, "memcpy", "REP MOVSB")
         collection_add_snippet(self.session, "libc", snippet.checksum)
-        # Confirm assignment
         self.assertEqual(snippet_get(self.session, snippet.checksum).collection, "libc")
-        # Delete
         result = collection_delete(self.session, "libc")
         self.assertTrue(result)
-        # Snippet should still exist but unassigned
         s = snippet_get(self.session, snippet.checksum)
         self.assertIsNotNone(s)
         self.assertIsNone(s.collection)
@@ -169,9 +163,7 @@ class TestCollections(BaseDBTest):
         self.assertIsNone(result)
 
 
-# ---------------------------------------------------------------------------
 # Tag tests (core functions, not CLI)
-# ---------------------------------------------------------------------------
 
 
 class TestTagCore(BaseDBTest):
@@ -189,7 +181,6 @@ class TestTagCore(BaseDBTest):
         snippet = snippet_add(self.session, "func", "XOR EAX, EAX")
         snippet_tag_add(self.session, snippet.checksum, "crypto")
         result = snippet_tag_add(self.session, snippet.checksum, "crypto")
-        # Returns snippet but doesn't double-add
         self.assertIsNotNone(result)
         self.assertEqual(result.tag_list.count("crypto"), 1)
 
@@ -218,9 +209,7 @@ class TestTagCore(BaseDBTest):
         self.assertIsNone(result)
 
 
-# ---------------------------------------------------------------------------
 # Search tests
-# ---------------------------------------------------------------------------
 
 
 class TestSearch(BaseDBTest):
@@ -253,9 +242,7 @@ class TestSearch(BaseDBTest):
         self.assertEqual(snippet_search_by_name(self.session, "mem", limit=0), [])
 
 
-# ---------------------------------------------------------------------------
 # Timestamp normalization tests
-# ---------------------------------------------------------------------------
 
 
 class TestTimestampNormalize(unittest.TestCase):
@@ -340,9 +327,7 @@ class TestTimestampNow(unittest.TestCase):
                 timestamp_now()
 
 
-# ---------------------------------------------------------------------------
 # DB Merge tests
-# ---------------------------------------------------------------------------
 
 
 class TestDBMerge(BaseDBTest):
@@ -512,7 +497,6 @@ class TestDBMerge(BaseDBTest):
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["updated"], 1)
-            # Check names merged
             checksum = string_checksum("MOV EAX, 1")
             s = snippet_get(self.session, checksum)
             self.assertIn("original_name", s.name_list)
@@ -651,9 +635,7 @@ class TestDBMerge(BaseDBTest):
             os.unlink(source_path)
 
 
-# ---------------------------------------------------------------------------
 # Snippet versioning tests
-# ---------------------------------------------------------------------------
 
 
 class TestVersioning(BaseDBTest):
@@ -681,9 +663,7 @@ class TestVersioning(BaseDBTest):
         self.assertEqual(versions[0]["snippet_checksum"], snippet.checksum)
 
 
-# ---------------------------------------------------------------------------
 # ResemblConfig dict-compat tests
-# ---------------------------------------------------------------------------
 
 
 class TestResemblConfig(unittest.TestCase):
@@ -719,9 +699,7 @@ class TestResemblConfig(unittest.TestCase):
         self.assertEqual(d["top_n"], 5)
 
 
-# ---------------------------------------------------------------------------
 # Model method tests
-# ---------------------------------------------------------------------------
 
 
 class TestModelMethods(BaseDBTest):
@@ -779,7 +757,6 @@ class TestModelMethods(BaseDBTest):
         self.session.commit()
         versions = SnippetVersion.get_by_checksum(self.session, snippet.checksum)
         self.assertEqual(len(versions), 2)
-        # Newest first
         self.assertEqual(versions[0].code, "v2")
 
 

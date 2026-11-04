@@ -26,9 +26,7 @@ from resembl.core import (
 TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), "test_data")
 
 
-# ---------------------------------------------------------------------------
 # Weighted Shingling
-# ---------------------------------------------------------------------------
 
 
 class TestShingleWeight(unittest.TestCase):
@@ -48,9 +46,7 @@ class TestShingleWeight(unittest.TestCase):
 
     def test_mixed_returns_2(self):
         """Shingle with neither rare nor all-common should get weight 2."""
-        # STOSB is not in common or rare
         self.assertEqual(shingle_weight("MOV STOSB REG"), 2)
-        # REP is not in either set
         self.assertEqual(shingle_weight("REP STOSD NOP"), 2)
 
     def test_empty_shingle(self):
@@ -96,9 +92,7 @@ class TestWeightedMinHash(unittest.TestCase):
         self.assertLess(sim_without_rare, 1.0)
 
 
-# ---------------------------------------------------------------------------
 # Hybrid Scoring
-# ---------------------------------------------------------------------------
 
 
 class TestScoreHybrid(unittest.TestCase):
@@ -149,9 +143,7 @@ class TestScoreHybrid(unittest.TestCase):
         self.assertAlmostEqual(score_hybrid(0.9, 20.0), 48.0)
 
 
-# ---------------------------------------------------------------------------
 # CFG Extraction
-# ---------------------------------------------------------------------------
 
 
 class TestCfgExtract(unittest.TestCase):
@@ -177,7 +169,6 @@ class TestCfgExtract(unittest.TestCase):
         code = "MOV EAX, 1\nRET"
         cfg = cfg_extract(code)
         self.assertGreaterEqual(cfg["num_blocks"], 1)
-        # The block ending with RET should have no successors
         last_block = cfg["num_blocks"] - 1
         self.assertEqual(cfg["adj"].get(last_block, []), [])
 
@@ -246,11 +237,9 @@ class TestCfgExtract(unittest.TestCase):
             code = f.read()
 
         cfg = cfg_extract(code)
-        # This file has multiple labels (?_1057, ?_1058, ?_1059, etc.)
         self.assertGreater(cfg["num_blocks"], 3)
         self.assertGreater(cfg["num_edges"], 2)
         self.assertEqual(len(cfg["block_sizes"]), cfg["num_blocks"])
-        # Adjacency list should have all block indices
         self.assertEqual(len(cfg["adj"]), cfg["num_blocks"])
 
     def test_branch_instructions_set(self):
@@ -263,9 +252,7 @@ class TestCfgExtract(unittest.TestCase):
         self.assertIn("LOOP", BRANCH_INSTRUCTIONS)
 
 
-# ---------------------------------------------------------------------------
 # CFG Similarity
-# ---------------------------------------------------------------------------
 
 
 class TestCfgSimilarity(unittest.TestCase):
@@ -343,9 +330,7 @@ class TestCfgSimilarity(unittest.TestCase):
         self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), 2.0 / 3.0)
 
 
-# ---------------------------------------------------------------------------
 # Integration: snippet_compare with new metrics
-# ---------------------------------------------------------------------------
 
 
 class TestSnippetCompareNewMetrics(unittest.TestCase):
@@ -378,11 +363,9 @@ class TestSnippetCompareNewMetrics(unittest.TestCase):
         self.assertIn("cfg_similarity", comp)
         self.assertIn("shared_normalized_tokens", comp)
 
-        # Hybrid score should be within 0-100 range
         self.assertGreaterEqual(comp["hybrid_score"], 0.0)
         self.assertLessEqual(comp["hybrid_score"], 100.0)
 
-        # CFG similarity should be within 0-1 range
         self.assertGreaterEqual(comp["cfg_similarity"], 0.0)
         self.assertLessEqual(comp["cfg_similarity"], 1.0)
 

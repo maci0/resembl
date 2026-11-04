@@ -12,8 +12,8 @@ project follows [Semantic Versioning](https://semver.org/).
   being published (and the directory entry fsynced after the rename), so
   an OS crash cannot leave a half-written backup or export at its final
   name; a backup whose manifest cannot be written now fails instead of
-  silently succeeding;  writes each file atomically instead
-  of truncating the live export file first. Added , a
+  silently succeeding; `snippet_export` writes each file atomically instead
+  of truncating the live export file first. Added `docs/restore.md`, a
   restore runbook covering instance loss, logical corruption, stale WAL
   sidecars, and periodic verify-backup scheduling.
 - `docs/http_api.md` and `docs/THREAT_MODEL.md` no longer describe the
