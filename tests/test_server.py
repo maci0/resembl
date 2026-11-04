@@ -741,7 +741,8 @@ class TestServerMode(_ServeTestCase):
 
         self._start_server()  # writes a valid port file
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             with patch(
                 "urllib.request.urlopen",
                 side_effect=lambda request, timeout=5: _FakeResponse(
@@ -751,7 +752,8 @@ class TestServerMode(_ServeTestCase):
                 rc = _main(["--query", "mov eax, 5"])
         out = stdout.getvalue()
         self.assertEqual(rc, 0)
-        self.assertIn("Found 2 candidates via LSH.", out)
+        self.assertIn("Found 2 candidates via LSH.", stderr.getvalue())
+        self.assertNotIn("Found 2 candidates via LSH.", out)
         self.assertIn("fn_a", out)
         self.assertIn("97.50", out)
         self.assertIn("fn_b, alias", out)

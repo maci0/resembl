@@ -109,6 +109,23 @@ Return the insertion weight for a shingle: 3 (rare instruction), 1 (all common),
 
 ### `score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4) → float`
 Combine Jaccard (0–1) and Levenshtein (0–100) into a single 0–100 hybrid score.
+Raises `ValueError` for a non-finite input or one outside its domain
+(Jaccard and `jaccard_weight` outside 0–1, Levenshtein outside 0–100).
+
+### `MINHASH_SEED` (`resembl.scoring`, = 1)
+The seed of the MinHash permutation stream. Every stored fingerprint and
+band key depends on it, so changing it makes them incomparable with new
+ones; `resembl serve` reports it in the fingerprint scheme (see
+`docs/http_api.md`).
+
+### `db_backup(session, backup_dir: str, *, keep: int = 7) → dict` / `db_verify_backup(session, backup_path: str) → dict`
+`db_backup` writes a consistent, restorable copy of the default SQLite
+database into `backup_dir` (via SQLite's online backup API) with a
+manifest holding the snippet count and fingerprint version, pruned to
+the newest `keep` backups. `db_verify_backup` checks a backup opens,
+holds every table, and matches its manifest. SQLite only; other
+backends raise `ValueError`. The CLI forms are `resembl backup DIR` and
+`resembl verify-backup PATH` (see `docs/man.md`).
 
 ### `cfg_extract(code: str) → dict`
 Extract a simplified control-flow graph from assembly code. Returns `{num_blocks, num_edges, block_sizes, adj}`.
@@ -141,6 +158,7 @@ Remove a snippet from its collection.
 
 ### `Snippet`
 SQLModel with fields: `checksum` (PK), `names` (JSON), `code`, `minhash` (bytes), `tags` (JSON), `collection` (optional collection name; a soft reference to `Collection.name`, not an enforced FK).
+`Snippet.get_all(session, limit=None)`, `Snippet.get_by_collection(session, collection_name, limit=None)`, `Collection.get_all(session, limit=None)` and `SnippetVersion.get_by_checksum(session, checksum, limit=None)` accept an optional `limit` that caps the fetch; `None` (the default) keeps the historical unbounded behavior, so existing calls are unchanged.
 
 ### `name_normalize(name: str) → str`
 Return *name* in NFC, the form every name is stored and compared in. A name

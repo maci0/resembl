@@ -8,6 +8,24 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking:** `score_hybrid` now raises `ValueError` for a non-finite
+  input or one outside its domain (Jaccard and `jaccard_weight` outside
+  0–1, Levenshtein outside 0–100) instead of returning an out-of-range
+  score. Clamp or validate the inputs before calling it; callers that
+  relied on the old lenient result now get an exception.
+- **Breaking:** the `Found N candidates via LSH.` line in `resembl-find`
+  now goes to stderr rather than stdout, so pipes that read stdout get
+  only match rows (or the JSON document). Scripts that parsed that line
+  from stdout must read stderr instead.
+- `resembl.server.serve` accepts `db_url=None` for stateless mode, and
+  the `-h` / `--help` short form is now available on the `config`,
+  `name`, `tag` and `collection` subcommand groups as well as the top
+  level. `resembl-find` accepts `--version`, `--quiet` / `-q` and
+  `--verbose` / `-v`.
+- `Collection.get_all`, `Snippet.get_all`,
+  `Snippet.get_by_collection` and `SnippetVersion.get_by_checksum`
+  gained an optional `limit: int | None = None` parameter. Existing
+  calls are unchanged.
 - The PostgreSQL and MySQL service containers in the test and coverage
   workflows are now pinned by digest, so CI tests against the exact
   database image that was reviewed rather than whatever the tag points
@@ -16,6 +34,25 @@ project follows [Semantic Versioning](https://semver.org/).
 - `packaging` is declared as an explicit dev dependency: the fuzz-extra
   marker test imports it directly and no longer relies on it arriving
   transitively via `black` or `duckdb-engine`.
+
+### Fixed
+
+- `snippet_name_add` and `collection_create` reject an empty or
+  whitespace-only name (after stripping and NFC-normalizing). Previously
+  an empty alias could be stored and a whitespace-only collection name
+  normalized to an empty primary key.
+- A fractional value (e.g. `2.9`) for an integer config field is now
+  rejected with a warning and the default kept, instead of being
+  truncated by `int()` to `2`. Integral floats such as `128.0` remain
+  accepted.
+- Concurrent `snippet_add` / `snippet_add_batch` / `collection_create`
+  calls for the same checksum or name now converge on the existing row
+  instead of raising `IntegrityError`.
+- A relative `XDG_CACHE_HOME` / `XDG_CONFIG_HOME` is now ignored, per
+  the freedesktop base-directory spec, instead of being resolved
+  relative to the working directory.
+- `resembl collection create` prints the `ValueError` message for an
+  empty name and exits 1 instead of propagating a traceback.
 
 ### Added
 
