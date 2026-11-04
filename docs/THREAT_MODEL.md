@@ -46,6 +46,7 @@ Every entry point below is present in the code at the cited location.
 | `POST /find` | `resembl/server.py:727` | Unauthenticated, read-only. |
 | `POST /find-pinned`, `GET /runtime-generation` | `_handle_find_pinned` in `resembl/server.py` | Experimental, unauthenticated like the other routes; the Go service in `service/` is the intended caller. `/find-pinned` reads the whole SQLite index to hash it, bounded by `resembl/pinned_snapshot.py` (1,000,000 rows, 64 MiB) while holding a writer fence, so a caller that reaches it can stall writers. Keep it on loopback behind the service. |
 | `POST /find-batch` | `resembl/server.py:727` | Unauthenticated, up to 1000 queries per request (`resembl/server.py:550`). |
+| `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
 | `resembl serve` bind | `resembl/cli.py:578` | `--host` is free-form; anything but loopback only prints a warning (`resembl/cli.py:603`). `--port` accepts `0`, which lets the OS assign a port (`resembl/cli.py:580`). |
 | Any other verb | `resembl/server.py:771` | Not implemented by the handler, so `BaseHTTPRequestHandler` answers `501` with its own HTML body. That answer is the only one this server emits that bypasses `_respond`, and so the only one carrying no `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy`, or `Cache-Control` header (`resembl/server.py:894`). |
 

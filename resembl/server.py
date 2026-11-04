@@ -30,7 +30,7 @@ import time
 import uuid
 import weakref
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,7 +48,15 @@ from .core import (
     snippet_find_matches,
     snippet_matches_payload,
 )
+from .lsh import band_buckets
 from .paths import cache_dir_get, db_url_mask, server_port_path
+from .scoring import (
+    code_tokenize,
+    minhash_from_tokens,
+    minhash_jaccard,
+    minhash_pack,
+    score_hybrid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -674,6 +682,97 @@ def _query_field_error(query: object) -> str | None:
     return None
 
 
+def _texts_field(body: dict, name: str) -> list[str]:
+    """Return ``body[name]`` as a list of strings, or raise :class:`BadRequestError`.
+
+    Bounded by :data:`MAX_BATCH_QUERIES` for the reason ``/find-batch`` is:
+    each entry is fingerprinted, so the list length is the request's work.
+    """
+    texts = body.get(name)
+    if not isinstance(texts, list):
+        raise BadRequestError(f"{name} must be a list of strings")
+    if len(texts) > MAX_BATCH_QUERIES:
+        raise BadRequestError(f"{name} must hold at most {MAX_BATCH_QUERIES} entries")
+    if not all(isinstance(text, str) for text in texts):
+        raise BadRequestError(f"{name} must hold only strings")
+    return texts
+
+
+def _text_fingerprint(text: str, request: _FindRequest) -> bytes:
+    """The packed MinHash of *text* under the request's fingerprint settings.
+
+    The same tokenization and shingling ``snippet_prepare`` stores for a
+    snippet, so a caller's text and the served corpus compare alike.
+    """
+    tokens = code_tokenize(text, normalize=request.normalize)
+    return minhash_pack(minhash_from_tokens(tokens, request.ngram_size, request.num_permutations))
+
+
+def _score_payload(body: dict, params: ResemblConfig) -> dict:
+    """Answer ``POST /score``: ``source`` scored against each of ``candidates``.
+
+    Each score is ``score_hybrid`` of the MinHash Jaccard and
+    ``rapidfuzz.fuzz.ratio`` (0 to 100, unrounded), in request order.  A
+    candidate whose Jaccard is below ``jaccard_floor`` is ``None`` without the
+    ratio.  A blank candidate has no structure: it scores 0, or ``None`` under
+    a positive floor.  The find parameters (*params* defaults) are validated
+    as ``/find`` validates them.  Raises :class:`BadRequestError`.
+    """
+    source = body.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise BadRequestError("source must be a non-blank string")
+    candidates = _texts_field(body, "candidates")
+    floor = body.get("jaccard_floor")
+    if floor is None:
+        floor = 0.0
+    if isinstance(floor, bool) or not isinstance(floor, int | float) or not 0.0 <= floor <= 1.0:
+        raise BadRequestError("jaccard_floor must be a number in [0.0, 1.0]")
+    request = _parse_find_request(body, params)
+    from rapidfuzz import fuzz
+
+    packed = _text_fingerprint(source, request)
+    scores: list[float | None] = []
+    for candidate in candidates:
+        if not candidate.strip():
+            scores.append(None if floor > 0.0 else 0.0)
+            continue
+        jaccard = minhash_jaccard(packed, _text_fingerprint(candidate, request))
+        if jaccard < floor:
+            scores.append(None)
+            continue
+        scores.append(
+            score_hybrid(jaccard, float(fuzz.ratio(source, candidate)), request.jaccard_weight)
+        )
+    return {"scores": scores}
+
+
+def _band_keys_payload(body: dict, params: ResemblConfig) -> dict:
+    """Answer ``POST /band-keys``: the LSH band keys of each of ``texts``.
+
+    ``lsh.band_buckets`` of each text's fingerprint: ``bands`` keys of
+    ``rows`` consecutive hash values, in request order.  Raises
+    :class:`BadRequestError`.
+    """
+    texts = _texts_field(body, "texts")
+    if not all(text.strip() for text in texts):
+        raise BadRequestError("texts must not hold a blank entry")
+    bands = _as_int(body.get("bands"), "bands")
+    rows = _as_int(body.get("rows"), "rows")
+    if bands < 1 or rows < 1:
+        raise BadRequestError("bands and rows must be at least 1")
+    request = _parse_find_request(body, params)
+    if bands * rows > request.num_permutations:
+        raise BadRequestError(
+            f"bands * rows must be at most num_permutations ({request.num_permutations})"
+        )
+    return {
+        "keys": [
+            band_buckets(_text_fingerprint(text, request), request.num_permutations, bands, rows)
+            for text in texts
+        ]
+    }
+
+
 #: Latency histogram buckets, in seconds.  Fixed, so the exposition costs the
 #: same on an idle server and under load, and a latency percentile can be read
 #: off the cumulative counts.  A find is ~1.4 ms uncached, so the lower
@@ -703,7 +802,14 @@ _SLOW_REQUEST_SECONDS = 1.0
 #: Paths that get a metric series of their own.  Anything else (a 404 for a
 #: crafted path) counts as ``other``: the label has to stay bounded by what
 #: this server serves, not by what a client asks for.
-_METRIC_PATHS: tuple[str, ...] = ("/find", "/find-batch", "/health", "/metrics")
+_METRIC_PATHS: tuple[str, ...] = (
+    "/find",
+    "/find-batch",
+    "/score",
+    "/band-keys",
+    "/health",
+    "/metrics",
+)
 
 
 def _metric_path_label(path: str) -> str:
@@ -850,9 +956,9 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
 
 
 _METRICS = _ServerMetrics()
-#: The paths this server serves, each POST-only except /health and /metrics.
-_FIND_PATHS = ("/find", "/find-batch", "/find-pinned")
-_ALL_PATHS = ("/find", "/find-batch", "/find-pinned", "/runtime-generation", "/health", "/metrics")
+#: The paths this server serves, each POST-only except the three GET paths.
+_POST_PATHS = ("/find", "/find-batch", "/find-pinned", "/score", "/band-keys")
+_ALL_PATHS = (*_POST_PATHS, "/runtime-generation", "/health", "/metrics")
 
 
 class _FindHandler(BaseHTTPRequestHandler):
@@ -1013,7 +1119,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
             return
-        if self.route not in _FIND_PATHS:
+        if self.route not in _POST_PATHS:
             self._respond(404, {"error": f"unknown path: {self.route}"})
             return
         if not self._content_type_ok():
@@ -1028,6 +1134,12 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         if self.route == "/find":
             self._handle_find(body)
+            return
+        if self.route == "/score":
+            self._handle_computed(_score_payload, body)
+            return
+        if self.route == "/band-keys":
+            self._handle_computed(_band_keys_payload, body)
             return
         self._handle_find_batch(body)
 
@@ -1236,6 +1348,23 @@ class _FindHandler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("pinned query failed")
             self._respond(503, {"error": "pinned index unavailable"})
+
+    def _handle_computed(self, compute: Callable[[dict, ResemblConfig], dict], body: dict) -> None:
+        """Answer a request that reads no database with ``compute(body, defaults)``.
+
+        A :class:`BadRequestError` is the caller's ``400``; anything else is a
+        logged ``500`` whose text stays in the log, as on ``/find``.
+        """
+        try:
+            payload = compute(body, self.find_defaults)
+        except BadRequestError as exc:
+            self._respond(400, {"error": str(exc)})
+            return
+        except Exception:  # pragma: no cover - defensive, as in _handle_find
+            logger.exception("[%s] POST %s failed", self.request_id, self.path)
+            self._respond(500, {"error": "internal server error"})
+            return
+        self._respond(200, payload)
 
     def _handle_find_batch(self, body: dict) -> None:
         """Process many queries in one request (results keyed by query)."""

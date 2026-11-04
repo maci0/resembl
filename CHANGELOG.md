@@ -6,6 +6,13 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl serve` answers `POST /score`, which scores one listing against
+  listings in the request with the find blend and an optional Jaccard floor,
+  and `POST /band-keys`, which returns the LSH band keys of listings in the
+  request. Neither reads the database. See `docs/http_api.md`.
+
 ## [3.12.0] - 2026-11-04
 
 ### Added

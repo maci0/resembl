@@ -1,9 +1,9 @@
 # HTTP API (`resembl serve`)
 
 `resembl serve` starts a loopback HTTP server that answers find queries from
-a warm engine and LSH index. `resembl find` and `resembl find-batch` use it
-automatically when it is running; the endpoints are documented here so other
-clients can use the same server.
+a warm engine and LSH index, and scores listings a caller sends. `resembl find`
+and `resembl find-batch` use it automatically when it is running; the
+endpoints are documented here so other clients can use the same server.
 
 The server has no authentication: it is a single-user local tool, not a
 service. It binds `127.0.0.1` by default, but `--host` overrides that and a
@@ -50,6 +50,8 @@ curl -s "http://127.0.0.1:$port/find" \
 | `POST` | `/find` | Find matches for one query. |
 | `POST` | `/find-batch` | Find matches for many queries in one request. |
 | `POST` | `/find-pinned` | Experimental, for `service/`: a find that succeeds only while the SQLite index digest and the runtime manifest match the request. |
+| `POST` | `/score` | Score one listing against caller-supplied listings. Reads no database. |
+| `POST` | `/band-keys` | LSH band keys of caller-supplied listings. Reads no database. |
 | `GET` | `/runtime-generation` | Experimental: the process generation that `/find-pinned` requires. |
 | `GET` | `/health` | Whether this process can still serve a find. |
 | `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
@@ -131,6 +133,50 @@ key and the other queries still return results, so the response is always
 ]}
 ```
 
+### `POST /score`
+
+Scores `source` against each of `candidates` the way a find scores a
+candidate snippet: `score_hybrid` of the MinHash Jaccard and
+`rapidfuzz.fuzz.ratio`, 0 to 100, unrounded. The listings come from the
+request, not from the database, so a caller can rank its own corpus.
+
+| Field | Type | Constraint |
+| ----- | ---- | ---------- |
+| `source` | string | required, not blank |
+| `candidates` | list of string | required, at most 1000 entries |
+| `jaccard_floor` | number | `0.0` to `1.0`, default `0.0` |
+
+The `/find` parameters `normalize`, `ngram_size`, `num_permutations` and
+`jaccard_weight` apply with the same rules and defaults; the others are
+validated and unused.
+
+```json
+{"scores": [97.5, null, 0.0]}
+```
+
+`scores` holds one entry per candidate, in request order. A candidate whose
+Jaccard is below `jaccard_floor` is `null`, and its text ratio is not
+computed. A blank candidate scores `0.0`, or `null` under a positive floor.
+
+### `POST /band-keys`
+
+The LSH band keys of each listing's fingerprint, as `lsh.band_buckets`
+computes them for the index: band `i` covers hash values `i * rows` to
+`(i + 1) * rows - 1`, and its key is their lowercase hex, `8 * rows`
+characters.
+
+| Field | Type | Constraint |
+| ----- | ---- | ---------- |
+| `texts` | list of string | required, at most 1000 entries, each one non-blank |
+| `bands` | integer | required, at least `1` |
+| `rows` | integer | required, at least `1`; `bands * rows` at most `num_permutations` |
+
+The `/find` fingerprint parameters apply as on `/score`.
+
+```json
+{"keys": [["0a1b…", "93c4…"], ["0a1b…", "77e0…"]]}
+```
+
 ### `POST /find-pinned`
 
 Experimental, for the Go query service in `service/`. It takes the
@@ -190,9 +236,9 @@ traceback.
 
 Counters for the served request path, in the Prometheus text exposition
 format (`Content-Type: text/plain; version=0.0.4`). The only label is the
-request path, and a path outside `/find`, `/find-batch`, `/health` and
-`/metrics` is folded into `other`, so a crafted path cannot grow the series
-count.
+request path, and a path outside `/find`, `/find-batch`, `/score`,
+`/band-keys`, `/health` and `/metrics` is folded into `other`, so a crafted
+path cannot grow the series count.
 
 | Metric | Type | Meaning |
 | ------ | ---- | ------- |

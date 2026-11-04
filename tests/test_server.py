@@ -1925,6 +1925,131 @@ class TestServerMode(_ServeTestCase):
         port_file_cleanup(port_file, 1111)
 
 
+class TestScoreEndpoints(_ServeTestCase):
+    """``POST /score`` and ``POST /band-keys`` fingerprint caller-supplied text."""
+
+    def _stored(self, index: int):
+        """The fixture snippet ``f<index>``."""
+        from resembl.models import Snippet
+
+        code = f"push ebx\nmov eax, {index}\npop ebx\nret"
+        return next(s for s in Snippet.get_all(self._session) if s.code == code)
+
+    def test_score_matches_compare_of_the_same_listings(self):
+        from resembl.core import snippet_compare
+
+        port = self._start_server()
+        first, second = self._stored(1), self._stored(2)
+        other = "xor ecx, ecx\nlea esi, [edi+8]\ncall dword ptr [eax]\nleave\nret 8"
+        reply = _post_json(
+            port, "/score", {"source": first.code, "candidates": [second.code, first.code, other]}
+        )
+        compared = snippet_compare(self._session, first.checksum, second.checksum)
+        assert compared is not None
+        self.assertEqual(len(reply["scores"]), 3)
+        self.assertAlmostEqual(reply["scores"][0], compared["comparison"]["hybrid_score"])
+        self.assertAlmostEqual(reply["scores"][1], 100.0)
+        self.assertLess(reply["scores"][2], reply["scores"][0])
+
+    def test_score_prunes_candidates_below_the_jaccard_floor(self):
+        port = self._start_server()
+        source = self._stored(1).code
+        other = "xor ecx, ecx\nlea esi, [edi+8]\ncall dword ptr [eax]\nleave\nret 8"
+        reply = _post_json(
+            port, "/score", {"source": source, "candidates": [other, source], "jaccard_floor": 0.9}
+        )
+        self.assertIsNone(reply["scores"][0])
+        self.assertAlmostEqual(reply["scores"][1], 100.0)
+
+    def test_score_honours_the_jaccard_weight(self):
+        port = self._start_server()
+        source = self._stored(1).code
+        other = "xor ecx, ecx\nlea esi, [edi+8]\ncall dword ptr [eax]\nleave\nret 8"
+        text_only = _post_json(
+            port, "/score", {"source": source, "candidates": [other], "jaccard_weight": 0.0}
+        )
+        from rapidfuzz import fuzz
+
+        self.assertAlmostEqual(text_only["scores"][0], fuzz.ratio(source, other))
+
+    def test_score_scores_a_blank_candidate_zero_or_prunes_it(self):
+        port = self._start_server()
+        source = self._stored(1).code
+        self.assertEqual(
+            _post_json(port, "/score", {"source": source, "candidates": ["  "]})["scores"], [0.0]
+        )
+        pruned = _post_json(
+            port, "/score", {"source": source, "candidates": [""], "jaccard_floor": 0.1}
+        )
+        self.assertEqual(pruned["scores"], [None])
+
+    def test_score_refuses_malformed_requests(self):
+        port = self._start_server()
+        for body, field in (
+            ({"candidates": []}, "source"),
+            ({"source": "  ", "candidates": []}, "source"),
+            ({"source": "ret"}, "candidates"),
+            ({"source": "ret", "candidates": "ret"}, "candidates"),
+            ({"source": "ret", "candidates": [5]}, "candidates"),
+            ({"source": "ret", "candidates": ["ret"] * 1001}, "candidates"),
+            ({"source": "ret", "candidates": [], "jaccard_floor": 1.5}, "jaccard_floor"),
+            ({"source": "ret", "candidates": [], "jaccard_floor": "x"}, "jaccard_floor"),
+            ({"source": "ret", "candidates": [], "jaccard_weight": 2}, "jaccard_weight"),
+            ({"source": "ret", "candidates": [], "num_permutations": 64}, "num_permutations"),
+        ):
+            with self.subTest(body=str(body)[:60]):
+                status, reply = _post_json_status(port, "/score", body)
+                self.assertEqual(status, 400)
+                self.assertIn(field, reply["error"])
+
+    def test_band_keys_match_the_stored_fingerprint(self):
+        from resembl.lsh import band_buckets
+
+        port = self._start_server()
+        snippet = self._stored(3)
+        reply = _post_json(port, "/band-keys", {"texts": [snippet.code], "bands": 16, "rows": 8})
+        self.assertEqual(reply["keys"], [band_buckets(snippet.minhash, 128, 16, 8)])
+
+    def test_band_keys_answer_one_key_list_per_text_in_order(self):
+        port = self._start_server()
+        texts = [self._stored(1).code, "xor ecx, ecx\nleave\nret 8"]
+        reply = _post_json(port, "/band-keys", {"texts": texts, "bands": 4, "rows": 2})
+        self.assertEqual([len(k) for k in reply["keys"]], [4, 4])
+        self.assertNotEqual(reply["keys"][0], reply["keys"][1])
+        self.assertEqual(reply["keys"][0][0], reply["keys"][0][0].lower())
+        self.assertEqual(len(reply["keys"][0][0]), 16)
+
+    def test_band_keys_refuse_malformed_requests(self):
+        port = self._start_server()
+        for body, field in (
+            ({"bands": 4, "rows": 2}, "texts"),
+            ({"texts": ["ret", " "], "bands": 4, "rows": 2}, "texts"),
+            ({"texts": [None], "bands": 4, "rows": 2}, "texts"),
+            ({"texts": ["ret"] * 1001, "bands": 4, "rows": 2}, "texts"),
+            ({"texts": ["ret"], "rows": 2}, "bands"),
+            ({"texts": ["ret"], "bands": 0, "rows": 2}, "bands"),
+            ({"texts": ["ret"], "bands": 4, "rows": 1.5}, "rows"),
+            ({"texts": ["ret"], "bands": 64, "rows": 4}, "bands"),
+        ):
+            with self.subTest(body=str(body)[:60]):
+                status, reply = _post_json_status(port, "/band-keys", body)
+                self.assertEqual(status, 400)
+                self.assertIn(field, reply["error"])
+
+    def test_score_and_band_keys_are_post_only_and_counted(self):
+        port = self._start_server()
+        for path in ("/score", "/band-keys"):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10)
+                self.assertEqual(caught.exception.code, 405)
+        _post_json(port, "/score", {"source": "ret", "candidates": ["ret"]})
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=10) as response:
+            metrics = response.read().decode()
+        self.assertIn('resembl_server_requests_total{path="/score",status="200"}', metrics)
+        self.assertIn('path="/band-keys"', metrics)
+
+
 class TestServerObservability(_ServeTestCase):
     """Health, metrics and the per-request trail a served query leaves."""
 
