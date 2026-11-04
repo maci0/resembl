@@ -31,6 +31,8 @@ from resembl.core import (
     snippet_name_remove,
     snippet_prepare,
     snippet_search_by_name,
+    snippet_tag_add,
+    snippet_tag_remove,
 )
 from resembl.models import Collection, Snippet, name_normalize
 
@@ -278,6 +280,59 @@ class TestYaraStringEscape(unittest.TestCase):
         self.assertNotIn(b"\x00", raw)
         self.assertNotIn(b"\x1b", raw)
         self.assertIn(b"\\x00", raw)
+
+
+class TestNameSearchCaseInsensitivity(BaseDBTest):
+    """snippet_search_by_name is documented case-insensitive; the check must be."""
+
+    def test_upper_ascii_pattern_finds_lower_name(self):
+        snippet_add(self.session, "mov_label", "MOV EAX, 1")
+        found = snippet_search_by_name(self.session, "MOV")
+        self.assertEqual([s.name_list for s in found], [["mov_label"]])
+
+    def test_upper_accented_pattern_finds_lower_name(self):
+        snippet_add(self.session, "café", "MOV EAX, 1")
+        found = snippet_search_by_name(self.session, "CAFÉ")
+        self.assertEqual([s.name_list for s in found], [["café"]])
+
+    def test_casefold_pattern_finds_sharp_s_name(self):
+        """casefold (not lower) maps ß to ss, so both ASCII spellings find it."""
+        snippet_add(self.session, "straße", "MOV EAX, 1")
+        for pattern in ("strasse", "STRASSE", "straße"):
+            found = snippet_search_by_name(self.session, pattern)
+            self.assertEqual([s.name_list for s in found], [["straße"]], pattern)
+
+    def test_like_metacharacters_in_pattern_are_literal(self):
+        snippet_add(self.session, "a_b", "MOV EAX, 1")
+        found = snippet_search_by_name(self.session, "a_b")
+        self.assertEqual([s.name_list for s in found], [["a_b"]])
+
+    def test_limit_bounds_verified_results(self):
+        for i in range(5):
+            snippet_add(self.session, f"mov_{i}", f"MOV EAX, {i}\nRET")
+        found = snippet_search_by_name(self.session, "MOV", limit=2)
+        self.assertEqual(len(found), 2)
+
+
+class TestTagNormalizationForms(BaseDBTest):
+    """Tags are identity like names: one NFC form, whichever spelling arrives."""
+
+    def test_add_is_idempotent_across_normalization_forms(self):
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        snippet.tags = json.dumps([_NFD_NAME])
+        self.session.add(snippet)
+        self.session.commit()
+        snippet_tag_add(self.session, snippet.checksum, _NFC_NAME)
+        self.assertEqual(snippet.tag_list, [_NFD_NAME])
+
+    def test_remove_accepts_either_spelling(self):
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        snippet.tags = json.dumps([_NFD_NAME])
+        self.session.add(snippet)
+        self.session.commit()
+        removed = snippet_tag_remove(self.session, snippet.checksum, _NFC_NAME)
+        assert removed is not None
+        self.assertEqual(removed.tag_list, [])
 
 
 if __name__ == "__main__":

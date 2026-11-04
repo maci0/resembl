@@ -25,7 +25,7 @@ def index_digest(connection: Any) -> str:
         ("lsh_meta", "SELECT id,threshold,num_perm FROM lsh_meta ORDER BY id"),
         ("app_meta", "SELECT key,value FROM app_meta ORDER BY key"),
     ):
-        digest.update(table.encode() + b"\0")
+        digest.update(table.encode("utf-8") + b"\0")
         for row in connection.exec_driver_sql(query):
             rows += 1
             values: list[list[Any]] = []
@@ -44,7 +44,7 @@ def index_digest(connection: Any) -> str:
                     raise ValueError("unsupported SQLite snapshot value")
             raw = json.dumps(
                 values, ensure_ascii=True, separators=(",", ":"), allow_nan=False
-            ).encode()
+            ).encode("utf-8")
             size += len(raw)
             if rows > MAX_SNAPSHOT_ROWS or size > MAX_SNAPSHOT_BYTES:
                 raise ValueError("index snapshot exceeds qualification limit")

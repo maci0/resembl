@@ -145,7 +145,7 @@ def _encoding_is_utf8(encoding: str) -> bool:
 
 
 def console_utf8_reconfigure() -> None:
-    """Make the process's output streams UTF-8 and LF-terminated for this run.
+    """Make the process's streams UTF-8 and LF-terminated for this run.
 
     Every string in the package is UTF-8 by the time it is printed (names
     and tags arrive from files, argv and JSON; code is stored NFC), but
@@ -156,20 +156,38 @@ def console_utf8_reconfigure() -> None:
     where a list was due.  ``errors="replace"`` keeps a character the
     terminal's own code page cannot draw from escalating that into a crash.
 
+    ``sys.stdin`` is the same boundary in the other direction: a query
+    piped to ``resembl find`` under a C locale (``LC_ALL=C`` with
+    ``PYTHONUTF8=0``) was decoded as ASCII with surrogateescape, so every
+    UTF-8 byte became a lone surrogate and the query — checksummed with
+    ``surrogatepass`` so it never crashed — silently searched for text
+    that was never in the corpus.  Reconfiguring stdin to UTF-8 decodes
+    the bytes the sender wrote; ``errors="surrogateescape"`` is kept so
+    a genuinely invalid byte still cannot crash the read, it just
+    cannot match, exactly as it could not before.
+
     The encoding is only replaced where it is not already UTF-8, so the
     Windows console's own writer keeps its Unicode path.  ``newline="\\n"``
-    is pinned on every stream, UTF-8 or not: ``newline=None`` rewrites every
-    ``"\\n"`` to ``os.linesep``, so the same command emitted LF-terminated
-    output on POSIX and CRLF on Windows.  Every renderer here writes ``"\\n"``
-    (see ``_CSV_LINETERMINATOR`` in the CLI), and a report that a script
-    reads should not differ by platform.
+    is pinned on every output stream, UTF-8 or not: ``newline=None``
+    rewrites every ``"\\n"`` to ``os.linesep``, so the same command
+    emitted LF-terminated output on POSIX and CRLF on Windows.  Every
+    renderer here writes ``"\\n"`` (see ``_CSV_LINETERMINATOR`` in the
+    CLI), and a report that a script reads should not differ by
+    platform.  Stdin is not newline-pinned: universal-newline decoding
+    there is what makes a CRLF-piped query compare equal to its LF
+    spelling, and pinning it would reintroduce the platform difference
+    on the input side.
     """
-    for stream in (sys.stdout, sys.stderr):
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
         if not isinstance(stream, io.TextIOWrapper):
             continue
+        is_input = stream is sys.stdin
         try:
             if _encoding_is_utf8(stream.encoding):
-                stream.reconfigure(newline="\n")
+                if not is_input:
+                    stream.reconfigure(newline="\n")
+            elif is_input:
+                stream.reconfigure(encoding="utf-8", errors="surrogateescape")
             else:
                 stream.reconfigure(encoding="utf-8", errors="replace", newline="\n")
         except ValueError:

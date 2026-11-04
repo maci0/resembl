@@ -57,7 +57,6 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
-    name_json_escape,
     name_normalize,
     timestamp_normalize,
     timestamp_now,
@@ -371,7 +370,14 @@ def snippet_tag_add(
         return None
 
     tag_list = snippet.tag_list
-    if tag in tag_list:
+    # Compare in NFC, as names do: a tag stored before normalization (or
+    # merged in from a macOS-written database, which hands out NFD)
+    # spelled the other way is the same tag, not a second one.  The
+    # query is already NFC, and ASCII is NFC as well, so an ASCII tag
+    # needs no re-composition on the stored side.
+    if any(
+        tag == (stored if stored.isascii() else normalize_unicode(stored)) for stored in tag_list
+    ):
         return snippet  # Idempotent: already tagged
 
     tag_list.append(tag)
@@ -394,10 +400,20 @@ def snippet_tag_remove(
         return None
 
     tag_list = snippet.tag_list
-    if tag not in tag_list:
+    # Match in NFC, as snippet_tag_add does: removing the composed
+    # spelling of a tag stored decomposed (or vice versa) must find it.
+    match = next(
+        (
+            stored
+            for stored in tag_list
+            if tag == (stored if stored.isascii() else normalize_unicode(stored))
+        ),
+        None,
+    )
+    if match is None:
         return snippet  # Idempotent: tag not present
 
-    tag_list.remove(tag)
+    tag_list.remove(match)
     snippet.tags = json.dumps(tag_list)
     session.add(snippet)
     session.commit()
@@ -1600,46 +1616,44 @@ def snippet_collection_names_stream(
 def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:
     """Search for snippets where any name matches the pattern (case-insensitive).
 
-    The JSON structure means names are embedded in the string, so a
-    ``ILIKE '%pattern%'`` matches anywhere in the names list.  Case-
-    insensitivity comes from ``ilike`` rather than plain ``LIKE``: SQLite
-    happens to fold case in ``LIKE``, but PostgreSQL and DuckDB do not,
-    which made the same search behave differently across backends.
-    *pattern* reaches the column in the two forms the stored names are in:
-    normalized to NFC, then spelled the way :func:`name_json_escape` spells
-    them.  A pattern macOS or a copy-paste hands over in NFD (``cafe`` plus a
-    combining acute), and a non-ASCII character is stored as its ``\\uXXXX``
-    escape, so the search missed names it was given.
-    *limit* bounds the result (and the fetch) so a broad pattern on a
-    large database returns a useful page instead of everything.  The page is
-    ordered by the checksum primary key, so two runs over the same database
-    return the same rows in the same order.
+    Names are embedded in a JSON column, so no index can answer a
+    substring search over them; the search scans the (checksum, names)
+    columns in checksum order and verifies each decoded name in Python.
+    An ``ILIKE`` probe was tried for candidate narrowing, but it cannot
+    be sound here: the column spells a non-ASCII character as its
+    ``\\uXXXX`` escape, and case changes the code point — ``CAFÉ``
+    escapes to ``\\u00c9`` while ``café`` stores ``\\u00e9`` — so no
+    one probe admits both spellings, and an ASCII pattern that
+    casefold-matches a non-ASCII name (``strasse`` for ``straße``, whose
+    casefold is ``strasse``) is spelled literally in the column nowhere.
+    The ``%pattern%`` form is a full scan on every backend anyway, so
+    narrowing bought nothing and cost the matches above.
 
-    The probe is built from the JSON-encoded pattern, because that is the
-    form the column holds: ``json.dumps`` writes a non-ASCII character as a
-    ``\\uXXXX`` escape, so a probe carrying the raw character never matches
-    an accented name.  The fetched rows are then verified against the
-    decoded names, so ``%``/``_`` in a pattern cannot pull in rows that do
-    not contain it.
+    The match itself is caseless: both sides are :meth:`str.casefold`
+    before the substring test (not ``lower``, which leaves ``ß`` as
+    ``ß``).  *pattern* is normalized to NFC first, so a pattern macOS or
+    a copy-paste hands over in NFD (``cafe`` plus a combining acute)
+    finds the composed name stored in the database.
+    *limit* bounds the result, applied after verification so rejected
+    rows cannot consume the page.  The page is ordered by the checksum
+    primary key, so two runs over the same database return the same
+    rows in the same order.
 
-    Only the two decision columns are fetched for the LIKE candidates
-    (``code`` dominates the table); the verified survivors' full rows are
-    fetched afterwards, so a broad pattern does not drag every match's
-    code through the ORM before verification.
+    Only the two decision columns are fetched (``code`` dominates the
+    table); the verified survivors' full rows are fetched afterwards,
+    so a broad pattern does not drag every match's code through the
+    ORM before verification.
     """
     target = name_normalize(pattern)
-    probe = name_json_escape(target)
-    # Only (checksum, names) are fetched: the LIKE can match many rows
-    # before one verifies, and full rows would pull each match's ``code``
-    # (the column that dominates the table) through the ORM for nothing.
-    # The survivors' full rows are fetched afterwards via the identity map,
-    # so callers still receive the usual ORM objects.
+    folded_target = target.casefold()
     candidates = session.exec(
-        select(Snippet.checksum, Snippet.names)
-        .where(Snippet.names.ilike(f"%{probe}%"))  # type: ignore[attr-defined]
-        .order_by(Snippet.checksum)
-        .limit(limit)
+        select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum)
     ).all()
+    # Verification is case-insensitive, as the probe is: candidate
+    # generation and this check must agree on what "matches" means, or an
+    # upper-case pattern finds no row its own probe admitted.  casefold
+    # (not lower) is the caseless form: it maps 'ß' to 'ss' and folds the
+    # final sigma, so 'STRASSE' finds the row stored as 'straße'.
     # The pattern is already NFC.  ASCII is NFC as well, so composing an
     # ASCII alias again cannot change whether the pattern occurs in it.
     # A non-ASCII alias may still be the decomposed spelling (a row from
@@ -1649,10 +1663,10 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
         checksum
         for checksum, names in candidates
         if any(
-            target in (stored if stored.isascii() else name_normalize(stored))
+            folded_target in (stored if stored.isascii() else name_normalize(stored)).casefold()
             for stored in json.loads(names)
         )
-    ]
+    ][:limit]
     if not checksums:
         return []
     snippets_by_checksum = _snippets_by_checksums(session, checksums)
@@ -2727,9 +2741,19 @@ def db_merge(session: Session, source_db_path: str) -> dict:
                     existing.names = json.dumps(merged_names)
                     changed = True
 
-                # Merge tags (independent of names)
+                # Merge tags (independent of names), deduplicated in
+                # NFC as names are: a source row written on macOS (NFD)
+                # and the composed tag already stored are one tag, and
+                # an unnormalized union would store both spellings.
                 existing_tags = existing.tag_list
-                merged_tags = list(dict.fromkeys(existing_tags + src_tags))
+                merged_tags = list(existing_tags)
+                seen_tags = {normalize_unicode(t) for t in merged_tags}
+                for src_tag in src_tags:
+                    normalized_tag = normalize_unicode(src_tag)
+                    if normalized_tag in seen_tags:
+                        continue
+                    seen_tags.add(normalized_tag)
+                    merged_tags.append(normalized_tag)
                 if merged_tags != existing_tags:
                     existing.tags = json.dumps(merged_tags)
                     changed = True

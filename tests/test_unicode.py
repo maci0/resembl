@@ -341,6 +341,25 @@ class TestEncodingBoundaries(unittest.TestCase):
             sys.stdout.flush()
         self.assertEqual(raw.getvalue().decode("utf-8"), "日本語\n")
 
+    def test_stdin_is_reconfigured_to_utf8(self):
+        """A UTF-8 query piped under a C locale decodes as UTF-8, not ASCII.
+
+        Without this, ``resembl find < query.asm`` under ``LC_ALL=C``
+        surrogates every non-ASCII byte and searches for text that was
+        never in the corpus.
+        """
+        raw_in = io.BytesIO(b'db "caf\xc3\xa9", 0\n')
+        legacy_in = io.TextIOWrapper(raw_in, encoding="ascii")
+        legacy_out = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+        with (
+            patch("sys.stdin", legacy_in),
+            patch("sys.stdout", legacy_out),
+            patch("sys.stderr", legacy_out),
+        ):
+            console_utf8_reconfigure()
+            self.assertEqual(sys.stdin.encoding, "utf-8")
+            self.assertEqual(sys.stdin.read(), 'db "café", 0\n')
+
     def test_a_utf8_stream_is_left_alone(self):
         raw = io.BytesIO()
         stream = io.TextIOWrapper(raw, encoding="utf-8")
