@@ -1431,6 +1431,37 @@ class TestServerMode(_ServeTestCase):
         _result_cache_put(("big",), 1, big)
         self.assertEqual(len(_RESULT_CACHE), 1, "an oversized payload must not be stored")
 
+    def test_result_cache_is_isolated_from_caller_mutation(self):
+        """A caller mutating a payload must not rewrite the cached answer.
+
+        Handlers hold the returned dict past the cache lock (batch merges
+        it), so the cache must copy on the way in and on the way out: mutating
+        the computed payload after ``put`` and mutating a ``get`` result must
+        both leave the stored entry byte-identical.
+        """
+        from resembl.server import _RESULT_CACHE, _result_cache_get, _result_cache_put
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+
+        payload = {
+            "lsh_candidates": 1,
+            "matches": [{"checksum": "a" * 64, "names": ["x"], "score": 1.0}],
+        }
+        _result_cache_put(("k",), 1, payload)
+        payload["lsh_candidates"] = 999
+        payload["matches"][0]["names"].append("EVIL")
+        first = _result_cache_get(("k",), 1)
+        self.assertIsNotNone(first)
+        assert first is not None
+        self.assertEqual(first["lsh_candidates"], 1)
+        self.assertEqual(first["matches"][0]["names"], ["x"])
+        first["matches"].append({"checksum": "b" * 64, "names": [], "score": 0.0})
+        again = _result_cache_get(("k",), 1)
+        self.assertIsNotNone(again)
+        assert again is not None
+        self.assertEqual(len(again["matches"]), 1)
+
     def test_result_cache_evicts_oldest_beyond_max(self):
         """The version-guarded result cache evicts its oldest entry past the cap."""
         from resembl.server import (

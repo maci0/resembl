@@ -17,6 +17,7 @@ case.
 from __future__ import annotations
 
 import atexit
+import copy
 import functools
 import hashlib
 import json
@@ -171,14 +172,17 @@ def _inflight(key: tuple) -> Iterator[None]:
     try:
         yield
     finally:
-        # Released before the count drops: a thread arriving after the
-        # registry entry is gone finds no holder to wait for, so the key it
-        # creates is genuinely free.
-        entry.lock.release()
+        # Decrement and delete under the registry lock first, then release:
+        # releasing first let a newcomer acquire the old lock while the
+        # holder still counted as a user, after which the holder's exit
+        # deleted the registry entry from under the newcomer -- a third
+        # thread then built a second lock for the same key and computed in
+        # parallel with it, defeating the singleflight.
         with _INFLIGHT_LOCK:
             entry.users -= 1
             if entry.users == 0:
                 del _INFLIGHT[key]
+        entry.lock.release()
 
 
 #: One single-connection probe engine per served database, used only by
@@ -225,7 +229,11 @@ def _db_version(session: Session) -> int | None:
     # A private in-memory database is per-connection, so a probe would read
     # an empty database of its own and report a constant version.  Those
     # engines (tests, embedded callers) go uncached rather than wrong.
-    if url.database in (None, "", ":memory:"):
+    # The file must also be one the probe can actually open: a
+    # ``sqlite:///:memory:``-style URL whose database component is a query
+    # string or otherwise not a real path cannot be probed, and a constant
+    # counter on it would pin stale payloads forever.
+    if url.database in (None, "", ":memory:") or url.query:
         return None
     from sqlalchemy.pool import StaticPool
     from sqlmodel import create_engine, text
@@ -563,7 +571,11 @@ def _result_cache_get(key: tuple, version: int) -> dict | None:
             return None
         _RESULT_CACHE.move_to_end(key)
         _METRICS.record_cache_lookup(hit=True)
-        return entry[1]
+        # Copy on the way out: the caller holds the returned dict past the
+        # lock (handlers serialize it, batch merges it), so sharing the
+        # stored dict would let one request's mutation -- or a later
+        # in-place update -- corrupt every subsequent hit for the key.
+        return copy.deepcopy(entry[1])
 
 
 def _payload_chars(payload: dict) -> int:
@@ -590,8 +602,12 @@ def _result_cache_put(key: tuple, version: int, payload: dict) -> None:
     """
     if _payload_chars(payload) > _RESULT_CACHE_MAX_CHARS:
         return
+    # Copy on the way in: the caller keeps (and may mutate) the dict it
+    # computed, so storing it by reference would let that later mutation
+    # rewrite what the cache answers for the key.
+    stored = copy.deepcopy(payload)
     with _RESULT_CACHE_LOCK:
-        _RESULT_CACHE[key] = (version, payload)
+        _RESULT_CACHE[key] = (version, stored)
         _RESULT_CACHE.move_to_end(key)
         while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
             _RESULT_CACHE.popitem(last=False)
