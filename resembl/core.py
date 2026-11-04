@@ -178,13 +178,18 @@ def snippet_name_add(
     made a retried add (a lost response, a double-clicked command, a script
     re-run) exit 1 for an end state it had already produced.
     """
+    new_name = normalize_unicode(new_name.strip())
+    if not new_name:
+        if not quiet:
+            logger.error("Name cannot be empty.")
+        return None
+
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
         if not quiet:
             logger.error("Snippet with checksum %s not found.", checksum)
         return None
 
-    new_name = normalize_unicode(new_name)
     name_list = snippet.name_list
     # Compare in NFC: a name typed here and the same name imported from a
     # macOS filesystem (NFD) are one alias, not two.  The query is already
@@ -2148,7 +2153,9 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     # The name is the primary key, so it is normalized before the lookup: a
     # create with the NFD spelling of a name stored in NFC would miss the
     # existing row and then collide with it on insert.
-    name = normalize_unicode(name)
+    name = normalize_unicode(name.strip())
+    if not name:
+        raise ValueError("Collection name cannot be empty.")
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing

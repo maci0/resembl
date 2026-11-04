@@ -2211,6 +2211,10 @@ def collection_create_cmd(
     already_existed = Collection.get_by_name(state.session, name) is not None
     try:
         col = collection_create(state.session, name, description)
+    except ValueError as e:
+        logger.error("Could not create collection %r: %s", name, e)
+        err_console.print("[red]Error:[/red] " + str(e))
+        raise typer.Exit(code=1) from e
     except SQLAlchemyError as e:
         # Driver text carries the SQL statement and its bind parameters, which
         # must not reach the terminal; the name is the caller's own input.

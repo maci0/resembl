@@ -395,6 +395,24 @@ class TestNameOperations(BaseDBTest):
         self.assertIsNotNone(result)
         self.assertEqual(result.name_list, ["original"])
 
+    def test_collection_create_empty_rejected(self):
+        """Empty/whitespace collection name must raise ValueError."""
+        from resembl.core import collection_create
+
+        for bad in ("", "   "):
+            with self.assertRaises(ValueError):
+                collection_create(self.session, bad)
+
+    def test_name_add_empty_rejected(self):
+        """Empty/whitespace alias must be rejected, leaving names unchanged."""
+        snippet = snippet_add(self.session, "original", "NOP")
+        for bad in ("", "   "):
+            result = snippet_name_add(self.session, snippet.checksum, bad, quiet=True)
+            self.assertIsNone(result)
+        refreshed = snippet_get(self.session, snippet.checksum)
+        self.assertIsNotNone(refreshed)
+        self.assertEqual(refreshed.name_list, ["original"])
+
     def test_name_remove_last_name(self):
         """Removing the last name must be refused, keeping the snippet named."""
         snippet = snippet_add(self.session, "only_name", "NOP")

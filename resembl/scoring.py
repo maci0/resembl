@@ -1033,7 +1033,25 @@ def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4
     - 0.0 = pure Levenshtein
     - 1.0 = pure Jaccard
     - 0.4 (default) = 40 % Jaccard + 60 % Levenshtein
+
+    Raises:
+        ValueError: If any input is non-finite or outside its domain.
     """
+    import math
+
+    for label, value in (
+        ("jaccard", jaccard),
+        ("levenshtein", levenshtein),
+        ("jaccard_weight", jaccard_weight),
+    ):
+        if not math.isfinite(value):
+            raise ValueError(f"{label} must be finite, got {value!r}")
+    if not 0.0 <= jaccard <= 1.0:
+        raise ValueError(f"jaccard must be in range, got {jaccard!r}")
+    if not 0.0 <= levenshtein <= 100.0:
+        raise ValueError(f"levenshtein must be in range, got {levenshtein!r}")
+    if not 0.0 <= jaccard_weight <= 1.0:
+        raise ValueError(f"jaccard_weight must be in range, got {jaccard_weight!r}")
     return (jaccard * 100 * jaccard_weight) + (levenshtein * (1 - jaccard_weight))
 
 

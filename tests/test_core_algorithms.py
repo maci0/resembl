@@ -127,6 +127,22 @@ class TestScoreHybrid(unittest.TestCase):
         # 0.5 * 60 + 0.5 * 80 = 70
         self.assertAlmostEqual(score_hybrid(0.6, 80.0, jaccard_weight=0.5), 70.0)
 
+    def test_out_of_domain_rejected(self):
+        """Out-of-range / non-finite inputs must raise, not silently score."""
+        for args, kwargs in [
+            ((2.0, 50.0), {}),
+            ((-0.1, 50.0), {}),
+            ((0.5, 200.0), {}),
+            ((0.5, -1.0), {}),
+            ((0.5, 50.0), {"jaccard_weight": 2.0}),
+            ((0.5, 50.0), {"jaccard_weight": -0.1}),
+            ((float("nan"), 50.0), {}),
+            ((0.5, float("inf")), {}),
+            ((0.5, 50.0), {"jaccard_weight": float("nan")}),
+        ]:
+            with self.assertRaises(ValueError):
+                score_hybrid(*args, **kwargs)
+
     def test_asymmetric_scores(self):
         """Jaccard high, Levenshtein low."""
         # Jaccard=0.9 → 90 * 0.4 = 36, Levenshtein=20 * 0.6 = 12 → 48
