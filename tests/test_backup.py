@@ -70,10 +70,16 @@ class TestDbBackup(FileDBTest):
         self.assertEqual(names, ["bar", "foo"])
 
     def test_backup_prunes_to_keep(self):
-        """Old backups beyond ``keep`` are removed, newest retained."""
-        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        """Old backups beyond ``keep`` are removed, newest retained.
+
+        Each run adds a snippet first, so every backup holds distinct
+        content and is written: identical re-runs converge on one backup
+        (see ``test_repeated_backup_of_unchanged_content_is_convergent``)
+        and pruning applies only to genuinely new backups.
+        """
         backup_dir = os.path.join(self._tmpdir.name, "backups")
-        for _ in range(3):
+        for i in range(3):
+            snippet_add(self.session, f"s{i}", f"mov eax, {i}\nret")
             db_backup(self.session, backup_dir, keep=2)
         backups = sorted(
             name
@@ -171,6 +177,78 @@ class TestDbBackup(FileDBTest):
             # rather than by refusing here.
             result = db_backup(session, os.path.join(self._tmpdir.name, "mem-backups"))
             self.assertIn("backup", result)
+
+    def test_repeated_backup_of_unchanged_content_is_convergent(self):
+        """A re-run of ``db_backup`` on unchanged data writes no second file.
+
+        Regression: every run wrote a new timestamped copy and pruned the
+        oldest retained one, so a retried run (a double-scheduled cron
+        job, a script re-run, a caller that lost the first response)
+        consumed two retention slots for one logical backup and deleted
+        the oldest restorable copy with identical content.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        for _ in range(3):
+            again = db_backup(self.session, backup_dir, keep=7)
+            self.assertEqual(again["backup"], first["backup"])
+            self.assertEqual(again["num_removed"], 0)
+        backups = [
+            name
+            for name in os.listdir(backup_dir)
+            if name.startswith("assembly-") and name.endswith(".db")
+        ]
+        self.assertEqual(backups, [os.path.basename(first["backup"])])
+        self.assertTrue(db_verify_backup(self.session, first["backup"])["ok"])
+
+    def test_backup_after_a_content_change_writes_a_new_file(self):
+        """The reuse check is on content, not on the directory being non-empty."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        snippet_add(self.session, "bar", "xor ebx, ebx\nret")
+        second = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(second["backup"], first["backup"])
+        self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+
+    def test_backup_reuse_does_not_drain_the_retention_window(self):
+        """Duplicate runs never prune: only genuinely new content does."""
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        for i in range(7):
+            snippet_add(self.session, f"s{i}", f"mov eax, {i}\nret")
+            db_backup(self.session, backup_dir, keep=7)
+        before = sorted(
+            name
+            for name in os.listdir(backup_dir)
+            if name.startswith("assembly-") and name.endswith(".db")
+        )
+        self.assertEqual(len(before), 7)
+        for _ in range(5):
+            db_backup(self.session, backup_dir, keep=7)
+        after = sorted(
+            name
+            for name in os.listdir(backup_dir)
+            if name.startswith("assembly-") and name.endswith(".db")
+        )
+        self.assertEqual(after, before)
+
+    def test_legacy_manifest_without_a_content_hash_is_not_reused(self):
+        """A pre-hash manifest never matches, so a fresh backup is written."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        manifest_name = os.path.splitext(os.path.basename(first["backup"]))[0] + ".json"
+        manifest_path = os.path.join(backup_dir, manifest_name)
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = json.load(f)
+        del manifest["content_hash"]
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        second = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(second["backup"], first["backup"])
+        third = db_backup(self.session, backup_dir, keep=7)
+        self.assertEqual(third["backup"], second["backup"])
 
 
 class TestDbVerifyBackup(FileDBTest):

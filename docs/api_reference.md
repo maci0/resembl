@@ -121,11 +121,13 @@ ones; `resembl serve` reports it in the fingerprint scheme (see
 ### `db_backup(session, backup_dir: str, *, keep: int = 7) → dict` / `db_verify_backup(session, backup_path: str) → dict`
 `db_backup` writes a consistent, restorable copy of the default SQLite
 database into `backup_dir` (via SQLite's online backup API) with a
-manifest holding the snippet count and fingerprint version, pruned to
-the newest `keep` backups. `db_verify_backup` checks a backup opens,
-holds every table, and matches its manifest. SQLite only; other
-backends raise `ValueError`. The CLI forms are `resembl backup DIR` and
-`resembl verify-backup PATH` (see `docs/man.md`).
+manifest holding the snippet count, fingerprint version and a content
+hash, pruned to the newest `keep` backups. Re-running it on unchanged
+content returns the existing backup without writing or pruning, so a
+retried call cannot drain the retention window. `db_verify_backup`
+checks a backup opens, holds every table, and matches its manifest.
+SQLite only; other backends raise `ValueError`. The CLI forms are
+`resembl backup DIR` and `resembl verify-backup PATH` (see `docs/man.md`).
 
 ### `cfg_extract(code: str) → dict`
 Extract a simplified control-flow graph from assembly code. Returns `{num_blocks, num_edges, block_sizes, adj}`.

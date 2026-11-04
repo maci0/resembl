@@ -173,6 +173,60 @@ def _db_backup_manifest_name(backup_path: str) -> str:
     return f"{stem}.json"
 
 
+def _db_content_hash(session: Session) -> str:
+    """Return a stable identity for the snippet corpus in *session*.
+
+    The SHA-256 hex digest over the checksums in primary-key order.  Two
+    databases holding the same snippets — however their files happen to be
+    paged — hash identically, which is what makes a re-executed backup
+    recognizable as the same logical backup instead of a new one.  Only the
+    (indexed) ``checksum`` column is read, not the code or fingerprint
+    payloads, so the scan is cheaper than the file copy that follows it.
+    """
+    digest = hashlib.sha256()
+    for checksum in session.exec(
+        select(Snippet.checksum).order_by(Snippet.checksum)
+    ).all():
+        digest.update(checksum.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
+    """Return the newest existing backup of identical content, or ``None``.
+
+    A backup is reusable when its per-backup manifest records the same
+    :func:`_db_content_hash` and the backup file is still present.  A
+    missing, unreadable, or legacy (pre-hash) manifest never matches, so
+    those backups are simply not reused — a fresh one is written instead.
+    Candidates are scanned newest-first and the first match wins: a
+    duplicate run follows the run that produced it, so the matching
+    backup is among the newest — and scanning (rather than trusting one
+    filename) keeps the check correct even if name order inverts.
+    """
+    try:
+        names = os.listdir(backup_dir)
+    except OSError:
+        return None
+    candidates = sorted(
+        name
+        for name in names
+        if name.startswith("assembly-")
+        and name.endswith(".db")
+        and os.path.isfile(os.path.join(backup_dir, name))
+    )
+    for newest in reversed(candidates):
+        manifest_path = os.path.join(backup_dir, _db_backup_manifest_name(newest))
+        try:
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = json.load(f)
+        except OSError, ValueError:
+            continue
+        if isinstance(manifest, dict) and manifest.get("content_hash") == content_hash:
+            return os.path.join(backup_dir, newest)
+    return None
+
+
 #: Bounded retries for the index clear inside ``db_reindex`` (see there):
 #: concurrent cold finds of the same database contend on SQLite's exclusive
 #: schema lock, and the loser should wait rather than crash.
@@ -2006,6 +2060,13 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     are removed after the new one is durably in place, so a pruning failure
     can never cost the backup just taken.  A ``keep`` below 1 raises
     :class:`ValueError`: zero would delete the backup this call just wrote.
+
+    Re-execution is convergent: when the newest retained backup already
+    holds this database's current content (see :func:`_db_content_hash`),
+    the existing backup is returned and nothing is written or pruned, so a
+    retried run — a double-scheduled cron job, a script re-run, a caller
+    that lost the first response — cannot consume a second retention
+    slot or delete an older restorable copy.
     """
     if keep < 1:
         raise ValueError("keep must be at least 1")
@@ -2023,6 +2084,22 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
 
     os.makedirs(backup_dir, exist_ok=True)
     backup_dir = os.path.realpath(backup_dir)
+    # Idempotency: a backup of unchanged content already retained is not
+    # written again.  The check runs before the copy, which is also the
+    # expensive part — a duplicate run costs one checksum scan.
+    content_hash = _db_content_hash(session)
+    reused = _db_backup_reuse(backup_dir, content_hash)
+    if reused is not None:
+        try:
+            num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+        except Exception:
+            num_snippets = 0
+        return {
+            "backup": reused,
+            "num_snippets": int(num_snippets),
+            "fingerprint_version": fingerprint_version_get(session),
+            "num_removed": 0,
+        }
     # Microseconds keep two backups in the same second distinct, so prune
     # counts backups rather than overwriting one.
     # Stamped in UTC, not local time: the name is a sort key for prune
@@ -2117,6 +2194,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         "backup": backup_name,
         "num_snippets": int(num_snippets) if num_snippets is not None else None,
         "fingerprint_version": fingerprint_version_get(session),
+        "content_hash": content_hash,
         "created_at": timestamp_now(),
     }
     manifest_name = _db_backup_manifest_name(backup_name)
