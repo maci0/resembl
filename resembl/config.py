@@ -153,6 +153,19 @@ class ResemblConfig:
             if not hasattr(self, key):
                 continue
             default = DEFAULTS[key]
+            # int() truncates (2.9 -> 2), silently accepting a fractional
+            # count the file never asked for.  Reject fractional floats for
+            # int fields before coercion; integral floats (128.0) stay legal.
+            if isinstance(default, int) and not isinstance(default, bool) and isinstance(value, float):
+                if not value.is_integer():
+                    logger.warning(
+                        "Ignoring %s: expected %s, got %r.",
+                        key,
+                        type(default).__name__,
+                        value,
+                    )
+                    continue
+                value = int(value)
             try:
                 value = type(default)(value)
             except TypeError, ValueError, OverflowError:
