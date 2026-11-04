@@ -1859,7 +1859,11 @@ def find(
         # ``_query_inline_statements``); multi-line input keeps NASM comments.
         query_string = _query_inline_statements(query)
     elif file:
-        query_string = file.read()
+        try:
+            query_string = file.read()
+        except UnicodeDecodeError:
+            err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+            raise typer.Exit(code=USAGE_ERROR) from None
         if any(0xD800 <= ord(ch) <= 0xDFFF for ch in query_string):
             err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
             raise typer.Exit(code=USAGE_ERROR)
@@ -1960,7 +1964,13 @@ def find_batch(
         effective_top_n,
     )
 
-    queries = [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]
+    try:
+        queries = [
+            line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")
+        ]
+    except UnicodeDecodeError:
+        err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+        raise typer.Exit(code=USAGE_ERROR) from None
     if not queries:
         err_console.print("[red]Error:[/red] No queries found in the file.")
         raise typer.Exit(code=USAGE_ERROR)

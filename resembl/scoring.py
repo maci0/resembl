@@ -737,6 +737,13 @@ def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4
 def cfg_extract(code: str) -> dict:
     """Extract a simplified control-flow graph from assembly code.
 
+    Normalization: the input is run through :func:`normalize_unicode` (NFC)
+    first, so a label defined as the NFC spelling and jumped to as the NFD
+    spelling (or vice-versa) resolves to the same block.  Without this, the
+    NFC/NFD mismatch drops the branch edge and skews every CFG-derived
+    score, even though the text is the same to a reader.  Callers that
+    already store NFC code (``snippet_prepare``) see no change.
+
     Parses line-by-line, splitting at labels and branch instructions to
     identify basic blocks.  Returns a dict with:
 
@@ -745,6 +752,7 @@ def cfg_extract(code: str) -> dict:
     - ``block_sizes``: list of instruction counts per block
     - ``adj``: adjacency list (block index → list of successor indices)
     """
+    code = normalize_unicode(code)
     lines = [line.strip() for line in code.splitlines() if line.strip()]
     if not lines:
         return {"num_blocks": 0, "num_edges": 0, "block_sizes": [], "adj": {}}
