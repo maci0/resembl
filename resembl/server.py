@@ -2069,7 +2069,25 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         fd = os.open(tmp_port_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8") as f:
             f.write(str(httpd.server_address[1]))
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_port_path, port_file)
+        # fsync the directory so the rename itself survives an OS crash;
+        # without it the port file can vanish while the server keeps
+        # listening, orphaning it for every find client.  Windows cannot
+        # open a directory for fsync, so failures are ignored (same
+        # pattern as resembl.core._sync_dir).
+        try:
+            dir_fd = os.open(os.path.dirname(port_file), os.O_RDONLY)
+        except OSError:
+            dir_fd = None
+        if dir_fd is not None:
+            try:
+                os.fsync(dir_fd)
+            except OSError:
+                pass
+            finally:
+                os.close(dir_fd)
     except BaseException:
         # A failed advertisement must not leak the bound server and its
         # warm engine pool (same reasoning as the bind-failure dispose

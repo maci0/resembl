@@ -1857,7 +1857,10 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(sorted(written), f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, os.path.join(export_dir, _EXPORT_MANIFEST_NAME))
+        _sync_dir(export_dir)
     except OSError as e:
         logger.warning("Could not write the export manifest: %s", e)
         try:
@@ -1946,6 +1949,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, file_path)
+            _sync_dir(abs_export_dir)
         except BaseException:
             try:
                 os.unlink(tmp_path)

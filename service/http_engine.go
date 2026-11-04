@@ -19,6 +19,9 @@ import (
 type LocalEngine struct {
 	endpoint string
 	client   *http.Client
+	// transport is kept so CloseIdleConnections can retire pooled
+	// connections when the engine is discarded.
+	transport *http.Transport
 }
 
 func NewLocalEngine(endpoint string) (*LocalEngine, error) {
@@ -30,7 +33,31 @@ func NewLocalEngine(endpoint string) (*LocalEngine, error) {
 	if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, errors.New("engine must be loopback")
 	}
-	return &LocalEngine{strings.TrimRight(u.String(), "/"), &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	// Bounded transport: the default http.Transport pools up to 100 idle
+	// connections per host with no idle timeout, so a long-lived service
+	// whose engine is slow to answer accumulates half-dead idle sockets
+	// that fail on next use.  Cap idle per host and time them out; the
+	// request timeout still bounds an in-flight call.
+	transport := &http.Transport{
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     30 * time.Second,
+	}
+	return &LocalEngine{
+		endpoint:  strings.TrimRight(u.String(), "/"),
+		client:    &http.Client{Timeout: 30 * time.Second, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		transport: transport,
+	}, nil
+}
+
+// CloseIdleConnections retires pooled connections held by this engine.
+// Callers that discard an engine (shutdown, tests) should call it so the
+// underlying sockets are released instead of held until the transport is
+// collected.
+func (e *LocalEngine) CloseIdleConnections() {
+	if e.transport != nil {
+		e.transport.CloseIdleConnections()
+	}
 }
 func (e *LocalEngine) Find(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 	return e.find(ctx, "/find", body)

@@ -29,6 +29,16 @@ func NewPinnedSQLiteEngine(endpoint, index, artifact, generation string) (*Pinne
 	}
 	return &PinnedSQLiteEngine{local, index, artifact, generation}, nil
 }
+
+// CloseIdleConnections retires pooled engine connections.  The local
+// engine's transport is bounded, but a process that discards the pinned
+// engine (shutdown, tests) must still release its idle sockets.
+func (e *PinnedSQLiteEngine) CloseIdleConnections() {
+	if e.local != nil {
+		e.local.CloseIdleConnections()
+	}
+}
+
 func (e *PinnedSQLiteEngine) Find(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 	var request map[string]json.RawMessage
 	if json.Unmarshal(body, &request) != nil || request == nil {
