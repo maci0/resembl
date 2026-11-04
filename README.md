@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/resembl_mascot.png" alt="resembl mascot" width="200">
+  <img src="https://raw.githubusercontent.com/maci0/resembl/main/docs/resembl_mascot.png" alt="resembl mascot" width="200">
 </p>
 
 # resembl: Assembly Code Similarity Search
