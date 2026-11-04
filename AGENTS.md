@@ -110,8 +110,10 @@ report.
 
 ## Branches and commits
 
-Never commit on `main`. Cut `feat/`, `fix/`, `refactor/`, `docs/`, `test/`,
-`chore/` branches named `<type>/<issue-number>-short-description`.
+Trunk-based: commit straight to `main` in small, verified, self-contained
+commits; `main` stays releasable at every commit. Branch only for work that must
+not land yet (a risky or long-running change, or one awaiting review), merge it
+by fast-forward and delete the branch.
 
 Conventional Commits v1.0.0, one type per commit, description in the
 imperative, lowercase, no trailing period:
@@ -207,8 +209,8 @@ contributor.
 
 ## Releasing
 
-A release is a maintainer's one `release X.Y.Z` commit on `main`, the single
-exception to "never commit on `main`", followed by tag `vX.Y.Z`; the tag is
+A release is a maintainer's one `release X.Y.Z` commit on `main`, followed by
+tag `vX.Y.Z`; the tag is
 what the published version is taken from. SemVer decides the
 number: a removed or renamed public export, a changed signature, default,
 stored format (fingerprint, database, cache) or `serve` response, or a raised
