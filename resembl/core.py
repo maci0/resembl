@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
@@ -1856,7 +1857,9 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
     manifest disables stale-file pruning on the next run, which the caller
     reports instead of silently accepting a non-convergent directory.
     """
-    tmp_path = os.path.join(export_dir, f"{_EXPORT_MANIFEST_NAME}.{os.getpid()}.tmp")
+    tmp_path = os.path.join(
+        export_dir, f"{_EXPORT_MANIFEST_NAME}.{os.getpid()}-{threading.get_ident()}.tmp"
+    )
     try:
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
@@ -1946,7 +1949,10 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         # (same pattern as ``db_backup``): ``open(file_path, "w")`` truncates
         # the live export first, so a crash mid-export leaves a truncated
         # file that looks like a complete export artifact.
-        tmp_path = file_path + ".tmp"
+        # The temp name is unique per caller (pid + thread id) so concurrent
+        # duplicate exports in one process do not truncate each other's
+        # temp and publish a corrupt file.
+        tmp_path = f"{file_path}.{os.getpid()}-{threading.get_ident()}.tmp"
         try:
             with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(snippet.code)
