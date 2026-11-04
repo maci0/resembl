@@ -22,7 +22,6 @@ from .scoring import (
     code_tokenize,
     minhash_ensure_packed,
     minhash_num_perm,
-    require_same_num_perm,
 )
 
 logger = logging.getLogger(__name__)
@@ -151,34 +150,44 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
 
     # Normalize and validate each sampled fingerprint, skipping corrupt ones
     # (disk rot) — one bad blob must not crash `stats` on a large database.
-    blobs: list[bytes] = []
+    # Stale-perm blobs are skipped the same way, matching the index build
+    # and find paths: a mixed-perm database (config flip between writes)
+    # must not crash the similarity estimate too.
+    blobs: list[tuple[str, bytes]] = []
     for s in sample_snippets:
         try:
-            blobs.append(minhash_ensure_packed(s.minhash))
+            blobs.append((s.checksum, minhash_ensure_packed(s.minhash)))
         except ValueError:
             logger.warning(
                 "Skipping snippet %s in the similarity sample: corrupt fingerprint.",
                 s.checksum,
             )
 
-    num_snippets = len(blobs)
+    if not blobs:
+        return 1.0
+
+    # Keep only blobs matching the first blob's permutation count; a
+    # well-formed blob at a different count is stale for this sample.
+    num_perm = minhash_num_perm(blobs[0][1])
+    packed_blobs: list[bytes] = []
+    for checksum, blob in blobs:
+        if minhash_num_perm(blob) != num_perm:
+            logger.warning(
+                "Skipping snippet %s in the similarity sample: "
+                "fingerprint permutation count does not match %d.",
+                checksum,
+                num_perm,
+            )
+            continue
+        packed_blobs.append(blob)
+
+    num_snippets = len(packed_blobs)
     if num_snippets < 2:
         return 1.0
 
-    # The sample is compared all-pairs (i < j).  At the default sample of 100
-    # that is 4,950 pairs; the per-pair ``minhash_jaccard`` path pays two
-    # ``struct.unpack`` calls plus a Python-level 128-element loop each, so
-    # the whole estimate ran ~633k interpreted iterations.  One packed uint32
-    # array is built once and every pair's equality count is then a C-level
-    # numpy pass; per-pair values are identical to ``minhash_jaccard``
-    # (boolean mean == equal-count / num_perm in float64).
-    num_perm = minhash_num_perm(blobs[0])
-    for blob in blobs[1:]:
-        require_same_num_perm(num_perm, minhash_num_perm(blob))
-
     import numpy as np
 
-    values = np.frombuffer(b"".join([blob[8:] for blob in blobs]), dtype=">u4").reshape(
+    values = np.frombuffer(b"".join([blob[8:] for blob in packed_blobs]), dtype=">u4").reshape(
         num_snippets, num_perm
     )
     total_similarity = 0.0
