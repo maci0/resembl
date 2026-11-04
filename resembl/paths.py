@@ -22,6 +22,7 @@ import io
 import os
 import re
 import sys
+import tempfile
 
 #: Database URL used when the environment names none.
 DEFAULT_DB_URL = "sqlite:///assembly.db"
@@ -76,17 +77,24 @@ def db_url_mask(url: str) -> str:
 
 
 def _expand_home(path: str) -> str:
-    """Return *path* with a leading ``~`` expanded, or *path* unchanged.
+    """Return *path* with a leading ``~`` expanded, or a temp fallback.
 
     ``os.path.expanduser`` returns the literal ``~``-prefixed string when it
     cannot resolve a home directory — on Windows when neither ``USERPROFILE``
     nor ``HOME`` is set (a service account or a scrubbed environment), and on
     POSIX when the login name has no password-database entry.  Writing into a
     directory literally named ``~`` in the working directory is never what the
-    user asked for, so the caller's default is used instead.
+    user asked for, so a per-process temp directory name is used instead.
     """
     expanded = os.path.expanduser(path)
-    return path if expanded == path and path.startswith("~") else expanded
+    if expanded == path and path.startswith("~"):
+        rest = path[1:].lstrip(os.sep + "/")
+        return (
+            os.path.join(tempfile.gettempdir(), "resembl-home-fallback", rest)
+            if rest
+            else tempfile.gettempdir()
+        )
+    return expanded
 
 
 def cache_dir_get() -> str:

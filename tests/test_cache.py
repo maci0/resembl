@@ -48,6 +48,14 @@ class TestCache(unittest.TestCase):
             with patch.dict(os.environ, env):
                 self.assertEqual(cache_dir_get(), override)
 
+    def test_cache_dir_unresolvable_home_falls_back_to_temp(self):
+        """A home expanduser cannot resolve must not yield a literal '~' path."""
+        with patch("os.path.expanduser", side_effect=lambda p: p):
+            with patch.dict(os.environ, {"XDG_CACHE_HOME": "", "RESEMBL_CACHE_DIR": ""}):
+                result = cache_dir_get()
+                self.assertFalse(result.startswith("~"))
+                self.assertIn("resembl", result)
+
     def test_load_nonexistent_cache(self):
         """Test loading a nonexistent cache file."""
         with tempfile.TemporaryDirectory() as tmpdir:
