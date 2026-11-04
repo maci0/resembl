@@ -168,10 +168,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if r.URL.RawQuery != "" {
-			writeError(w, http.StatusNotFound, "not found")
-			return
-		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -179,10 +175,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		if r.URL.RawQuery != "" {
-			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -193,7 +185,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if (r.URL.Path != "/v1/find" && r.URL.Path != "/v1/find-batch") || r.URL.RawQuery != "" {
+	if r.URL.Path != "/v1/find" && r.URL.Path != "/v1/find-batch" {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}

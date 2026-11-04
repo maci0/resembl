@@ -368,22 +368,22 @@ def test_find_pinned_rejects_get(pinned_server):
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    "overrides,field",
     [
-        {"index_sha256": "xyz"},
-        {"index_sha256": "A" * 64},
-        {"index_sha256": 5},
-        {"query": 5},
-        {"query": "   "},
+        ({"index_sha256": "xyz"}, "index_sha256"),
+        ({"index_sha256": "A" * 64}, "index_sha256"),
+        ({"index_sha256": 5}, "index_sha256"),
+        ({"query": 5}, "query"),
+        ({"query": "   "}, "query"),
     ],
 )
-def test_find_pinned_rejects_malformed_request(pinned_server, overrides):
+def test_find_pinned_rejects_malformed_request(pinned_server, overrides, field):
     httpd, digest = pinned_server
     status, body, _headers = _request(
         httpd, "/find-pinned", _pinned_body(httpd, digest, **overrides)
     )
     assert status == 400
-    assert body == {"error": "invalid pinned query"}
+    assert field in body["error"]
 
 
 def test_find_pinned_without_manifest_env_is_unavailable(pinned_server, monkeypatch):

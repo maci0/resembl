@@ -2226,11 +2226,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # Record the absence (None, not 0) so verify knows the count was
         # never taken and skips the cross-check rather than failing it.
         logger.warning("Could not count snippets for the backup manifest: %s", e)
-        num_snippets = None
+        num_snippets = None  # type: ignore[assignment]
         count_known = False
     manifest = {
         "backup": backup_name,
-        "num_snippets": int(num_snippets) if num_snippets is not None else None,
+        "num_snippets": num_snippets,
         "fingerprint_version": fingerprint_version_get(session),
         "content_hash": content_hash,
         "created_at": timestamp_now(),

@@ -1547,10 +1547,14 @@ class _FindHandler(BaseHTTPRequestHandler):
             not isinstance(expected, str)
             or len(expected) != 64
             or any(c not in "0123456789abcdef" for c in expected)
-            or not isinstance(query, str)
-            or _query_field_error(query) is not None
         ):
-            self._respond(400, {"error": "invalid pinned query"})
+            self._respond(
+                400, {"error": "bad request: index_sha256 must be 64 lowercase hex digits"}
+            )
+            return
+        reason = _query_field_error(query)
+        if reason is not None:
+            self._respond(400, {"error": f"bad request: {reason}"})
             return
         try:
             verify_runtime(manifest_path, artifact)
@@ -1576,7 +1580,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                 ):
                     self._respond(503, {"error": "pinned index requires rebuild"})
                     return
-                payload = _find_uncached(session, query, request)
+                payload = _find_uncached(session, cast(str, query), request)
                 verify_runtime(manifest_path, artifact)
                 self._respond(
                     200,
