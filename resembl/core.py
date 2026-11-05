@@ -2193,7 +2193,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             # As in the fresh-backup path below: never fabricate a 0 count,
             # which db_verify_backup reads as an empty database.
             logger.warning("Could not count snippets for the reused backup: %s", e)
-            num_snippets = None  # type: ignore[assignment]
+            num_snippets = None
         return {
             "backup": reused,
             "num_snippets": num_snippets,
@@ -2302,7 +2302,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # Record the absence (None, not 0) so verify knows the count was
         # never taken and skips the cross-check rather than failing it.
         logger.warning("Could not count snippets for the backup manifest: %s", e)
-        num_snippets = None  # type: ignore[assignment]
+        num_snippets = None
         count_known = False
     manifest = {
         "backup": backup_name,

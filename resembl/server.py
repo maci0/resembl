@@ -1883,9 +1883,10 @@ class _FindServer(ThreadingHTTPServer):
         """
         if isinstance(sys.exc_info()[1], ConnectionError | TimeoutError):
             return
-        logger.exception(
+        logger.error(
             "unhandled error serving %s",
             client_address[0] if client_address else "unknown",
+            exc_info=sys.exc_info(),
         )
         super().handle_error(request, client_address)
 

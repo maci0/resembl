@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'python' ]
+        language: [ 'python', 'go' ]
 
     steps:
     - name: Checkout repository
@@ -41,9 +41,9 @@ jobs:
       with:
         languages: ${{ matrix.language }}
 
-    # No autobuild step: Python is extracted from source by CodeQL itself, so
-    # an autobuild pass only adds a way to fail for a compiler the project does
-    # not use.
+    # No autobuild step: Python and Go are extracted from source by CodeQL
+    # itself, so an autobuild pass only adds a way to fail for a compiler
+    # the project does not use.
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
       with:
