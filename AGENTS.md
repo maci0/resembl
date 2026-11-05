@@ -151,7 +151,7 @@ touches the matching docs in the same change:
   flag also lands in the tool's own `--help`.
 - The relevant file in `docs/` (`api_reference.md`, `http_api.md`,
   `flowcharts.md`, `custom_database.md`, `user_stories.md`, `tutorial.md`,
-  `man.md`, `THREAT_MODEL.md`).
+  `man.md`, `restore.md`, `THREAT_MODEL.md`).
 - `CHANGELOG.md` under `## [Unreleased]`, grouped `Added` / `Changed` /
   `Fixed`, written for a consumer: what changed for you, and the migration step
   for anything breaking.
