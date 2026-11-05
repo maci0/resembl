@@ -461,7 +461,7 @@ def _csv_safe(value: object) -> object:
     """
     if isinstance(value, str) and (
         value.startswith(_CSV_FORMULA_PREFIXES)
-        or value.lstrip().lstrip("﻿​‌‍").startswith(_CSV_FORMULA_PREFIXES)
+        or value.lstrip().lstrip("\ufeff\u200b\u200c\u200d").startswith(_CSV_FORMULA_PREFIXES)
     ):
         return "'" + value
     return value

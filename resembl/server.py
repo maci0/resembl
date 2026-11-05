@@ -1592,11 +1592,10 @@ class _FindHandler(BaseHTTPRequestHandler):
                     # returns to the pool, serializing later writers.
                     _release_fence()
                     raise
-                else:
-                    try:
-                        connection.exec_driver_sql("COMMIT")
-                    except Exception:
-                        pass
+                try:
+                    connection.exec_driver_sql("COMMIT")
+                except Exception:
+                    pass
                 self._respond(
                     200,
                     {
@@ -1789,7 +1788,9 @@ class _FindHandler(BaseHTTPRequestHandler):
             )
 
 
-class _FindServer(ThreadingHTTPServer):
+class _FindServer(
+    ThreadingHTTPServer
+):  # pylint: disable=too-many-instance-attributes  # server lifecycle and connection state
     """The serving :class:`ThreadingHTTPServer`; owns and disposes the engine.
 
     ``server_close`` releases the engine's pooled DB connections instead of
