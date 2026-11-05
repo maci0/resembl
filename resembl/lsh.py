@@ -289,14 +289,9 @@ def _ensure_tables_once(session: Session) -> None:
     time.  Without the lock each thread would run ``create_all``
     (checkfirst) concurrently and lose the race between its has-table probe
     and another thread's CREATE — surfacing as a spurious "table already
-    exists" / "database is locked" failure on real requests.  The unlocked
-    fast path keeps the steady state (one set-membership read per request)
-    lock-free; the marker is only published under the lock after the DDL
-    completed.
+    exists" / "database is locked" failure on real requests.
     """
     engine = session.get_bind()
-    if engine in _TABLES_ENSURED:
-        return
     with _TABLES_ENSURED_LOCK:
         if engine not in _TABLES_ENSURED:
             table_ensure(session)
