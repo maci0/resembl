@@ -38,6 +38,7 @@ from resembl.core import (
     snippet_prepare,
     snippet_search_by_name,
     snippet_tag_add,
+    snippet_tag_remove,
     string_checksum,
 )
 from resembl.models import Collection, Snippet
@@ -168,6 +169,38 @@ class TestSnippetRoundTrip(_InMemoryDbTestCase):
         snippet_tag_add(self.session, snippet.checksum, "café")
         self.assertEqual(snippet.tag_list, ["café"])
 
+    def test_tag_add_is_idempotent_against_a_legacy_nfd_tag(self):
+        """A tag stored decomposed must not gain a composed twin."""
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        snippet.tags = json.dumps(["cafe\u0301"])
+        self.session.add(snippet)
+        self.session.commit()
+        result = snippet_tag_add(self.session, snippet.checksum, "café")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(len(result.tag_list), 1)
+
+    def test_tag_remove_accepts_nfc_against_a_legacy_nfd_tag(self):
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        snippet.tags = json.dumps(["cafe\u0301"])
+        self.session.add(snippet)
+        self.session.commit()
+        result = snippet_tag_remove(self.session, snippet.checksum, "café")
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.tag_list, [])
+
+    def test_readding_code_does_not_alias_a_legacy_nfd_name(self):
+        """Re-adding stored code under its composed name adds no second alias."""
+        snippet = snippet_add(self.session, "unused", "MOV EAX, 1")
+        snippet.names = json.dumps(["cafe\u0301"])
+        self.session.add(snippet)
+        self.session.commit()
+        again = snippet_add(self.session, "café", "MOV EAX, 1")
+        self.assertIsNotNone(again)
+        assert again is not None
+        self.assertEqual(len(again.name_list), 1)
+
     def test_astral_and_combining_characters_survive_the_round_trip(self):
         code = 'db "\U0001f600é", 0'
         snippet = snippet_add(self.session, "\U0001f600-combining", code)
@@ -277,6 +310,22 @@ class TestNameSearch(_InMemoryDbTestCase):
         snippet_add(self.session, "café", "MOV EAX, 1")
         self.assertEqual(snippet_search_by_name(self.session, "tea"), [])
 
+    def test_search_is_case_insensitive(self):
+        """The documented search is case-insensitive, verification included."""
+        snippet = snippet_add(self.session, "café", "MOV EAX, 1")
+        self.assertIsNotNone(snippet)
+        found = snippet_search_by_name(self.session, "CAFÉ")
+        self.assertEqual([s.checksum for s in found], [snippet.checksum])
+
+    def test_search_finds_a_name_stored_before_normalization(self):
+        """A legacy decomposed row must be reachable, not just verifiable."""
+        snippet = snippet_add(self.session, "unused", "MOV EAX, 1")
+        snippet.names = json.dumps(["cafe\u0301"])
+        self.session.add(snippet)
+        self.session.commit()
+        found = snippet_search_by_name(self.session, "café")
+        self.assertEqual([s.checksum for s in found], [snippet.checksum])
+
     def test_a_name_lookup_finds_a_non_ascii_name(self):
         """The LIKE probe has to spell the name the way the column stores it:
         ``json.dumps`` escapes every non-ASCII character, so the character
@@ -321,7 +370,8 @@ class TestEncodingBoundaries(unittest.TestCase):
             with open(query_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(code)
 
-            added = _cli_run("import", query_path, "--force")
+            db_url = f"sqlite:///{os.path.join(temp_dir, 'test.db')}"
+            added = _cli_run("import", query_path, "--force", env={"DATABASE_URL": db_url})
             self.assertEqual(added.returncode, 0, added.stderr)
 
             # The C locale with coercion off is the platform default a
@@ -334,6 +384,7 @@ class TestEncodingBoundaries(unittest.TestCase):
                 "--file",
                 query_path,
                 env={
+                    "DATABASE_URL": db_url,
                     "LC_ALL": "C",
                     "LANG": "C",
                     "PYTHONCOERCECLOCALE": "0",
