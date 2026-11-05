@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fixed documentation that contradicted the code: `docs/custom_database.md` claimed importing `Snippet` creates only the `snippet` table, when importing `resembl.models` registers and creates all six resembl tables; `docs/api_reference.md` now documents `snippet_search_by_name`, `snippet_name_add`, `snippet_tag_add`, `snippet_export_yara`, and `db_verify`, includes the `quiet` parameter on `snippet_delete`/`collection_delete`, and clarifies that `lsh_cache_save`/`lsh_cache_load` stamp metadata only and never load legacy pickle caches; the README project tree now lists `pinned_snapshot.py`, `runtime_attestation.py`, and `status_colors.py`.
+
 - Trimmed whitespace in database and directory environment overrides and rejected boolean-style values in `config.toml` (including `"true"`/`"false"`) and in `resembl-find`, so a padded `RESEMBL_DATABASE_URL` opens the intended database and a mistyped boolean no longer becomes `1` or `0`.
 
 ### Added

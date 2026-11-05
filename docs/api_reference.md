@@ -80,8 +80,8 @@ List snippets, optionally within a `[start, end)` window of the full listing.
 `end=None` (the default) lists everything; an explicit `end` selects a window,
 so `end=0` is the empty window rather than "no window".
 
-### `snippet_delete(session, checksum: str) → bool`
-Delete a snippet. Returns `True` on success.
+### `snippet_delete(session, checksum: str, quiet: bool = False) → bool`
+Delete a snippet. Returns `True` on success. With `quiet=True`, a missing snippet returns `False` without logging an error.
 
 ### `snippet_export(session, export_dir: str) → dict`
 Write every snippet to `export_dir` as `<primary name>.asm`. Returns
@@ -138,14 +138,26 @@ Compute structural similarity between two CFGs (0.0–1.0) using block/edge rati
 ### `snippet_version_list(session, checksum: str) → list[dict]`
 Return version history for a snippet.
 
+### `snippet_search_by_name(session, pattern: str, limit: int = 50) → list[Snippet]`
+Case-insensitive substring search over snippet names (NFC-normalized, `casefold` comparison). Names live in a JSON column so no index can answer the search; it scans `(checksum, names)` in checksum order and verifies each decoded name in Python. *limit* caps the result after verification.
+
+### `snippet_name_add(session, checksum: str, new_name: str, quiet: bool = False) → Snippet | None`
+Add a name to an existing snippet's alias list. Idempotent: adding an existing name is a no-op that returns the snippet. With `quiet=True`, a missing snippet or empty name returns `None` without logging an error.
+
+### `snippet_tag_add(session, checksum: str, tag: str, quiet: bool = False) → Snippet | None`
+Add a tag to a snippet. Idempotent: adding an existing tag is a no-op that returns the snippet. With `quiet=True`, a missing snippet or empty tag returns `None` without logging an error.
+
+### `snippet_export_yara(session, output_file: str) → dict`
+Export snippets as YARA string-matching rules to *output_file* (one rule per snippet, `nocase ascii wide`, checksum in metadata). Returns `num_exported` and `time_elapsed`. The file is written to a same-directory temp and published with one atomic rename, so a failure never leaves a truncated rule file at *output_file*.
+
 ## Collection Operations
 
 ### `collection_create(session, name: str, description: str = "") → Collection`
 Create a snippet collection, or return the existing one of that name with its
 stored description and `created_at` untouched. Idempotent.
 
-### `collection_delete(session, name: str) → bool`
-Delete a collection (snippets are kept but unassigned).
+### `collection_delete(session, name: str, quiet: bool = False) → bool`
+Delete a collection (snippets are kept but unassigned). With `quiet=True`, a missing collection returns `False` without logging an error.
 
 ### `collection_list(session) → list[dict]`
 List all collections with snippet counts.
@@ -232,6 +244,9 @@ Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
 Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard; all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
 
+### `db_verify(session) → dict`
+Report database health: fingerprint format version, LSH metadata, bucket/snippet counts, and any pending work. Returns counts plus `warnings` (self-healing states a next `find` repairs: missing index, stale fingerprints) and `issues` (a bucket/snippet mismatch that `reindex --force` should resolve). Callers exit non-zero only when `issues` is non-empty.
+
 ### `db_reindex(session, ngram_size: int = 3, batch_size: int = 500, jobs: int = 1, num_perm: int = 128, progress=None) → dict`
 Recompute every snippet's MinHash. With `jobs > 1` *and* more than `batch_size` snippets, the CPU-bound tokenization runs in a process pool; below that the pool's spawn cost exceeds the work and it stays sequential. Clears any built index up front (a crash mid-reindex never leaves a stale index) and commits periodically on SQLite so the WAL stays bounded. `progress(done, total)` is called with snippets processed so far.
 
@@ -240,10 +255,14 @@ Recompute every snippet's MinHash. With `jobs > 1` *and* more than `batch_size` 
 The similarity index is database-backed rather than an in-memory datasketch
 structure: band buckets live in the `lsh_bucket` table with parameters in
 `lsh_meta`. `ResemblLSH`, `band_buckets`, and `lsh_index_clear` / `lsh_meta_get`
-live in `resembl.lsh`; the build/save/load helpers (`lsh_index_build`,
-`lsh_cache_save`, `lsh_cache_load`) live in `resembl.cache`; the packed
-fingerprint primitives below are defined in `resembl.scoring` and re-exported
-by `resembl.models`.
+live in `resembl.lsh`; the index lifecycle helpers (`lsh_index_build`,
+`lsh_cache_save`, `lsh_cache_load`) live in `resembl.cache`. `lsh_cache_save`
+only stamps the metadata row and removes any legacy pickle cache file;
+`lsh_cache_load` returns the database-backed index when its metadata
+matches the requested parameters and `None` otherwise — legacy pickle cache
+files are deliberately never loaded (unpickling is arbitrary code execution).
+The packed fingerprint primitives below are defined in `resembl.scoring` and
+re-exported by `resembl.models`.
 
 ### `ResemblLSH(session, threshold: float, num_perm: int)`
 A banded MinHash LSH facade over the `lsh_bucket` table. Methods `insert(key, minhash_or_packed, *, commit=True)`, `insert_batch(items, *, commit=True)`, `query(value) → list[str]`, and `remove(checksum)` accept either a `resembl.minhash.MinHash` or a packed fingerprint blob. The banding parameters `(b, r)` are computed once per `(threshold, num_perm)` and cached (the numpy banding search would otherwise add ~13 ms per construction), and `query` batches band lookups into bounded `UNION ALL` queries. `remove` does not commit: the caller owns the transaction, which is what lets `snippet_delete` commit the bucket purge together with the snippet row (via `lsh_index_purge` in `resembl.cache`). The same holds for `insert` / `insert_batch` with `commit=False`: `snippet_add`, `snippet_add_batch`, and `db_merge` write a snippet row and its bucket rows in one commit, so a process that dies between the two leaves neither. Re-running the write is free: the `(band, bucket, checksum)` primary key makes both halves naturally idempotent.

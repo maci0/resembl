@@ -33,7 +33,7 @@ all of the above (pinned by `tests/test_pg_dialect.py`).
 
 ## The Key Principle: SQLModel Metadata
 
-The magic behind this flexibility lies in how `SQLModel` manages database schemas. When you import a model class that inherits from `SQLModel` (like `resembl.models.Snippet`), it registers its schema with a central `SQLModel.metadata` object.
+The magic behind this flexibility lies in how `SQLModel` manages database schemas. When you import a model class that inherits from `SQLModel`, it registers its schema with a central `SQLModel.metadata` object. Importing `resembl.models` registers every table class defined there (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`, `app_meta`) — importing one name runs the whole module.
 
 When you are ready to create your database tables, you call `SQLModel.metadata.create_all(your_engine)`. This command iterates through all registered models (both yours and `resembl`'s) and creates the corresponding tables in the database pointed to by your engine.
 
@@ -45,9 +45,10 @@ Here is a complete example of how an external application can set up its own dat
 # main_app.py
 from sqlmodel import SQLModel, create_engine, Session
 
-# 1. Import the resembl.models you need.
-#    This is the crucial step that registers the `Snippet` model's schema
-#    with SQLModel's central metadata catalog.
+# 1. Import the resembl models — this is the crucial step: importing
+#    `resembl.models` registers every table class it defines
+#    (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`,
+#    `app_meta`) with SQLModel's central metadata catalog.
 from resembl.models import Snippet
 
 # 2. Import the resembl core functions you want to use.
@@ -61,8 +62,10 @@ from resembl.core import snippet_add, snippet_list
 my_custom_engine = create_engine("sqlite:///:memory:")
 
 # 4. Create the tables on your custom engine.
-#    Because we imported `Snippet`, this call will generate and execute the
-#    `CREATE TABLE` statement for the 'snippet' table in our database.
+#    Because we imported `resembl.models`, this call generates and executes
+#    the `CREATE TABLE` statements for all registered `resembl` tables
+#    (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`,
+#    `app_meta`) in our database.
 SQLModel.metadata.create_all(my_custom_engine)
 
 # 5. Use your engine to create a session and pass it to resembl functions.
@@ -93,7 +96,7 @@ with Session(my_custom_engine) as session:
 
 To use your own database with `resembl`, follow these steps:
 
-1.  **Import Models:** Before creating your tables, make sure to `import` the `resembl` models you intend to use (e.g., `from resembl.models import Snippet`).
+1.  **Import Models:** Before creating your tables, import `resembl.models` (e.g., `from resembl.models import Snippet`). Importing the module registers every table class it defines; one import registers all of them.
 2.  **Create Your Engine:** Instantiate your own `create_engine()` with the desired database URL.
 3.  **Create Tables:** Call `SQLModel.metadata.create_all(your_engine)` to create the tables for all registered models in your database.
 4.  **Create and Pass the Session:** Whenever you need to call an `resembl` core function, create a `Session` from your engine and pass it as the `session` argument.

@@ -257,8 +257,11 @@ resembl/
 │   ├── minhash.py
 │   ├── models.py
 │   ├── paths.py
+│   ├── pinned_snapshot.py
+│   ├── runtime_attestation.py
 │   ├── scoring.py
 │   ├── server.py
+│   ├── status_colors.py
 │   └── theme.py
 ├── docs/            # listed under Documentation above
 ├── fuzzers/
