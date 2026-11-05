@@ -1769,7 +1769,9 @@ _WINDOWS_RESERVED_STEMS = frozenset(
 #: suffix plus the checksum disambiguator add up to 17 more — so the stem is
 #: truncated here to stay inside every supported filesystem (and a Windows
 #: MAX_PATH budget) regardless of how long the snippet's name is.
-_EXPORT_STEM_MAX_BYTES = 230
+#: The temp-file suffix (``.pid-thread.tmp``) adds up to 32 more bytes, so
+#: the budget leaves room for that too when the stem is at its maximum.
+_EXPORT_STEM_MAX_BYTES = 200
 
 #: Manifest a previous :func:`snippet_export` run left in the export
 #: directory: the file names it wrote.  Only names listed here are ever
