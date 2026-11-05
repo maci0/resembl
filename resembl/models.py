@@ -9,7 +9,7 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, ForeignKey, Integer, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
 from sqlmodel import Field, Session, SQLModel, select
 
 # Re-exported for external backward compatibility only
@@ -195,11 +195,10 @@ class SnippetVersion(SQLModel, table=True):
     )
     snippet_checksum: str = Field(
         sa_column=Column(
-            Text,
+            String(64),
             ForeignKey("snippet.checksum"),
             nullable=False,
             index=True,
-            max_length=64,
         )
     )
     code: str = Field(sa_column=Column(Text, nullable=False))
@@ -237,11 +236,10 @@ class Snippet(SQLModel, table=True):
     collection: str | None = Field(
         default=None,
         sa_column=Column(
-            Text,
+            String(128),
             ForeignKey("collection.name"),
             nullable=True,
             index=True,
-            max_length=128,
         ),
     )
 
@@ -450,12 +448,11 @@ class LSHBucket(SQLModel, table=True):
     bucket: str = Field(primary_key=True, max_length=LSH_BUCKET_KEY_MAX)
     checksum: str = Field(
         sa_column=Column(
-            Text,
+            String(64),
             ForeignKey("snippet.checksum"),
             nullable=False,
             primary_key=True,
             index=True,
-            max_length=64,
         )
     )
 
