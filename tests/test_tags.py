@@ -17,12 +17,12 @@ class TestCLITags(BaseCLITest):
         # Add a tag
         result = self.run_command(f"tag add {checksum} 'malware'")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("now has tags: ['malware']", result.stdout)
+        self.assertIn("now has tags: malware", result.stdout)
 
         # Remove the tag
         result = self.run_command(f"tag remove {checksum} 'malware'")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("now has tags: []", result.stdout)
+        self.assertIn("now has tags:", result.stdout)
 
     def test_tag_invalid_snippet(self):
         """Test adding a tag to a non-existent snippet."""

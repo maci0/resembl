@@ -750,15 +750,16 @@ class TestCLIAddSnippet(BaseCLITest):
         """Test that a snippet can be added with no name."""
         self.run_command("add '' 'MOV ECX, 3'")
         with Session(self.engine) as session:
-            snippet = Snippet.get_by_name(session, "")
-            self.assertIsNotNone(snippet)
+            snippets = session.exec(select(Snippet).where(Snippet.code == "MOV ECX, 3")).all()
+            self.assertEqual(len(snippets), 1)
+            self.assertEqual(snippets[0].name_list, [])
 
     def test_add_multiple_snippets_with_no_name(self):
         """Test that multiple snippets can be added with no name."""
         self.run_command("add '' 'MOV EDX, 4'")
         self.run_command("add '' 'MOV ESI, 5'")
         with Session(self.engine) as session:
-            snippets = session.exec(select(Snippet).where(Snippet.names == '[""]')).all()
+            snippets = session.exec(select(Snippet).where(Snippet.names == "[]")).all()
             self.assertEqual(len(snippets), 2)
 
     def test_add_multiple_snippets_with_same_name(self):
