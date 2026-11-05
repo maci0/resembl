@@ -562,12 +562,23 @@ def fingerprint_stamps_reconcile(
     permanently invisible until a manual ``reindex --force``.
     """
 
+    # One batched read for the three stamps (see ``fingerprint_stamps_get``):
+    # this runs on every ``snippet_add`` / ``snippet_add_batch``, so three
+    # keyed selects there cost three round trips per write where one indexed
+    # ``IN`` lookup suffices.  The writes below stay per-key — a clear and a
+    # set hit different rows, and batching them would couple their commits.
+    stamps = fingerprint_stamps_get(session)
+    currents = {
+        _VERSION_STAMP_KEY: stamps.version,
+        _NGRAM_STAMP_KEY: stamps.ngram,
+        _PERM_STAMP_KEY: stamps.perm,
+    }
     for key, expected in (
         (_VERSION_STAMP_KEY, FINGERPRINT_VERSION),
         (_NGRAM_STAMP_KEY, ngram_size),
         (_PERM_STAMP_KEY, num_perm),
     ):
-        current = _stamp_get(session, key)
+        current = currents[key]
         if current == expected:
             continue
         if current is not None:
