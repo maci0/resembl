@@ -538,7 +538,9 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
         value = json.loads(raw)
     except ValueError:
         return None
-    return value if isinstance(value, list) else None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    return value
 
 
 def _source_lists_or_none(source_snippet: Snippet) -> tuple[list[str], list[str]] | None:
@@ -843,7 +845,7 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
 
     new_snippet = Snippet(
         checksum=checksum,
-        names=json.dumps([name]),
+        names=json.dumps([name] if name else []),
         code=code,
         minhash=minhash_bytes,
     )
