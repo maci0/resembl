@@ -31,7 +31,6 @@ import operator
 import os
 import signal
 import sys
-import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import UTC, tzinfo
@@ -96,7 +95,7 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
-from .models import parse_instant
+from .models import monotonic_now, parse_instant
 from .paths import (
     cache_dir_get,
     console_utf8_reconfigure,
@@ -1407,7 +1406,7 @@ def import_cmd(
         target = "snippet" if len(file_paths) == 1 else "all snippets"
         _confirm(f"Are you sure you want to import {target} from '{path}'?", force)
 
-    start_time = time.monotonic()
+    start_time = monotonic_now()
     ngram_size = state.config.ngram_size
 
     if jobs is None:
@@ -1539,7 +1538,7 @@ def import_cmd(
     # write; dedupes by checksum and merges alias names).
     flush_prepared()
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     time_elapsed = end_time - start_time
     stats = {
         "num_imported": added_total,

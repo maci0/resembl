@@ -60,6 +60,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    monotonic_now,
     name_normalize,
     timestamp_normalize,
     timestamp_now,
@@ -686,7 +687,7 @@ def snippet_add_batch(
 
     Returns ``{"added", "aliased", "skipped", "time_elapsed"}``.
     """
-    start_time = time.monotonic()
+    start_time = monotonic_now()
 
     # Group by checksum: within one batch, identical code is deduplicated and
     # its names are merged.  ``(code, minhash_bytes, names)`` tuples keep the
@@ -795,7 +796,7 @@ def snippet_add_batch(
                 fresh_database=fresh_database,
             )
 
-    elapsed = time.monotonic() - start_time
+    elapsed = monotonic_now() - start_time
     return {
         "added": len(new_snippets),
         "aliased": aliased,
@@ -1254,7 +1255,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     """Export snippets as YARA string matching rules."""
     import tempfile
 
-    start_time = time.monotonic()
+    start_time = monotonic_now()
     num_exported = 0
 
     # Stream into a same-directory temp and publish with one atomic rename
@@ -1305,7 +1306,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
             pass
         raise
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     time_elapsed = end_time - start_time
 
     return {
@@ -1376,7 +1377,7 @@ def _db_reindex(
     from collections import deque
     from concurrent.futures import Future, ProcessPoolExecutor
 
-    start_time = time.monotonic()
+    start_time = monotonic_now()
     num_snippets = session.exec(
         select(func.count(Snippet.checksum))  # type: ignore[arg-type]
     ).one()
@@ -1500,7 +1501,7 @@ def _db_reindex(
     fingerprint_ngram_set(session, ngram_size)
     fingerprint_perm_set(session, num_perm)
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     time_elapsed = end_time - start_time
 
     return {
@@ -1890,7 +1891,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     input to a later ``import`` rather than one that re-adds retired
     snippets.  Files the export did not write are never touched.
     """
-    start_time = time.monotonic()
+    start_time = monotonic_now()
     num_exported = 0
 
     os.makedirs(export_dir, exist_ok=True)
@@ -1977,7 +1978,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     num_removed = _export_stale_remove(export_dir, previous_exports, written)
     manifest_written = _export_manifest_write(export_dir, written)
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     time_elapsed = end_time - start_time
 
     result = {
@@ -2093,7 +2094,7 @@ def db_clean(session: Session) -> dict:
     next index write (:func:`resembl.cache.lsh_pickle_cache_remove`), not by
     ``clean``.
     """
-    start_time = time.monotonic()
+    start_time = monotonic_now()
 
     vacuum_success = False
     # The whole operation is destructive to the index, so it runs under the
@@ -2113,7 +2114,7 @@ def db_clean(session: Session) -> dict:
             session.commit()
             vacuum_success = True
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     time_elapsed = end_time - start_time
 
     return {
@@ -2770,7 +2771,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
     """
     from .database import create_db_engine
 
-    start_time = time.monotonic()
+    start_time = monotonic_now()
     # The source may be any backend: a full URL (e.g. duckdb:///file.db,
     # postgresql+pg8000://...) is used as-is; otherwise it is a SQLite path.
     # Build the URL from the filesystem path through SQLAlchemy's URL
@@ -3031,7 +3032,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # never reused after this call.
         source_engine.dispose()
 
-    end_time = time.monotonic()
+    end_time = monotonic_now()
     return {
         "added": added,
         "updated": updated,

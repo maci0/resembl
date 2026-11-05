@@ -27,7 +27,6 @@ import socket
 import socketserver
 import sys
 import threading
-import time
 import weakref
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
@@ -49,7 +48,7 @@ from .core import (
     snippet_matches_payload,
 )
 from .lsh import band_buckets
-from .models import FINGERPRINT_VERSION
+from .models import FINGERPRINT_VERSION, monotonic_now
 from .paths import cache_dir_get, db_url_mask, port_file_cleanup, server_port_path
 from .scoring import (
     MINHASH_SEED,
@@ -963,11 +962,11 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
         self._cache_hits = 0
         self._cache_misses = 0
         self._query_errors: dict[str, int] = {}
-        self._started = time.monotonic()
+        self._started = monotonic_now()
 
     def uptime_seconds(self) -> float:
         """Seconds this process has been serving."""
-        return time.monotonic() - self._started
+        return monotonic_now() - self._started
 
     def record_request(self, path: str, status: int, seconds: float) -> None:
         """Record one answered request under *path* with *status*."""
@@ -1126,7 +1125,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         is the only place the id can be attached before any record is made.
         """
         self.request_id = _seeded_uuid_hex()[:12]
-        self._request_start = time.monotonic()
+        self._request_start = monotonic_now()
         self._body_read = False
         super().handle_one_request()
         if not self._body_read and not self.close_connection:
@@ -1167,7 +1166,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         """Seconds since this request started, or 0.0 outside one."""
         if self._request_start is None:
             return 0.0
-        return time.monotonic() - self._request_start
+        return monotonic_now() - self._request_start
 
     server_version = "Resembl"
     sys_version = ""
@@ -1423,7 +1422,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        started = time.monotonic()
+        started = monotonic_now()
         try:
             with Session(self.engine) as session:
                 session.exec(select(1)).one()
@@ -1451,7 +1450,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                 "mode": "database",
                 "database": "ok",
                 "uptime_seconds": round(_METRICS.uptime_seconds(), 3),
-                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "latency_ms": round((monotonic_now() - started) * 1000, 3),
             },
         )
 
@@ -1667,7 +1666,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                     if reason is not None:
                         results.append({"query": query, "error": reason})
                         continue
-                    query_started = time.monotonic()
+                    query_started = monotonic_now()
                     try:
                         results.append(
                             {"query": query, **_find_one(session, body, query, self.find_defaults)}
@@ -1683,7 +1682,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                         logger.warning(
                             "[%s] find-batch query failed after %.3fs: %s: %s",
                             self.request_id,
-                            time.monotonic() - query_started,
+                            monotonic_now() - query_started,
                             type(exc).__name__,
                             str(exc)[:200],
                         )

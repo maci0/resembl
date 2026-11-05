@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import unicodedata
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
@@ -115,6 +116,24 @@ def timestamp_now() -> str:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(UTC).isoformat()
+
+
+def monotonic_now() -> float:
+    """Return a monotonic clock reading, pinned to 0 when ``CLOCK_ENV_VAR`` is set.
+
+    The wall-clock seam in :func:`timestamp_now` covers ``created_at`` stamps,
+    but every duration metric (``time_elapsed`` in core, ``latency_ms`` and
+    ``uptime_seconds`` in the server) reads ``time.monotonic()`` directly.
+    Two seeded runs therefore diff on those fields even when every stamp
+    matches.  When the clock is pinned, durations are pinned too: every
+    reading is 0, so every elapsed value is exactly 0.0.  Monotonic callers
+    only take differences, so a constant clock is indistinguishable from a
+    frozen one and needs no offset bookkeeping.
+    """
+    override = os.environ.get(CLOCK_ENV_VAR)
+    if override is not None and override.strip():
+        return 0.0
+    return time.monotonic()
 
 
 def timestamp_normalize(value: str | None) -> str | None:
