@@ -6,20 +6,32 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-05
+
 ### Fixed
 
+- `resembl-find` (the thin client) now rejects a fractional float for an
+  integer config field (e.g. `top_n = 2.9`) and falls back to the default,
+  matching the `resembl` CLI's `config` loader; previously it silently
+  truncated the value and searched with a different result set.
 - Fixed documentation that contradicted the code: `docs/custom_database.md` claimed importing `Snippet` creates only the `snippet` table, when importing `resembl.models` registers and creates all six resembl tables; `docs/api_reference.md` now documents `snippet_search_by_name`, `snippet_name_add`, `snippet_tag_add`, `snippet_export_yara`, and `db_verify`, includes the `quiet` parameter on `snippet_delete`/`collection_delete`, and clarifies that `lsh_cache_save`/`lsh_cache_load` stamp metadata only and never load legacy pickle caches; the README project tree now lists `pinned_snapshot.py`, `runtime_attestation.py`, and `status_colors.py`.
 
 - Trimmed whitespace in database and directory environment overrides and rejected boolean-style values in `config.toml` (including `"true"`/`"false"`) and in `resembl-find`, so a padded `RESEMBL_DATABASE_URL` opens the intended database and a mistyped boolean no longer becomes `1` or `0`.
 
 ### Added
 
+- `snippet_search_by_name` now scans the name column in bounded keyset
+  pages and stops as soon as the requested number of matches is found,
+  so a common pattern no longer materializes the whole table's
+  (checksum, names) rows before returning its first page.
 - Go service `GET /metrics` now exposes `resembl_service_uptime_seconds` and a `resembl_service_request_duration_seconds` histogram (same buckets as the Python server); failure paths that previously answered `503` without a log record (custody unavailable, busy, capacity claim/release, invalid engine response, response write) now log with the request correlation id.
 - Two new Atheris fuzz harnesses: `fuzzers/fuzz_yara_escape.py` covers the YARA export escaping (`_yara_string_escape`) and filename sanitizer (`_export_safe_filename`) with round-trip and traversal invariants, and `fuzzers/fuzz_config_file.py` covers the `config.toml` TOML reader (`_read_config_file`) over raw bytes, truncation, invalid UTF-8, and deeply nested documents. Both run via `make fuzz FUZZER=<name>`.
 - `make bench` runs the microbenchmarks in `tests/test_bench.py` with `--benchmark-enable`; they are disabled by default so a plain `make test` never measures them.
 
 ### Changed
 
+- Fingerprint stamp reconciliation now batches stamp reads in a single
+  query rather than three separate lookups per write.
 - The Go service now requires Go 1.26 everywhere: `service/go.mod`, `service/Dockerfile`, the Makefile and the docs named 1.25 while the Dockerfile built with 1.26, so a contributor with Go 1.25 got a toolchain switch instead of a named error.
 - **Breaking:** Snippet checksums are now taken over a whitespace-collapsed
   normalized string. Before, `mov eax,1` and `mov  eax,  1` tokenized and
@@ -1196,7 +1208,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v3.12.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/maci0/resembl/compare/v3.12.0...v4.0.0
 [3.12.0]: https://github.com/maci0/resembl/compare/v3.11.0...v3.12.0
 [3.11.0]: https://github.com/maci0/resembl/compare/v3.10.2...v3.11.0
 [3.10.1]: https://github.com/maci0/resembl/compare/v3.10.0...v3.10.1

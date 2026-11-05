@@ -1,6 +1,6 @@
 # Security policy
 
-Last reviewed: 2026-11-05, against the tree at version 3.12.0
+Last reviewed: 2026-11-05, against the tree at version 4.0.0
 (`pyproject.toml:3`). This review covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
@@ -33,10 +33,10 @@ The repository is <https://github.com/maci0/resembl>.
 
 | Version | Supported |
 | ------- | --------- |
-| 3.x (current release line) | yes |
-| 2.x and earlier | no |
+| 4.x (current release line) | yes |
+| 3.x and earlier | no |
 
-The current release is 3.12.0. Older lines receive no fixes; upgrade to the
+The current release is 4.0.0. Older lines receive no fixes; upgrade to the
 current line before reporting an issue against them.
 
 ## Threat model
