@@ -878,6 +878,14 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     """
     b1, b2 = cfg1["num_blocks"], cfg2["num_blocks"]
     e1, e2 = cfg1["num_edges"], cfg2["num_edges"]
+    for label, count in (
+        ("num_blocks", b1),
+        ("num_blocks", b2),
+        ("num_edges", e1),
+        ("num_edges", e2),
+    ):
+        if count < 0:
+            raise ValueError(f"{label} must be non-negative, got {count!r}")
 
     if b1 == 0 and b2 == 0:
         return 1.0  # Both empty
@@ -1079,10 +1087,13 @@ def minhash_jaccard_batch(
     ``num_perm``, a float64 int/int division that is correctly rounded in
     either path.  Candidates are processed in chunks to bound peak memory.
 
-    Raises ``ValueError`` when the query or a candidate is malformed, or
-    when a candidate uses a different permutation count than the query —
-    matching :func:`minhash_jaccard`.
+    Raises ``ValueError`` when the query or a candidate is malformed, when
+    a candidate uses a different permutation count than the query —
+    matching :func:`minhash_jaccard` — or when *chunk_size* is below 1
+    (``range`` would raise ``ValueError`` with no message).
     """
+    if chunk_size < 1:
+        raise ValueError(f"chunk_size must be at least 1, got {chunk_size!r}")
     if not packed_list:
         return []
     # Either side not being in the compact format rules out the vectorized
