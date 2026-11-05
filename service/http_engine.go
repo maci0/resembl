@@ -92,6 +92,12 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 		return nil, err
 	}
 	defer resp.Body.Close()
+	// Drain to EOF on every path (bounded): an unread body keeps the
+	// transport from reusing the connection, and the success path below
+	// already caps its read — without this, every engine reply leaks a
+	// pooled connection until the idle timeout.
+	drain := func() { _, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20)) }
+	defer drain()
 	if resp.StatusCode != http.StatusOK {
 		// Consume the error body (discarding it) so the connection is
 		// reusable. Surface its detail: callers and operators relay

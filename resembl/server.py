@@ -1274,7 +1274,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         self._body_read = True
         try:
             body = json.loads((self.rfile.read(length) or b"{}").decode("utf-8"))
-        except ValueError, KeyError, RecursionError:
+        except ValueError, KeyError, RecursionError, UnicodeDecodeError, OSError:
+            # UnicodeDecodeError is a ValueError subclass, listed for
+            # clarity; OSError from a truncated stream / client hangup is
+            # a malformed body, not a 500: the handler treats None as 400.
             return None
         return body if isinstance(body, dict) else None
 
@@ -1552,24 +1555,49 @@ class _FindHandler(BaseHTTPRequestHandler):
                     self._respond(503, {"error": "pinned index unavailable"})
                     return
                 connection.exec_driver_sql("BEGIN IMMEDIATE")
-                actual = index_digest(connection)
-                if actual != expected:
-                    self._respond(409, {"error": "index identity mismatch"})
-                    return
-                request = _parse_find_request(body, self.find_defaults)
-                from .cache import lsh_cache_load
-                from .core import fingerprints_need_reindex
 
-                if fingerprints_need_reindex(session, request.ngram_size, request.num_permutations):
-                    self._respond(503, {"error": "pinned index requires rebuild"})
-                    return
-                if not lsh_cache_load(
-                    session, request.effective_threshold, request.num_permutations
-                ):
-                    self._respond(503, {"error": "pinned index requires rebuild"})
-                    return
-                payload = _find_uncached(session, cast(str, query), request)
-                verify_runtime(manifest_path, artifact)
+                def _release_fence() -> None:
+                    try:
+                        connection.exec_driver_sql("ROLLBACK")
+                    except Exception:
+                        pass
+
+                try:
+                    actual = index_digest(connection)
+                    if actual != expected:
+                        _release_fence()
+                        self._respond(409, {"error": "index identity mismatch"})
+                        return
+                    request = _parse_find_request(body, self.find_defaults)
+                    from .cache import lsh_cache_load
+                    from .core import fingerprints_need_reindex
+
+                    if fingerprints_need_reindex(
+                        session, request.ngram_size, request.num_permutations
+                    ):
+                        _release_fence()
+                        self._respond(503, {"error": "pinned index requires rebuild"})
+                        return
+                    if not lsh_cache_load(
+                        session, request.effective_threshold, request.num_permutations
+                    ):
+                        _release_fence()
+                        self._respond(503, {"error": "pinned index requires rebuild"})
+                        return
+                    payload = _find_uncached(session, cast(str, query), request)
+                    verify_runtime(manifest_path, artifact)
+                except BaseException:
+                    # The BEGIN IMMEDIATE fence must not outlive the request:
+                    # any exception from the query would otherwise leave the
+                    # connection holding the writer lock until the session
+                    # returns to the pool, serializing later writers.
+                    _release_fence()
+                    raise
+                else:
+                    try:
+                        connection.exec_driver_sql("COMMIT")
+                    except Exception:
+                        pass
                 self._respond(
                     200,
                     {

@@ -144,7 +144,11 @@ func (s *Service) getCustody() Custody {
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+	// Encode writes to w; a failure means the client is gone. Log it
+	// rather than discarding silently, but the status is already sent.
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		log.Printf("writeError failed: %v", err)
+	}
 }
 
 func newRequestID() string {
@@ -157,17 +161,25 @@ func newRequestID() string {
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status   int
+	wroteHdr bool
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
+	if s.wroteHdr {
+		return
+	}
+	s.wroteHdr = true
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
 }
 
 func (s *statusRecorder) Write(b []byte) (int, error) {
-	if s.status == 0 {
-		s.status = http.StatusOK
+	if !s.wroteHdr {
+		s.wroteHdr = true
+		if s.status == 0 {
+			s.status = http.StatusOK
+		}
 	}
 	return s.ResponseWriter.Write(b)
 }
@@ -378,7 +390,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[%s] response write failed: %v", reqID, err)
 		// Response may be truncated on the wire; the claim is already
 		// released, so the client must retry against fresh capacity.
-		writeError(w, http.StatusServiceUnavailable, "response write failed")
+		// Headers/status are already committed by the partial write;
+		// a second WriteHeader would be a superfluous log line, not a
+		// recoverable status change. The error is logged above.
 		return
 	}
 }
