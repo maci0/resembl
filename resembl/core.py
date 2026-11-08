@@ -293,7 +293,7 @@ class IndexBuildError(RuntimeError):
     """
 
 
-class _MergeRetry(Exception):
+class _MergeRetryError(Exception):
     """Internal signal: a chunk collided on the snippet primary key.
 
     Raised inside :func:`db_merge` when a bulk insert hits an
@@ -3056,7 +3056,7 @@ def db_merge(session: Session, source_db_path: str, *, _merge_retry_seen: bool =
                 # and let the outer handler re-run the merge from the
                 # start, where they take the idempotent existing-row path.
                 session.rollback()
-                raise _MergeRetry from None
+                raise _MergeRetryError from None
             if index_threshold is not None:
                 lsh_pickle_cache_remove(index_threshold)
             new_rows.clear()
@@ -3217,7 +3217,7 @@ def db_merge(session: Session, source_db_path: str, *, _merge_retry_seen: bool =
         # stamps there would force a pointless full reindex on the next find.
         if added:
             _fingerprint_stamps_clear(session)
-    except _MergeRetry:
+    except _MergeRetryError:
         # A concurrent merge committed this chunk's checksums first.
         # The rows now exist locally, so a re-run takes the existing-row
         # path (alias/tag/collection merge) and converges.  Bounded to
