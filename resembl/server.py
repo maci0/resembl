@@ -84,19 +84,24 @@ def _seeded_uuid_hex() -> str:
     return uuid.uuid4().hex
 
 
-#: Version-guarded result cache: key -> (db_version, payload).  SQLite's
-#: ``PRAGMA data_version`` increments on every commit, so a cached result is
-#: returned only while the database is unchanged — repeated queries (triage
-#: workflows re-checking the same hashes) answer in ~0.1 ms instead of
-#: ~1.4 ms, never stale.  Non-SQLite backends get no version counter and
-#: bypass the cache.  The key ends with the serving engine's URL: one
+#: Version-guarded result cache: key -> ((data_version, file fingerprint),
+#: payload).  SQLite's ``PRAGMA data_version`` increments on every commit,
+#: so a cached result is returned only while the database is unchanged —
+#: repeated queries (triage workflows re-checking the same hashes) answer
+#: in ~0.1 ms instead of ~1.4 ms, never stale.  The file fingerprint (see
+#: :func:`_db_file_fingerprint`) is part of the guard because a replaced
+#: file restarts ``data_version`` at the same value.  Non-SQLite backends
+#: get no version counter and bypass the cache.  The key ends with the
+#: serving engine's URL: one
 #: process may run several servers for different databases (tests,
 #: embedded callers), and the version counter is per-database — without that
 #: final component a hit computed for database A could be served to database
 #: B whenever both counters happened to carry the same value.  It starts with
 #: :func:`_query_cache_key`, not the query itself, so the entry-count bound
 #: is also a memory bound.
-_RESULT_CACHE: OrderedDict[tuple, tuple[int | None, dict]] = OrderedDict()
+_RESULT_CACHE: OrderedDict[tuple, tuple[tuple[int, tuple[int, int] | None] | None, dict]] = (
+    OrderedDict()
+)
 _RESULT_CACHE_MAX = 128
 #: Largest payload :func:`_result_cache_put` retains, in characters of
 #: checksum and name text.  One request chooses its own ``top_n`` and the
@@ -221,7 +226,33 @@ def _session_engine(session: Session) -> Engine:
     return cast(Engine, session.get_bind())
 
 
-def _db_version(session: Session) -> int | None:
+def _db_file_fingerprint(path: str) -> tuple[int, int] | None:
+    """Return ``(mtime_ns, size)`` for the main database file, or ``None``.
+
+    ``PRAGMA data_version`` alone cannot see a database file that was
+    replaced underneath the server (a restore, a backup copy, or a
+    ``db_merge`` that writes the file directly): the new file starts its
+    counter at the same small value as the old one, so the version guard
+    in :func:`_find_one` hands back payloads computed for the previous
+    corpus.  The WAL sidecar's size is tracked alongside the main file's
+    ``(mtime_ns, size)``: an un-checkpointed write leaves the main file
+    untouched and grows only the WAL, so its size — not its mtime — is
+    what changes between two consecutive commits.  ``None`` means the
+    file cannot be stat'ed and the cache must not trust a bare
+    ``data_version``.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    try:
+        wal_size = os.path.getsize(path + "-wal") if os.path.exists(path + "-wal") else 0
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size + wal_size)
+
+
+def _db_version(session: Session) -> tuple[int, tuple[int, int] | None] | None:
     """Return a DB-change counter for cache invalidation (SQLite only).
 
     ``PRAGMA data_version`` is a *per-connection* counter: every connection
@@ -233,6 +264,10 @@ def _db_version(session: Session) -> int | None:
     stopped guarding as soon as the pool held more than one live connection.
     One shared probe connection per database (see :data:`_VERSION_PROBES`)
     makes the counter advance in step with the file for the whole cache.
+
+    The counter is paired with the database file's fingerprint (see
+    :func:`_db_file_fingerprint`): a replaced file restarts the counter,
+    so the pair — not the integer alone — is the invalidation token.
 
     ``None`` means "no counter": callers bypass the cache.
     """
@@ -269,7 +304,11 @@ def _db_version(session: Session) -> int | None:
             event.listen(engine, "engine_disposed", _on_engine_disposed)
             _VERSION_PROBES[engine] = probe
         with probe.connect() as conn:
-            return int(conn.execute(text("PRAGMA data_version")).scalar() or 0)
+            data_version = int(conn.execute(text("PRAGMA data_version")).scalar() or 0)
+    fingerprint = _db_file_fingerprint(url.database)
+    if fingerprint is None:
+        return None
+    return (data_version, fingerprint)
 
 
 def _version_probe_release(engine: Engine) -> None:
@@ -582,7 +621,7 @@ def _find_uncached(session: Session, query: str, request: _FindRequest) -> dict:
     return snippet_matches_payload(num_candidates, matches)
 
 
-def _result_cache_get(key: tuple, version: int) -> dict | None:
+def _result_cache_get(key: tuple, version: tuple[int, tuple[int, int] | None]) -> dict | None:
     """Return the cached payload for *key* if it was built at *version*."""
     with _RESULT_CACHE_LOCK:
         entry = _RESULT_CACHE.get(key)
@@ -609,7 +648,9 @@ def _payload_chars(payload: dict) -> int:
     )
 
 
-def _result_cache_put(key: tuple, version: int, payload: dict) -> None:
+def _result_cache_put(
+    key: tuple, version: tuple[int, tuple[int, int] | None], payload: dict
+) -> None:
     """Store *payload* for *key* at *version*, evicting past the cap.
 
     A payload larger than :data:`_RESULT_CACHE_MAX_CHARS` is not stored at

@@ -1671,6 +1671,53 @@ class TestServerMode(_ServeTestCase):
         self.assertGreater(after["lsh_candidates"], first["lsh_candidates"])
         self.assertNotEqual(after["lsh_candidates"], first["lsh_candidates"])
 
+    def test_result_cache_invalidates_on_db_file_replace(self):
+        """A replaced database file invalidates the cache despite equal data_version.
+
+        A restore or backup copy puts a different file under the served
+        path: the new file's ``PRAGMA data_version`` restarts from the same
+        small counter, so the version guard alone would serve the previous
+        corpus's cached finds forever.  The file fingerprint in the guard
+        token is what catches the replace.
+        """
+        import shutil
+
+        from resembl.server import _RESULT_CACHE, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+        params = ResemblConfig()
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        first = _find_one(self._session, {"top_n": 5}, query, params)
+        self.assertGreater(first["lsh_candidates"], 0)
+        self.assertEqual(len(_RESULT_CACHE), 1)
+
+        # Build a different database and copy its file over the served path,
+        # the way a restore would leave the directory.
+        other = tempfile.mktemp(suffix=".db")
+        other_engine = create_engine(f"sqlite:///{other}")
+        SQLModel.metadata.create_all(other_engine)
+        from resembl.core import snippet_add_batch, snippet_prepare
+
+        with Session(other_engine) as other_session:
+            items = [
+                snippet_prepare(f"g{i}", f"push ebx\nmov eax, {i}\npop ebx\nret", 3)
+                for i in range(5)
+            ]
+            snippet_add_batch(other_session, [x for x in items if x])
+        other_engine.dispose()
+        shutil.copyfile(other, self._db)
+        for suffix in ("-wal", "-shm"):
+            sidecar = self._db + suffix
+            if os.path.exists(sidecar):
+                os.remove(sidecar)
+        for path in (other, other + "-wal", other + "-shm"):
+            if os.path.exists(path):
+                os.remove(path)
+
+        after = _find_one(self._session, {"top_n": 5}, query, params)
+        self.assertNotEqual(after["lsh_candidates"], first["lsh_candidates"])
+
     def test_result_cache_keys_isolate_served_databases(self):
         """One process serving two databases never shares result-cache hits.
 
