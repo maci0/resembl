@@ -279,6 +279,21 @@ class TestSafeFilenameSurrogates(unittest.TestCase):
         self.assertNotEqual(stem[-1], "e")
         self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
 
+    def test_truncation_does_not_leave_a_dangling_zwj(self):
+        stem = _export_safe_filename("a" * 193 + "\U0001f468\u200d\U0001f469")
+        self.assertFalse(stem.endswith("\u200d"))
+        self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+
+    def test_truncation_does_not_leave_a_lone_regional_indicator(self):
+        stem = _export_safe_filename("a" * 196 + "\U0001f1fa\U0001f1f8")
+        self.assertFalse(stem.endswith("\U0001f1fa"))
+        self.assertLessEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+
+    def test_a_grapheme_that_fits_is_kept_whole(self):
+        stem = _export_safe_filename("a" * 192 + "\U0001f1fa\U0001f1f8")
+        self.assertTrue(stem.endswith("\U0001f1fa\U0001f1f8"))
+        self.assertEqual(len(stem.encode("utf-8")), _EXPORT_STEM_MAX_BYTES)
+
 
 class TestCollectionIdentity(_InMemoryDbTestCase):
     """A collection name is a primary key, so its form is part of its identity."""

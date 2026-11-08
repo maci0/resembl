@@ -1830,6 +1830,62 @@ _EXPORT_STEM_MAX_BYTES = 200
 _EXPORT_MANIFEST_NAME = ".resembl-export.json"
 
 
+def _grapheme_clusters(text: str) -> Iterator[str]:
+    """Yield *text* split into grapheme clusters (UAX #29 approximation).
+
+    No third-party segmentation is available, so this covers the clusters
+    that break on a byte cut: combining marks (categories Mn, Me, Mc),
+    variation selectors, emoji skin-tone modifiers, ZWJ-joined sequences,
+    and regional-indicator pairs (flags). Used only to keep the
+    byte-truncation on a user-perceived character boundary.
+    """
+    cluster: list[str] = []
+    ri_run = 0
+    prev_zwj = False
+    for ch in text:
+        if not cluster:
+            cluster.append(ch)
+            ri_run = 1 if 0x1F1E6 <= ord(ch) <= 0x1F1FF else 0
+            prev_zwj = ch == "\u200d"
+            continue
+        code = ord(ch)
+        is_ri = 0x1F1E6 <= code <= 0x1F1FF
+        extend = (
+            prev_zwj
+            or ch == "\u200d"
+            or unicodedata.category(ch) in ("Mn", "Me", "Mc")
+            or 0xFE00 <= code <= 0xFE0F
+            or 0xE0100 <= code <= 0xE01EF
+            or 0x1F3FB <= code <= 0x1F3FF
+            or (is_ri and ri_run % 2 == 1)
+        )
+        if extend:
+            cluster.append(ch)
+            if is_ri:
+                ri_run += 1
+            prev_zwj = ch == "\u200d"
+        else:
+            yield "".join(cluster)
+            cluster = [ch]
+            ri_run = 1 if is_ri else 0
+            prev_zwj = ch == "\u200d"
+    if cluster:
+        yield "".join(cluster)
+
+
+def _truncate_utf8_graphemes(text: str, max_bytes: int) -> str:
+    """Return *text* truncated to *max_bytes* UTF-8 bytes, on a grapheme boundary."""
+    budget = max_bytes
+    out: list[str] = []
+    for cluster in _grapheme_clusters(text):
+        size = len(cluster.encode("utf-8"))
+        if size > budget:
+            break
+        out.append(cluster)
+        budget -= size
+    return "".join(out)
+
+
 def _export_safe_filename(name: str) -> str:
     """Sanitize a snippet name into a portable filename stem.
 
@@ -1844,14 +1900,18 @@ def _export_safe_filename(name: str) -> str:
     cleaned = os.path.basename(cleaned)
     cleaned = unicodedata.normalize("NFC", cleaned)
     if len(cleaned.encode("utf-8")) > _EXPORT_STEM_MAX_BYTES:
-        # Cut by bytes, then drop any partial multi-byte character left at
-        # the end ("ignore") so the stem stays a valid string.  Normalizing
-        # to NFC first is what keeps the cut on a grapheme boundary: a
-        # decomposed ``e`` + combining acute is one 2-byte code point, so
-        # the partial character the cut discards is the whole grapheme
-        # rather than its combining mark (which would mangle it into a
-        # different character).
-        cleaned = cleaned.encode("utf-8")[:_EXPORT_STEM_MAX_BYTES].decode("utf-8", errors="ignore")
+        # Truncate by whole grapheme clusters so the cut never splits a
+        # multi-code-point sequence: NFC first composes e + combining acute
+        # into one code point, but sequences NFC does not compose (emoji
+        # ZWJ chains, regional-indicator flag pairs, variation selectors,
+        # emoji modifiers, combining marks that stay decomposed) are still
+        # several code points.  Cutting raw bytes drops a partial code
+        # point but leaves a dangling ZWJ or a lone regional indicator,
+        # which renders as a broken glyph.  Walking code points and only
+        # keeping whole clusters keeps the stem valid and on a grapheme
+        # boundary; a trailing cluster that does not fit in the byte
+        # budget is dropped whole, not split.
+        cleaned = _truncate_utf8_graphemes(cleaned, _EXPORT_STEM_MAX_BYTES)
     cleaned = cleaned.rstrip(" .")
     if not cleaned:
         return ""
@@ -2881,9 +2941,7 @@ def _fingerprint_stamps_clear(session: Session) -> None:
     fingerprint_perm_clear(session)
 
 
-def db_merge(
-    session: Session, source_db_path: str, *, _merge_retry_seen: bool = False
-) -> dict:
+def db_merge(session: Session, source_db_path: str, *, _merge_retry_seen: bool = False) -> dict:
     """Merge snippets from a source database into the current one.
 
     *source_db_path* is a SQLite file path, or a full database URL (e.g.
@@ -2989,9 +3047,7 @@ def db_merge(
                 # and the buckets that make them findable commit together,
                 # so a merge interrupted between the two cannot leave
                 # either half behind.
-                index_threshold = lsh_index_add_batch(
-                    session, added_minhashes, commit=False
-                )
+                index_threshold = lsh_index_add_batch(session, added_minhashes, commit=False)
                 session.commit()
             except IntegrityError:
                 # A concurrent merge of the same source committed the same
