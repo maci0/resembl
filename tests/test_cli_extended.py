@@ -609,9 +609,7 @@ class TestCLIServeWarnings(BaseCLITest):
             taken.bind(("0.0.0.0", 0))
             port = taken.getsockname()[1]
             taken.listen(1)
-            result = self.run_command(
-                f"serve --host 0.0.0.0 --port {port} --allow-unauthenticated"
-            )
+            result = self.run_command(f"serve --host 0.0.0.0 --port {port} --allow-unauthenticated")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("non-loopback", result.stdout)
         self.assertIn("unauthenticated", result.stdout)
@@ -968,7 +966,7 @@ class TestServerFallback(unittest.TestCase):
 
         with patch(
             "urllib.request.urlopen",
-            side_effect=lambda request, timeout=None: _BadResponse(),
+            side_effect=lambda request, timeout=None, context=None: _BadResponse(),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -1004,7 +1002,9 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         # Signature-conformance stub for urllib.request.urlopen.
-        def refused_after_retarget(request, timeout=None):  # pylint: disable=unused-argument
+        def refused_after_retarget(
+            request, timeout=None, context=None
+        ):  # pylint: disable=unused-argument
             # Simulate the newcomer winning the advertisement race between
             # this client's read of the port file and its connect attempt.
             with open(self.port_file, "w", encoding="utf-8") as f:

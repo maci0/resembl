@@ -561,7 +561,7 @@ class TestServerMode(_ServeTestCase):
 
         # Signature-conformance stub for urllib.request.urlopen; the real
         # call site passes timeout but the fake needs no fetch delay.
-        def fake_urlopen(request, timeout=5):  # pylint: disable=unused-argument
+        def fake_urlopen(request, timeout=5, context=None):  # pylint: disable=unused-argument
             captured["body"] = json.loads(request.data)
             return _FakeResponse()
 
@@ -691,7 +691,7 @@ class TestServerMode(_ServeTestCase):
         with contextlib.redirect_stderr(stderr):
             with patch(
                 "urllib.request.urlopen",
-                side_effect=lambda request, timeout=5: _FakeResponse(),
+                side_effect=lambda request, timeout=5, context=None: _FakeResponse(),
             ):
                 rc = _main(["--query", "mov eax, 5", "--json"])
         self.assertEqual(rc, 1)
@@ -762,7 +762,7 @@ class TestServerMode(_ServeTestCase):
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             with patch(
                 "urllib.request.urlopen",
-                side_effect=lambda request, timeout=5: _FakeResponse(
+                side_effect=lambda request, timeout=5, context=None: _FakeResponse(
                     json.dumps(payload).encode("utf-8")
                 ),
             ):

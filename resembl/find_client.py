@@ -396,7 +396,12 @@ def _main(argv: list[str] | None = None) -> int:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
+        # Loopback must not go through a proxy (http_proxy): the server is
+        # on this host, and a proxied request would either fail or send the
+        # corpus query to a third party.  ProxyHandler({}) disables proxies.
+        with urllib.request.urlopen(
+            request, timeout=5, context=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        ) as response:
             payload = json.loads(_read_bounded_response(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # A 4xx answer carries the server's own JSON error envelope: report
