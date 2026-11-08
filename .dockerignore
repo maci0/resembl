@@ -6,34 +6,49 @@
 .venv-fuzz
 dist
 build
+.gitignore
+.github
+Makefile
+MANIFEST.in
+pyproject.toml
+.pre-commit-config.yaml
+.gitattributes
+# Test and profile caches hold generated, non-source data and differ per
+# host; `__pycache__` needs the `**/` form, because a bare pattern only
+# matches at the context root and the package's own `__pycache__` (and
+# `.hypothesis`) would otherwise be sent in the context. They are never
+# COPY'd, but they bloat the transfer and invalidate the layer cache on
+# every local run.
 __pycache__
+**/__pycache__
 *.pyc
 *.egg-info
 .pytest_cache
 .mypy_cache
 .ruff_cache
+.hypothesis
+**.hypothesis
 .scratch
 docs
 tests
 fuzzers
 # Local databases and benchmark data are sensitive corpus data and are
 # never COPY'd into the service image; keep them out of the context too.
+# `*.db` and `*.sqlite3` as written only match at the context root, so
+# the `**/` forms cover a database generated under a package or data
+# directory instead of next to the Dockerfile's call site.
 *.db
+**.db
 *.sqlite3
+**.sqlite3
 data
 scale_data
 # Go test and fuzz files are never compiled into the service binary;
 # excluding them keeps test-only edits from invalidating the image layer
-# and keeps test dependencies out of the build context.
-service/custody_test.go
-service/fuzz_service_test.go
-service/http_engine_drain_test.go
-service/http_engine_timeout_test.go
-service/service_fix_test.go
-service/service_test.go
-service/token_authority_test.go
-service/cmd/resembl-lambda/main_test.go
-service/cmd/resembl-service/main_test.go
-service/internal/lambdaproxy/fuzz_handle_test.go
-service/internal/lambdaproxy/head_test.go
-service/internal/lambdaproxy/proxy_test.go
+# and keeps test dependencies out of the build context. The patterns
+# use wildcards over the Go tree's known package depths, not one entry
+# per file, so a newly added test file is excluded by default instead
+# of silently re-entering the context until someone notices it here.
+service/*_test.go
+service/cmd/*/*_test.go
+service/internal/*/*_test.go
