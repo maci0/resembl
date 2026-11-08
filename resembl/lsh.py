@@ -706,8 +706,8 @@ class ResemblLSH:
         Re-inserting the rows is free either way, the ``(band, bucket,
         checksum)`` primary key making the write naturally idempotent.
         """
-        packed = self._as_packed(value)
         try:
+            packed = self._as_packed(value)
             buckets = self._buckets(packed)
         except ValueError as e:
             logger.warning("Skipping index insert for %s: %s", key, e)
@@ -736,8 +736,8 @@ class ResemblLSH:
         """
         rows: list[dict[str, object]] = []
         for key, value in items:
-            packed = self._as_packed(value)
             try:
+                packed = self._as_packed(value)
                 buckets = self._buckets(packed)
             except ValueError as e:
                 logger.warning("Skipping index insert for %s: %s", key, e)

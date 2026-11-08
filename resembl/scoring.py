@@ -997,9 +997,17 @@ def minhash_pack(m: MinHash) -> bytes:
     The format is ``MINHASH_MAGIC`` + big-endian uint32 ``num_perm`` +
     ``num_perm`` big-endian uint32 hash values (520 bytes for the default
     128 permutations — several times smaller than a pickle).
+
+    Raises ``ValueError`` for a permutation count outside the range
+    :func:`minhash_num_perm` accepts (2..``MAX_NUM_PERM``): ``MinHash``
+    itself accepts 1..2**32 for datasketch parity, but emitting a blob
+    its own reader rejects as implausible would leave the producer and
+    consumer disagreeing about what is storable.
     """
     digest = m.digest()
     num_perm = len(digest)
+    if not 2 <= num_perm <= MAX_NUM_PERM:
+        raise ValueError(f"Corrupt MinHash payload: implausible permutation count {num_perm}.")
     # ``astype(">u4").tobytes()`` emits the whole uint32 array in one C pass;
     # the equivalent ``struct.pack`` with 129 separate arguments measured ~8x
     # slower.  Hash values are masked to 32 bits by construction.

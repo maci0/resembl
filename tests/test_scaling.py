@@ -187,6 +187,23 @@ class TestMinHashStorage(BaseScalingTest):
         with self.assertRaises(ValueError):
             minhash_unpack(raw)
 
+    def test_pack_rejects_counts_the_blob_format_cannot_hold(self):
+        """Pack must not emit a blob its own reader rejects.
+
+        ``MinHash`` accepts any count from 1 to 2**32 (datasketch parity),
+        but the packed format only holds 2..MAX_NUM_PERM per
+        ``minhash_num_perm``. Packing a 1-perm or over-cap fingerprint
+        used to succeed and then fail on ``minhash_unpack`` as
+        "implausible", so producer and consumer disagreed.
+        """
+        from resembl.minhash import MinHash
+        from resembl.scoring import MAX_NUM_PERM
+
+        for num_perm in (1, MAX_NUM_PERM + 1):
+            with self.subTest(num_perm=num_perm):
+                with self.assertRaises(ValueError):
+                    minhash_pack(MinHash(num_perm=num_perm, seed=1))
+
     def test_snippet_add_stores_compact_format(self):
         snippet_add(self.session, "s", "MOV EAX, 1")
         row = self.session.exec(select(Snippet)).first()
@@ -918,8 +935,14 @@ class TestResemblLSH(BaseScalingTest):
         good = minhash_pack(code_create_minhash("MOV EAX, 1; RET", num_perm=64))
         foreign = minhash_pack(minhash_new(128))  # different permutation count
         corrupt = b"RMLH" + b"\x00" * 4  # implausible perm count in the header
+        # A MinHash object whose count the packed format cannot hold is
+        # unusable too: it must skip like the other unbandable items.
+        from resembl.minhash import MinHash
+
         with self.assertLogs("resembl.lsh", level="WARNING"):
-            inserted = lsh.insert_batch([("good", good), ("f", foreign), ("c", corrupt)])
+            inserted = lsh.insert_batch(
+                [("good", good), ("f", foreign), ("c", corrupt), ("d", MinHash(num_perm=1, seed=1))]
+            )
         self.assertEqual(inserted, b)  # exactly one item's worth of bands
         stored = set(self.session.exec(select(LSHBucket.checksum).distinct()).all())
         self.assertEqual(stored, {"good"})

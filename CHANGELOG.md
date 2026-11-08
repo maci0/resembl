@@ -25,6 +25,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `minhash_pack` now raises `ValueError` for a permutation count outside 2..4096 instead of emitting a blob that `minhash_unpack` rejects as implausible; `ResemblLSH.insert`/`insert_batch` skip such a fingerprint with a warning like any other unbandable item. Callers that packed a 1-perm or over-cap `MinHash` and relied on the unreadable blob now get an exception at pack time.
 - `db_merge` now disposes the source engine when opening its session fails, instead of returning the error with the engine's connection pool still live for the life of the process.
 - `resembl serve` now refuses a non-loopback `--host` unless `--allow-unauthenticated` is given; it previously only printed a warning and bound the unauthenticated corpus to the network. The Go `resembl-service` likewise now requires `-token-file` for a non-loopback `-listen`.
 - The Python HTTP server and the Go service no longer log a request path (or method) verbatim: control characters (including CR/LF) are stripped before the path reaches `logger.exception`/`log.Printf`, so a crafted URL cannot forge log lines; the 404 `unknown path` error message strips them the same way.
