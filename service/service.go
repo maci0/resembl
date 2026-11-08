@@ -417,7 +417,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Path != "/v1/find" && r.URL.Path != "/v1/find-batch" {
-		writeError(w, http.StatusNotFound, "not found")
+		safe := strings.Map(func(ch rune) rune {
+			if ch < 0x20 || ch == 0x7f {
+				return -1
+			}
+			return ch
+		}, r.URL.Path)
+		if safe == "" {
+			safe = r.URL.Path
+		}
+		writeError(w, http.StatusNotFound, "unknown path: "+safe)
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -480,7 +489,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]json.RawMessage
 	if json.Unmarshal(raw, &body) != nil || body == nil {
-		writeError(w, http.StatusBadRequest, "invalid request")
+		writeError(w, http.StatusBadRequest, "bad request body")
 		return
 	}
 	var result json.RawMessage
@@ -506,8 +515,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 	if r.URL.Path == "/v1/find" {
 		var query string
-		if json.Unmarshal(body["query"], &query) != nil || strings.TrimSpace(query) == "" {
-			writeError(w, http.StatusBadRequest, "query required")
+		if _, present := body["query"]; !present {
+			writeError(w, http.StatusBadRequest, "bad request: 'query' is required")
+			return
+		}
+		if json.Unmarshal(body["query"], &query) != nil {
+			writeError(w, http.StatusBadRequest, "bad request: query must be a string")
+			return
+		}
+		if strings.TrimSpace(query) == "" {
+			writeError(w, http.StatusBadRequest, "bad request: query must not be empty")
 			return
 		}
 		dispatched = true
@@ -519,8 +536,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var queries []json.RawMessage
+		if _, present := body["queries"]; !present {
+			writeError(w, http.StatusBadRequest, "bad request: 'queries' is required")
+			return
+		}
 		if json.Unmarshal(body["queries"], &queries) != nil || queries == nil || len(queries) > 1000 {
-			writeError(w, http.StatusBadRequest, "invalid queries")
+			if queries != nil && len(queries) > 1000 {
+				writeError(w, http.StatusBadRequest, "queries must hold at most 1000 entries")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "bad request: queries must be a list")
 			return
 		}
 		dispatched = true

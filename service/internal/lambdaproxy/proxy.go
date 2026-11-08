@@ -66,7 +66,7 @@ func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRe
 				StatusCode:      code,
 				Headers:         map[string]string{"Content-Type": "application/json", "Content-Length": fmt.Sprint(len(body))},
 				Body:            "",
-				IsBase64Encoded: true,
+				IsBase64Encoded: false,
 			}, nil
 		}
 		return events.APIGatewayV2HTTPResponse{
