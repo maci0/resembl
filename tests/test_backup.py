@@ -623,6 +623,27 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertFalse(check["ok"], check)
         self.assertTrue(any("wal sidecar" in i for i in check["issues"]), check["issues"])
 
+    def test_backup_reuse_skips_wal_sidecar_backup(self):
+        """A retained backup with a -wal sidecar is never reused as a
+        successful backup.
+
+        ``db_verify_backup`` refuses a backup with a -wal/-shm sidecar
+        because the documented restore copies only the .db file.  The
+        reuse path must therefore drop such a trio and write a fresh
+        single-file backup instead of returning the sidecarred copy as
+        the newest restore point.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir)
+        with open(first["backup"] + "-wal", "wb") as f:
+            f.write(b"\x00" * 32)
+        second = db_backup(self.session, backup_dir)
+        self.assertNotEqual(second["backup"], first["backup"])
+        self.assertTrue(second["verified"])
+        self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+        self.assertFalse(os.path.exists(first["backup"]))
+
     def test_rebackup_of_corrupted_retained_backup_writes_fresh(self):
         """A corrupt retained backup is not reused as a successful backup.
 

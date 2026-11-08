@@ -274,12 +274,25 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
         names = os.listdir(backup_dir)
     except OSError:
         return None
+
+    # Newest-first by mtime, like ``_db_backup_prune``: name order inverts
+    # on a hand-supplied copy with a late timestamp, which would hide the
+    # genuinely newest matching backup behind a stale one.
+    def _reuse_mtime(name: str) -> tuple[float, str]:
+        try:
+            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
+        except OSError:
+            return (0.0, name)
+
     candidates = sorted(
-        name
-        for name in names
-        if name.startswith("assembly-")
-        and name.endswith(".db")
-        and os.path.isfile(os.path.join(backup_dir, name))
+        (
+            name
+            for name in names
+            if name.startswith("assembly-")
+            and name.endswith(".db")
+            and os.path.isfile(os.path.join(backup_dir, name))
+        ),
+        key=_reuse_mtime,
     )
     for newest in reversed(candidates):
         manifest_path = os.path.join(backup_dir, _db_backup_manifest_name(newest))
@@ -2427,6 +2440,19 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     # expensive part — a duplicate run costs one checksum scan.
     content_hash = _db_content_hash(session)
     reused = _db_backup_reuse(backup_dir, content_hash)
+    # A reused backup with a WAL/SHM sidecar must never be served as a
+    # restore point: ``db_verify_backup`` refuses such a copy because a
+    # single-file restore would not carry the sidecar's pages.
+    if reused is not None and any(
+        os.path.exists(reused + _sidecar) for _sidecar in ("-wal", "-shm")
+    ):
+        for _stale in (
+            reused,
+            os.path.join(backup_dir, _db_backup_manifest_name(reused)),
+            os.path.join(backup_dir, _db_backup_config_name(reused)),
+        ):
+            _remove_quietly(_stale)
+        reused = None
     if reused is not None and not db_verify_backup(session, reused)["ok"]:
         # A retained backup whose manifest still matches the live content
         # hash can nonetheless be corrupt now (bit rot, a truncated
@@ -2713,12 +2739,29 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
         names = os.listdir(backup_dir)
     except OSError:
         return 0
+
+    # Prune by file modification time, not by name: a backup directory
+    # that holds a hand-supplied or clock-skewed ``assembly-*.db`` whose
+    # name sorts newest would otherwise make name-order pruning delete
+    # genuinely newer restore points first.  mtime is the only
+    # chronological signal that survives a renamed or retimestamped
+    # copy; the 6-digit microsecond suffix is a prune tie-breaker only
+    # within the same second, not a global order.
+    def _mtime(name: str) -> tuple[float, str]:
+        try:
+            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
+        except OSError:
+            return (0.0, name)
+
     candidates = sorted(
-        name
-        for name in names
-        if name.startswith("assembly-")
-        and name.endswith(".db")
-        and os.path.isfile(os.path.join(backup_dir, name))
+        (
+            name
+            for name in names
+            if name.startswith("assembly-")
+            and name.endswith(".db")
+            and os.path.isfile(os.path.join(backup_dir, name))
+        ),
+        key=_mtime,
     )
     removed = 0
     for name in candidates[: max(0, len(candidates) - keep)]:

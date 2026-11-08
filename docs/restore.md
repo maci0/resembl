@@ -19,6 +19,24 @@ DuckDB 2.0 file is not readable by DuckDB before 2.0, so keep the copy
 with the DuckDB version that wrote it and prove the restore by opening
 the copy with that version (see `docs/custom_database.md`).
 
+
+## Scheduled backups and restore drills
+
+Backups taken by `resembl backup` and the pre-delete/pre-merge backups in
+`.resembl-pre-delete-backups/` are **not** committed to git: the repository
+`.gitignore` ignores `.resembl-pre-delete-backups/` and database files, and
+`git check-ignore` must report both ignored. A backup that re-enters the
+tree re-enters the build context and ships corpus data and its config with
+the repo. Schedule the operator backup explicitly (e.g. cron
+`resembl backup <off-host-dir> --force`) and keep that directory on
+different storage from `assembly.db` (see Failure-domain notes below).
+
+A backup that has never been restored is a hypothesis: run a restore drill
+at least quarterly — copy the newest verified backup to a scratch path,
+`resembl verify` it, and record (date, backup filename, verify result)
+beside the backup directory. `db_backup` re-verifies a reused retained
+backup and refuses a copy with a `-wal`/`-shm` sidecar, but only the drill
+proves the restore procedure itself.
 ## RPO / RTO
 
 - **RPO** = time since the last *verified* backup. No backup job runs

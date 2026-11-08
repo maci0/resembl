@@ -12,6 +12,10 @@ venv/
 # Database
 *.db
 *.sqlite3
+# Pre-delete backup copies, manifests, and config sidecars (modeled
+# corpus data; never commit — a tracked backup ships both the data
+# and its config, and the WAL/SHM sidecars `verify-backup` rejects).
+.resembl-pre-delete-backups/
 
 # Build artifacts
 build/
