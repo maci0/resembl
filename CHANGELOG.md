@@ -38,6 +38,7 @@ project follows [Semantic Versioning](https://semver.org/).
 - `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
 - `make install` now names the missing `uv` prerequisite (uv 0.12.13 or newer, with an install link) instead of failing with a bare `uv: command not found`.
 - `docs/THREAT_MODEL.md` and `SECURITY.md` now record that `db_merge` masks credentials in its source-URL error path (`0afeba7`) and that `serve` answers `413` for oversized bodies (`2cd23c9`), and correct stale `file:line` references (including two out-of-range `resembl/scoring.py:1315` citations) so the model matches the code it describes.
+- The service `Dockerfile` now runs `go mod download` before copying sources, so a source-only edit reuses the cached module layer instead of re-fetching every dependency; `service/.dockerignore` now carries the nested `**` database patterns and states that the root `.dockerignore` is the file Docker actually reads for the documented root-context build.
 
 ## [4.0.0] - 2026-11-05
 

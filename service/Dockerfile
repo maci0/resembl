@@ -9,6 +9,9 @@ ARG GO_IMAGE=golang:1.26-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
 COPY service/go.mod service/go.sum ./
+# Download modules before copying sources, so a source-only edit reuses
+# the cached module layer instead of re-fetching every dependency.
+RUN go mod download
 COPY service/*.go ./
 COPY service/cmd ./cmd
 COPY service/internal ./internal

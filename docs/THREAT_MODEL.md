@@ -591,7 +591,7 @@ workflow does not re-run either.
 | Legacy cache files never deserialized | `resembl/cache.py:8`, `resembl/cache.py:316` | Code execution from a planted cache file |
 | Backup filename percent-encoded before SQLite URI | `resembl/core.py:2129` | A `?`/`#` in a backup filename injecting SQLite URI params (e.g. `?mode=rwc`) and escaping the read-only mode |
 | Go container runs unprivileged | `service/Dockerfile` (`FROM scratch`, `USER 65532:65532`) | A compromised service process holding root in the image |
-| Docker build context exclusions | `.dockerignore` (root and `service/.dockerignore`) | Local databases, benchmark data, and build output shipped in the service image context (`docker build -f service/Dockerfile .` uses the repository root as context) |
+| Docker build context exclusions | `.dockerignore` (root; `service/.dockerignore` mirrors it) | Local databases, benchmark data, and build output shipped in the service image context (`docker build -f service/Dockerfile .` uses the repository root as context, so Docker reads the root file) |
 | YARA string escaping | `resembl/core.py:989` | A snippet name breaking out of a generated rule string |
 | Config value coercion and range check | `resembl/config.py:157`, `resembl/config.py:74` | A hand-edited config putting a raw TOML type or an out-of-range value into a numeric field |
 | `LIKE` metacharacter escaping | `resembl/cli.py:726`, `resembl/models.py:180` | A checksum prefix like `%` resolving to an arbitrary snippet |
