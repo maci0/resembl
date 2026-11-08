@@ -150,18 +150,11 @@ func New(authority Authorizer, engine Engine, resource string, concurrency int, 
 	}
 	now := time.Now
 	if v, pinned := os.LookupEnv("RESEMBL_NOW"); pinned && strings.TrimSpace(v) != "" {
+		if err := validateNow(v); err != nil {
+			return nil, err
+		}
 		// Pin started to a fixed instant so uptime renders 0.000 under
 		// RESEMBL_NOW, matching Python monotonic_now behaviour.
-		// Validate the value at startup (fail-fast): an unparseable pin
-		// must not silently pin the clock, matching Python's
-		// timestamp_now/monotonic_now ValueError contract. Mirror
-		// resembl.models.parse_instant: extended YYYY-MM-DDTHH:MM:SS with
-		// T/t/space separator, optional fractional seconds and offset,
-		// trailing Z/z normalized to +00:00.
-		trimmed := strings.TrimSpace(v)
-		if !isISO8601Instant(trimmed) {
-			return nil, fmt.Errorf("RESEMBL_NOW=%q is not an ISO 8601 instant", v)
-		}
 		now = m_started_fixed
 	}
 	// Validate RESEMBL_SEED at startup (fail-fast): an unparseable seed
@@ -248,25 +241,34 @@ func isISO8601Instant(s string) bool {
 	return false
 }
 
+func validateNow(v string) error {
+	if !isISO8601Instant(strings.TrimSpace(v)) {
+		return fmt.Errorf("RESEMBL_NOW=%q is not an ISO 8601 instant", v)
+	}
+	return nil
+}
+
 func newRequestID() string {
 	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
-		if v, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64); err == nil {
-			seedRNGMu.Lock()
-			if !seedInit || seedVal != v || seedRNG == nil {
-				seedRNG = rand.New(rand.NewSource(v))
-				seedVal = v
-				seedInit = true
-			}
-			r := seedRNG
-			seedRNGMu.Unlock()
-			seedRNGMu.Lock()
-			defer seedRNGMu.Unlock()
-			b := make([]byte, 8)
-			for i := range b {
-				b[i] = byte(r.Intn(256))
-			}
-			return hex.EncodeToString(b)
+		v, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64)
+		if err != nil {
+			panic(fmt.Sprintf("RESEMBL_SEED=%q is not an integer: %v", seed, err))
 		}
+		seedRNGMu.Lock()
+		if !seedInit || seedVal != v || seedRNG == nil {
+			seedRNG = rand.New(rand.NewSource(v))
+			seedVal = v
+			seedInit = true
+		}
+		r := seedRNG
+		seedRNGMu.Unlock()
+		seedRNGMu.Lock()
+		defer seedRNGMu.Unlock()
+		b := make([]byte, 8)
+		for i := range b {
+			b[i] = byte(r.Intn(256))
+		}
+		return hex.EncodeToString(b)
 	}
 	b := make([]byte, 8)
 	if _, err := crypto_rand.Read(b); err != nil {
