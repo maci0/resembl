@@ -718,12 +718,19 @@ def score_hybrid(jaccard: float, levenshtein: float, jaccard_weight: float = 0.4
     Raises:
         ValueError: If any input is non-finite or outside its domain.
     """
-    if not math.isfinite(jaccard):
-        raise ValueError(f"jaccard must be finite, got {jaccard!r}")
-    if not math.isfinite(levenshtein):
-        raise ValueError(f"levenshtein must be finite, got {levenshtein!r}")
-    if not math.isfinite(jaccard_weight):
-        raise ValueError(f"jaccard_weight must be finite, got {jaccard_weight!r}")
+    for label, value in (
+        ("jaccard", jaccard),
+        ("levenshtein", levenshtein),
+        ("jaccard_weight", jaccard_weight),
+    ):
+        # bool is an int subclass (True==1): reject it explicitly, and
+        # non-numeric types with ValueError (not TypeError from
+        # math.isfinite), matching cfg_similarity and the server
+        # float validator.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{label} must be a number, got {value!r}")
+        if not math.isfinite(value):
+            raise ValueError(f"{label} must be finite, got {value!r}")
     if not 0.0 <= jaccard <= 1.0:
         raise ValueError(f"jaccard must be in range, got {jaccard!r}")
     if not 0.0 <= levenshtein <= 100.0:

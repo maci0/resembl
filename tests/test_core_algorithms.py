@@ -142,6 +142,27 @@ class TestScoreHybrid(unittest.TestCase):
         # Jaccard=0.9 → 90 * 0.4 = 36, Levenshtein=20 * 0.6 = 12 → 48
         self.assertAlmostEqual(score_hybrid(0.9, 20.0), 48.0)
 
+    def test_bool_and_non_numeric_rejected(self):
+        """bool and non-numeric inputs raise ValueError, not silent score/TypeError.
+
+        bool is an int subclass (True==1), so without an explicit guard
+        score_hybrid(True, 50) silently scored 70.0; cfg_similarity and
+        the server float validator already reject bool with ValueError /
+        BadRequestError.  A string reached math.isfinite as TypeError,
+        contradicting the documented ValueError contract.
+        """
+        for args, kwargs in [
+            ((True, 50.0), {}),
+            ((0.5, True), {}),
+            ((0.5, 50.0), {"jaccard_weight": True}),
+            (("0.5", 50.0), {}),
+            ((0.5, "50"), {}),
+            ((0.5, 50.0), {"jaccard_weight": "0.4"}),
+            ((None, 50.0), {}),
+        ]:
+            with self.assertRaises(ValueError):
+                score_hybrid(*args, **kwargs)
+
 
 # CFG Extraction
 
