@@ -279,7 +279,7 @@ known-first-party = ["resembl"]
 
 [tool.mypy]
 python_version = "3.14"
-files = ["resembl", "tests", "fuzzers"]
+files = ["resembl", "tests", "fuzzers", "benchmarks"]
 ignore_missing_imports = true
 # Strict flags the whole tree (package + tests) already passes.
 no_implicit_optional = true

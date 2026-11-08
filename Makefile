@@ -93,9 +93,9 @@ format:  ## Apply the auto-fixes black and ruff can make
 
 lint:  ## Run ruff and pylint
 	uv run --locked ruff check .
-	uv run --locked pylint resembl/ tests/ fuzzers/
+	uv run --locked pylint resembl/ tests/ fuzzers/ benchmarks/
 
-types:  ## Run mypy over resembl/, tests/ and fuzzers/
+types:  ## Run mypy over resembl/, tests/, fuzzers/ and benchmarks/
 	uv run --locked mypy
 
 # The tracked text files the pre-commit hygiene hooks rewrite.  The pathspecs
@@ -216,7 +216,7 @@ check:  ## Run every check CI runs, plus the commit-gate file checks
 	$(MAKE) types
 	uv run --locked ruff check .
 	uv run --locked black --check .
-	uv run --locked pylint resembl/ tests/ fuzzers/
+	uv run --locked pylint resembl/ tests/ fuzzers/ benchmarks/
 	$(MAKE) test
 	@if [ -z "$${RESEMBL_TEST_PG_URL:-}" ] || [ -z "$${RESEMBL_TEST_MYSQL_URL:-}" ]; then \
 		echo "note: the PostgreSQL and MySQL integration tests were skipped (unset"; \

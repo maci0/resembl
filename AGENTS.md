@@ -36,7 +36,7 @@ The pre-commit hooks run over the project rather than the staged files
 | black  | `uv run --locked black .`   | project                    |
 | ruff   | `uv run --locked ruff check --fix --exit-non-zero-on-fix` | project |
 | mypy  | `uv run --locked mypy`      | `files` in `pyproject.toml` |
-| pylint | `uv run --locked pylint`    | `resembl/ tests/ fuzzers/` |
+| pylint | `uv run --locked pylint`    | `resembl/ tests/ fuzzers/ benchmarks/` |
 
 The same config also runs three mirror hooks: `check-yaml`,
 `end-of-file-fixer` and `trailing-whitespace`. No CI workflow runs them, so

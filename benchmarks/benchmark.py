@@ -14,13 +14,13 @@ import sys
 import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from tests.generate_data import generate_files
+from benchmarks.generate_data import generate_files
 
 # --- Benchmark Configuration ---
 NUM_FILES = 1000
 
 # Anchored to the repository root, not the working directory: the script is
-# documented as `uv run python tests/benchmark.py` and the suite runs it as a
+# documented as `uv run python benchmarks/benchmark.py` and the suite runs it as a
 # subprocess, and a relative path makes the run depend on where the caller
 # happened to be, failing with an import error rather than saying so.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

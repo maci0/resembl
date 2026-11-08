@@ -6,12 +6,12 @@ import subprocess
 import sys
 import unittest
 
-from tests.benchmark import REPO_ROOT
+from benchmarks.benchmark import REPO_ROOT
 
 # This must match the DATA_DIR used in the benchmark script.
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 DB_NAME = os.path.join(REPO_ROOT, "benchmark.db")
-BENCHMARK_SCRIPT = os.path.join(REPO_ROOT, "tests", "benchmark.py")
+BENCHMARK_SCRIPT = os.path.join(REPO_ROOT, "benchmarks", "benchmark.py")
 
 
 class TestBenchmarkScript(unittest.TestCase):

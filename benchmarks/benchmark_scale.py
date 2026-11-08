@@ -12,7 +12,7 @@ for larger datasets and reports the metrics that matter at scale:
 
 Usage::
 
-    uv run python tests/benchmark_scale.py --num-files 5000
+    uv run python benchmarks/benchmark_scale.py --num-files 5000
 
 Optional flags:
 
@@ -38,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tests.generate_data import generate_files
+from benchmarks.generate_data import generate_files
 
 DEFAULT_NUM_FILES = 5000
 DEFAULT_DATA_DIR = "scale_data"

@@ -285,7 +285,7 @@ A simple benchmarking script is included to measure the performance of the `impo
 To run the benchmark, execute the following command from the root of the project:
 
 ```bash
-uv run --locked python tests/benchmark.py
+uv run --locked python benchmarks/benchmark.py
 ```
 
 The script will:
@@ -294,24 +294,24 @@ The script will:
 3.  Measure the time it takes to run a `find` query against the newly created database.
 4.  Clean up the generated files and the benchmark database.
 
-`tests/generate_data.py` writes randomized assembly files on its own (1,000 into `data/` by default), for importing with `resembl import data/`:
+`benchmarks/generate_data.py` writes randomized assembly files on its own (1,000 into `data/` by default), for importing with `resembl import data/`:
 
 ```bash
-uv run --locked python tests/generate_data.py --num-files 500 --data-dir custom_data/
+uv run --locked python benchmarks/generate_data.py --num-files 500 --data-dir custom_data/
 ```
 
-For larger datasets, use `tests/benchmark_scale.py`, which reports the metrics that matter at scale:
+For larger datasets, use `benchmarks/benchmark_scale.py`, which reports the metrics that matter at scale:
 bulk import throughput, cold and warm `find` latency, `reindex` time, database size, and the stored
 MinHash footprint:
 
 ```bash
-uv run --locked python tests/benchmark_scale.py --num-files 5000
+uv run --locked python benchmarks/benchmark_scale.py --num-files 5000
 ```
 
 ### Performance at Scale
 
 Measured on a development workstation (shared, under load) with
-`tests/benchmark_scale.py`, which parallelizes the import but runs the
+`benchmarks/benchmark_scale.py`, which parallelizes the import but runs the
 reindex in a single process:
 
 | Dataset | Bulk import | Warm `find` | Cold `find` (index build + query) | `reindex` (single process) |
