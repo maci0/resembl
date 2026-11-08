@@ -2964,14 +2964,23 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     # longer holds); legacy manifests without the field are skipped.
     if manifest_config_hash is not None:
         sidecar_name = manifest_config_name or _db_backup_config_name(backup_path)
-        sidecar_path = os.path.join(manifest_dir, sidecar_name)
-        try:
-            with open(sidecar_path, "rb") as f:
-                sidecar_data = f.read()
-            if hashlib.sha256(sidecar_data).hexdigest() != manifest_config_hash:
-                issues.append("config mismatch: backup config differs from manifest")
-        except OSError:
+        # The manifest is untrusted (it travels with the backup): a
+        # ``config`` value carrying a separator or ``..`` would make
+        # verify read/hash an arbitrary file outside the backup
+        # directory (path traversal / hash oracle).  Only a plain file
+        # name beside the backup is a valid sidecar; anything else is
+        # a mismatch, not a path to follow.
+        if sidecar_name in {"", ".", ".."} or os.path.basename(sidecar_name) != sidecar_name:
             issues.append("config mismatch: backup config sidecar missing")
+        else:
+            sidecar_path = os.path.join(manifest_dir, sidecar_name)
+            try:
+                with open(sidecar_path, "rb") as f:
+                    sidecar_data = f.read()
+                if hashlib.sha256(sidecar_data).hexdigest() != manifest_config_hash:
+                    issues.append("config mismatch: backup config differs from manifest")
+            except OSError:
+                issues.append("config mismatch: backup config sidecar missing")
     # A missing manifest alone does not fail verification: the file may
     # predate manifests, and its contents are what matter.  A missing table,
     # a failed integrity_check, or a count/hash mismatch does.
