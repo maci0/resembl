@@ -40,6 +40,8 @@ project follows [Semantic Versioning](https://semver.org/).
 - `make install` now names the missing `uv` prerequisite (uv 0.12.13 or newer, with an install link) instead of failing with a bare `uv: command not found`.
 - `docs/THREAT_MODEL.md` and `SECURITY.md` now record that `db_merge` masks credentials in its source-URL error path (`0afeba7`) and that `serve` answers `413` for oversized bodies (`2cd23c9`), and correct stale `file:line` references (including two out-of-range `resembl/scoring.py:1315` citations) so the model matches the code it describes.
 - The service `Dockerfile` now runs `go mod download` before copying sources, so a source-only edit reuses the cached module layer instead of re-fetching every dependency; `service/.dockerignore` now carries the nested `**` database patterns and states that the root `.dockerignore` is the file Docker actually reads for the documented root-context build.
+- The CLI warm-server client now logs a server refusal that arrives as a 200 `{"error": ...}` envelope before it falls back to the in-process path, so a server that only ever refused with envelopes is no longer silent in the operator's log.
+- The Go `resembl-service` now drains in-flight queries on SIGINT/SIGTERM (`http.Server.Shutdown` with a 30 s bound) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls.
 
 ## [4.0.0] - 2026-11-05
 

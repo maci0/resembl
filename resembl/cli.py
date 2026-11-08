@@ -731,6 +731,17 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
             port_file_cleanup(port_file, port)
         return None
     if "error" in payload:
+        # A 200 carrying an error envelope is a deliberate server refusal
+        # (e.g. the index needs a rebuild), not a result.  Falling back to
+        # the in-process path keeps the caller moving, but the refusal
+        # itself is the only trace of the server-side fault: log it like
+        # the HTTPError branch above, or a server that only ever answers
+        # with envelopes fails silently from the operator's log.
+        logger.warning(
+            "Server request to %s was refused (%s); falling back to the in-process path.",
+            path,
+            payload.get("error"),
+        )
         return None
     return payload
 
