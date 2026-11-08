@@ -157,12 +157,13 @@ def _sync_dir(path: str) -> None:
 def _fsync_quiet(path: str) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
-    except OSError:
+    except OSError as e:
+        logger.debug("fsync skipped for %s: could not open: %s", path, e)
         return
     try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.debug("fsync failed for %s: %s", path, e)
     finally:
         os.close(fd)
 
@@ -2484,6 +2485,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
                 # As in the fresh-backup path below: never fabricate a 0 count,
                 # which db_verify_backup reads as an empty database.
                 logger.warning("Could not count snippets for the reused backup: %s", e)
+                session.rollback()
                 num_snippets = None
             return {
                 "backup": reused,
@@ -2615,6 +2617,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # Record the absence (None, not 0) so verify knows the count was
         # never taken and skips the cross-check rather than failing it.
         logger.warning("Could not count snippets for the backup manifest: %s", e)
+        session.rollback()
         num_snippets = None
         count_known = False
     # Config sidecar: copy the live config.toml verbatim beside the backup
