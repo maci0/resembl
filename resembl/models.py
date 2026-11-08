@@ -69,6 +69,12 @@ def parse_instant(value: str) -> datetime | None:
     # but the canonical stored form uses uppercase ``T``.
     if text[10] == "t":
         text = text[:10] + "T" + text[11:]
+    # ``-00:00`` (in any spelling) is ISO 8601's "unknown local offset",
+    # not UTC: ``fromisoformat`` maps it to UTC, so normalizing it would
+    # fabricate a UTC instant the row never stated -- the same corruption
+    # the date-only gate above refuses.  Leave it verbatim instead.
+    if text.endswith(("-00:00", "-0000", "-00", "-00:00:00")):
+        return None
     try:
         return datetime.fromisoformat(text)
     except ValueError:

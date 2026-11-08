@@ -314,6 +314,23 @@ class TestTimestampNormalize(unittest.TestCase):
         self.assertEqual(timestamp_normalize("2024-W01-1"), "2024-W01-1")
         self.assertEqual(timestamp_normalize("20240601T100000"), "20240601T100000")
 
+    def test_unknown_offset_is_not_an_instant(self):
+        """``-00:00`` is ISO 8601's unknown offset, not UTC.
+
+        ``datetime.fromisoformat`` maps it to UTC, so normalizing it would
+        stamp a foreign row whose instant is genuinely unknown as if it
+        were known to the minute -- inventing a sort position (and, on
+        import, a wrong ordering) the source never stated.  It is left
+        verbatim like a date-only value, in every accepted spelling.
+        """
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T10:00:00-00:00"), "2024-06-01T10:00:00-00:00"
+        )
+        self.assertEqual(
+            timestamp_normalize("2024-06-01T10:00:00-0000"), "2024-06-01T10:00:00-0000"
+        )
+        self.assertEqual(timestamp_normalize("2024-06-01T10:00:00-00"), "2024-06-01T10:00:00-00")
+
     def test_nanoseconds_truncate_to_microseconds(self):
         """Sub-microsecond precision cannot be stored; it truncates."""
         self.assertEqual(
