@@ -2765,8 +2765,14 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         # every platform, and the Windows backslash spelling percent-encoded
         # (``file:C%3A%5C...``) is not the absolute form SQLite opens there.
         _uri_path = os.path.abspath(backup_path).replace(os.sep, "/")
+        # ``errors="surrogateescape"``: a filename carrying an undecodable
+        # byte arrives as a lone surrogate (``os.fsdecode``); plain
+        # ``quote`` raises UnicodeEncodeError on it, crashing verify
+        # instead of reporting the file unopenable.  surrogateescape
+        # encodes the raw byte as %FF, which SQLite decodes back to it.
         connection = sqlite3.connect(
-            f"file:{quote(_uri_path, safe='/')}?mode=ro", uri=True
+            f"file:{quote(_uri_path, safe='/', encoding='utf-8', errors='surrogateescape')}?mode=ro",
+            uri=True,
         )
     except sqlite3.Error as e:
         return {"ok": False, "num_snippets": 0, "issues": [f"cannot open backup: {e}"]}
