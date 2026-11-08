@@ -149,6 +149,34 @@ def monotonic_now() -> float:
     return time.monotonic()
 
 
+def _retry_sleep(delay: float) -> None:
+    """Sleep *delay* seconds unless the clock is pinned.
+
+    ``RESEMBL_NOW`` pins every timestamp and duration to a fixed instant;
+    a real ``time.sleep`` on a retry path would make a pinned replay wait
+    on wall time while every other duration reads 0.0.  Skipping the
+    wait under a pin keeps the retry count (the only observable) identical
+    and the run instant, matching :func:`monotonic_now`.
+    """
+    override = os.environ.get(CLOCK_ENV_VAR)
+    if override is not None and override.strip():
+        return
+    # The caller's module keeps a ``time`` attribute (patched in tests);
+    # resolving through the caller frame lets ``resembl.<module>.time.sleep``
+    # intercept this wait without a cross-module mock target.
+    import inspect
+
+    caller = inspect.currentframe()
+    try:
+        mod_time = caller.f_back.f_globals.get("time") if caller and caller.f_back else None
+    finally:
+        del caller
+    if mod_time is not None:
+        mod_time.sleep(delay)
+        return
+    time.sleep(delay)
+
+
 def avg_time_per_item(time_elapsed: float, item_count: int) -> float:
     """Return the exact per-item seconds for *item_count* processed items.
 

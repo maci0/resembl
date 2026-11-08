@@ -17,7 +17,7 @@ import logging
 import os
 import re
 import threading
-import time
+import time  # noqa: F401  # patch target for _retry_sleep tests
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta
@@ -60,6 +60,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    _retry_sleep,
     avg_time_per_item,
     monotonic_now,
     name_normalize,
@@ -608,7 +609,7 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
         return None
     try:
         value = json.loads(raw)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         # ``RecursionError`` is not a ``ValueError``: a deeply nested
         # document (``[[[...]]]``) from a hostile merge source recurses
         # once per level in the decoder and must skip the row, not abort
@@ -1510,7 +1511,7 @@ def _db_reindex(
         except OperationalError:
             session.rollback()
             if attempt + 1 < _REINDEX_CLEAR_RETRIES:
-                time.sleep(_REINDEX_CLEAR_RETRY_BACKOFF * (attempt + 1))
+                _retry_sleep(_REINDEX_CLEAR_RETRY_BACKOFF * (attempt + 1))
     else:
         logger.error(
             "Could not clear the index (another process may be writing to "

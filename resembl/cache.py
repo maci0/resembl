@@ -15,7 +15,7 @@ database instead.
 
 import logging
 import os
-import time
+import time  # noqa: F401  # patch target for _retry_sleep tests
 from collections.abc import Callable
 
 from sqlalchemy.exc import OperationalError
@@ -33,7 +33,7 @@ from .lsh import (
     lsh_meta_matches,
     lsh_meta_set,
 )
-from .models import FINGERPRINT_VERSION, Snippet
+from .models import FINGERPRINT_VERSION, Snippet, _retry_sleep
 from .paths import cache_dir_get
 
 # Default permutation count when (re)building the index: shared with scoring.
@@ -148,7 +148,7 @@ def lsh_index_build(
                     _BUILD_RETRY_BACKOFF * (attempt + 1),
                     exc,
                 )
-                time.sleep(_BUILD_RETRY_BACKOFF * (attempt + 1))
+                _retry_sleep(_BUILD_RETRY_BACKOFF * (attempt + 1))
             else:
                 logger.error("Index build attempt %d failed: %s", attempt + 1, exc)
     logger.error(

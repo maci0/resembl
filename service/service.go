@@ -3,14 +3,17 @@ package service
 
 import (
 	"context"
-	"crypto/rand"
+	crypto_rand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,6 +81,7 @@ type serviceMetrics struct {
 	sums     map[string]float64
 	counts   map[string]int64
 	started  time.Time
+	now      func() time.Time
 }
 
 func (m *serviceMetrics) record(path string, status int, seconds float64) {
@@ -103,9 +107,24 @@ func (m *serviceMetrics) render() string {
 	var b strings.Builder
 	b.WriteString("# HELP resembl_service_up 1 while this process is answering requests.\n# TYPE resembl_service_up gauge\nresembl_service_up 1\n")
 	b.WriteString("# HELP resembl_service_uptime_seconds Seconds since this process started serving.\n# TYPE resembl_service_uptime_seconds gauge\n")
-	fmt.Fprintf(&b, "resembl_service_uptime_seconds %.3f\n", time.Since(m.started).Seconds())
+	now := m.now
+	if now == nil {
+		now = time.Now
+	}
+	fmt.Fprintf(&b, "resembl_service_uptime_seconds %.3f\n", now().Sub(m.started).Seconds())
 	b.WriteString("# HELP resembl_service_requests_total Requests answered, by path and status.\n# TYPE resembl_service_requests_total counter\n")
-	for key, count := range m.requests {
+	requestKeys := make([][2]string, 0, len(m.requests))
+	for key := range m.requests {
+		requestKeys = append(requestKeys, key)
+	}
+	sort.Slice(requestKeys, func(i, j int) bool {
+		if requestKeys[i][0] != requestKeys[j][0] {
+			return requestKeys[i][0] < requestKeys[j][0]
+		}
+		return requestKeys[i][1] < requestKeys[j][1]
+	})
+	for _, key := range requestKeys {
+		count := m.requests[key]
 		fmt.Fprintf(&b, "resembl_service_requests_total{path=%q,status=%q} %d\n", key[0], key[1], count)
 	}
 	b.WriteString("# HELP resembl_service_request_duration_seconds Answered-request latency, by path.\n# TYPE resembl_service_request_duration_seconds histogram\n")
@@ -113,14 +132,7 @@ func (m *serviceMetrics) render() string {
 	for label := range m.counts {
 		labels = append(labels, label)
 	}
-	// deterministic order for stable exposition
-	for i := 0; i < len(labels); i++ {
-		for j := i + 1; j < len(labels); j++ {
-			if labels[j] < labels[i] {
-				labels[i], labels[j] = labels[j], labels[i]
-			}
-		}
-	}
+	sort.Strings(labels)
 	for _, label := range labels {
 		for _, bound := range latencyBuckets {
 			fmt.Fprintf(&b, "resembl_service_request_duration_seconds_bucket{path=%q,le=%q} %d\n", label, strconv.FormatFloat(bound, 'f', -1, 64), m.buckets[[2]interface{}{label, bound}])
@@ -136,7 +148,13 @@ func New(authority Authorizer, engine Engine, resource string, concurrency int, 
 	if authority == nil || engine == nil || resource == "" || concurrency < 1 || concurrency > 64 || timeout <= 0 {
 		return nil, errors.New("invalid service configuration")
 	}
-	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), buckets: make(map[[2]interface{}]int64), sums: make(map[string]float64), counts: make(map[string]int64), started: time.Now()}}, nil
+	now := time.Now
+	if v, pinned := os.LookupEnv("RESEMBL_NOW"); pinned && strings.TrimSpace(v) != "" {
+		// Pin started to a fixed instant so uptime renders 0.000 under
+		// RESEMBL_NOW, matching Python monotonic_now behaviour.
+		now = m_started_fixed
+	}
+	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), buckets: make(map[[2]interface{}]int64), sums: make(map[string]float64), counts: make(map[string]int64), started: now(), now: now}}, nil
 }
 
 // SetCustody installs an owner-supplied durable capacity store before serving.
@@ -164,9 +182,37 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	}
 }
 
+var (
+	seedRNGMu sync.Mutex
+	seedRNG   *rand.Rand
+	seedVal   int64
+	seedInit  bool
+)
+
+func m_started_fixed() time.Time { return time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC) }
+
 func newRequestID() string {
+	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
+		if v, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64); err == nil {
+			seedRNGMu.Lock()
+			if !seedInit || seedVal != v || seedRNG == nil {
+				seedRNG = rand.New(rand.NewSource(v))
+				seedVal = v
+				seedInit = true
+			}
+			r := seedRNG
+			seedRNGMu.Unlock()
+			seedRNGMu.Lock()
+			defer seedRNGMu.Unlock()
+			b := make([]byte, 8)
+			for i := range b {
+				b[i] = byte(r.Intn(256))
+			}
+			return hex.EncodeToString(b)
+		}
+	}
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
+	if _, err := crypto_rand.Read(b); err != nil {
 		return "-"
 	}
 	return hex.EncodeToString(b)
