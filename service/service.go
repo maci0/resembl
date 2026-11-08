@@ -221,6 +221,31 @@ func isISO8601Instant(s string) bool {
 	if len(candidate) > 10 && candidate[10] == 't' {
 		candidate = candidate[:10] + "T" + candidate[11:]
 	}
+	// -00:00 (in any spelling) is ISO 8601's "unknown local offset", not
+	// UTC: Go's RFC3339 parse maps it to UTC, so accepting it would
+	// fabricate a UTC instant the value never stated, while the Python
+	// parse_instant this mirrors rejects it. Leave it not-an-instant.
+	for _, suffix := range []string{"-00:00", "-0000", "-00", "-00:00:00"} {
+		if strings.HasSuffix(candidate, suffix) {
+			return false
+		}
+	}
+	// Go's RFC3339 requires a colon in the offset; Python's fromisoformat
+	// accepts the colon-less (+0000) and hour-only (+00) spellings, so
+	// normalize them to +00:00 before parsing to keep the two validators
+	// in agreement on RESEMBL_NOW.
+	if len(candidate) >= 5 {
+		switch candidate[len(candidate)-5:] {
+		case "+0000", "-0000":
+			candidate = candidate[:len(candidate)-5] + candidate[len(candidate)-5:len(candidate)-4] + "00:00"
+		}
+	}
+	if len(candidate) >= 3 {
+		tail := candidate[len(candidate)-3:]
+		if (tail[0] == '+' || tail[0] == '-') && tail[1] >= '0' && tail[1] <= '9' && tail[2] >= '0' && tail[2] <= '9' {
+			candidate += ":00"
+		}
+	}
 	// Go requires T separator for RFC3339; normalize space before parsing.
 	rfcCandidate := candidate
 	if len(rfcCandidate) > 10 && rfcCandidate[10] == ' ' {

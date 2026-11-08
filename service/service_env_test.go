@@ -25,6 +25,34 @@ func TestNewAcceptsValidNow(t *testing.T) {
 	}
 }
 
+func TestNewAcceptsValidNowForms(t *testing.T) {
+	for _, v := range []string{
+		"2024-06-01T12:00:00+0000",
+		"2024-06-01T12:00:00+00",
+		"2024-06-01T12:00:00Z",
+		"2024-06-01T12:00:00.123456789+00:00",
+	} {
+		t.Setenv("RESEMBL_NOW", v)
+		if _, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), okEngine{}, "index", 1, time.Second); err != nil {
+			t.Fatalf("RESEMBL_NOW=%q rejected: %v", v, err)
+		}
+	}
+}
+
+func TestNewRejectsUnknownOffsetNow(t *testing.T) {
+	for _, v := range []string{
+		"2024-06-01T12:00:00-00:00",
+		"2024-06-01T12:00:00-0000",
+		"2024-06-01T12:00:00-00",
+		"2024-06-01T12:00:00-00:00:00",
+	} {
+		t.Setenv("RESEMBL_NOW", v)
+		if _, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), okEngine{}, "index", 1, time.Second); err == nil {
+			t.Fatalf("RESEMBL_NOW=%q accepted, want rejection", v)
+		}
+	}
+}
+
 func TestNewRequestIDRejectsInvalidSeed(t *testing.T) {
 	t.Setenv("RESEMBL_SEED", "abc")
 	defer func() {
