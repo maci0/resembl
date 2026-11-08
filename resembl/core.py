@@ -551,7 +551,7 @@ def snippet_lex(code: str) -> tuple[str, list[str]] | None:
 
 
 def snippet_prepare(
-    name: str, code: str, ngram_size: int = 3
+    name: str, code: str, ngram_size: int = 3, num_perm: int = NUM_PERMUTATIONS
 ) -> tuple[str, str, str, bytes] | None:
     """Compute the checksum and MinHash fingerprint for a snippet.
 
@@ -580,7 +580,7 @@ def snippet_prepare(
         checksum,
         normalize_unicode(name),
         normalize_unicode(code),
-        minhash_pack(minhash_from_tokens(token_list, ngram_size)),
+        minhash_pack(minhash_from_tokens(token_list, ngram_size, num_perm=num_perm)),
     )
 
 
@@ -759,6 +759,7 @@ def snippet_add_batch(
     prepared_items: list[tuple[str, str, str, bytes]],
     batch_size: int = 500,
     ngram_size: int = 3,
+    num_perm: int = NUM_PERMUTATIONS,
 ) -> dict:
     """Insert many prepared snippets in one pass.
 
@@ -862,7 +863,7 @@ def snippet_add_batch(
             # converge by re-running the dedup pass — the same strategy the
             # index-sync block below already uses for the same race.
             session.rollback()
-            return snippet_add_batch(session, prepared_items, batch_size, ngram_size)
+            return snippet_add_batch(session, prepared_items, batch_size, ngram_size, num_perm)
     if new_snippets or aliased:
         # The index rows join the snippet rows' transaction: a commit that
         # publishes a snippet must publish the buckets that make it findable.
@@ -880,14 +881,14 @@ def snippet_add_batch(
             # Concurrent batch committed the same checksums first; converge
             # by re-running the dedup pass on the now-current rows.
             session.rollback()
-            return snippet_add_batch(session, prepared_items, batch_size, ngram_size)
+            return snippet_add_batch(session, prepared_items, batch_size, ngram_size, num_perm)
         if index_threshold is not None:
             lsh_pickle_cache_remove(index_threshold)
         if new_snippets:
             fingerprint_stamps_reconcile(
                 session,
                 ngram_size=ngram_size,
-                num_perm=NUM_PERMUTATIONS,
+                num_perm=num_perm,
                 fresh_database=fresh_database,
             )
 
@@ -900,7 +901,9 @@ def snippet_add_batch(
     }
 
 
-def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> Snippet | None:
+def snippet_add(
+    session: Session, name: str, code: str, ngram_size: int = 3, num_perm: int = NUM_PERMUTATIONS
+) -> Snippet | None:
     """Add a new snippet or alias to the database.
 
     *name* is stored in NFC, so the alias a caller types and the same alias
@@ -930,7 +933,7 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
             session.refresh(existing_snippet)
         return existing_snippet
 
-    minhash_bytes = minhash_pack(minhash_from_tokens(token_list, ngram_size))
+    minhash_bytes = minhash_pack(minhash_from_tokens(token_list, ngram_size, num_perm=num_perm))
 
     # Detect an empty database with an O(1) ``LIMIT 1`` probe instead of a
     # full-table COUNT (same reason as ``snippet_add_batch``): the stamp
@@ -974,7 +977,7 @@ def snippet_add(session: Session, name: str, code: str, ngram_size: int = 3) -> 
     fingerprint_stamps_reconcile(
         session,
         ngram_size=ngram_size,
-        num_perm=NUM_PERMUTATIONS,
+        num_perm=num_perm,
         fresh_database=fresh_database,
     )
     return new_snippet

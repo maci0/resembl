@@ -1362,7 +1362,13 @@ def add(
       resembl add "memcpy" "mov ecx, ebx"
       resembl add "memcpy" "mov ecx, ebx; add eax, 1"
     """
-    snippet = snippet_add(state.session, name, code, ngram_size=state.config.ngram_size)
+    snippet = snippet_add(
+        state.session,
+        name,
+        code,
+        ngram_size=state.config.ngram_size,
+        num_perm=state.config.num_permutations,
+    )
     if snippet:
         if state.format in ("json", "csv"):
             _echo_format({"checksum": snippet.checksum, "names": snippet.name_list})
@@ -1437,7 +1443,7 @@ def export_yara_cmd(
     _echo_kv_table("YARA Export Complete", rows)
 
 
-def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] | None:
+def _import_prepare_file(args: tuple[str, int, int]) -> tuple[str, str, str, bytes] | None:
     """Worker: read a file and compute its checksum + MinHash fingerprint.
 
     Top-level and pure (no database access) so it can run in a process pool.
@@ -1445,7 +1451,7 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
     or unreadable (a failure here must never silently drop rows — see
     ``import_cmd``, which counts rejects).
     """
-    file_path, ngram_size = args
+    file_path, ngram_size, num_perm = args
     try:
         with open(file_path, encoding="utf-8") as f:
             code = f.read()
@@ -1453,7 +1459,7 @@ def _import_prepare_file(args: tuple[str, int]) -> tuple[str, str, str, bytes] |
         # Unreadable or non-UTF-8 files are rejected, never fatal.
         return None
     name = os.path.splitext(os.path.basename(file_path))[0]
-    return snippet_prepare(name, code, ngram_size)
+    return snippet_prepare(name, code, ngram_size, num_perm)
 
 
 @app.command("import")
@@ -1520,6 +1526,7 @@ def import_cmd(
 
     start_time = monotonic_now()
     ngram_size = state.config.ngram_size
+    num_perm = state.config.num_permutations
 
     if jobs is None:
         jobs = adaptive_worker_count(len(file_paths), os.cpu_count() or 1)
@@ -1536,7 +1543,9 @@ def import_cmd(
         nonlocal prepared, added_total, aliased_total
         if not prepared:
             return
-        batch_result = snippet_add_batch(state.session, prepared, ngram_size=ngram_size)
+        batch_result = snippet_add_batch(
+            state.session, prepared, ngram_size=ngram_size, num_perm=num_perm
+        )
         added_total += batch_result["added"]
         aliased_total += batch_result["aliased"]
         prepared = []
@@ -1563,7 +1572,7 @@ def import_cmd(
 
     def prepare_sequential() -> None:
         for fp in file_paths:
-            handle_prepared(_import_prepare_file((fp, ngram_size)))
+            handle_prepared(_import_prepare_file((fp, ngram_size, num_perm)))
 
     if file_paths and jobs > 0:
         ctx = multiprocessing.get_context("spawn")
@@ -1583,7 +1592,9 @@ def import_cmd(
                     fp = next(file_iter, None)
                     if fp is None:
                         return False
-                    in_flight.append(executor.submit(_import_prepare_file, (fp, ngram_size)))
+                    in_flight.append(
+                        executor.submit(_import_prepare_file, (fp, ngram_size, num_perm))
+                    )
                     return True
 
                 for _ in range(min(window, len(file_paths))):
