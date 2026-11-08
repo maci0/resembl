@@ -35,7 +35,14 @@ jobs:
         # The Dockerfile is the deployment artifact for service/; a build
         # that only runs `go test` would let a broken Dockerfile merge
         # undetected until an operator builds it by hand.
-        run: docker build -f service/Dockerfile -t resembl-service:ci .
+        # SOURCE_DATE_EPOCH is the commit time of HEAD (the same clock
+        # `make dist` pins), so the image's created timestamp and the
+        # binary's embedded build time are reproducible; REVISION and
+        # VERSION pin the OCI labels instead of the Dockerfile's
+        # defaults (unknown/dev). GitHub injects SOURCE_DATE_EPOCH=0
+        # into every step's environment, which the Dockerfile would
+        # otherwise inherit as its reproducible-but-wrong epoch.
+        run: docker build -f service/Dockerfile -t resembl-service:ci . --build-arg SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" --build-arg REVISION="${{ github.sha }}" --build-arg VERSION="${{ github.ref_name }}"
       - name: Smoke-test the service image
         # A successful build does not prove the entrypoint runs: a broken
         # COPY path or a missing binary would only fail on an operator's

@@ -92,7 +92,7 @@ types:  ## Run mypy over resembl/, tests/ and fuzzers/
 # mirror what the hooks see (files git tracks), which is why they are listed
 # here instead of globbing the working tree: a build artifact in the tree must
 # not fail a check the commit would not have run.
-HYGIENE_FILES = $(shell git ls-files '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.cfg' '*.txt' '*.asm' '*.json' Makefile .pre-commit-config.yaml .gitattributes .gitignore)
+HYGIENE_FILES = $(shell git ls-files '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.cfg' '*.txt' '*.asm' '*.json' '*.go' '*.typed' '*.in' '*.lock' '*Dockerfile*' '*dockerignore*' '*.version' 'LICENSE' 'NOTICE' 'brand-source.json' Makefile .pre-commit-config.yaml .gitattributes .gitignore)
 
 # The pre-commit config runs trailing-whitespace and end-of-file-fixer over
 # every commit; no CI workflow runs them.  That leaves the commit gate and
@@ -110,7 +110,7 @@ hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing white
 		echo "make hygiene needs git: 'git ls-files' returned nothing, so there is"; \
 		echo "nothing to check and the target would pass vacuously."; exit 1; \
 	fi; \
-	whitespace=$$(grep -nE ' +$$' $(HYGIENE_FILES) || true); \
+	whitespace=$$(grep -nE '[[:space:]]+$$' $(HYGIENE_FILES) || true); \
 	if [ -n "$$whitespace" ]; then \
 		echo "trailing whitespace, which the pre-commit trailing-whitespace hook refuses to commit:"; \
 		echo "$$whitespace"; exit 1; \
