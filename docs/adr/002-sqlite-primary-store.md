@@ -23,7 +23,9 @@ lookup order.
 ## Consequences
 - SQLite has limited concurrent write support. Every `resembl serve` endpoint
   is read-only: `POST /find`, `POST /find-batch` and `POST /find-pinned`
-  search, `GET /runtime-generation` reads the process generation,
+  search, `POST /score` and `POST /band-keys` score caller-supplied listings
+  without touching the database, `GET /scheme` reports the fingerprint
+  scheme, `GET /runtime-generation` reads the process generation,
   `GET /health` runs one `SELECT 1`, and `GET /metrics` reads counters held
   in the process (`docs/http_api.md`). The served API therefore never issues
   writes; concurrent writers serialize instead, with a 30 s busy timeout

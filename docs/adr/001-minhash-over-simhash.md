@@ -8,7 +8,10 @@ Accepted (2026-08-11)
 We needed a fast, scalable similarity search mechanism for assembly code snippets. The two main contenders were **SimHash** (single-hash fingerprint with Hamming distance) and **MinHash + LSH** (set-based Jaccard estimation with locality-sensitive hashing).
 
 ## Decision
-We chose **MinHash + LSH** via the `datasketch` library.
+We chose **MinHash + LSH**. At the time this record was accepted the
+implementation used the `datasketch` library; that provenance was later
+vendored (ADR 005) and the index moved into the database (ADR 004), as
+annotated in Consequences below.
 
 ## Rationale
 
