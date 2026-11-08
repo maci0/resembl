@@ -94,8 +94,16 @@ def name_normalize(name: str) -> str:
     # ``str.strip`` removes) is not part of the name either: every other
     # ingestion path (``snippet_name_add``, ``collection_create``) strips
     # it, so a name that kept it would be stored under a spelling no
-    # lookup strips its way to.
-    return unicodedata.normalize("NFC", name.strip().lstrip("\ufeff"))
+    # lookup strips its way to.  Both are stripped in a loop: a BOM can
+    # sit on either side of the padding (``"\ufeff café"``), so a single
+    # ``strip().lstrip(BOM)`` leaves the padding that followed the BOM.
+    stripped = name
+    while True:
+        next_stripped = stripped.strip().lstrip("\ufeff")
+        if next_stripped == stripped:
+            break
+        stripped = next_stripped
+    return unicodedata.normalize("NFC", stripped)
 
 
 def timestamp_now() -> str:

@@ -448,6 +448,18 @@ class TestSnippetLex(unittest.TestCase):
                 self.assertIsNone(snippet_lex(code))
                 self.assertIsNone(snippet_prepare("name", code, 3))
 
+    def test_bom_only_code_has_no_lexed_form(self):
+        """A leading BOM is not part of the code, so BOM-only code is empty.
+
+        normalize_unicode strips a leading BOM, so a file holding
+        only a BOM (and padding) is blank code and must have no lexed
+        form, not a stored snippet with empty code.
+        """
+        for code in ("\ufeff", "\ufeff   ", "\ufeff\n"):
+            with self.subTest(code=code):
+                self.assertIsNone(snippet_lex(code))
+                self.assertIsNone(snippet_prepare("name", code, 3))
+
     def test_prepare_agrees_with_standalone_fingerprint(self):
         """The batch-import path must fingerprint what ``code_create_minhash`` does."""
         for ngram in (2, 3, 5):

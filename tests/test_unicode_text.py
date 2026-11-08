@@ -233,6 +233,20 @@ class TestNameNormalization(BaseDBTest):
         collection_create(self.session, "foo")
         self.assertTrue(collection_delete(self.session, " foo "))
 
+    def test_bom_before_whitespace_does_not_leave_a_leading_space(self):
+        """A BOM followed by padding is not part of the name.
+
+        ``name_normalize`` strips surrounding whitespace and a leading BOM;
+        a name spelled with the BOM first must still normalize to the bare
+        name, not to a name with a leading space that no stripped lookup
+        can reach.
+        """
+        self.assertEqual(name_normalize("\ufeff café"), "café")
+        self.assertEqual(name_normalize("\ufeff  café  "), "café")
+        self.assertEqual(name_normalize(" \ufeff café "), "café")
+        snippet = snippet_add(self.session, "\ufeff café", "MOV EAX, 1")
+        self.assertEqual(snippet.name_list, ["café"])
+
     def test_merge_does_not_duplicate_a_decomposed_name(self):
         """Merging a macOS-written database creates no second alias."""
         snippet = snippet_add(self.session, "unused", "MOV EAX, 1")

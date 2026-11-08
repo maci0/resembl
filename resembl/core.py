@@ -500,16 +500,18 @@ def snippet_lex(code: str) -> tuple[str, list[str]] | None:
     checksum (the alias path of :func:`snippet_add`) or only the fingerprint
     still pay the lexer exactly once, instead of once per derived value.
     """
-    if not code.strip():
+    # NFC first: the checksum is the snippet's primary key, so the same string
+    # in two composition forms would have to be stored twice and neither
+    # query could find the other.  The empty check runs on the normalized
+    # form: a leading BOM is not part of the code, so BOM-only code is
+    # empty like whitespace-only code.
+    normalized_code = normalize_unicode(code)
+    if not normalized_code.strip():
         return None
     # Materialize the token stream: it is consumed twice (once for the
     # normalized checksum string, once for the MinHash tokens), and the fused
     # pass derives both from one iteration instead of two.
-    #
-    # NFC first: the checksum is the snippet's primary key, so the same string
-    # in two composition forms would have to be stored twice and neither
-    # query could find the other.
-    tokens = list(get_lexer().get_tokens(normalize_unicode(code)))
+    tokens = list(get_lexer().get_tokens(normalized_code))
     token_list, normalized = code_tokenize_normalize_lexed(tokens)
     checksum = hashlib.sha256(normalized.encode("utf-8", errors="surrogatepass")).hexdigest()
     return checksum, token_list
