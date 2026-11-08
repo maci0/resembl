@@ -383,7 +383,7 @@ def snippet_name_add(
     made a retried add (a lost response, a double-clicked command, a script
     re-run) exit 1 for an end state it had already produced.
     """
-    new_name = normalize_unicode(new_name.strip())
+    new_name = name_normalize(new_name)
     if not new_name:
         if not quiet:
             logger.error("Name cannot be empty.")
@@ -401,7 +401,6 @@ def snippet_name_add(
     # NFC.  ASCII is NFC as well, so composing an ASCII alias again cannot
     # change equality.  A non-ASCII alias may still be the decomposed
     # spelling (a row from before names were composed, or from macOS).
-    new_name = name_normalize(new_name)
     if any(new_name == (name if name.isascii() else name_normalize(name)) for name in name_list):
         return snippet  # Idempotent: already named
 
@@ -433,7 +432,6 @@ def snippet_name_remove(
     # Names are stored in NFC, so the argument is normalized too: passing the
     # NFD spelling macOS hands back for a file whose name has an accent must
     # still find the row.
-    name_to_remove = normalize_unicode(name_to_remove)
     name_list = snippet.name_list
     # A name may have been stored before normalization, or arrived from a
     # filesystem that spells it decomposed; remove the stored spelling.
@@ -1819,7 +1817,7 @@ def snippet_collection_names_stream(
     before the next is fetched (same keyset semantics as
     :func:`snippet_names_stream`).
     """
-    return _names_stream(session, collection_name, batch_size)
+    return _names_stream(session, name_normalize(collection_name), batch_size)
 
 
 def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> list[Snippet]:
@@ -1923,6 +1921,7 @@ _WINDOWS_RESERVED_STEMS = frozenset(
     + [f"COM{i}" for i in range(1, 10)]
     + [f"LPT{i}" for i in range(1, 10)]
 )
+_WINDOWS_RESERVED_STEMS_CASEFOLDED = frozenset(stem.casefold() for stem in _WINDOWS_RESERVED_STEMS)
 
 #: Maximum encoded length of an exported filename stem, in bytes.  Name
 #: limits are per-*byte* on POSIX filesystems (ext4: 255), and the ``.asm``
@@ -2026,7 +2025,7 @@ def _export_safe_filename(name: str) -> str:
     cleaned = cleaned.rstrip(" .")
     if not cleaned:
         return ""
-    if cleaned.split(".", 1)[0].upper() in _WINDOWS_RESERVED_STEMS:
+    if cleaned.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_STEMS_CASEFOLDED:
         cleaned = f"_{cleaned}"
     return cleaned
 
@@ -3001,13 +3000,13 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     # The name is the primary key, so it is normalized before the lookup: a
     # create with the NFD spelling of a name stored in NFC would miss the
     # existing row and then collide with it on insert.
-    name = normalize_unicode(name.strip())
+    name = name_normalize(name)
     if not name:
         raise ValueError("Collection name cannot be empty.")
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing
-    collection = Collection(name=name_normalize(name), description=normalize_unicode(description))
+    collection = Collection(name=name, description=normalize_unicode(description))
     session.add(collection)
     try:
         session.commit()

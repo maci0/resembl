@@ -170,7 +170,7 @@ class ResemblConfig:
                 )
                 continue
             if isinstance(value, str):
-                text = value.strip().lower()
+                text = value.strip().casefold()
                 if text in ("true", "false"):
                     logger.warning(
                         "Ignoring %s: expected %s, got %r.",

@@ -347,7 +347,7 @@ def lsh_meta_get(session: Session) -> tuple[float, int] | None:
     try:
         row = session.execute(text(_META_SELECT)).one_or_none()
     except OperationalError as exc:
-        message = str(exc).lower()
+        message = str(exc).casefold()
         if "no such table" in message or "does not exist" in message or "doesn't exist" in message:
             return None
         logger.error(

@@ -119,7 +119,7 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     default = _CFG_DEFAULTS[key]
     value = cfg.get(key, default)
     if isinstance(value, bool) or (
-        isinstance(value, str) and value.strip().lower() in ("true", "false")
+        isinstance(value, str) and value.strip().casefold() in ("true", "false")
     ):
         print(
             f"error: ignoring config value {key} = {value!r} (not a number)",
