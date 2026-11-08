@@ -19,6 +19,9 @@ import (
 type LocalEngine struct {
 	endpoint string
 	client   *http.Client
+	// timeout is the per-request client timeout, exposed for tests and
+	// for callers that construct with NewLocalEngineWithTimeout.
+	timeout time.Duration
 	// transport is kept so CloseIdleConnections can retire pooled
 	// connections when the engine is discarded.
 	transport *http.Transport
@@ -40,7 +43,23 @@ func (e *EngineError) Error() string {
 	return fmt.Sprintf("engine rejected request: status %d", e.Status)
 }
 
+// NewLocalEngineWithTimeout is NewLocalEngine with a caller-chosen
+// per-request timeout.  The default (30s) matches the shipped
+// resembl-service timeout; callers that already bound the request with a
+// shorter context deadline (Service) should construct with that deadline
+// so the client never outlives the handler that owns the custody claim.
+func NewLocalEngineWithTimeout(endpoint string, timeout time.Duration) (*LocalEngine, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return newLocalEngine(endpoint, timeout)
+}
+
 func NewLocalEngine(endpoint string) (*LocalEngine, error) {
+	return newLocalEngine(endpoint, 30*time.Second)
+}
+
+func newLocalEngine(endpoint string, timeout time.Duration) (*LocalEngine, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return nil, errors.New("invalid engine endpoint")
@@ -61,7 +80,8 @@ func NewLocalEngine(endpoint string) (*LocalEngine, error) {
 	}
 	return &LocalEngine{
 		endpoint:  strings.TrimRight(u.String(), "/"),
-		client:    &http.Client{Timeout: 30 * time.Second, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:    &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		timeout:   timeout,
 		transport: transport,
 	}, nil
 }

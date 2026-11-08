@@ -2275,7 +2275,11 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         row = session.execute(text("PRAGMA database_list")).first()
         if row is not None and len(row) > 2 and row[2]:
             live_path = os.path.realpath(str(row[2]))
-    except Exception:
+    except Exception as exc:
+        # The collision guard degrades to "no live path known" — a failed
+        # probe must not be silent, or a backup that clobbered nothing
+        # only gets reported if it coincidentally collides.
+        logger.debug("db_backup: could not probe live database path: %s", exc)
         live_path = ""
     if live_path:
         live_dir = os.path.dirname(live_path)
@@ -2329,7 +2333,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         try:
             dbapi_connection.close()
         except Exception:
-            pass
+            # The borrowed DBAPI connection is checked out of SQLAlchemy's
+            # pool; a close failure here is not worth failing the backup,
+            # but swallowing it silently hid connection leaks — log it.
+            logger.debug("db_backup: borrowed connection close failed", exc_info=True)
     session.rollback()
 
     count_known = True

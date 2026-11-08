@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"time"
 )
 
 // PinnedSQLiteEngine requires the backend's query-bound SQLite snapshot check.
@@ -15,6 +16,12 @@ type PinnedSQLiteEngine struct {
 }
 
 func NewPinnedSQLiteEngine(endpoint, index, artifact, generation string) (*PinnedSQLiteEngine, error) {
+	return NewPinnedSQLiteEngineWithTimeout(endpoint, index, artifact, generation, 30*time.Second)
+}
+
+// NewPinnedSQLiteEngineWithTimeout is NewPinnedSQLiteEngine with a
+// caller-chosen engine timeout (see NewLocalEngineWithTimeout).
+func NewPinnedSQLiteEngineWithTimeout(endpoint, index, artifact, generation string, timeout time.Duration) (*PinnedSQLiteEngine, error) {
 	raw, err := hex.DecodeString(index)
 	if err != nil || len(raw) != 32 || hex.EncodeToString(raw) != index {
 		return nil, errors.New("invalid index digest")
@@ -23,7 +30,7 @@ func NewPinnedSQLiteEngine(endpoint, index, artifact, generation string) (*Pinne
 	if err != nil || len(a) != 32 || hex.EncodeToString(a) != artifact || generation == "" {
 		return nil, errors.New("invalid runtime pin")
 	}
-	local, err := NewLocalEngine(endpoint)
+	local, err := NewLocalEngineWithTimeout(endpoint, timeout)
 	if err != nil {
 		return nil, err
 	}

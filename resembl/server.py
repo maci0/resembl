@@ -1605,7 +1605,17 @@ class _FindHandler(BaseHTTPRequestHandler):
                 try:
                     connection.exec_driver_sql("COMMIT")
                 except Exception:
-                    pass
+                    # A failed COMMIT leaves the fence (writer lock) held:
+                    # log it so an operator can correlate it with later
+                    # "database is locked" stalls, then answer 503 rather
+                    # than 200 — the caller must not treat a failed
+                    # commit-ack as a completed pinned query.
+                    logger.exception(
+                        "[%s] POST %s pinned commit failed", self.request_id, self.path
+                    )
+                    _release_fence()
+                    self._respond(503, {"error": "pinned index unavailable"})
+                    return
                 self._respond(
                     200,
                     {

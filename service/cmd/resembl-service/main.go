@@ -39,7 +39,7 @@ func newServer(args []string) (*http.Server, error) {
 	if *resource == "" {
 		return nil, errors.New("-resource is required")
 	}
-	engine, err := service.NewPinnedSQLiteEngine(*engineURL, *index, *artifact, *generation)
+	engine, err := service.NewPinnedSQLiteEngineWithTimeout(*engineURL, *index, *artifact, *generation, *timeout)
 	if err != nil {
 		return nil, err
 	}
