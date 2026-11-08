@@ -1646,6 +1646,12 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
     Ordered by the checksum primary key, so a paged window selects the same
     rows on every run: an unordered ``OFFSET``/``LIMIT`` over the same
     database can return a different page once the plan changes.
+
+    The unbounded listing reads only ``(checksum, names)`` via keyset
+    pagination and reconstructs lightweight ``Snippet`` objects, instead of
+    loading every full row (the ``code`` column dominates the table).
+    Rendered listings only need the checksum and names; callers that need
+    the code still use :meth:`Snippet.get_all` or :meth:`Snippet.stream_all`.
     """
     if start < 0:
         # A window starting before the first row selects no rows: SQLite
@@ -1656,12 +1662,34 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
         # ``end < start`` is an empty window, not a negative LIMIT: SQLite
         # reads a negative LIMIT as "unbounded" and would return every row
         # from the offset, while PostgreSQL rejects it outright.
+        limit = max(0, end - start)
+        if limit == 0:
+            return []
+        # Windowed reads keep their full-row fetch: the window is bounded
+        # and callers may need the code column.
         return list(
             session.exec(
-                select(Snippet).order_by(Snippet.checksum).offset(start).limit(max(0, end - start))
+                select(Snippet).order_by(Snippet.checksum).offset(start).limit(limit)
             ).all()
         )
-    return list(Snippet.get_all(session))
+    # Unbounded: stream (checksum, names) in keyset batches so memory stays
+    # flat and the code column never enters the ORM.  ``Snippet`` objects
+    # are reconstructed with empty code/minhash — the listing only renders
+    # checksum and names (``name_list`` parses ``names``).
+    result: list[Snippet] = []
+    last: str | None = None
+    page_size = 1000
+    while True:
+        stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(page_size)
+        if last is not None:
+            stmt = stmt.where(Snippet.checksum > last)
+        rows = session.exec(stmt).all()
+        if not rows:
+            break
+        for checksum, names in rows:
+            result.append(Snippet(checksum=checksum, names=names, code="", minhash=b""))
+        last = rows[-1][0]
+    return result
 
 
 def _names_stream(
