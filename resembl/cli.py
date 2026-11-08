@@ -1074,7 +1074,6 @@ def _resolve_checksum(prefix: str) -> str | None:
 
     from .models import Snippet as SnippetModel
 
-    # Try exact match first
     exact = SnippetModel.get_by_checksum(state.session, prefix)
     if exact:
         return exact.checksum

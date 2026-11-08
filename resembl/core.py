@@ -142,16 +142,7 @@ def _sync_path(path: str) -> None:
     mounts) must not fail an otherwise complete backup, so ``OSError`` is
     swallowed.
     """
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
+    _fsync_quiet(path)
 
 
 def _sync_dir(path: str) -> None:
@@ -161,6 +152,10 @@ def _sync_dir(path: str) -> None:
     after an OS crash the rename can be lost even though the data survived.
     Windows cannot open a directory for fsync, so failures are ignored.
     """
+    _fsync_quiet(path)
+
+
+def _fsync_quiet(path: str) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError:
