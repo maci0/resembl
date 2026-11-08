@@ -307,11 +307,16 @@ class Snippet(SQLModel, table=True):
                 .replace("%", "\\%")
                 .replace("_", "\\_")
             )
+            # Stream candidates: a short/common alias can LIKE-match many
+            # rows, and ``.all()`` would materialize every (checksum, names)
+            # pair before the first verification.  ``yield_per`` keeps the
+            # probe O(batch) in memory; verification order is unchanged
+            # (the first verified candidate still wins).
             candidates = session.exec(
                 select(cls.checksum, cls.names).where(
                     cls.names.like(f'%"{literal}"%', escape="\\")  # type: ignore[attr-defined]
                 )
-            ).all()
+            ).yield_per(1000)
             # The query is already NFC.  ASCII is NFC as well, so composing
             # an ASCII alias again cannot change equality.  A non-ASCII alias
             # may still be the decomposed spelling (a row from before names

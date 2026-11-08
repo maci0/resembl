@@ -2723,15 +2723,21 @@ def collection_remove_snippet(
 # Version Functions
 
 
-def snippet_version_list(session: Session, checksum: str) -> list[dict]:
+def snippet_version_list(
+    session: Session, checksum: str, *, limit: int | None = None
+) -> list[dict]:
     """Return version history for a snippet.
 
     Only ``(id, snippet_checksum, created_at)`` are fetched: :meth:`SnippetVersion.get_by_checksum`
     loads the full row (``code`` + ``minhash``) ORM objects, but the caller
     renders only the three metadata columns — a large version history would
     drag every version's code through the ORM for nothing.
+
+    *limit* caps the fetch so a caller rendering a bounded history does
+    not materialize an unbounded version list; ``None`` (the default)
+    keeps the historical unbounded behavior.
     """
-    rows = session.exec(
+    stmt = (
         select(
             SnippetVersion.id,
             SnippetVersion.snippet_checksum,
@@ -2739,7 +2745,12 @@ def snippet_version_list(session: Session, checksum: str) -> list[dict]:
         )
         .where(SnippetVersion.snippet_checksum == checksum)
         .order_by(SnippetVersion.created_at.desc())  # type: ignore[attr-defined]
-    ).all()
+    )
+    if limit is not None:
+        if limit <= 0:
+            return []
+        stmt = stmt.limit(limit)
+    rows = session.exec(stmt).yield_per(1000)
     return [
         {"id": vid, "snippet_checksum": s_checksum, "created_at": created_at}
         for vid, s_checksum, created_at in rows

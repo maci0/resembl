@@ -167,8 +167,15 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     if count > sample_size:
         # Random sample directly in SQL — no need to load the whole table.
         sample_snippets = _random_snippet_rows(session, sample_size)
+        sample_rows = [(s.checksum, s.minhash) for s in sample_snippets]
     else:
-        sample_snippets = list(Snippet.get_all(session))
+        # Small database (count <= sample_size): only (checksum, minhash)
+        # are needed for the similarity estimate.  ``Snippet.get_all``
+        # would pull the ``code`` column (dominant size) through the ORM
+        # for every row just to discard it; fetch the two columns instead.
+        sample_rows = list(
+            session.exec(select(Snippet.checksum, Snippet.minhash).order_by(Snippet.checksum)).all()
+        )
 
     # Normalize and validate each sampled fingerprint, skipping corrupt ones
     # (disk rot) — one bad blob must not crash `stats` on a large database.
@@ -176,13 +183,13 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     # and find paths: a mixed-perm database (config flip between writes)
     # must not crash the similarity estimate too.
     blobs: list[tuple[str, bytes]] = []
-    for s in sample_snippets:
+    for checksum, minhash in sample_rows:
         try:
-            blobs.append((s.checksum, minhash_ensure_packed(s.minhash)))
+            blobs.append((checksum, minhash_ensure_packed(minhash)))
         except ValueError:
             logger.warning(
                 "Skipping snippet %s in the similarity sample: corrupt fingerprint.",
-                s.checksum,
+                checksum,
             )
 
     if not blobs:
