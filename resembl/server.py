@@ -2160,6 +2160,10 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         existing_port = None  # no port file, or malformed
     if existing_port is not None:
         try:
+            # The probe socket must be closed: without a ``with`` it stays
+            # open until garbage collection, so a process that cycles
+            # ``serve`` calls (tests, embedded callers) accumulated one
+            # descriptor per probe.
             with socket.create_connection(("127.0.0.1", existing_port), timeout=1):
                 raise ValueError(
                     "another serve process is already running for this "
