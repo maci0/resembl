@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl backup` now copies the live `config.toml` verbatim to a `<backup-stem>.config.toml` sidecar beside each SQLite backup (mode `0600`), records its SHA-256 in the manifest as `config_sha256` (`null` when no config existed), and `verify-backup` cross-checks the sidecar: a missing or mismatched sidecar fails verification instead of passing on the database copy alone. A restore can now recover tuned config, not just the corpus; see `docs/restore.md`.
+
 ### Fixed
 
 - CI runners are now pinned to versioned labels (`ubuntu-24.04`, `macos-15`, `windows-2025`) instead of the floating `-latest` labels, so a GitHub OS migration can no longer move the test platform under a green run; `tests/test_ci_images.py` now fails a workflow that reintroduces a `-latest` label.

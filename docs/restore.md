@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | Snippet corpus (`snippet`, `collection`, `snippetversion` tables) | SQLite file named by `RESEMBL_DATABASE_URL` / `DATABASE_URL`, default `assembly.db` | Yes — `resembl backup DIR` (online backup API, single file) | No — this *is* the corpus. `export` to `.asm` files is a second, human-readable copy |
 | LSH index (`lsh_bucket`, `lsh_meta`) + fingerprint stamps (`app_meta`) | Same SQLite file | Yes — included in the backup copy | Yes — `reindex` / next `find` rebuilds from snippet code + fingerprints |
-| Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | **No** | Regenerable — defaults are sane; re-apply overrides with `resembl config set` |
+| Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite) — copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable — defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
 | Legacy pickle cache, port file, export manifest | `~/.cache/resembl/` | **No** | Yes — cache, never loaded; port file rewritten by `serve`; manifest rewritten by next `export` |
 
 Non-SQLite backends (PostgreSQL/MySQL/DuckDB) are **not** covered by
@@ -49,9 +49,12 @@ resembl verify
 # change to the database URL, backend, or backup tooling.
 ```
 
-If `config.toml` existed, restore it from your own copy (it is not in
-the backup) or re-apply overrides with `resembl config set`; defaults
-are sane but not identical to a tuned config.
+Restore `config.toml` from the sidecar written beside the backup
+(`<backup-stem>.config.toml`, mode `0600`).  When the manifest records
+`config_sha256: null` there was no config at backup time — defaults
+apply, or re-apply overrides with `resembl config set`.  The sidecar's
+hash is cross-checked by `verify-backup`; a missing or mismatched
+sidecar fails verification.
 
 ## Restore (logical corruption — bad code wrote bad data for hours)
 
@@ -70,10 +73,10 @@ verified):
 resembl verify-backup backups/assembly-<newest>.db   # exit 1 = unrestorable
 ```
 
-Alert on: non-zero exit, a zero-byte `assembly-*.db`, or a backup directory
+Alert on: non-zero exit, a zero-byte `assembly-*.db`, a config mismatch (missing or tampered `.config.toml` sidecar), or a backup directory
 whose newest file is older than your RPO target. A missing manifest is an
 issue (contents still verify); a count mismatch, content-hash mismatch,
-`integrity_check` failure, or missing table is a hard failure.
+config mismatch, `integrity_check` failure, or missing table is a hard failure.
 
 Before any destructive operation in the next section, run the backup and
 `verify-backup` on the result — a backup that has never been verified is

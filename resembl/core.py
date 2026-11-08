@@ -65,7 +65,7 @@ from .models import (
     timestamp_normalize,
     timestamp_now,
 )
-from .paths import db_url_mask
+from .paths import config_path_get, db_url_mask
 from .scoring import (
     NUM_PERMUTATIONS,
     cfg_extract,
@@ -122,6 +122,14 @@ LSH_THRESHOLD = 0.5
 #: manifests, when the shared file records that backup's own name.
 DB_BACKUP_MANIFEST_NAME = ".resembl-backup.json"
 
+#: Name of the config sidecar :func:`db_backup` writes beside a backup.
+#: ``config.toml`` (see :func:`resembl.paths.config_path_get`) is the only
+#: non-corpus state an operator tunes by hand and cannot regenerate
+#: byte-for-byte, so it is copied verbatim next to the database backup it
+#: was taken with and hashed into the manifest (``config_sha256``).
+#: A missing config is recorded as ``null`` rather than failing the backup.
+DB_BACKUP_CONFIG_NAME = "config.toml"
+
 
 def _sync_path(path: str) -> None:
     """Flush *path*'s data to disk (fsync), ignoring filesystems that refuse it.
@@ -175,6 +183,33 @@ def _db_backup_manifest_name(backup_path: str) -> str:
     """
     stem, _ = os.path.splitext(os.path.basename(backup_path))
     return f"{stem}.json"
+
+
+def _db_backup_config_name(backup_path: str) -> str:
+    """Return the config sidecar name for a backup path.
+
+    The sidecar is ``<backup-stem>.config.toml`` so a directory retaining
+    several backups keeps each backup's config with its own database copy,
+    exactly like the per-backup ``<backup-stem>.json`` manifest.
+    """
+    stem, _ = os.path.splitext(os.path.basename(backup_path))
+    return f"{stem}.config.toml"
+
+
+def _db_backup_config_read() -> tuple[bytes | None, str | None]:
+    """Return ``(raw_bytes, sha256)`` for the live ``config.toml``.
+
+    ``(None, None)`` when no config file exists: a missing config means
+    defaults, which are regenerable, so it is recorded as absent rather
+    than failing the backup.  An unreadable config raises ``OSError`` so
+    the caller can decide whether to fail loud.
+    """
+    try:
+        with open(config_path_get(), "rb") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return None, None
+    return data, hashlib.sha256(data).hexdigest()
 
 
 def _db_content_hash(session: Session) -> str:
@@ -2308,12 +2343,41 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         logger.warning("Could not count snippets for the backup manifest: %s", e)
         num_snippets = None
         count_known = False
+    # Config sidecar: copy the live config.toml verbatim beside the backup
+    # so a restore can recover tuned settings, not just the corpus.  A
+    # missing config is recorded as absent (defaults are regenerable); an
+    # unreadable one fails loud so a backup that silently dropped tuned
+    # state is never reported as complete.
+    config_data, config_hash = _db_backup_config_read()
+    config_name = _db_backup_config_name(backup_name)
+    config_path = os.path.join(backup_dir, config_name)
+    if config_data is not None:
+        tmp_config = os.path.join(backup_dir, f"{config_name}.{os.getpid()}.tmp")
+        try:
+            fd = os.open(tmp_config, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with open(fd, "wb") as f:
+                f.write(config_data)
+            _sync_path(tmp_config)
+            os.replace(tmp_config, config_path)
+            _sync_dir(backup_dir)
+        except OSError:
+            try:
+                os.unlink(tmp_config)
+            except OSError:
+                pass
+            try:
+                os.remove(final_path)
+            except OSError:
+                pass
+            raise
     manifest = {
         "backup": backup_name,
         "num_snippets": num_snippets,
         "fingerprint_version": fingerprint_version_get(session),
         "content_hash": content_hash,
         "created_at": timestamp_now(),
+        "config_sha256": config_hash,
+        "config": config_name if config_data is not None else None,
     }
     manifest_name = _db_backup_manifest_name(backup_name)
     manifest_path = os.path.join(backup_dir, manifest_name)
@@ -2374,6 +2438,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             pass
         try:
             os.remove(manifest_path)
+        except OSError:
+            pass
+        try:
+            os.remove(config_path)
         except OSError:
             pass
         return {
@@ -2442,6 +2510,10 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
         except OSError:
             # A missing or unremovable manifest strands bookkeeping, not
             # data; verify-backup ignores manifests that name no backup.
+            pass
+        try:
+            os.remove(os.path.join(backup_dir, _db_backup_config_name(name)))
+        except OSError:
             pass
     return removed
 
@@ -2538,6 +2610,8 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     shared_path = os.path.join(manifest_dir, DB_BACKUP_MANIFEST_NAME)
     manifest_snippets: int | None = None
     manifest_hash: str | None = None
+    manifest_config_hash: str | None = None
+    manifest_config_name: str | None = None
     manifest_present = False
     for manifest_path in (per_backup_path, shared_path):
         try:
@@ -2556,6 +2630,12 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             manifest_hash = (
                 data.get("content_hash") if isinstance(data.get("content_hash"), str) else None
             )
+            manifest_config_hash = (
+                data.get("config_sha256") if isinstance(data.get("config_sha256"), str) else None
+            )
+            manifest_config_name = (
+                data.get("config") if isinstance(data.get("config"), str) else None
+            )
             manifest_present = True
         elif isinstance(data, dict) and data.get("num_snippets") is None:
             # The count was never taken at backup time (the count query
@@ -2573,6 +2653,20 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         )
     if manifest_hash is not None and content_hash is not None and manifest_hash != content_hash:
         issues.append("content hash mismatch: backup contents differ from manifest")
+    # Config sidecar cross-check: when the manifest records a config hash,
+    # the sidecar must exist and hash to it.  A missing or mismatched
+    # sidecar is a hard failure (the backup promised tuned state it no
+    # longer holds); legacy manifests without the field are skipped.
+    if manifest_config_hash is not None:
+        sidecar_name = manifest_config_name or _db_backup_config_name(backup_path)
+        sidecar_path = os.path.join(manifest_dir, sidecar_name)
+        try:
+            with open(sidecar_path, "rb") as f:
+                sidecar_data = f.read()
+            if hashlib.sha256(sidecar_data).hexdigest() != manifest_config_hash:
+                issues.append("config mismatch: backup config differs from manifest")
+        except OSError:
+            issues.append("config mismatch: backup config sidecar missing")
     # A missing manifest alone does not fail verification: the file may
     # predate manifests, and its contents are what matter.  A missing table,
     # a failed integrity_check, or a count/hash mismatch does.

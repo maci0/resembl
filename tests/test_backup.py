@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -80,6 +81,73 @@ class TestDbBackup(FileDBTest):
         result = db_backup(self.session, backup_dir)
         mode = stat.S_IMODE(os.stat(result["backup"]).st_mode)
         self.assertEqual(mode, 0o600)
+
+    def test_backup_includes_config_sidecar_and_verifies_it(self):
+        """db_backup copies config.toml beside the backup; verify checks it.
+
+        ``config.toml`` is the only tuned state outside the corpus; a
+        backup that dropped it would restore an untuned database.  The
+        sidecar must be byte-identical to the live config and its SHA-256
+        recorded in the manifest.
+        """
+        import hashlib
+
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        config_path = os.path.join(self._tmpdir.name, "config.toml")
+        config_bytes = b"top_n = 7\nlsh_threshold = 0.8\n"
+        with open(config_path, "wb") as f:
+            f.write(config_bytes)
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch("resembl.core.config_path_get", return_value=config_path):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        sidecar = os.path.join(backup_dir, f"{stem}.config.toml")
+        self.assertTrue(os.path.isfile(sidecar))
+        with open(sidecar, "rb") as f:
+            self.assertEqual(f.read(), config_bytes)
+        with open(os.path.join(backup_dir, f"{stem}.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertEqual(manifest["config_sha256"], hashlib.sha256(config_bytes).hexdigest())
+        self.assertEqual(manifest["config"], f"{stem}.config.toml")
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
+    def test_backup_without_config_records_absent_config(self):
+        """No live config.toml: manifest records null, verify still passes."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        missing = os.path.join(self._tmpdir.name, "nope.toml")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch("resembl.core.config_path_get", return_value=missing):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        self.assertFalse(os.path.exists(os.path.join(backup_dir, f"{stem}.config.toml")))
+        with open(os.path.join(backup_dir, f"{stem}.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertIsNone(manifest["config_sha256"])
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
+    def test_corrupted_config_sidecar_fails_verification(self):
+        """A config sidecar that disagrees with its manifest must fail.
+
+        A truncated or tampered sidecar would restore wrong tuned state;
+        verify-backup must report it as unrestorable rather than pass on
+        the database copy alone.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        config_path = os.path.join(self._tmpdir.name, "config.toml")
+        with open(config_path, "wb") as f:
+            f.write(b"top_n = 7\n")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch("resembl.core.config_path_get", return_value=config_path):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        sidecar = os.path.join(backup_dir, f"{stem}.config.toml")
+        with open(sidecar, "wb") as f:
+            f.write(b"top_n = 999\n")
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertFalse(check["ok"])
+        self.assertTrue(any("config mismatch" in i for i in check["issues"]), check["issues"])
 
     def test_backup_prunes_to_keep(self):
         """Old backups beyond ``keep`` are removed, newest retained.

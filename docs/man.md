@@ -206,7 +206,11 @@ Global options go before the subcommand: `resembl --format json find ...`.
 
 **backup** *DIR* [**--keep** *N*] [**--force**]
 :   Write a consistent, restorable copy of the default SQLite database
-    into *DIR*, pruned to the newest *N* backups (default 7).  Uses
+    into *DIR*, pruned to the newest *N* backups (default 7).  Also copies
+    the live `config.toml` verbatim to `<backup-stem>.config.toml` beside the
+    backup (mode `0600`, SHA-256 recorded in the manifest as `config_sha256`,
+    `null` when no config file existed) and `verify-backup` cross-checks it.
+    Uses
     SQLite's online backup API, so the copy is a single database file
     the current binary can open — not a raw copy of `assembly.db`
     paired with a stale WAL.  Also writes a manifest (snippet count,
