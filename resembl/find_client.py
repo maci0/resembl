@@ -316,13 +316,15 @@ def _main(argv: list[str] | None = None) -> int:
             1,
             json_on=json_on,
         )
-    # The port file is attacker-writable on a shared host (cache dir is
-    # user-owned but a malicious process can plant an arbitrary port).  A
-    # port outside the ephemeral range (1024-65535) is not a valid serve
-    # port and must not be dialed — an attacker could name a privileged or
-    # sensitive local service (e.g. 22, 3306, 6379) and exfiltrate its
-    # response as find results.
-    if not (1024 <= port <= 65535):
+    # Only a TCP-bindable port can name a serve process: ``serve`` binds
+    # the port it writes here (``--port 0`` lets the OS assign one, so a
+    # written 0 is never a live server), and a value outside 1-65535
+    # cannot be bound at all.  Ports below 1024 are not excluded: the
+    # documented trust model for the port file is that its contents are
+    # trusted to name the loopback server (THREAT_MODEL R3), and a
+    # legitimately bound low port (e.g. ``serve --port 80``) must be
+    # dialable, matching ``resembl.cli._server_request``.
+    if not (1 <= port <= 65535):
         return _fail(
             f"no server running for {db_url_mask(db_url)} (start `resembl serve`)",
             1,
