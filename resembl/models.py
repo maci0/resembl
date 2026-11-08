@@ -411,7 +411,8 @@ class Snippet(SQLModel, table=True):
             if not batch:
                 return
             yield batch
-            last = batch[-1][0]
+            last_row = batch[-1]
+            last = last_row.checksum if isinstance(last_row, Snippet) else last_row[0]
 
     @classmethod
     def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:

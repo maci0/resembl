@@ -4,6 +4,7 @@
 # pylint: disable=consider-using-with  # a test keeps a temp file, a temp
 # directory or a child process open for the whole test body on purpose
 
+import io
 import json
 import os
 import subprocess
@@ -957,14 +958,17 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         class _BadResponse:
+            def __init__(self, body=b"<html>not json</html>"):
+                self._stream = io.BytesIO(body)
+
             def __enter__(self):
                 return self
 
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return b"<html>not json</html>"
+            def read(self, size=-1):
+                return self._stream.read(size)
 
         with patch(
             "urllib.request.urlopen",

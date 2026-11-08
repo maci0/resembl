@@ -550,14 +550,17 @@ class TestServerMode(_ServeTestCase):
         captured: dict = {}
 
         class _FakeResponse:
+            def __init__(self, body=b'{"lsh_candidates": 0, "matches": []}'):
+                self._stream = io.BytesIO(body)
+
             def __enter__(self):
                 return self
 
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return b'{"lsh_candidates": 0, "matches": []}'
+            def read(self, size=-1):
+                return self._stream.read(size)
 
         # Signature-conformance stub for urllib.request.urlopen; the real
         # call site passes timeout but the fake needs no fetch delay.
@@ -677,14 +680,17 @@ class TestServerMode(_ServeTestCase):
         from resembl.find_client import _main
 
         class _FakeResponse:
+            def __init__(self, body=b'{"error": "threshold too high"}'):
+                self._stream = io.BytesIO(body)
+
             def __enter__(self):
                 return self
 
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return b'{"error": "threshold too high"}'
+            def read(self, size=-1):
+                return self._stream.read(size)
 
         self._start_server()  # writes a valid port file
         stderr = io.StringIO()
@@ -745,7 +751,7 @@ class TestServerMode(_ServeTestCase):
 
         class _FakeResponse:
             def __init__(self, body):
-                self._body = body
+                self._stream = io.BytesIO(body)
 
             def __enter__(self):
                 return self
@@ -753,8 +759,8 @@ class TestServerMode(_ServeTestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return self._body
+            def read(self, size=-1):
+                return self._stream.read(size)
 
         self._start_server()  # writes a valid port file
         stdout = io.StringIO()
