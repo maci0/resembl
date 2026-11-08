@@ -176,6 +176,19 @@ def _backup_stem(backup_path: str) -> str:
     return os.path.splitext(os.path.basename(backup_path))[0]
 
 
+def _remove_quietly(path: str) -> None:
+    """Delete *path* if present, logging (not raising) a failed removal.
+
+    Cleanup on an error path must not mask the original failure, but a
+    removal that fails silently strands the file for a later run to trust,
+    so the failure is recorded at warning level with the path and cause.
+    """
+    try:
+        os.remove(path)
+    except OSError as e:
+        logger.warning("Could not remove %s during cleanup: %s", path, e)
+
+
 def _db_backup_manifest_name(backup_path: str) -> str:
     """Return the per-backup manifest name for *backup_path*.
 
@@ -2397,10 +2410,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             os.path.join(backup_dir, _db_backup_manifest_name(reused)),
             os.path.join(backup_dir, _db_backup_config_name(reused)),
         ):
-            try:
-                os.remove(_stale)
-            except OSError:
-                pass
+            _remove_quietly(_stale)
         reused = None
     if reused is not None:
         # A reused backup was verified when it was written, but its file can
@@ -2559,14 +2569,8 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             os.replace(tmp_config, config_path)
             _sync_dir(backup_dir)
         except OSError:
-            try:
-                os.unlink(tmp_config)
-            except OSError:
-                pass
-            try:
-                os.remove(final_path)
-            except OSError:
-                pass
+            _remove_quietly(tmp_config)
+            _remove_quietly(final_path)
             raise
     manifest = {
         "backup": backup_name,
@@ -2589,10 +2593,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         os.replace(tmp_manifest, manifest_path)
         _sync_dir(backup_dir)
     except OSError:
-        try:
-            os.unlink(tmp_manifest)
-        except OSError:
-            pass
+        _remove_quietly(tmp_manifest)
         # The backup file is complete but unverifiable: a restore checked
         # against a manifest that was never written would pass on contents
         # alone. Say so in the result instead of leaving the caller to
@@ -2603,10 +2604,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # trusts it.  Remove the unmanifested file too: re-running the
         # backup will write a fresh one, and the caller was already told
         # via ``manifest_written``.
-        try:
-            os.remove(final_path)
-        except OSError:
-            pass
+        _remove_quietly(final_path)
+        # A manifest-less backup must not keep its config sidecar either:
+        # a later verify would find a sidecar no manifest vouches for.
+        _remove_quietly(config_path)
         return {
             "backup": final_path,
             "num_snippets": manifest["num_snippets"],
@@ -2630,18 +2631,9 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             final_path,
             "; ".join(check["issues"]),
         )
-        try:
-            os.remove(final_path)
-        except OSError:
-            pass
-        try:
-            os.remove(manifest_path)
-        except OSError:
-            pass
-        try:
-            os.remove(config_path)
-        except OSError:
-            pass
+        _remove_quietly(final_path)
+        _remove_quietly(manifest_path)
+        _remove_quietly(config_path)
         return {
             "backup": final_path,
             "num_snippets": manifest["num_snippets"],
@@ -2705,14 +2697,12 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
         # manifests whose backups are gone.
         try:
             os.remove(os.path.join(backup_dir, _db_backup_manifest_name(name)))
-        except OSError:
-            # A missing or unremovable manifest strands bookkeeping, not
-            # data; verify-backup ignores manifests that name no backup.
-            pass
-        try:
-            os.remove(os.path.join(backup_dir, _db_backup_config_name(name)))
-        except OSError:
-            pass
+        except OSError as e:
+            # A missing manifest strands bookkeeping, not data; verify-backup
+            # ignores manifests that name no backup, but an unremovable one
+            # is worth an operator-visible record.
+            logger.warning("Could not remove manifest for pruned backup %s: %s", name, e)
+        _remove_quietly(os.path.join(backup_dir, _db_backup_config_name(name)))
     return removed
 
 
