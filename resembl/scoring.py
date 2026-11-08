@@ -884,6 +884,8 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
         ("num_edges", e1),
         ("num_edges", e2),
     ):
+        if not isinstance(count, int) or isinstance(count, bool):
+            raise ValueError(f"{label} must be a non-negative integer, got {count!r}")
         if count < 0:
             raise ValueError(f"{label} must be non-negative, got {count!r}")
 
@@ -905,6 +907,8 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
     sizes1 = cfg1["block_sizes"]
     sizes2 = cfg2["block_sizes"]
     for size in (*sizes1, *sizes2):
+        if not isinstance(size, int) or isinstance(size, bool):
+            raise ValueError(f"block sizes must be non-negative integers, got {size!r}")
         if size < 0:
             raise ValueError(f"block sizes must be non-negative, got {size!r}")
     hist1: dict[int, int] = {}
@@ -915,15 +919,18 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
         hist2[s] = hist2.get(s, 0) + 1
 
     dot = sum(count * hist2[size] for size, count in hist1.items() if size in hist2)
-    mag1 = sum(a * a for a in hist1.values()) ** 0.5
-    mag2 = sum(b * b for b in hist2.values()) ** 0.5
+    mag1 = math.sqrt(sum(a * a for a in hist1.values()))
+    mag2 = math.sqrt(sum(b * b for b in hist2.values()))
 
     if mag1 == 0 or mag2 == 0:
         cosine_sim = 0.0
     else:
-        cosine_sim = dot / (mag1 * mag2)
+        # Clamp: float rounding can push the ratio a hair past 1.0
+        # (e.g. dot/(sqrt(S)**2) == 1.0000000000000002 for S=3), which
+        # would put the result above the documented [0, 1] range.
+        cosine_sim = min(1.0, max(0.0, dot / (mag1 * mag2)))
 
-    return (block_ratio + edge_ratio + cosine_sim) / 3.0
+    return min(1.0, max(0.0, (block_ratio + edge_ratio + cosine_sim) / 3.0))
 
 
 def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:

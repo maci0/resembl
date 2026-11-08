@@ -342,6 +342,36 @@ class TestCfgSimilarity(unittest.TestCase):
         cfg2 = {"num_blocks": 1, "num_edges": 0, "block_sizes": [10**8], "adj": {}}
         self.assertAlmostEqual(cfg_similarity(cfg1, cfg2), 2.0 / 3.0)
 
+    def test_non_integer_counts_rejected(self):
+        """NaN/inf/bool/float counts and sizes raise instead of yielding NaN."""
+        good = {"num_blocks": 1, "num_edges": 1, "block_sizes": [1], "adj": {}}
+        for bad in (
+            {"num_blocks": float("nan"), "num_edges": 1, "block_sizes": [1], "adj": {}},
+            {"num_blocks": float("inf"), "num_edges": 1, "block_sizes": [1], "adj": {}},
+            {"num_blocks": True, "num_edges": 1, "block_sizes": [1], "adj": {}},
+            {"num_blocks": 1.5, "num_edges": 1, "block_sizes": [1], "adj": {}},
+            {"num_blocks": 1, "num_edges": float("nan"), "block_sizes": [1], "adj": {}},
+            {"num_blocks": 1, "num_edges": 1, "block_sizes": [float("nan")], "adj": {}},
+            {"num_blocks": 1, "num_edges": 1, "block_sizes": [float("inf")], "adj": {}},
+            {"num_blocks": 1, "num_edges": 1, "block_sizes": [True], "adj": {}},
+        ):
+            with self.assertRaises(ValueError):
+                cfg_similarity(bad, good)
+            with self.assertRaises(ValueError):
+                cfg_similarity(good, bad)
+
+    def test_identical_distinct_sizes_stays_in_range(self):
+        """Identical CFGs with distinct block sizes score exactly 1.0.
+
+        The cosine term is ``S/(sqrt(S)**2)`` for the squared-count sum
+        ``S``; for ``S=2`` that is ``0.9999999999999998`` in float, and
+        for ``S=3`` it is ``1.0000000000000002`` — both must still land
+        in ``[0, 1]`` with a self-score of 1.0.
+        """
+        for sizes in ([1, 2], [1, 2, 3], [1, 1, 2, 2, 3, 3]):
+            cfg = {"num_blocks": len(sizes), "num_edges": 1, "block_sizes": sizes, "adj": {}}
+            self.assertEqual(cfg_similarity(cfg, cfg), 1.0)
+
 
 # Integration: snippet_compare with new metrics
 
