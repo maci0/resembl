@@ -377,6 +377,19 @@ class TestChangelog(unittest.TestCase):
                 f"a bullet under '### {category}' that changes a contract is not marked",
             )
 
+    def test_unreleased_bullets_are_unique(self):
+        """No bullet repeats verbatim inside ``[Unreleased]``.
+
+        A duplicated note (the scheme-id cache removal and the serve-refusal
+        notes both shipped twice) doubles the consumer's reading and can
+        drift: the two copies are edited independently and one goes stale.
+        The shipped section keeps one copy of each bullet.
+        """
+        seen: set[str] = set()
+        for bullet, _category in parse_bullets(unreleased_body(self.text)):
+            self.assertNotIn(bullet, seen, f"duplicate [Unreleased] bullet: {bullet[:80]!r}")
+            seen.add(bullet)
+
 
 if __name__ == "__main__":
     unittest.main()
