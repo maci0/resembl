@@ -219,7 +219,8 @@ Global options go before the subcommand: `resembl --format json find ...`.
     fingerprint version) beside it.  SQLite only; other backends use
     their own backup tooling.  Backup and manifest files are mode `0600`.
     Exits 1 when the backup file is complete but its manifest could not
-    be written — such a backup is unverified, not safe.  RPO is the time
+    be written or the published copy fails verification — such a backup
+    is unverified, not safe.  RPO is the time
     since the last verified backup;
     RTO is the time to copy the file back to `assembly.db` and run
     `verify` (the index is rebuilt by the next `find` if it is stale).
@@ -232,11 +233,12 @@ Global options go before the subcommand: `resembl --format json find ...`.
     restorable.  Run this after a restore to prove the copy is good —
     a backup never restored is a hypothesis, not a backup.
 
-**merge** *PATH*
+**merge** *PATH* [--force] [--no-backup] [--backup-dir *DIR*]
 :   Merge snippets from another resembl database into the current one,
     deduplicating by checksum.  *PATH* is a database file or a full
     `DATABASE_URL` (any backend with its driver installed, e.g.
-    `duckdb:///file.db`).
+    `duckdb:///file.db`).  The verified pre-merge backup is taken first
+    (SQLite only); pass `--no-backup` to skip it.
 
 ### Naming & Tags
 

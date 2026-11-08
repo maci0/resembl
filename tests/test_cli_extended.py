@@ -352,6 +352,45 @@ class TestCLIMerge(BaseCLITest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error", result.stderr)
 
+    def test_merge_takes_pre_merge_backup(self):
+        """``merge`` writes a verified pre-merge backup before merging."""
+        source_path = self._create_source_db()
+        # Tests run with the repo root as cwd (the CLI's default
+        # backup dir is relative to cwd); point backup_dir at an
+        # absolute temp path so the artifact can be inspected.
+        backup_dir = os.path.join(os.path.dirname(self.db_name), "pre-merge")
+        try:
+            result = self.run_command(f"merge --force --backup-dir {backup_dir} {source_path}")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Merge Complete", result.stdout)
+            backups = [
+                n for n in os.listdir(backup_dir) if n.startswith("assembly-") and n.endswith(".db")
+            ]
+            self.assertEqual(len(backups), 1, os.listdir(backup_dir))
+            # The backup must verify, even after the merge it guards:
+            # its manifest and config sidecar are beside it, and the
+            # merged corpus must not have polluted it.
+            from resembl.core import db_verify_backup
+
+            with Session(self.engine) as session:
+                check = db_verify_backup(session, os.path.join(backup_dir, backups[0]))
+            self.assertTrue(check["ok"], check)
+        finally:
+            os.unlink(source_path)
+
+    def test_merge_no_backup_skips_pre_merge_backup(self):
+        """``merge --no-backup`` writes no backup."""
+        source_path = self._create_source_db()
+        backup_dir = os.path.join(os.path.dirname(self.db_name), "pre-merge-none")
+        try:
+            result = self.run_command(
+                f"merge --force --no-backup --backup-dir {backup_dir} {source_path}"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(os.path.exists(backup_dir) and os.listdir(backup_dir))
+        finally:
+            os.unlink(source_path)
+
 
 class TestCLIVersion(BaseCLITest):
     """Integration tests for the version command."""

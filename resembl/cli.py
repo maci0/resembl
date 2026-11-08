@@ -2346,10 +2346,12 @@ def backup(
         if result.get("num_removed"):
             rows.append(("Old backups removed", str(result["num_removed"])))
         _echo_kv_table("Backup Complete", rows)
-    if result.get("manifest_written") is False:
+    if result.get("manifest_written") is False or result.get("verified") is False:
         err_console.print(
             "[red]Error:[/red] Backup file is complete but its manifest could not be "
             "written; verify-backup cannot cross-check it. Treat it as unverified."
+            if result.get("manifest_written") is False
+            else "[red]Error:[/red] Backup failed verification; treat it as unrestorable."
         )
         raise typer.Exit(code=1)
 
@@ -2380,6 +2382,17 @@ def merge(
         help="Path to the source database file, or a full DATABASE_URL "
         "(e.g. duckdb:///file.db, postgresql+pg8000://...)."
     ),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+    backup_dir: str = typer.Option(
+        ".resembl-pre-delete-backups",
+        "--backup-dir",
+        help="Directory for the verified pre-merge backup.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the verified pre-merge backup (not recommended).",
+    ),
 ) -> None:
     """Merge snippets from another resembl database into this one."""
     source_path = source
@@ -2392,6 +2405,16 @@ def merge(
     if state.format not in ("json", "csv"):
         # A full source URL may embed credentials; mask them for display.
         _echo(f"Merging from [bold]{_display(db_url_mask(source_path))}[/bold]...")
+    _confirm(
+        f"Merge snippets from '{db_url_mask(source_path)}' into the current database?",
+        force or True,
+    )
+    if not no_backup:
+        try:
+            db_backup_for_delete(state.session, backup_dir)
+        except (ValueError, OSError) as e:
+            err_console.print(f"[red]Error:[/red] Pre-merge backup failed: {_display(str(e))}")
+            raise typer.Exit(code=1) from e
     result = db_merge(state.session, source_path)
 
     if "error" in result:

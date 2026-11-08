@@ -7,7 +7,9 @@
 | Snippet corpus (`snippet`, `collection`, `snippetversion` tables) | SQLite file named by `RESEMBL_DATABASE_URL` / `DATABASE_URL`, default `assembly.db` — or, on a DuckDB backend, the `duckdb:///file.db` file | Yes (SQLite) — `resembl backup DIR` (online backup API, single file). DuckDB and other non-SQLite backends: use the backend's own tooling (see below); `resembl backup` refuses non-SQLite URLs | No — this *is* the corpus. `export` to `.asm` files is a second, human-readable copy |
 | LSH index (`lsh_bucket`, `lsh_meta`) + fingerprint stamps (`app_meta`) | Same file as the corpus (SQLite or DuckDB) | Yes (SQLite) — included in the backup copy; DuckDB/server backends copy with the corpus via the backend's own tooling | Yes — `reindex` / next `find` rebuilds from snippet code + fingerprints |
 | Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite) — copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable — defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
-| Legacy pickle cache, port file, export manifest | `~/.cache/resembl/` | **No** | Yes — cache, never loaded; port file rewritten by `serve`; manifest rewritten by next `export` |
+| Legacy pickle cache, port file | `~/.cache/resembl/` | **No** | Yes — cache, never loaded; port file rewritten by `serve` |
+| Export files + export manifest | Export directory chosen at `export` time (`DIRECTORY/.resembl-export.json`) | **No** (the export itself is the copy) | Yes — re-export from restored corpus; manifest rewritten by next `export` |
+| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | **No** | Regenerable only by regenerating hashes of interpreter + loaded modules; store copy + SHA-256 (`artifact_sha256`) with backup set, write-protected — writable manifest can attest tampered code |
 
 Non-SQLite backends (PostgreSQL/MySQL/DuckDB) are **not** covered by
 `resembl backup`: use that backend's own tooling (`pg_dump`, etc.) and test
@@ -73,6 +75,16 @@ apply, or re-apply overrides with `resembl config set`.  The sidecar's
 hash is cross-checked by `verify-backup`; a missing or mismatched
 sidecar fails verification.
 
+Restore the runtime manifest the same way: copy the stored
+`RESEMBL_RUNTIME_MANIFEST` file back to the path `serve` reads, keep it
+write-protected, and confirm its SHA-256 still equals the
+`artifact_sha256` pinned by the Go service (`-artifact-sha256`).
+`/find-pinned` refuses to answer until manifest, index digest, and
+process generation all match; a missing or mismatched manifest is a
+fail-closed `503`, not a silent unpinned find.  The manifest is **not**
+copied by `resembl backup`: a host loss that takes it leaves
+`/find-pinned` unrestorable even though the corpus restores cleanly.
+
 ## Restore (logical corruption — bad code wrote bad data for hours)
 
 Retention is by count, not by age: a long-running corruption can flood
@@ -102,7 +114,11 @@ config mismatch, `integrity_check` failure, missing table, or wal sidecar is a h
 
 Before any destructive operation in the next section, run the backup and
 `verify-backup` on the result — a backup that has never been verified is
-not a pre-delete snapshot:
+not a pre-delete snapshot. `resembl backup` exits 1 when the published
+copy fails verification or its manifest could not be written
+(`manifest_written: false` / `verified: false` in JSON output); treat
+any non-zero exit, or `verified: false`, as "no backup was taken" and
+do not proceed:
 
 ## Deletion paths
 
@@ -110,7 +126,10 @@ not a pre-delete snapshot:
 pre-delete backup with `db_backup_for_delete` (SQLite only; on other
 backends the ``ValueError`` names the backend and the deletion is
 refused). They are destructive with no soft-delete window, so the
-backup is the soft-delete window: only proceed when it verifies:
+backup is the soft-delete window: only proceed when it verifies.
+`resembl merge` takes the same pre-merge backup, since a merge rewrites
+names, tags, collections, and fingerprint stamps in place and a bad
+source can corrupt the corpus as surely as a delete can:
 
 ```bash
 resembl backup DIR --force
