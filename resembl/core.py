@@ -3120,10 +3120,13 @@ def db_merge(session: Session, source_db_path: str, *, _merge_retry_seen: bool =
 
         source_url = str(URL.create("sqlite", database=source_db_path))
 
+    source_engine = None
     try:
         source_engine = create_db_engine(source_url)
         source_session = Session(source_engine)
     except Exception as e:
+        if source_engine is not None:
+            source_engine.dispose()
         # Mask credentials: a URL source may embed a password, and the
         # exception/log path must not persist it (same rule as db_url_mask
         # in the CLI/server open paths). Plain paths pass through intact.

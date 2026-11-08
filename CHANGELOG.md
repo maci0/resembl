@@ -22,6 +22,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `db_merge` now disposes the source engine when opening its session fails, instead of returning the error with the engine's connection pool still live for the life of the process.
 - `resembl serve` now refuses a non-loopback `--host` unless `--allow-unauthenticated` is given; it previously only printed a warning and bound the unauthenticated corpus to the network. The Go `resembl-service` likewise now requires `-token-file` for a non-loopback `-listen`.
 - The Python HTTP server and the Go service no longer log a request path (or method) verbatim: control characters (including CR/LF) are stripped before the path reaches `logger.exception`/`log.Printf`, so a crafted URL cannot forge log lines; the 404 `unknown path` error message strips them the same way.
 - `resembl serve`'s loopback guard now uses the full `127.0.0.0/8` loopback test (via `ipaddress`) instead of matching only `127.0.0.1`/`localhost`/`::1`, matching the server's own `Host` allow-list; the `resembl-find` thin client and the `resembl` CLI's warm-server request now bound the response body they read (16 MiB ceiling) instead of buffering it unbounded.

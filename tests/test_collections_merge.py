@@ -928,6 +928,47 @@ class TestDBMergeFailure(unittest.TestCase):
         finally:
             os.unlink(source_path)
 
+    def test_merge_disposes_source_engine_when_session_open_fails(self):
+        """A source engine whose session fails to open is disposed, not leaked.
+
+        ``db_merge`` returns the error without reaching the ``finally``
+        that disposes the source engine; the engine created just before
+        the failure must still release its pool.
+        """
+        source_path = self._create_raw_source_db([self._raw_row(1)])
+        created = []
+        dispose_calls = []
+        real_create = __import__("resembl.database", fromlist=["create_db_engine"]).create_db_engine
+
+        def capturing_create(url, **kwargs):
+            engine = real_create(url, **kwargs)
+            real_dispose = engine.dispose
+
+            def counting_dispose(*a, **k):
+                dispose_calls.append(1)
+                return real_dispose(*a, **k)
+
+            engine.dispose = counting_dispose
+            created.append(engine)
+            return engine
+
+        try:
+            with (
+                patch("resembl.database.create_db_engine", side_effect=capturing_create),
+                patch("resembl.core.Session", side_effect=RuntimeError("boom")),
+            ):
+                result = db_merge(self.session, source_path)
+            self.assertIn("error", result)
+            self.assertEqual(len(created), 1)
+            # The engine built just before the failure must be disposed:
+            # without it its pool (and any connection it later opens) is
+            # pinned for the life of the process.  A disposed SQLAlchemy
+            # engine silently recreates its pool on a fresh connect, so
+            # pin the dispose call itself rather than a connect failure.
+            self.assertEqual(dispose_calls, [1])
+        finally:
+            os.unlink(source_path)
+
 
 if __name__ == "__main__":
     unittest.main()
