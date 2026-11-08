@@ -1642,6 +1642,50 @@ class TestServerMode(_ServeTestCase):
         # being computed, not every query ever asked for.
         self.assertEqual(_INFLIGHT, {})
 
+    def test_result_cache_skips_a_payload_filed_under_a_stale_version(self):
+        """A write committed during the find must not file the payload.
+
+        The version sampled before the find is the only guard the next
+        request has; a payload computed for that version but stored after
+        the database moved on is stale by the time it is read back, and
+        serving it violates read-your-writes for the writer whose commit
+        landed mid-find.
+        """
+        from unittest.mock import patch as mock_patch
+
+        from resembl import server as server_mod
+        from resembl.core import snippet_add
+        from resembl.server import _RESULT_CACHE, _db_version, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        _db_version(self._session)  # warm the probe
+        real_find = server_mod.snippet_find_matches
+        written = {"done": False}
+
+        def find_then_write(*args, **kwargs):
+            payload = real_find(*args, **kwargs)
+            # A concurrent writer commits while this find is in flight.
+            if not written["done"]:
+                written["done"] = True
+                snippet_add(self._session, "mid_find", "push ebx\nmov eax, 123\npop ebx\nret")
+            return payload
+
+        with mock_patch.object(server_mod, "snippet_find_matches", find_then_write):
+            first = _find_one(self._session, {"top_n": 5}, query)
+        # The computing caller still gets its answer...
+        self.assertIn("matches", first)
+        # ...but the payload filed for the pre-write version is not served
+        # back: the entry carries the stale version and misses, so the
+        # next request recomputes against the new one.
+        second = _find_one(self._session, {"top_n": 5}, query)
+        self.assertIn("matches", second)
+        # The freshly computed entry is the current one.
+        self.assertEqual(len(_RESULT_CACHE), 1)
+        (entry,) = _RESULT_CACHE.values()
+        self.assertEqual(entry[0], _db_version(self._session))
+
     def test_version_probe_is_released_with_the_server(self):
         """A closed server no longer holds the cache's version-probe engine.
 

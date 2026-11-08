@@ -584,7 +584,18 @@ def _find_one(
         if cached is not None:
             return cached
         payload = _find_uncached(session, query, request)
-        _result_cache_put(key, version, payload)
+        # A write committed during the find advances the version; filing
+        # the payload under the older one would serve pre-write results
+        # to the next request, until a further write advanced it again.
+        # The caller still gets the payload it computed.  The version is
+        # re-sampled here so the payload lands under the version the
+        # database is actually at once the find is done: the find's own
+        # commits (a cold-start index build) are part of its result, and
+        # filing under the pre-find version would make the entry
+        # unreachable on the next request.
+        version = _db_version(session)
+        if version is not None:
+            _result_cache_put(key, version, payload)
         return payload
 
 
@@ -625,7 +636,9 @@ def _result_cache_get(key: tuple, version: int | None) -> dict | None:
 def _payload_chars(payload: dict) -> int:
     """Return the characters a find payload retains (checksums and names)."""
     return sum(
-        len(match["checksum"]) + sum(len(name) for name in match["names"])
+        len(match["checksum"])
+        + len(repr(match.get("score", 0.0)))
+        + sum(len(name) for name in match["names"])
         for match in payload["matches"]
     )
 
