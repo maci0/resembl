@@ -1,7 +1,10 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `9438c03`. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `db64fab`, with the
+loopback-client fix (mypy `urlopen` context replaced by
+`OpenerDirector.open`, `resembl/cli.py` `_server_request` and
+`resembl/find_client.py` `_main`) re-verified on that date. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including

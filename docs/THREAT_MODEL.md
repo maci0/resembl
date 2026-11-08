@@ -2,7 +2,11 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`9438c03`. Every reference below was re-read in that tree on that
+`db64fab`, with the loopback-client fix (mypy `urlopen` context
+replaced by `OpenerDirector.open`, `resembl/cli.py` `_server_request`
+and `resembl/find_client.py` `_main`, and the pinning tests in
+`tests/test_cli_extended.py` `TestServerFallback` retargeted to
+`OpenerDirector.open`) re-verified on that date. Every reference below was re-read in that tree on that
 date, except where a line number is explicitly historical. The
 `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The

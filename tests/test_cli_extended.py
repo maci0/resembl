@@ -923,7 +923,7 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.urlopen",
+            "urllib.request.OpenerDirector.open",
             side_effect=urllib.error.URLError(TimeoutError("server busy")),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
@@ -943,7 +943,7 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.urlopen",
+            "urllib.request.OpenerDirector.open",
             side_effect=urllib.error.URLError(ConnectionResetError("connection reset")),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
@@ -965,8 +965,8 @@ class TestServerFallback(unittest.TestCase):
                 return b"<html>not json</html>"
 
         with patch(
-            "urllib.request.urlopen",
-            side_effect=lambda request, timeout=None, context=None: _BadResponse(),
+            "urllib.request.OpenerDirector.open",
+            side_effect=lambda request, timeout=None: _BadResponse(),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -980,7 +980,7 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.urlopen",
+            "urllib.request.OpenerDirector.open",
             side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
@@ -1001,17 +1001,15 @@ class TestServerFallback(unittest.TestCase):
 
         import resembl.cli as cli
 
-        # Signature-conformance stub for urllib.request.urlopen.
-        def refused_after_retarget(
-            request, timeout=None, context=None
-        ):  # pylint: disable=unused-argument
+        # Signature-conformance stub for OpenerDirector.open.
+        def refused_after_retarget(request, timeout=None):  # pylint: disable=unused-argument
             # Simulate the newcomer winning the advertisement race between
             # this client's read of the port file and its connect attempt.
             with open(self.port_file, "w", encoding="utf-8") as f:
                 f.write("6789")
             raise urllib.error.URLError(ConnectionRefusedError("no server"))
 
-        with patch("urllib.request.urlopen", side_effect=refused_after_retarget):
+        with patch("urllib.request.OpenerDirector.open", side_effect=refused_after_retarget):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
         with open(self.port_file, encoding="utf-8") as f:
@@ -1025,7 +1023,7 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.urlopen",
+            "urllib.request.OpenerDirector.open",
             side_effect=urllib.error.URLError(TimeoutError("server busy")),
         ):
             result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)
@@ -1033,7 +1031,7 @@ class TestServerFallback(unittest.TestCase):
         self.assertTrue(os.path.exists(self.port_file), "port file must survive a timeout")
 
         with patch(
-            "urllib.request.urlopen",
+            "urllib.request.OpenerDirector.open",
             side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
         ):
             result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)

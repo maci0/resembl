@@ -692,10 +692,9 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         # Loopback must not go through a proxy (http_proxy): the server is
         # on this host, and a proxied request would either fail or send the
         # corpus query to a third party.  ProxyHandler({}) disables proxies.
-        with urllib.request.urlopen(
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
             request,
             timeout=timeout,
-            context=urllib.request.build_opener(urllib.request.ProxyHandler({})),
         ) as response:
             payload = json.loads(_read_bounded_server_response(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
