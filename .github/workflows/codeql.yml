@@ -13,6 +13,12 @@ concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege at the workflow level, matching every other workflow
+# here: the job's own `permissions:` narrows it further, and a workflow
+# without a top-level block inherits the repository default instead.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: Analyze

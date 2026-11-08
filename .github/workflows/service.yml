@@ -48,5 +48,12 @@ jobs:
         # COPY path or a missing binary would only fail on an operator's
         # host. `resembl-service -h` prints the flag list without needing a
         # custody directory, token or engine; Go's flag package exits 1 on
-        # -h, so the check is the output, not the exit code.
-        run: docker run --rm resembl-service:ci -h 2>&1 | grep -q 'Usage of resembl-service:'
+        # -h, so the check is the output, not the exit code. The output is
+        # captured before grepping, not piped into grep: a pipeline's exit
+        # code is grep's under the default shell (which has no pipefail),
+        # but a `set -o pipefail` shell would fail the step on the docker
+        # exit code even when the usage line is present.
+        run: |
+          set -e
+          output="$(docker run --rm resembl-service:ci -h 2>&1 || true)"
+          printf '%s\n' "$output" | grep -q 'Usage of resembl-service:'
