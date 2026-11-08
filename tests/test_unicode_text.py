@@ -374,6 +374,35 @@ class TestTagNormalizationForms(BaseDBTest):
         assert removed is not None
         self.assertEqual(removed.tag_list, [])
 
+    def test_bom_before_padding_is_not_part_of_the_tag(self):
+        """A BOM followed by padding stored as a leading space before.
+
+        ``normalize_unicode(tag.strip())`` left the space behind a BOM
+        (``"\ufeff mytag"`` -> ``" mytag"``), a spelling no stripped
+        lookup could reach.  Tags share the name normalization, which
+        loops over BOM and whitespace together.
+        """
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        added = snippet_tag_add(self.session, snippet.checksum, "\ufeff mytag")
+        assert added is not None
+        self.assertEqual(added.tag_list, ["mytag"])
+        same = snippet_tag_add(self.session, snippet.checksum, "mytag")
+        assert same is not None
+        self.assertEqual(same.tag_list, ["mytag"])
+        removed = snippet_tag_remove(self.session, snippet.checksum, "\ufeff mytag")
+        assert removed is not None
+        self.assertEqual(removed.tag_list, [])
+
+    def test_remove_finds_a_tag_stored_with_leading_space(self):
+        """A row written by the old BOM bug still resolves."""
+        snippet = snippet_add(self.session, "s", "MOV EAX, 1")
+        snippet.tags = json.dumps([" mytag"])
+        self.session.add(snippet)
+        self.session.commit()
+        removed = snippet_tag_remove(self.session, snippet.checksum, "mytag")
+        assert removed is not None
+        self.assertEqual(removed.tag_list, [])
+
 
 if __name__ == "__main__":
     unittest.main()

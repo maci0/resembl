@@ -440,7 +440,12 @@ def snippet_tag_add(
     session: Session, checksum: str, tag: str, quiet: bool = False
 ) -> Snippet | None:
     """Add a tag to a snippet (idempotent — adding an existing tag is a no-op)."""
-    tag = normalize_unicode(tag.strip())
+    # Tags are identity like names, so they use the same normalization:
+    # ``normalize_unicode(tag.strip())`` left a leading space behind when a
+    # BOM preceded the padding ("\ufeff mytag" -> " mytag"), a spelling
+    # no stripped lookup could reach.  ``name_normalize`` loops over BOM
+    # and whitespace together and composes to NFC.
+    tag = name_normalize(tag)
     if not tag:
         if not quiet:
             logger.error("Tag cannot be empty.")
@@ -456,11 +461,10 @@ def snippet_tag_add(
     # Compare in NFC, as names do: a tag stored before normalization (or
     # merged in from a macOS-written database, which hands out NFD)
     # spelled the other way is the same tag, not a second one.  The
-    # query is already NFC, and ASCII is NFC as well, so an ASCII tag
-    # needs no re-composition on the stored side.
-    if any(
-        tag == (stored if stored.isascii() else normalize_unicode(stored)) for stored in tag_list
-    ):
+    # stored side is normalized unconditionally, unlike the name paths:
+    # an ASCII stored tag can still carry a BOM/space residue from before
+    # tags shared the name normalization, and that residue must match.
+    if any(tag == name_normalize(stored) for stored in tag_list):
         return snippet  # Idempotent: already tagged
 
     tag_list.append(tag)
@@ -475,7 +479,7 @@ def snippet_tag_remove(
     session: Session, checksum: str, tag: str, quiet: bool = False
 ) -> Snippet | None:
     """Remove a tag from a snippet (idempotent — removing a missing tag is a no-op)."""
-    tag = normalize_unicode(tag.strip())
+    tag = name_normalize(tag)
     snippet = Snippet.get_by_checksum(session, checksum)
     if not snippet:
         if not quiet:
@@ -486,11 +490,7 @@ def snippet_tag_remove(
     # Match in NFC, as snippet_tag_add does: removing the composed
     # spelling of a tag stored decomposed (or vice versa) must find it.
     match = next(
-        (
-            stored
-            for stored in tag_list
-            if tag == (stored if stored.isascii() else normalize_unicode(stored))
-        ),
+        (stored for stored in tag_list if tag == name_normalize(stored)),
         None,
     )
     if match is None:
@@ -2928,9 +2928,7 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing
-    collection = Collection(
-        name=name_normalize(name), description=normalize_unicode(description)
-    )
+    collection = Collection(name=name_normalize(name), description=normalize_unicode(description))
     session.add(collection)
     try:
         session.commit()
@@ -3316,9 +3314,9 @@ def db_merge(session: Session, source_db_path: str, *, _merge_retry_seen: bool =
                 # an unnormalized union would store both spellings.
                 existing_tags = existing.tag_list
                 merged_tags = list(existing_tags)
-                seen_tags = {normalize_unicode(t) for t in merged_tags}
+                seen_tags = {name_normalize(t) for t in merged_tags}
                 for src_tag in src_tags:
-                    normalized_tag = normalize_unicode(src_tag)
+                    normalized_tag = name_normalize(src_tag)
                     if normalized_tag in seen_tags:
                         continue
                     seen_tags.add(normalized_tag)
