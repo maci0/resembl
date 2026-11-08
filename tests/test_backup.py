@@ -560,6 +560,40 @@ class TestDbVerifyBackup(FileDBTest):
         check = db_verify_backup(self.session, result["backup"])
         self.assertFalse(check["ok"], check)
 
+    def test_wal_sidecar_beside_backup_fails(self):
+        """A -wal beside the backup must fail: restore copies only the .db.
+
+        The read-only verify open would replay the wal and measure
+        main+wal, while the documented restore ships the single file —
+        so a backup that verifies with a wal present can restore empty.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        with open(result["backup"] + "-wal", "wb") as f:
+            f.write(b"\x00" * 32)
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertFalse(check["ok"], check)
+        self.assertTrue(any("wal sidecar" in i for i in check["issues"]), check["issues"])
+
+    def test_rebackup_of_corrupted_retained_backup_writes_fresh(self):
+        """A corrupt retained backup is not reused as a successful backup.
+
+        The reuse check keys on the manifest's content hash, which a
+        truncated on-disk copy still matches.  Without re-verification,
+        ``db_backup`` would return the corrupt file as its newest
+        restore point and report success.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir)
+        with open(first["backup"], "r+b") as f:
+            f.truncate(10)
+        second = db_backup(self.session, backup_dir)
+        self.assertNotEqual(second["backup"], first["backup"])
+        self.assertTrue(second["verified"])
+        self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

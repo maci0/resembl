@@ -73,10 +73,10 @@ verified):
 resembl verify-backup backups/assembly-<newest>.db   # exit 1 = unrestorable
 ```
 
-Alert on: non-zero exit, a zero-byte `assembly-*.db`, a config mismatch (missing or tampered `.config.toml` sidecar), or a backup directory
+Alert on: non-zero exit, a zero-byte `assembly-*.db`, a config mismatch (missing or tampered `.config.toml` sidecar), a `-wal`/`-shm` sidecar beside a backup (a restore copies only the `.db`, so such a backup cannot be trusted), or a backup directory
 whose newest file is older than your RPO target. A missing manifest is an
 issue (contents still verify); a count mismatch, content-hash mismatch,
-config mismatch, `integrity_check` failure, or missing table is a hard failure.
+config mismatch, `integrity_check` failure, missing table, or wal sidecar is a hard failure.
 
 Before any destructive operation in the next section, run the backup and
 `verify-backup` on the result — a backup that has never been verified is

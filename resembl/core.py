@@ -2298,6 +2298,24 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     # expensive part — a duplicate run costs one checksum scan.
     content_hash = _db_content_hash(session)
     reused = _db_backup_reuse(backup_dir, content_hash)
+    if reused is not None and not db_verify_backup(session, reused)["ok"]:
+        # A retained backup whose manifest still matches the live content
+        # hash can nonetheless be corrupt now (bit rot, a truncated
+        # transfer, a half-overwritten copy).  Reusing it would report
+        # success for a directory whose newest restore point no longer
+        # restores — the exact failure db_backup's fresh path refuses by
+        # deleting an unverifiable copy.  Drop the trio and fall through
+        # to write a fresh, self-verified backup.
+        for _stale in (
+            reused,
+            os.path.join(backup_dir, _db_backup_manifest_name(reused)),
+            os.path.join(backup_dir, _db_backup_config_name(reused)),
+        ):
+            try:
+                os.remove(_stale)
+            except OSError:
+                pass
+        reused = None
     if reused is not None:
         try:
             num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
@@ -2627,6 +2645,19 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     issues: list[str] = []
     if not os.path.isfile(backup_path):
         return {"ok": False, "num_snippets": 0, "issues": [f"backup not found: {backup_path}"]}
+    # A backup is a single-file restore point: a restore copies only the
+    # ``.db`` file (docs/restore.md).  A ``-wal``/``-shm`` sidecar beside
+    # it (a previous restore attempt, a hand-copied live pair) would be
+    # replayed by the read-only open below, so verify would measure
+    # main+wal while a restore ships main alone — a backup that verifies
+    # here and restores empty.  Flag the sidecar as a hard failure so the
+    # copy that cannot survive a restore is never trusted.
+    issues.extend(
+        f"wal sidecar present: {os.path.basename(backup_path + _sidecar)} "
+        "would be replayed on verify but not copied on restore"
+        for _sidecar in ("-wal", "-shm")
+        if os.path.exists(backup_path + _sidecar)
+    )
     try:
         # Percent-encode so '?'/'#' in a filename cannot inject URI params
         # (e.g. "?mode=rwc") and escape the read-only mode.
@@ -2751,7 +2782,9 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     # predate manifests, and its contents are what matter.  A missing table,
     # a failed integrity_check, or a count/hash mismatch does.
     hard_failures = [
-        i for i in issues if "mismatch" in i or "missing tables" in i or "integrity_check" in i
+        i
+        for i in issues
+        if "mismatch" in i or "missing tables" in i or "integrity_check" in i or "wal sidecar" in i
     ]
     return {"ok": not hard_failures, "num_snippets": num_snippets, "issues": issues}
 
