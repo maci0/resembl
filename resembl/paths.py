@@ -142,8 +142,11 @@ def server_port_path(db_url: str, cache_dir: str) -> str:
     Both sides of the warm-find protocol hash the same string: the raw
     database URL, never :func:`db_url_mask`'s ``user:***@host`` rendering,
     which would name a different file for a URL that carries credentials.
+    SHA-256 replaces the historical SHA-1 here: the port-file name is
+    derived from a credential-carrying URL, and SHA-1 is deprecated for
+    new content-addressing uses.
     """
-    digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(db_url.encode("utf-8")).hexdigest()[:12]
     return os.path.join(cache_dir, f"server_{digest}.port")
 
 

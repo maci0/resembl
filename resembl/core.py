@@ -2904,9 +2904,11 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # Mask credentials: a URL source may embed a password, and the
         # exception/log path must not persist it (same rule as db_url_mask
         # in the CLI/server open paths). Plain paths pass through intact.
+        # The driver error text (SQL, host, credentials) stays in the log
+        # only; the caller gets a stable message naming the masked source.
         masked = db_url_mask(source_db_path)
         logger.exception("Failed to open source database %r: %s", masked, e)
-        return {"error": f"failed to open source database {masked}: {e}"}
+        return {"error": f"failed to open source database {masked}"}
 
     added = 0
     updated = 0
@@ -3135,10 +3137,12 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # copied blobs may be foreign-format, and an unchanged stamp would
         # vouch for them — every later find would skip those snippets as
         # stale instead of healing them with one reindex.
+        # The raw exception text (SQL, file paths, driver internals) stays
+        # in the log; the caller gets a stable message naming the source.
         session.rollback()
         if added:
             _fingerprint_stamps_clear(session)
-        return {"error": str(e)}
+        return {"error": f"merge failed for {db_url_mask(source_db_path)}"}
     finally:
         source_session.close()
         # Return the pooled connections to the OS — the source engine is

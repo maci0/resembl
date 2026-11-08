@@ -758,7 +758,7 @@ class TestCLIServeLifecycle(BaseCLITest):
         db_url = f"sqlite:///{self.db_name}"
         with tempfile.TemporaryDirectory() as cache_dir:
             # Replicate server_port_path() against the temp cache dir.
-            digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+            digest = hashlib.sha256(db_url.encode("utf-8")).hexdigest()[:12]
             port_file = os.path.join(cache_dir, f"server_{digest}.port")
             proc = self._start_serve(cache_dir)
             try:
@@ -819,7 +819,7 @@ class TestCLIServeLifecycle(BaseCLITest):
 
         db_url = f"sqlite:///{self.db_name}"
         with tempfile.TemporaryDirectory() as cache_dir:
-            digest = hashlib.sha1(db_url.encode("utf-8")).hexdigest()[:12]
+            digest = hashlib.sha256(db_url.encode("utf-8")).hexdigest()[:12]
             port_file = os.path.join(cache_dir, f"server_{digest}.port")
             first = self._start_serve(cache_dir)
             try:
@@ -893,7 +893,7 @@ class TestServerFallback(unittest.TestCase):
         self.addCleanup(self._session.close)
         cli.state.session = self._session
 
-        digest = hashlib.sha1(str(engine.url).encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha256(str(engine.url).encode("utf-8")).hexdigest()[:12]
         self.port_file = os.path.join(self._cache.name, f"server_{digest}.port")
         with open(self.port_file, "w", encoding="utf-8") as f:
             f.write("12345")
