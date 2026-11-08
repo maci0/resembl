@@ -1,10 +1,11 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `9d6f2f0`, with the
-loopback-client fix (mypy `urlopen` context replaced by
-`OpenerDirector.open`, `resembl/cli.py` `_server_request` and
-`resembl/find_client.py` `_main`) re-verified on that date. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `a4dba24`, with the
+loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
+via `OpenerDirector.open` instead of passed as `urlopen`'s context,
+`resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
+re-verified on that date. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
@@ -23,9 +24,11 @@ the 1000-row `top_n` cap, the 96 handler-thread bound in `resembl/server.py`, th
 `413` envelope for oversized bodies in `resembl/server.py` `_read_body`,
 and the
 JSON `405` envelope for any unhandled verb, the verified pre-delete backup
-before `rm`/`clean`/`collection delete` (`db_backup_for_delete`,
-`resembl/core.py`, with `--no-backup` to opt out), the fail-fast
-`RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths, the
+before `rm`/`clean`/`collection delete` and the verified pre-merge backup
+before `merge` (`db_backup_for_delete`, `resembl/core.py`, with `--no-backup`
+to opt out), the fail-fast
+`RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths (base-10
+only), the
 warm-server refusal log line before the in-process fallback, and the Go
 service's graceful drain on SIGINT/SIGTERM) are documented in `CHANGELOG.md`.
 
@@ -124,14 +127,19 @@ relies on, not configuration options.
   recomputed rather than unpickled. The failure path is also closed: a
   source that will not open makes `merge` log the driver's error text and
   return only a stable message naming the masked source, so host, port,
-  file-path, and SQL detail no longer reach the caller.
+  file-path, and SQL detail no longer reach the caller. `merge` takes a
+  verified pre-merge backup first (`db_backup_for_delete` in
+  `resembl/core.py`, with `--no-backup` to opt out); a backup that does not
+  verify aborts the merge with exit 1.
 - **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` once surrounding whitespace is trimmed, treating a blank value as unset (default `http://127.0.0.1:8081`), and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest and a `<backup-stem>.config.toml`
   config sidecar into a caller-chosen
-  directory, pruning to the newest `--keep` (default 7), and re-verifies
+  directory, pruning to the newest `--keep` (default 7), folds the
+  published copy to a single-file restore point, and re-verifies
   the published file before reporting success (removing it on failure;
-  exits 1 when the manifest could not be written). A retained backup is
+  exits 1 when the manifest could not be written or the published copy
+  fails verification). A retained backup is
   re-verified before reuse and replaced by a fresh self-verified copy
   when it no longer verifies. `verify-backup`
   checks tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm`
