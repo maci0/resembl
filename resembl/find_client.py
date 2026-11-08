@@ -217,6 +217,13 @@ def _main(argv: list[str] | None = None) -> int:
                 output = args_list[index + 1]
             elif token.startswith("--output="):
                 output = token.split("=", 1)[1]
+        if output not in ("auto", "text", "json"):
+            return _fail(
+                f"--output must be one of auto, text, json, got {output!r}",
+                2,
+                json_on=False,
+                kind="usage",
+            )
         return _print_schema(schema_words, json_on=_json_on(output, json_flag))
 
     # JSON mode must be known before argparse reports a usage error, so

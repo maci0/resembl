@@ -2659,8 +2659,53 @@ def config_unset_cmd(
     state.config.update(new_config)
 
 
+def _pre_scan_output(argv: list[str]) -> None:
+    """Record ``-o``/``--output`` before Typer parses the command line.
+
+    Typer validates the whole group before invoking the eager ``-o``
+    callback: an unknown option or command at the group level fails the
+    parse first, so ``-o json --badflag`` never reaches ``_accept_output``
+    and the JSON error envelope would not be emitted for its own usage
+    error.  Scanning the leading global options here mirrors the
+    ``--no-color`` pre-scan below.
+    """
+    argv = list(argv)
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in ("-o", "--output"):
+            if index + 1 < len(argv):
+                value = argv[index + 1]
+                if value in _OUTPUT_CHOICES:
+                    _output_choice.set(value)
+                index += 2
+                continue
+            break
+        if token.startswith("--output="):
+            value = token.split("=", 1)[1]
+            if value in _OUTPUT_CHOICES:
+                _output_choice.set(value)
+            index += 1
+            continue
+        if token.startswith("-") and token != "-":
+            # A global flag that may take a value (--format, --tz) consumes
+            # the next token; other flags do not.  Only the forms that can
+            # precede -o matter, and every other token ends the scan: the
+            # subcommand name is not a global option.
+            if token in ("--format", "--tz"):
+                index += 2
+                continue
+            if "=" in token:
+                index += 1
+                continue
+            index += 1
+            continue
+        break
+
+
 def main() -> None:
     """Entry point for the resembl command line interface."""
+    _pre_scan_output(sys.argv[1:])
     # Before anything is written: a locale-encoded stdout raises
     # UnicodeEncodeError on the first snippet name it cannot represent, which
     # costs the user the whole report.
