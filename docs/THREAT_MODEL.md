@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`6cbddc6`. Every reference below was re-read in that tree on that
+`9438c03`. Every reference below was re-read in that tree on that
 date, except where a line number is explicitly historical. The
 `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
@@ -84,6 +84,28 @@ before reusing it and writes a fresh self-verified copy instead of
 reporting success for a corrupt one (`0e258ed`, `db_backup` in
 `resembl/core.py`), which extends R17; and the Lambda adapter now strips
 the body from `HEAD` answers (`6dfaa9b`, `service/internal/lambdaproxy/proxy.go`).
+A later 2026-11-09 pass re-checked the commits after `6cbddc6`: the
+standalone client `resembl-find` now admits only ports 1-65535 (`6406aee`,
+`_main` in `resembl/find_client.py`), so a legitimately bound low port
+(e.g. `serve --port 80`) is dialable there, while the in-process `find`
+client guards the narrower ephemeral 1024-65535 range (`cdabd39`,
+`_server_request` in `resembl/cli.py`), which corrects R3, B5, and the
+query-text-capture abuse case below; both loopback clients now bypass
+`http_proxy` via `ProxyHandler({})` (`456e464`, `resembl/cli.py`,
+`resembl/find_client.py`) and bound the response body they read at 16 MiB
+(`709d31b`, `_MAX_RESPONSE_BYTES` / `_MAX_SERVER_RESPONSE_BYTES`); `serve`'s
+loopback guard now uses the full `127.0.0.0/8` test via `ipaddress`
+(`709d31b`, `_is_loopback_bind` in `resembl/cli.py`); both servers strip
+control characters from logged request paths/methods (`709d31b`,
+`_LOG_CONTROL_CHARS` in `resembl/server.py`, `safeLogPath` in
+`service/service.go`); the handler-slot wait is bounded (`7c10336`,
+`_HANDLER_SLOT_TIMEOUT_SECONDS` in `resembl/server.py`) and the
+result cache is released on server close and invalidated by a
+database-file fingerprint (`7c10336` / `50aeeae`, `_result_cache_release`
+and `_db_file_fingerprint` in `resembl/server.py`); and the on-disk JSON
+manifest readers skip deeply nested manifests (`99c4f3a`,
+`_export_manifest_read` / `_db_backup_reuse` / `db_verify_backup` in
+`resembl/core.py`). Those land in R3, B1, B2, B5, and Mitigations below.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -108,7 +130,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | - | ---- | -------- | ------ | ------------- |
 | R1 | `POST /find` is unauthenticated and answers any local caller, so the corpus is readable a page at a time | B1 | Full corpus disclosure to any same-host process; memory pressure on the server | `top_n` capped at 1000 per request (`_MAX_TOP_N` in `resembl/server.py:662`, enforced in `_parse_find_request` at `resembl/server.py:469`, lower bound at `resembl/server.py:426`), which bounds one response but not a sequence of them; the config layer leaves the local `top_n` unbounded (`resembl/config.py:63`), and the served default is clamped to the same cap (`resembl/server.py:1950`) |
 | R2 | The find server has no authentication and no rate limit; a non-loopback bind is refused unless the operator explicitly allows it | B1 | R1 plus sustained exhaustion | Non-loopback `--host` refused without `--allow-unauthenticated` (`6cbddc6`, `serve` in `resembl/cli.py`); Go `resembl-service` requires `-token-file` for a non-loopback `-listen` (`6cbddc6`, `isLoopbackListen` in `service/cmd/resembl-service/main.go`); `Host` check on a loopback bind, which answers `403` to a rebound name (`_host_allowed` in `resembl/server.py:1301`, `_loopback_allowed_hosts` in `resembl/server.py:672`); loopback default only (`resembl/cli.py:578`) |
-| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | The standalone client `resembl-find` refuses a port-file port outside the ephemeral range 1024-65535 before dialing it (`6273fa0`, `_main` in `resembl/find_client.py`), so a planted port naming a privileged local service (22, 3306, 6379) is no longer dialed; a forged port inside that range still reaches an attacker listener, the in-process `find` client (`resembl/cli.py:429`) has no equivalent range check, and the cache directory the server did not create is still unchecked (`serve` in `resembl/server.py:2116` makes its own directory `0o700`) |
+| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | The standalone client `resembl-find` refuses a port-file port outside 1-65535 before dialing it (`6406aee`, `_main` in `resembl/find_client.py`), so a planted out-of-range value is no longer dialed; the in-process `find` client guards the narrower ephemeral range 1024-65535 (`cdabd39`, `_server_request` in `resembl/cli.py`), so a planted port naming a privileged local service (22, 3306, 6379) is no longer dialed there; a forged port inside the admitted range still reaches an attacker listener, and the cache directory the server did not create is still unchecked (`serve` in `resembl/server.py:2116` makes its own directory `0o700`) |
 | R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`log_message`/`log_request` in `resembl/server.py:1760`); the only default-level per-request trace is a slow-request WARNING (`resembl/server.py:1790`) and exception logs on failure (`resembl/server.py:1521`) |
 | R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at an attacker-chosen host; config read from an attacker-chosen directory | none, by design (`docs/adr/006-paths-module-owns-environment.md`, `resembl/paths.py:57`, `resembl/paths.py:81`, `resembl/paths.py:97`) |
 | R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`db_merge` in `resembl/core.py`); the source URL is masked for display in the error path (`db_url_mask` in `resembl/paths.py`), and callers get only a stable message naming the masked source — driver/SQL detail stays in the operator log, not the return value (`c1eb6cb`, `db_merge` in `resembl/core.py`) |
@@ -276,7 +298,7 @@ escapes them (`resembl/models.py:180`), while the name search does not
 (`resembl/core.py:1612`). The result set is capped by `limit`, so the
 unescaped wildcards widen the match set rather than the returned page.
 
-**B5, cache directory to process.** The port file is read as an integer and used to open an HTTP connection (`resembl/find_client.py:121`, `resembl/cli.py:429`). Its contents are authenticated by nothing. The file names a port only: both clients dial `127.0.0.1` (`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port reaches a listener the forger must already be running on the loopback interface. The standalone client narrows this by refusing a port outside 1024-65535 before dialing (`6273fa0`, `_main` in `resembl/find_client.py`), so a forged port naming a privileged service is rejected; a forged port inside the ephemeral range and the in-process `find` client remain unchecked.
+**B5, cache directory to process.** The port file is read as an integer and used to open an HTTP connection (`resembl/find_client.py:121`, `resembl/cli.py:429`). Its contents are authenticated by nothing. The file names a port only: both clients dial `127.0.0.1` (`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port reaches a listener the forger must already be running on the loopback interface. The standalone client narrows this by refusing a port outside 1-65535 before dialing (`6406aee`, `_main` in `resembl/find_client.py`), so a forged port that cannot be bound at all is rejected; the in-process `find` client guards the narrower ephemeral range 1024-65535 (`cdabd39`, `_server_request` in `resembl/cli.py`), so a forged port naming a privileged service is rejected there; a forged port inside the admitted range still reaches an attacker listener on both.
 
 **B6, merge source to local corpus.** Rows from another database are
 inserted after structural checks, not after a trust decision about the source
@@ -385,7 +407,7 @@ range, and a non-loopback bind is refused without `--allow-unauthenticated`
 (`6cbddc6`, `serve` in `resembl/cli.py`); when allowed, it is reached by
 whatever name resolves to it. A verb the handler does not implement is answered with the JSON `405` envelope instead: `__getattr__` resolves any unhandled `do_*` name to the shared not-allowed answer (`resembl/server.py:1209`), and `send_error` answers stdlib errors, including malformed request lines, through `_respond` (`resembl/server.py:1712`), so no response skips the hardening header block. Earlier revisions of this model carried the stdlib's header-less HTML `501` as a live finding; the code no longer emits it.
 
-*Denial of service.* `ThreadingHTTPServer` spawns a thread per connection, and `_FindServer` bounds that with a 96-slot semaphore (`_MAX_HANDLER_THREADS`, `resembl/server.py:121`, acquired in `process_request` at `resembl/server.py:1872`): excess connections wait in the listen backlog rather than pinning a thread. Each thread holds a 30-second idle timeout (`resembl/server.py:1104`). The engine pool is 32 plus 64 overflow (`resembl/server.py:1885`). A client that opens connections faster than requests complete therefore exhausts pool connections and file descriptors, but not handler threads; there is still no per-caller rate limit or request accounting, so the backlog and the pool are the policy.
+*Denial of service.* `ThreadingHTTPServer` spawns a thread per connection, and `_FindServer` bounds that with a 96-slot semaphore (`_MAX_HANDLER_THREADS`, `resembl/server.py:121`, acquired in `process_request` at `resembl/server.py:1872`): excess connections wait in the listen backlog rather than pinning a thread. The acquire is bounded to 30 seconds (`_HANDLER_SLOT_TIMEOUT_SECONDS`, `7c10336`), so a stalled handler cannot wedge the accept loop and `shutdown`; a timed-out slot closes the queued connection. Each thread holds a 30-second idle timeout (`resembl/server.py:1104`). The engine pool is 32 plus 64 overflow (`resembl/server.py:1885`). A client that opens connections faster than requests complete therefore exhausts pool connections and file descriptors, but not handler threads; there is still no per-caller rate limit or request accounting, so the backlog and the pool are the policy.
 
 *Repudiation.* `log_message`/`log_request` write at DEBUG
 (`resembl/server.py:1760`, `resembl/server.py:1776`), which is quiet unless
@@ -549,6 +571,14 @@ workflow does not re-run either.
 | Generic 500 body, details to log | `resembl/server.py:1525` | B1 error-text disclosure of SQL, bind parameters, and paths |
 | Response hardening headers | `_respond` in `resembl/server.py:1712` | Browser reinterpretation of a snippet-derived response; caching of that response. Every response, including an unhandled verb (`resembl/server.py:1209`) and a stdlib error (`resembl/server.py:1197`), goes through this block |
 | Handler-thread bound, 96 | `resembl/server.py:121`, `resembl/server.py:1872` | A stalled-client flood accumulating unbounded handler threads; excess connections stay in the listen backlog |
+| Handler-slot wait timeout, 30s | `_HANDLER_SLOT_TIMEOUT_SECONDS` in `resembl/server.py` (`7c10336`), `process_request` | A stalled handler wedging the accept loop in an unbounded acquire, so `serve_forever` and `shutdown` never run; a timed-out slot closes the queued connection instead |
+| Result-cache release on server close | `_result_cache_release` in `resembl/server.py` (`7c10336`), `server_close` | A stopped generation's payloads (up to 32 MiB) outliving the engine that produced them in the process-wide cache until LRU eviction |
+| Result-cache file fingerprint | `_db_file_fingerprint` in `resembl/server.py` (`50aeeae`), `_db_version` | A replaced database file restarting `data_version` at the same value and serving payloads computed for the previous corpus |
+| Log control-character stripping | `_LOG_CONTROL_CHARS` in `resembl/server.py` (`709d31b`), `safeLogPath` in `service/service.go` | A crafted request path/method forging log lines (log injection) via CR/LF in `logger.exception`/`log.Printf` output and the 404 `unknown path` body |
+| Bounded client response reads, 16 MiB | `_MAX_RESPONSE_BYTES` in `resembl/find_client.py`, `_MAX_SERVER_RESPONSE_BYTES` in `resembl/cli.py` (`709d31b`) | A port-file swap or compromised loopback server pinning unbounded memory via `response.read()` with no size |
+| Loopback proxy bypass | `ProxyHandler({})` in `resembl/cli.py` (`456e464`) and `resembl/find_client.py` | A proxied loopback request failing or sending the corpus query to a third party via `http_proxy` |
+| On-disk manifest RecursionError guard | `_export_manifest_read`, `_db_backup_reuse`, `db_verify_backup` in `resembl/core.py` (`99c4f3a`) | A deeply nested manifest aborting export/backup/verify instead of being treated as unreadable |
+| Loopback bind 127.0.0.0/8 | `_is_loopback_bind` in `resembl/cli.py` (`709d31b`) | A loopback bind (127.0.0.2, 127.1.2.3, …) misclassified as non-loopback and demanding `--allow-unauthenticated`, diverging from the server's own Host allow-list |
 | Thread timeout, 30s | `resembl/server.py:1104` | Connections parked open by an idle client |
 | Engine pool, 32 + 64 | `resembl/server.py:2027` | Pool exhaustion; the overflow is what a client that outruns requests consumes first |
 | Slow-request WARNING at default level | `_SLOW_REQUEST_SECONDS` in `resembl/server.py:923`, `resembl/server.py:1790` | A warm server that has stopped being warm leaves no other default-level trace |
@@ -587,8 +617,9 @@ workflow does not re-run either.
 Ranked as in the summary. R13, R14, R15, and R16 are the Go service gaps: R13 and R14 have no mitigation beyond the loopback isolation that service/README.md requires, R15 has none beyond the loopback default, and R16 is mitigated only by operator repair of custody slots. R10 (unbounded
 `--file` read) has no control at all. R3 (unauthenticated port file) is
 narrowed but not closed: the standalone client refuses an out-of-range
-port (`6273fa0`) while an in-range forged port and the in-process
-`find` client remain unchecked. R1's `top_n` cap bounds one response
+port (`6406aee`, 1-65535) and the in-process `find` client refuses a
+port outside the ephemeral 1024-65535 range (`cdabd39`), while an
+in-range forged port still reaches an attacker listener on both. R1's `top_n` cap bounds one response
 but not a sequence of them, R2's is a `Host` check that a non-loopback bind
 does not get (a non-loopback bind is refused without `--allow-unauthenticated`,
 `6cbddc6`, so the check's absence only matters when the operator explicitly
@@ -598,8 +629,8 @@ enforced.
 R3's server-side `0o700` closes the case where `serve` created the cache
 directory itself and leaves open the case where something else created it
 first, which is the case a shared cache directory actually is, and the
-standalone client's port-range check (`6273fa0`) closes only the
-privileged-port sub-case of the forged-port attack. R6's
+clients' port-range checks (`6406aee` / `cdabd39`) close only the
+out-of-range and privileged-port sub-cases of the forged-port attack. R6's
 recomputed fingerprints are a control, and its error path now masks the
 source URL (`0afeba7`) and keeps driver text in the operator log
 (`c1eb6cb`), so the B6 failure-path leak is closed.
@@ -649,10 +680,12 @@ per-caller one (`_MAX_TOP_N` in `resembl/server.py:662`).
 cache directory, replaces the port file's contents with a port it is
 listening on. Every subsequent `resembl find` ships its query, which is
 attacker-supplied disassembly, to that loopback listener. The standalone
-client `resembl-find` refuses a port outside 1024-65535 before dialing
-(`6273fa0`, `_main` in `resembl/find_client.py`), so naming a privileged
-service port no longer works there; a forged port inside the ephemeral
-range, and the in-process `find` client, remain unchecked. Enabled by
+client `resembl-find` refuses a port outside 1-65535 before dialing
+(`6406aee`, `_main` in `resembl/find_client.py`), so naming an unbindable
+port no longer works there; the in-process `find` client refuses a port
+outside 1024-65535 (`cdabd39`), so naming a privileged service port no
+longer works there; a forged port inside the admitted range still reaches
+an attacker listener on both. Enabled by
 `resembl/find_client.py:118`, `resembl/cli.py:429`, and the hard-coded
 loopback dial at `resembl/find_client.py:152`.
 

@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `6cbddc6`. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `9438c03`. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
@@ -12,7 +12,10 @@ The `serve` controls below (the loopback `Host` check, the non-loopback
 bind refusal without `--allow-unauthenticated`, the Go service's
 `-token-file` requirement for a non-loopback `-listen`, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, the `0600`
-config file on save, the standalone client's 1024-65535 port-range check,
+config file on save, the standalone client's 1-65535 port-range check and
+the in-process client's 1024-65535 check, the loopback proxy bypass and
+the 16 MiB bounded client response reads, the log-path control-character
+stripping on both servers,
 the 1000-row `top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
 `413` envelope for oversized bodies in `resembl/server.py` `_read_body`,
 and the
@@ -79,9 +82,11 @@ relies on, not configuration options.
 - **The cache directory is private to the user.** The port file in it is
   read as an unauthenticated port number by every `find` client, which then
   dials that port on `127.0.0.1`. The standalone client `resembl-find`
-  refuses a port outside 1024-65535 before dialing, so a planted port
-  naming a privileged local service is not dialed; a forged port inside
-  that range, and the in-process `find` client, are still unchecked.
+  refuses a port outside 1-65535 before dialing, so a planted port that
+  cannot be bound is not dialed; the in-process `find` client refuses a
+  port outside 1024-65535. A forged port inside the admitted range, and
+  the in-process client's low-port exclusion of a legitimately bound
+  low port, are still unchecked.
   `resembl serve` creates that directory with
   mode `0700` and the port file with mode `0600`, so a directory the server
   made itself is not writable by anyone else. Nothing re-checks the mode, so
