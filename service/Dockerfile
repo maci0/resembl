@@ -16,7 +16,7 @@ COPY service/*.go ./
 COPY service/cmd ./cmd
 COPY service/internal ./internal
 ARG SOURCE_DATE_EPOCH=0
-ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C GOFLAGS=-mod=readonly GOTOOLCHAIN=local GOPROXY=off
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service
 FROM scratch
 COPY --from=build /resembl-service /resembl-service

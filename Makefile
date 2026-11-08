@@ -180,8 +180,8 @@ service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.2
 	fi
 	@unformatted=$$(gofmt -l service); \
 	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
-	cd service && go vet ./...
-	cd service && go test -race -count=1 ./...
+	cd service && GOFLAGS=-mod=readonly GOTOOLCHAIN=local go vet ./...
+	cd service && GOFLAGS=-mod=readonly GOTOOLCHAIN=local go test -race -count=1 ./...
 
 # Go fuzz targets (service/fuzz_service_test.go, service/internal/lambdaproxy).
 # `go test -fuzz` is the native tool; the Python `fuzz` target below is the
@@ -256,9 +256,15 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 		tar --create --sort=name \
 			--mtime="@$(SOURCE_DATE_EPOCH)" \
 			--owner=0 --group=0 --numeric-owner \
+			--mode='a+rX' \
 			--directory "$$unpack" --file - "$$root" | gzip -n -9 > "$$sdist.tmp"; \
 		mv "$$sdist.tmp" "$$sdist"; \
 		rm -rf "$$unpack"; \
+	done
+	@set -e; for whl in dist/*.whl; do \
+		tmp=$${whl}.tmp; \
+		python3 -c "import sys, zipfile; src, dst = sys.argv[1], sys.argv[2]; zi = zipfile.ZipFile(src); zo = zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED); [exec('ni = zipfile.ZipInfo(i.filename, i.date_time)\nni.compress_type = i.compress_type\nni.create_system = i.create_system\nni.external_attr = (0o100644 << 16)\nzo.writestr(ni, zi.read(i.filename))') for i in zi.infolist()]; zo.close(); zi.close()" "$$whl" "$$tmp"; \
+		mv "$$tmp" "$$whl"; \
 	done
 
 # Proves the claim above instead of asserting it: build twice, compare.  The
