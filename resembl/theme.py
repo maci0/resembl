@@ -59,21 +59,27 @@ TERMINAL: dict[str, str] = {
     "warn": "#9a6d20",
 }
 
-#: Rich theme mapping the stock style names onto the TERMINAL palette.
-_BASE: dict[str, str] = {
-    "green": TERMINAL["exact"],
-    "cyan": TERMINAL["live"],
-    "blue": TERMINAL["near"],
-    "magenta": TERMINAL["thunk"],
-    "yellow": TERMINAL["warn"],
-    "red": TERMINAL["fail"],
-}
-
+#: Rich theme mapping the stock style names onto the TERMINAL palette,
+#: plus both bold spellings of each.
 RICH_STYLES: dict[str, str] = {
-    **_BASE,
-    **{f"bold {name}": f"bold {hex_}" for name, hex_ in _BASE.items()},
-    **{f"{name} bold": f"bold {hex_}" for name, hex_ in _BASE.items()},
+    name: TERMINAL[role]
+    for name, role in (
+        ("green", "exact"),
+        ("cyan", "live"),
+        ("blue", "near"),
+        ("magenta", "thunk"),
+        ("yellow", "warn"),
+        ("red", "fail"),
+    )
 }
+RICH_STYLES.update({f"bold {name}": f"bold {value}" for name, value in list(RICH_STYLES.items())})
+RICH_STYLES.update(
+    {
+        f"{name} bold": f"bold {value}"
+        for name, value in list(RICH_STYLES.items())
+        if " " not in name
+    }
+)
 
 
 def score_color(score: float) -> str:

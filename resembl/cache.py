@@ -15,7 +15,6 @@ database instead.
 
 import logging
 import os
-import time  # noqa: F401  # patch target for _retry_sleep tests
 from collections.abc import Callable
 
 from sqlalchemy.exc import OperationalError

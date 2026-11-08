@@ -17,7 +17,6 @@ import logging
 import os
 import re
 import threading
-import time  # noqa: F401  # patch target for _retry_sleep tests
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta

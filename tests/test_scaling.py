@@ -1396,7 +1396,7 @@ class TestIndexBuild(BaseScalingTest):
 
         with (
             patch("resembl.cache.insert_rows", side_effect=flaky_insert),
-            patch("resembl.cache.time.sleep"),
+            patch("resembl.models.time.sleep"),
             patch("resembl.cache._BUILD_RETRIES", 3),
             patch("resembl.cache._BUILD_RETRY_BACKOFF", 0),
         ):
@@ -1428,7 +1428,7 @@ class TestIndexBuild(BaseScalingTest):
 
         with (
             patch("resembl.core.lsh_index_clear", side_effect=flaky_clear),
-            patch("resembl.core.time.sleep"),
+            patch("resembl.models.time.sleep"),
             patch("resembl.core._REINDEX_CLEAR_RETRIES", 3),
             patch("resembl.core._REINDEX_CLEAR_RETRY_BACKOFF", 0),
         ):
@@ -1458,7 +1458,7 @@ class TestIndexBuild(BaseScalingTest):
 
         with (
             patch("resembl.core.lsh_index_clear", side_effect=always_locked),
-            patch("resembl.core.time.sleep"),
+            patch("resembl.models.time.sleep"),
             patch("resembl.core._REINDEX_CLEAR_RETRIES", 2),
             patch("resembl.core._REINDEX_CLEAR_RETRY_BACKOFF", 0),
             self.assertLogs("resembl.core", level="ERROR"),

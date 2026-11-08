@@ -172,19 +172,6 @@ def _retry_sleep(delay: float) -> None:
         if parse_instant(override) is None:
             raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant")
         return
-    # The caller's module keeps a ``time`` attribute (patched in tests);
-    # resolving through the caller frame lets ``resembl.<module>.time.sleep``
-    # intercept this wait without a cross-module mock target.
-    import inspect
-
-    caller = inspect.currentframe()
-    try:
-        mod_time = caller.f_back.f_globals.get("time") if caller and caller.f_back else None
-    finally:
-        del caller
-    if mod_time is not None:
-        mod_time.sleep(delay)
-        return
     time.sleep(delay)
 
 
