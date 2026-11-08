@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -46,10 +47,12 @@ func (r *response) Write(p []byte) (int, error) {
 // Handle preserves the handler's authorization and request cancellation. It never
 // treats API Gateway identity claims as a grant and does not establish durable stop.
 func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	isHead := strings.EqualFold(event.RequestContext.HTTP.Method, http.MethodHead)
 	bad := func(code int) (events.APIGatewayV2HTTPResponse, error) {
 		// Same JSON error envelope as the HTTP service's writeError, so
 		// an API Gateway caller parses one shape on every path instead
-		// of an empty body here.
+		// of an empty body here. A HEAD answer carries the headers but
+		// no body, as HEAD requires (and as the Python server sends it).
 		msg := "bad request"
 		switch code {
 		case http.StatusRequestEntityTooLarge:
@@ -58,6 +61,14 @@ func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRe
 			msg = "response too large"
 		}
 		body, _ := json.Marshal(map[string]string{"error": msg})
+		if isHead {
+			return events.APIGatewayV2HTTPResponse{
+				StatusCode:      code,
+				Headers:         map[string]string{"Content-Type": "application/json", "Content-Length": fmt.Sprint(len(body))},
+				Body:            "",
+				IsBase64Encoded: true,
+			}, nil
+		}
 		return events.APIGatewayV2HTTPResponse{
 			StatusCode:      code,
 			Headers:         map[string]string{"Content-Type": "application/json"},
@@ -126,6 +137,14 @@ func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRe
 			continue
 		}
 		out.Headers[key] = strings.Join(values, ", ")
+	}
+	if isHead {
+		// A HEAD answer carries no body: the Python server sends the
+		// headers with a Content-Length for the body it did not write,
+		// and net/http does the same on a direct server. The Lambda
+		// adapter must not leak the handler's JSON body here.
+		out.Headers["Content-Length"] = fmt.Sprint(len(w.body.Bytes()))
+		out.Body = ""
 	}
 	return out, nil
 }
