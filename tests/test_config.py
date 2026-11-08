@@ -499,3 +499,29 @@ class TestDatabaseUrlEnv(unittest.TestCase):
                 self.assertEqual(str(engine.url), "sqlite:///late.db")
             finally:
                 os.environ.pop("RESEMBL_DATABASE_URL", None)
+
+
+class TestConfigDirPlatformSpelling(unittest.TestCase):
+    """The ~/.config default is returned with the platform separator."""
+
+    def test_default_is_platform_spelling(self):
+        """expanduser keeps '/' verbatim, so normalize before returning.
+
+        On Windows the raw expanduser result mixes separators
+        (``C:\\Users\\u/.config\\resembl``); normalizing keeps the returned
+        path string-equal to an ``os.path.join`` expectation on every
+        platform.
+        """
+        with tempfile.TemporaryDirectory() as home:
+            env = {
+                "HOME": home,
+                "USERPROFILE": home,
+                "XDG_CONFIG_HOME": "",
+                "RESEMBL_CONFIG_DIR": "",
+            }
+            with patch.dict(os.environ, env):
+                result = config_dir_get()
+            expected = os.path.join(home, ".config", "resembl")
+            self.assertEqual(result, expected)
+            if os.sep == "\\":
+                self.assertNotIn("/", result)

@@ -94,7 +94,13 @@ def _expand_home(path: str) -> str:
             if rest
             else tempfile.gettempdir()
         )
-    return expanded
+    # ``expanduser`` keeps the forward slashes of the ``~/.cache`` spelling
+    # verbatim, so on Windows the result mixes separators
+    # (``C:\Users\u/.cache\resembl``).  The OS accepts both spellings, but a
+    # caller comparing the returned path as a string against an
+    # ``os.path.join``-built expectation sees a mismatch, so normalize to
+    # the platform spelling before returning.
+    return os.path.normpath(expanded)
 
 
 def cache_dir_get() -> str:
