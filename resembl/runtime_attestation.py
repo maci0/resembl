@@ -49,6 +49,10 @@ def verify_runtime(manifest_path: str, expected: str) -> None:
             try:
                 filename = importlib.util.source_from_cache(filename)
             except ValueError:
+                # source_from_cache raises when the pyc has no source path;
+                # a stale .pyc still names a verifiable file, so keep
+                # the original name and let the digest check below reject
+                # it as unverified rather than silently hiding the module.
                 pass
         required.add(str(Path(filename).resolve()))
     if len(required) > MAX_FILES or not required.issubset(document):

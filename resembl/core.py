@@ -169,12 +169,12 @@ def _fsync_quiet(path: str) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError as e:
-        logger.debug("fsync skipped for %s: could not open: %s", path, e)
+        logger.warning("fsync skipped for %s: could not open: %s", path, e)
         return
     try:
         os.fsync(fd)
     except OSError as e:
-        logger.debug("fsync failed for %s: %s", path, e)
+        logger.warning("fsync failed for %s: %s", path, e)
     finally:
         os.close(fd)
 
@@ -2619,7 +2619,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # The collision guard degrades to "no live path known" — a failed
         # probe must not be silent, or a backup that clobbered nothing
         # only gets reported if it coincidentally collides.
-        logger.debug("db_backup: could not probe live database path: %s", exc)
+        logger.warning("db_backup: could not probe live database path: %s", exc)
         live_path = ""
     if live_path:
         live_dir = os.path.dirname(live_path)
@@ -2667,8 +2667,8 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             _sync_path(tmp_path)
             try:
                 os.chmod(tmp_path, 0o600)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Could not set permissions on backup %s: %s", tmp_path, e)
             os.replace(tmp_path, final_path)
             _sync_dir(backup_dir)
         except BaseException:
@@ -2684,7 +2684,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             # The borrowed DBAPI connection is checked out of SQLAlchemy's
             # pool; a close failure here is not worth failing the backup,
             # but swallowing it silently hid connection leaks — log it.
-            logger.debug("db_backup: borrowed connection close failed", exc_info=True)
+            logger.warning("db_backup: borrowed connection close failed", exc_info=True)
     session.rollback()
 
     count_known = True

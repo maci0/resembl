@@ -170,8 +170,17 @@ def port_file_cleanup(port_file: str, port: int) -> None:
             if f.read().strip() != str(port):
                 return
         os.remove(port_file)
-    except OSError:
-        pass
+    except OSError as e:
+        # A missing port file means another process already removed it;
+        # any other failure (read-only directory, permission) is worth
+        # a visible record so a stale port file is not silently left
+        # for the next serve to trip over — but never fail shutdown.
+        if e.errno != 2:  # ENOENT
+            import logging
+
+            logging.getLogger(__name__).debug(
+                "server port file cleanup failed for %s: %s", port_file, e
+            )
 
 
 def _encoding_is_utf8(encoding: str) -> bool:
