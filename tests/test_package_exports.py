@@ -90,6 +90,34 @@ class TestFindClientDefaults(unittest.TestCase):
         }
         self.assertEqual(_CFG_DEFAULTS, {k: config_defaults[k] for k in _CFG_DEFAULTS})
 
+    def test_bounds_mirror_config_value_bounds(self):
+        """``find_client._within_bounds`` enforces the same ranges as the config.
+
+        The client cannot import ``resembl.config`` (it must stay
+        stdlib-only), so its bounds are literals; this test is the only thing
+        that fails when either side moves. Without it, a bound change in
+        ``VALUE_BOUNDS`` would silently let out-of-range values leave the
+        client (or be refused there while the server accepts them).
+        """
+        from resembl.config import VALUE_BOUNDS
+        from resembl.find_client import _within_bounds
+
+        for key, bounds in VALUE_BOUNDS.items():
+            with self.subTest(key=key):
+                # Just inside low and just inside high must pass.
+                self.assertTrue(_within_bounds(key, bounds.low))
+                if bounds.high_inclusive:
+                    self.assertTrue(_within_bounds(key, bounds.high))
+                elif bounds.high != float("inf"):
+                    self.assertFalse(_within_bounds(key, bounds.high))
+                # Just outside must fail.
+                self.assertFalse(_within_bounds(key, bounds.low - 1e-9))
+                if bounds.high != float("inf"):
+                    step = 1e-9 if bounds.high_inclusive else 0.0
+                    self.assertFalse(_within_bounds(key, bounds.high + step))
+                self.assertFalse(_within_bounds(key, float("nan")))
+                self.assertFalse(_within_bounds(key, float("inf")))
+
 
 if __name__ == "__main__":
     unittest.main()

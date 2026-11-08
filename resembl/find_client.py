@@ -150,7 +150,15 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
 
 
 def _within_bounds(key: str, number: float) -> bool:
-    """True when *number* lies inside the range ``resembl.config`` enforces for *key*."""
+    """True when *number* lies inside the range ``resembl.config`` enforces for *key*.
+
+    Bounds are literals mirroring ``config.VALUE_BOUNDS`` (this module must
+    stay stdlib-only and cannot import that module): ``lsh_threshold`` below
+    0.99 (``THRESHOLD_MAX``, exclusive), ``num_permutations`` 2..4096
+    (``scoring.MAX_NUM_PERM``), ``jaccard_weight`` 0..1, ``top_n`` /
+    ``ngram_size`` at least 1.  ``test_bounds_mirror_config_value_bounds``
+    fails if either side moves.
+    """
     if not math.isfinite(number):
         return False
     if key == "lsh_threshold":

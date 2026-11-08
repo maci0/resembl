@@ -233,7 +233,11 @@ Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_s
 
 ### `load_config() → ResemblConfig`
 Load `config_path_get()` (see [Paths](#paths)). A missing, malformed, or unreadable file yields the
-defaults (malformed and unreadable files are logged as errors).
+defaults (malformed and unreadable files are logged as errors). The one
+exception is `resembl serve`: a present but malformed or unreadable
+`config.toml` fails startup (`ConfigError`) instead of silently serving
+defaults, so a server never binds with thresholds the operator did not
+configure.
 
 ### `validate_value(key: str, value: object) → str | None`
 The one configuration-value check: returns why *value* is unusable as a
@@ -264,6 +268,29 @@ The configured database URL, read from the environment at call time:
 The port file `resembl serve` advertises itself with, named from a SHA-256 prefix
 of the *unmasked* URL. The client resolves the same path, so a
 credential-carrying `DATABASE_URL` stays discoverable.
+
+### Environment variables
+Every environment-derived setting, read at call time (not import time).
+Precedence is namespaced `RESEMBL_*` first, then the unprefixed fallback,
+then the built-in default; a blank (empty or whitespace-only) value counts
+as unset for every one. The full manual-page reference is in
+`docs/man.md` (ENVIRONMENT section); this table is the code-facing list.
+
+| Variable | Default | Used for |
+|---|---|---|
+| `RESEMBL_DATABASE_URL` | `sqlite:///assembly.db` | Database URL; falls back to `DATABASE_URL` when unset |
+| `DATABASE_URL` | — | Fallback for `RESEMBL_DATABASE_URL` only |
+| `RESEMBL_CONFIG_DIR` | `~/.config/resembl` | Config directory; falls back to `$XDG_CONFIG_HOME/resembl` |
+| `RESEMBL_CACHE_DIR` | `~/.cache/resembl` | Cache directory (port file); falls back to `$XDG_CACHE_HOME/resembl` |
+| `RESEMBL_RUNTIME_MANIFEST` | — | Path to the runtime manifest `serve` checks for `/find-pinned`; unset refuses that endpoint |
+| `RESEMBL_ENGINE_URL` | `http://127.0.0.1:8081` | Loopback engine URL the Lambda bootstrap dials (Go service only) |
+| `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
+| `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |
+
+Database URLs may carry credentials (`postgresql+pg8000://user:pass@host/db`);
+they are masked (`***`) in every display path via `db_url_mask` but hashed
+unmasked for the port file. No secret is stored in `config.toml` (mode
+`0600` on write); keep database credentials in the environment, not the file.
 
 ## Database
 

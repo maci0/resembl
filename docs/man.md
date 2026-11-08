@@ -402,7 +402,8 @@ jaccard_weight = 0.5
 `config set` refuses a value outside these ranges. A hand-edited
 `config.toml` holding one is reported on stderr and ignored, and the default
 is used instead, so a bad value cannot silently produce a degenerate index
-or an empty result set.
+or an empty result set. `config.toml` holds tuning only; database
+credentials belong in `RESEMBL_DATABASE_URL`, never in this file.
 
 ## EXAMPLES
 

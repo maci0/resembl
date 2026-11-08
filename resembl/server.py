@@ -2098,9 +2098,17 @@ def _find_defaults_load() -> ResemblConfig:
     instead of per-request rebuilds.  The values are carried on the server
     *instance* (like ``engine``): module globals would leak into any older
     server still serving another database in this process.
-    """
-    from .config import load_config
 
+    A present but malformed or unreadable ``config.toml`` fails startup here
+    (``ConfigError``) instead of silently serving defaults: ``load_config``
+    reports the error and returns defaults for interactive use, but a server
+    that binds with tuned thresholds silently replaced would answer every
+    find with a different result set than the operator configured.
+    """
+    from .config import _read_config_dict, load_config
+
+    # Fail fast on a malformed file; a missing file is the documented default run.
+    _read_config_dict()
     cfg = load_config()
     # The config layer leaves ``top_n`` unbounded (only the request path needs
     # a bound), so a config above ``_MAX_TOP_N`` would become a default the
