@@ -293,6 +293,18 @@ class IndexBuildError(RuntimeError):
     """
 
 
+class _MergeRetry(Exception):
+    """Internal signal: a chunk collided on the snippet primary key.
+
+    Raised inside :func:`db_merge` when a bulk insert hits an
+    ``IntegrityError`` because a concurrent merge committed the same
+    checksums first.  Caught by the merge loop, which rolls back and
+    re-runs the dedup pass on the now-current rows — the same converge
+    strategy :func:`snippet_add_batch` uses — instead of surfacing the
+    collision as a failed merge.
+    """
+
+
 def adaptive_worker_count(num_items: int, cpu_count: int) -> int:
     """Choose a sensible worker count for a parallel job of *num_items* items.
 
@@ -2869,7 +2881,9 @@ def _fingerprint_stamps_clear(session: Session) -> None:
     fingerprint_perm_clear(session)
 
 
-def db_merge(session: Session, source_db_path: str) -> dict:
+def db_merge(
+    session: Session, source_db_path: str, *, _merge_retry_seen: bool = False
+) -> dict:
     """Merge snippets from a source database into the current one.
 
     *source_db_path* is a SQLite file path, or a full database URL (e.g.
@@ -2969,12 +2983,24 @@ def db_merge(session: Session, source_db_path: str) -> dict:
             """Bulk-insert buffered new rows and sync the index, then clear."""
             if not new_rows:
                 return
-            _insert_snippet_rows(session, new_rows)
-            # Same atomicity as ``snippet_add_batch``: the new snippets and
-            # the buckets that make them findable commit together, so a merge
-            # interrupted between the two cannot leave either half behind.
-            index_threshold = lsh_index_add_batch(session, added_minhashes, commit=False)
-            session.commit()
+            try:
+                _insert_snippet_rows(session, new_rows)
+                # Same atomicity as ``snippet_add_batch``: the new snippets
+                # and the buckets that make them findable commit together,
+                # so a merge interrupted between the two cannot leave
+                # either half behind.
+                index_threshold = lsh_index_add_batch(
+                    session, added_minhashes, commit=False
+                )
+                session.commit()
+            except IntegrityError:
+                # A concurrent merge of the same source committed the same
+                # checksums first.  Rolling back undoes this chunk; the
+                # colliding rows already live locally, so drop the count
+                # and let the outer handler re-run the merge from the
+                # start, where they take the idempotent existing-row path.
+                session.rollback()
+                raise _MergeRetry from None
             if index_threshold is not None:
                 lsh_pickle_cache_remove(index_threshold)
             new_rows.clear()
@@ -3135,6 +3161,18 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         # stamps there would force a pointless full reindex on the next find.
         if added:
             _fingerprint_stamps_clear(session)
+    except _MergeRetry:
+        # A concurrent merge committed this chunk's checksums first.
+        # The rows now exist locally, so a re-run takes the existing-row
+        # path (alias/tag/collection merge) and converges.  Bounded to
+        # one retry: a second collision means a pathological writer
+        # loop, which must surface as an error instead of spinning.
+        session.rollback()
+        if _merge_retry_seen:
+            if added:
+                _fingerprint_stamps_clear(session)
+            return {"error": "merge collided with a concurrent writer"}
+        return db_merge(session, source_db_path, _merge_retry_seen=True)
     except Exception as e:
         logger.exception("Merge failed for %r: %s", db_url_mask(source_db_path), e)
         # Chunks already through ``flush_new_rows`` are committed (it commits

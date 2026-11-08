@@ -12,6 +12,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `db_merge` now converges when two merges of the same source run concurrently: a chunk whose bulk insert hits a primary-key collision from the other merge is rolled back and the merge is re-run once, taking the existing-row path for the now-present checksums, instead of failing with a spurious `IntegrityError` and aborting the whole merge.
 - CI runners are now pinned to versioned labels (`ubuntu-24.04`, `macos-15`, `windows-2025`) instead of the floating `-latest` labels, so a GitHub OS migration can no longer move the test platform under a green run; `tests/test_ci_images.py` now fails a workflow that reintroduces a `-latest` label.
 - `db_merge` no longer returns raw driver/SQL error text to callers; the exception stays in the log and the return value names only the masked source database, so a hostile or misconfigured source cannot leak host, file-path, or SQL details through the merge error.
 - The `serve` port-file name now hashes the database URL with SHA-256 instead of SHA-1; stale `server_<sha1>.port` files from older versions are ignored, so a running server must be restarted once after upgrading.
