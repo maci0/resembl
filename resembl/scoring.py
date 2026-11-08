@@ -975,7 +975,14 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
     # ``hashvalues`` is copied (update mutates it); the permutation arrays
     # are read-only in update, but copied anyway so a caller mutating them
     # cannot corrupt the shared template.
-    clone = MinHash(num_perm=template.num_perm, seed=template.seed)
+    # Clone via ``__new__`` without ``__init__``: the wrapped constructor
+    # would re-seed and re-draw state, and eagerly materialising the lazy
+    # permutation table via ``__init__``-triggered paths would defeat the
+    # cache's purpose.  Populating the four fields directly reproduces
+    # exactly the template's state.
+    clone = MinHash.__new__(MinHash)
+    clone.seed = template.seed
+    clone.num_perm = template.num_perm
     clone.hashvalues = template.hashvalues.copy()
     pa, pb = template.permutations
     clone._permutations = (pa.copy(), pb.copy())  # pylint: disable=protected-access
