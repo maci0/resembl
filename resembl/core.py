@@ -2812,11 +2812,16 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             content_hash = digest.hexdigest()
         # integrity_check: a flipped or zeroed page that still answers
         # COUNT(*) must not pass as restorable.
-        integrity_rows = [
-            str(row[0]) for row in connection.execute("PRAGMA integrity_check").fetchall()
-        ]
+        # Only the first three rows are ever rendered, so cap the read:
+        # a heavily corrupt database reports one row per damaged page
+        # and fetchall() would materialize the whole list to slice it.
+        integrity_rows: list[str] = []
+        for row in connection.execute("PRAGMA integrity_check"):
+            integrity_rows.append(str(row[0]))
+            if len(integrity_rows) >= 3:
+                break
         if integrity_rows != ["ok"]:
-            issues.append(f"integrity_check failed: {'; '.join(integrity_rows[:3])}")
+            issues.append(f"integrity_check failed: {'; '.join(integrity_rows)}")
     except sqlite3.Error as e:
         return {"ok": False, "num_snippets": 0, "issues": [f"cannot read backup: {e}"]}
     finally:
