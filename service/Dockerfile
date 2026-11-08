@@ -2,6 +2,9 @@
 #   docker build -f service/Dockerfile --build-arg VERSION=<tag> .
 # Passing service/ as the build context instead fails, because the COPY
 # instructions below name service/... paths.
+# SOURCE_DATE_EPOCH pins the image's created timestamp and the binary's
+# embedded build time; TZ=UTC and LC_ALL=C keep the build from depending
+# on the host's timezone or locale (reproducible-builds.org).
 ARG GO_IMAGE=golang:1.26-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
@@ -9,6 +12,8 @@ COPY service/go.mod service/go.sum ./
 COPY service/*.go ./
 COPY service/cmd ./cmd
 COPY service/internal ./internal
+ARG SOURCE_DATE_EPOCH=0
+ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service
 FROM scratch
 COPY --from=build /resembl-service /resembl-service

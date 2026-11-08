@@ -50,6 +50,12 @@ FUZZ_SECONDS ?= 60
 # Artifact build epoch: the commit time of HEAD, never the build host's clock.
 # setuptools stamps SOURCE_DATE_EPOCH into the wheel's zip entries; the sdist
 # is normalized afterwards (see `dist`).
+# LC_ALL=C and TZ=UTC are pinned here so every recipe inherits them: locale
+# affects sort order and message formatting, and the timezone affects
+# formatted dates embedded in output (reproducible-builds.org).  The dist
+# target re-pins them explicitly for the uv build invocation as well.
+export LC_ALL := C
+export TZ := UTC
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
 
 # The PostgreSQL and MySQL integration modules skip themselves unless
@@ -146,6 +152,8 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 # The experimental Go query service in service/ has its own module and its own
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a
 # Python-only contributor needs no Go toolchain.
+# The Docker build honors SOURCE_DATE_EPOCH (see service/Dockerfile), so the
+# commit-time epoch is passed through for a reproducible image.
 service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.26+)
 	@if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then \
 		echo "make service-check needs Go 1.26+ (go and gofmt on PATH; see service/go.mod)."; \
