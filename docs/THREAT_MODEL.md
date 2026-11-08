@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`5f9337c`. Every reference below was re-read in that tree on that
+`1c03f6f`. Every reference below was re-read in that tree on that
 date, except where a line number is explicitly historical. The
 `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
@@ -53,6 +53,24 @@ per-request timeout instead of a hardcoded 30s (`1e1fa33`,
 `NewLocalEngineWithTimeout` in `service/http_engine.go`,
 `NewPinnedSQLiteEngineWithTimeout` in `service/pinned_engine.go`),
 closing the gap where a handler could outlive its custody claim.
+A later 2026-11-09 pass re-checked the commits after `5f9337c`: the
+standalone client `resembl-find` now refuses a port-file port outside
+the ephemeral range 1024-65535 before dialing it (`6273fa0`,
+`_main` in `resembl/find_client.py`), so a planted port naming a
+privileged service (22, 3306, 6379) is no longer dialed and its
+response exfiltrated as find results, which narrows R3 but does not
+close it; the result-cache key now renders the engine URL with the
+password hidden (`6273fa0`, `_find_one` in `resembl/server.py`,
+`render_as_string(hide_password=True)`), correcting the B7 wording
+below; `save_config` now writes the config file mode `0600`
+(`6273fa0`, `save_config` in `resembl/config.py`); the Lambda
+bootstrap now trims surrounding whitespace from `RESEMBL_ENGINE_URL`
+and treats a blank value as unset (`6963a53`,
+`service/cmd/resembl-lambda/main.go`, `strings.TrimSpace`), so a
+blank environment value no longer becomes an opaque engine-address
+error; and the platform-separator normalization of a home-expanded
+config path (`3a9c4e1`, `_expand_home` in `resembl/paths.py`) is a
+portability fix with no trust change.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -77,7 +95,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | - | ---- | -------- | ------ | ------------- |
 | R1 | `POST /find` is unauthenticated and answers any local caller, so the corpus is readable a page at a time | B1 | Full corpus disclosure to any same-host process; memory pressure on the server | `top_n` capped at 1000 per request (`_MAX_TOP_N` in `resembl/server.py:662`, enforced in `_parse_find_request` at `resembl/server.py:469`, lower bound at `resembl/server.py:426`), which bounds one response but not a sequence of them; the config layer leaves the local `top_n` unbounded (`resembl/config.py:63`), and the served default is clamped to the same cap (`resembl/server.py:1950`) |
 | R2 | The find server has no authentication and no rate limit, and a non-loopback bind is a warning, not a block | B1 | R1 plus sustained exhaustion | `Host` check on a loopback bind, which answers `403` to a rebound name (`_host_allowed` in `resembl/server.py:1301`, `_loopback_allowed_hosts` in `resembl/server.py:672`); loopback default only (`resembl/cli.py:578`, `resembl/cli.py:603`) |
-| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | none on a cache directory that already existed (`resembl/find_client.py:118`, `resembl/cli.py:429`); the server's own directory is `0o700` (`serve` in `resembl/server.py:2116`) |
+| R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | The standalone client `resembl-find` refuses a port-file port outside the ephemeral range 1024-65535 before dialing it (`6273fa0`, `_main` in `resembl/find_client.py`), so a planted port naming a privileged local service (22, 3306, 6379) is no longer dialed; a forged port inside that range still reaches an attacker listener, the in-process `find` client (`resembl/cli.py:429`) has no equivalent range check, and the cache directory the server did not create is still unchecked (`serve` in `resembl/server.py:2116` makes its own directory `0o700`) |
 | R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`log_message`/`log_request` in `resembl/server.py:1760`); the only default-level per-request trace is a slow-request WARNING (`resembl/server.py:1790`) and exception logs on failure (`resembl/server.py:1521`) |
 | R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at an attacker-chosen host; config read from an attacker-chosen directory | none, by design (`docs/adr/006-paths-module-owns-environment.md`, `resembl/paths.py:57`, `resembl/paths.py:81`, `resembl/paths.py:97`) |
 | R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`db_merge` in `resembl/core.py`); the source URL is masked for display in the error path (`db_url_mask` in `resembl/paths.py`), and callers get only a stable message naming the masked source — driver/SQL detail stays in the operator log, not the return value (`c1eb6cb`, `db_merge` in `resembl/core.py`) |
@@ -92,7 +110,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, latency, and uptime. The Python `GET /health` additionally reports database reachability and probe latency; the Go `GET /healthz` is liveness only | B1, B9 | Process internals (traffic volume, hit rate, latency) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:767`); Python `GET /metrics` (`_handle_metrics` in `resembl/server.py:1467`) exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` latency and `resembl_server_result_cache_total` hit/miss, and `GET /health` (`_handle_health` in `resembl/server.py:1413`) returns database status plus `latency_ms`; Go `GET /metrics` (`service/service.go:212`) exposes `resembl_service_up`, `resembl_service_uptime_seconds`, `resembl_service_requests_total` by path and status, and `resembl_service_request_duration_seconds` histogram, and `GET /healthz` (`service/service.go:203`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:123`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:261`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
 | R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256`, the `<backup-stem>.config.toml` sidecar must also exist and hash to it (`8616290`, `db_verify_backup` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged triple still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, writes backup, manifest, and config sidecar mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup` |
-| R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
+| R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim once surrounding whitespace is trimmed, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap trims the value and treats a blank one as unset, defaulting to `http://127.0.0.1:8081` (`6963a53`, `service/cmd/resembl-lambda/main.go`, `strings.TrimSpace`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
 
@@ -187,12 +205,12 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `RESEMBL_DATABASE_URL`, then `DATABASE_URL` | `resembl/paths.py:33`, `resembl/paths.py:57` | Trusted verbatim; may carry a password. |
 | `RESEMBL_CACHE_DIR` | `resembl/paths.py:81` | Trusted verbatim; selects where the port file is written and read. |
 | `RESEMBL_RUNTIME_MANIFEST` | `_handle_find_pinned` in `resembl/server.py` | Trusted verbatim; selects the file `resembl/runtime_attestation.py` checks loaded code against. The supervisor must keep it and the interpreter environment write-protected. |
-| `RESEMBL_ENGINE_URL` (Lambda only) | `service/cmd/resembl-lambda/main.go:17` | Trusted verbatim; selects the loopback engine the adapter dials. `NewLocalEngine` refuses a non-loopback host. |
+| `RESEMBL_ENGINE_URL` (Lambda only) | `service/cmd/resembl-lambda/main.go:17` | Trusted verbatim once surrounding whitespace is trimmed, and a blank value counts as unset (`6963a53`, `strings.TrimSpace`); selects the loopback engine the adapter dials. `NewLocalEngine` refuses a non-loopback host. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
 | `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |
 | `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. Refused unless it parses as ISO 8601. |
-| `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). |
+| `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). |
 
 The config file holds six fields (`resembl/config.py:114`):
 `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`,
@@ -243,24 +261,13 @@ escapes them (`resembl/models.py:180`), while the name search does not
 (`resembl/core.py:1612`). The result set is capped by `limit`, so the
 unescaped wildcards widen the match set rather than the returned page.
 
-**B5, cache directory to process.** The port file is read as an integer and
-used to open an HTTP connection (`resembl/find_client.py:121`,
-`resembl/cli.py:429`). Its contents are authenticated by nothing. The file
-names a port only: both clients dial `127.0.0.1`
-(`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port
-reaches a listener the forger must already be running on the loopback
-interface.
+**B5, cache directory to process.** The port file is read as an integer and used to open an HTTP connection (`resembl/find_client.py:121`, `resembl/cli.py:429`). Its contents are authenticated by nothing. The file names a port only: both clients dial `127.0.0.1` (`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port reaches a listener the forger must already be running on the loopback interface. The standalone client narrows this by refusing a port outside 1024-65535 before dialing (`6273fa0`, `_main` in `resembl/find_client.py`), so a forged port naming a privileged service is rejected; a forged port inside the ephemeral range and the in-process `find` client remain unchecked.
 
 **B6, merge source to local corpus.** Rows from another database are
 inserted after structural checks, not after a trust decision about the source
 (`resembl/core.py:2036`).
 
-**B7, secrets to code.** The database URL may embed a password. It is masked
-for display (`resembl/paths.py:63`, used at `resembl/find_client.py:124`)
-but used unmasked to derive the port-file name (`resembl/paths.py:118`) and
-to open the connection. The in-process result cache keys on the rendered
-engine URL (`resembl/server.py:433`), which SQLAlchemy renders with the
-password replaced by `***`, so credentials do not persist in the cache keys.
+**B7, secrets to code.** The database URL may embed a password. It is masked for display (`resembl/paths.py:63`, used at `resembl/find_client.py:124`) but used unmasked to derive the port-file name (`resembl/paths.py:118`) and to open the connection. The in-process result cache keys on the engine URL rendered with the password hidden (`6273fa0`, `_find_one` in `resembl/server.py`, `render_as_string(hide_password=True)`), so credentials do not persist in the cache keys.
 
 **B9, Go service to pinned engine.** The Go service (`service/service.go:175`)
 is the only boundary that authenticates a caller: it calls
@@ -318,7 +325,7 @@ network fetch at import.
 | Warm server availability | The performance reason to run `serve` at all | `serve` in `resembl/server.py:1854` |
 | Port file | Discovery of the running server, and a redirect target | cache dir |
 | Exported YARA rules | Downstream detection artifacts | caller-chosen output file |
-| Config file | Thresholds and match settings, applied with no on-screen report that they are in force | `config.toml` |
+| Config file | Thresholds and match settings, applied with no on-screen report that they are in force | `config.toml`, mode `0600` on write (`save_config` in `resembl/config.py`, `6273fa0`) |
 | Release artifacts | The only thing a consumer installs; a substituted one runs with the operator's database credentials | PyPI, attested per B8 |
 | Lambda engine address | Selects the loopback engine the adapter dials; a hostile value points it at an attacker listener once an authorizer is supplied | `RESEMBL_ENGINE_URL` (`service/cmd/resembl-lambda/main.go:17`) |
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
@@ -510,6 +517,7 @@ workflow does not re-run either.
 | Index-parameter match check | `resembl/server.py:502` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:72` | An unbounded dict grown by cycling permutation counts |
 | Result-cache key is a query digest | `resembl/server.py:618` | Query text retained by the result cache, and an entry count standing in for a memory bound |
+| Result-cache key hides the database password | `_find_one` in `resembl/server.py` (`6273fa0`) | Credentials retained in the long-lived cache keys |
 | Per-key compute lock | `resembl/server.py:121` | A burst of identical queries multiplying one find across connections |
 | Content-Type check, 415 | `_content_type_ok` in `resembl/server.py:1292` | B1 request shape |
 | Backup published only after verification | A truncated or page-flipped copy must not be handed to a restore drill as the newest restore point | `db_backup` in `resembl/core.py` re-verifies with `db_verify_backup` and removes the file and manifest on failure; `backup` CLI in `resembl/cli.py` exits 1 when `manifest_written` is false |
@@ -555,15 +563,20 @@ workflow does not re-run either.
 
 ### Threats with no mitigation
 
-Ranked as in the summary. R13, R14, R15, and R16 are the Go service gaps: R13 and R14 have no mitigation beyond the loopback isolation that service/README.md requires, R15 has none beyond the loopback default, and R16 is mitigated only by operator repair of custody slots. R3 (unauthenticated port file) and R10 (unbounded
-`--file` read) have no control at all. R1's `top_n` cap bounds one response
+Ranked as in the summary. R13, R14, R15, and R16 are the Go service gaps: R13 and R14 have no mitigation beyond the loopback isolation that service/README.md requires, R15 has none beyond the loopback default, and R16 is mitigated only by operator repair of custody slots. R10 (unbounded
+`--file` read) has no control at all. R3 (unauthenticated port file) is
+narrowed but not closed: the standalone client refuses an out-of-range
+port (`6273fa0`) while an in-range forged port and the in-process
+`find` client remain unchecked. R1's `top_n` cap bounds one response
 but not a sequence of them, R2's is a `Host` check that a non-loopback bind
 does not get, and R4's is a log level the operator has to ask for. R5
 and R6 are accepted by design and documented in `SECURITY.md` rather than
 enforced.
 R3's server-side `0o700` closes the case where `serve` created the cache
 directory itself and leaves open the case where something else created it
-first, which is the case a shared cache directory actually is. R6's
+first, which is the case a shared cache directory actually is, and the
+standalone client's port-range check (`6273fa0`) closes only the
+privileged-port sub-case of the forged-port attack. R6's
 recomputed fingerprints are a control, and its error path now masks the
 source URL (`0afeba7`) and keeps driver text in the operator log
 (`c1eb6cb`), so the B6 failure-path leak is closed.
@@ -612,7 +625,11 @@ per-caller one (`_MAX_TOP_N` in `resembl/server.py:662`).
 **Query text capture.** The same process, or any process that can write the
 cache directory, replaces the port file's contents with a port it is
 listening on. Every subsequent `resembl find` ships its query, which is
-attacker-supplied disassembly, to that loopback listener. Enabled by
+attacker-supplied disassembly, to that loopback listener. The standalone
+client `resembl-find` refuses a port outside 1024-65535 before dialing
+(`6273fa0`, `_main` in `resembl/find_client.py`), so naming a privileged
+service port no longer works there; a forged port inside the ephemeral
+range, and the in-process `find` client, remain unchecked. Enabled by
 `resembl/find_client.py:118`, `resembl/cli.py:429`, and the hard-coded
 loopback dial at `resembl/find_client.py:152`.
 

@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `5f9337c`. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `1c03f6f`. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
@@ -9,8 +9,9 @@ the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 `backup` / `verify-backup` commands.
 
 The `serve` controls below (the loopback `Host` check, `serve -v` request
-logging, the `0700` cache directory, the `0600` port file, the 1000-row
-`top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
+logging, the `0700` cache directory, the `0600` port file, the `0600`
+config file on save, the standalone client's 1024-65535 port-range check,
+the 1000-row `top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
 `413` envelope for oversized bodies in `resembl/server.py` `_read_body`,
 and the
 JSON `405` envelope for any unhandled verb) are documented in `CHANGELOG.md`.
@@ -72,7 +73,11 @@ relies on, not configuration options.
   bind. Do not put it behind a reverse proxy that does not authenticate.
 - **The cache directory is private to the user.** The port file in it is
   read as an unauthenticated port number by every `find` client, which then
-  dials that port on `127.0.0.1`. `resembl serve` creates that directory with
+  dials that port on `127.0.0.1`. The standalone client `resembl-find`
+  refuses a port outside 1024-65535 before dialing, so a planted port
+  naming a privileged local service is not dialed; a forged port inside
+  that range, and the in-process `find` client, are still unchecked.
+  `resembl serve` creates that directory with
   mode `0700` and the port file with mode `0600`, so a directory the server
   made itself is not writable by anyone else. Nothing re-checks the mode, so
   a cache directory created earlier by an operator's own `mkdir`, by another
@@ -81,7 +86,8 @@ relies on, not configuration options.
   their own. The config directory (`RESEMBL_CONFIG_DIR`, else
   `$XDG_CONFIG_HOME/resembl`, else `~/.config/resembl`) is a separate directory
   with the same
-  requirement: it supplies thresholds and match settings, and the tool does
+  requirement: it supplies thresholds and match settings, is written
+  mode `0600` on save, and the tool does
   not report that it is running under a non-default configuration.
 - **`DATABASE_URL` is trusted verbatim.** `RESEMBL_DATABASE_URL` takes
   precedence over it, and either may carry a password and name a remote
@@ -101,7 +107,7 @@ relies on, not configuration options.
   source that will not open makes `merge` log the driver's error text and
   return only a stable message naming the masked source, so host, port,
   file-path, and SQL detail no longer reach the caller.
-- **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` (default `http://127.0.0.1:8081`) and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
+- **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` once surrounding whitespace is trimmed, treating a blank value as unset (default `http://127.0.0.1:8081`), and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest and a `<backup-stem>.config.toml`
   config sidecar into a caller-chosen
