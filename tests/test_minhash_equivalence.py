@@ -158,6 +158,10 @@ class TestConstructorFromHashvalues(unittest.TestCase):
             DSMinHash(num_perm=(1 << 32) + 1)
         with self.assertRaises(ValueError):
             MinHash(num_perm=(1 << 32) + 1)
+        # Exactly 2**32 also fails: uint32 packing caps the count at
+        # 2**32 - 1, so it must be refused here, not at pack time.
+        with self.assertRaises(ValueError):
+            MinHash(num_perm=1 << 32)
 
     def test_rejects_degenerate_num_perm(self):
         """Zero/negative permutation counts are rejected, not ZeroDivision."""

@@ -88,8 +88,14 @@ def sample_rng() -> random.Random:
                 )
             return _SAMPLE_RNG
 
+        # Decimal only: base-0 parsing rejects plain decimal spellings with
+        # a leading zero ("0123" raised, though it is a valid decimal seed)
+        # and silently accepts hex/octal spellings, while the documented
+        # contract is a plain integer (see docs/man.md).  ``int`` itself
+        # takes surrounding whitespace and underscores, so " 42 " / "4_2"
+        # keep parsing as before.
         try:
-            seed = int(env_seed, 0)
+            seed = int(env_seed.strip(), 10)
         except ValueError as e:
             raise ValueError(f"{SEED_ENV_VAR}={env_seed!r} is not an integer") from e
         if _SAMPLE_RNG is None or seed != _SAMPLE_SEED:

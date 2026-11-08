@@ -159,9 +159,10 @@ func New(authority Authorizer, engine Engine, resource string, concurrency int, 
 	}
 	// Validate RESEMBL_SEED at startup (fail-fast): an unparseable seed
 	// must not silently fall back to OS randomness, matching Python's
-	// sample_rng ValueError contract.
+	// sample_rng ValueError contract. Base 10 only, like Python: a
+	// leading-zero decimal is valid, hex/octal spellings are not.
 	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
-		if _, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64); err != nil {
+		if _, err := strconv.ParseInt(strings.TrimSpace(seed), 10, 64); err != nil {
 			return nil, fmt.Errorf("RESEMBL_SEED=%q is not an integer", seed)
 		}
 	}
@@ -250,7 +251,7 @@ func validateNow(v string) error {
 
 func newRequestID() string {
 	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
-		v, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64)
+		v, err := strconv.ParseInt(strings.TrimSpace(seed), 10, 64)
 		if err != nil {
 			panic(fmt.Sprintf("RESEMBL_SEED=%q is not an integer: %v", seed, err))
 		}

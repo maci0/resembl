@@ -52,6 +52,7 @@ from resembl.diagnostics import (
     _sample_key,
     db_calculate_average_similarity,
     db_stats,
+    sample_rng,
 )
 from resembl.lsh import lsh_index_clear, lsh_meta_get
 from resembl.models import (
@@ -1083,6 +1084,25 @@ class TestIndexBuild(BaseScalingTest):
         # samples within a run must differ, or every estimate in a seeded
         # run is computed from the same rows.
         self.assertEqual(len(set(first_keys)), 3)
+
+    def test_seed_parser_accepts_leading_zero_decimal(self):
+        """A decimal seed with a leading zero is a valid integer seed."""
+        from resembl import diagnostics
+
+        saved = (diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED)
+        diagnostics._SAMPLE_RNG = None
+        diagnostics._SAMPLE_SEED = None
+        try:
+            with patch.dict(os.environ, {SEED_ENV_VAR: "0123"}):
+                sample_rng()
+                self.assertEqual(diagnostics._SAMPLE_SEED, 123)
+            diagnostics._SAMPLE_RNG = None
+            diagnostics._SAMPLE_SEED = None
+            with patch.dict(os.environ, {SEED_ENV_VAR: "0x10"}):
+                with self.assertRaises(ValueError):
+                    sample_rng()
+        finally:
+            diagnostics._SAMPLE_RNG, diagnostics._SAMPLE_SEED = saved
 
     def test_unseeded_run_reports_the_seed_it_drew(self):
         """An unseeded run logs the seed to replay it with.

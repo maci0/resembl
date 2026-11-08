@@ -67,8 +67,13 @@ class MinHash:
         seed: int = 1,
         hashvalues: Iterable[int] | None = None,
     ) -> None:
-        if num_perm > _HASH_RANGE:
-            raise ValueError(f"Cannot have more than {_HASH_RANGE} number of permutation functions")
+        # ``>=``: uint32 packing caps the count at 2**32 - 1, so 2**32 itself
+        # must fail here rather than allocating its hash array and failing
+        # later in ``minhash_pack`` with a bare ``struct.error``.
+        if num_perm >= _HASH_RANGE:
+            raise ValueError(
+                f"Cannot have more than {_HASH_RANGE - 1} number of permutation functions"
+            )
         if num_perm < 1:
             raise ValueError("Cannot have fewer than 1 permutation function")
         self.seed = seed
