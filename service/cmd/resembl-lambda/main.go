@@ -10,11 +10,12 @@ import (
 	"github.com/maci0/resembl/service/internal/lambdaproxy"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
 func main() {
-	endpoint := os.Getenv("RESEMBL_ENGINE_URL")
+	endpoint := strings.TrimSpace(os.Getenv("RESEMBL_ENGINE_URL"))
 	if endpoint == "" {
 		endpoint = "http://127.0.0.1:8081"
 	}

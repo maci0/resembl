@@ -332,6 +332,13 @@ Linux or Windows are one name.
     refuses without it. The manifest must list the interpreter and every
     loaded module file. See the HTTP API reference.
 
+**RESEMBL_ENGINE_URL**
+:   Loopback engine URL the Lambda bootstrap dials. Defaults to
+    `http://127.0.0.1:8081`. Surrounding whitespace is ignored and a blank
+    value counts as unset, matching the other `RESEMBL_*` overrides. The
+    value is trusted verbatim beyond that: it must name a loopback
+    listener, which the engine adapter enforces. See `SECURITY.md`.
+
 **RESEMBL_DATABASE_URL**
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
     Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)
