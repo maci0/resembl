@@ -137,6 +137,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # python-version 3.15.2, like every other job: the value keys the
+      # uv cache (see setup-uv), and an empty default reads .python-version
+      # only for the interpreter choice, so a no-input call would restore a
+      # cache no other job shares.
       - uses: ./.github/actions/setup-uv
+        with:
+          python-version: '3.15.2'
       - name: Smoke all fuzz targets on Atheris's supported interpreter
         run: make fuzz FUZZ_SECONDS=1

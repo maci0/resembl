@@ -52,8 +52,12 @@ jobs:
           uv venv --python 3.15.2 dist/wheel-venv
           # --no-deps is not an option here: the wheel declares its runtime
           # dependencies, and an install that skipped them would pass a
-          # smoke test the real installation would fail.
-          uv pip install --python dist/wheel-venv/bin/python dist/*.whl
+          # smoke test the real installation would fail.  --constraint
+          # pins that resolution to the committed uv.lock, so the smoke
+          # test runs the exact versions a release ships instead of
+          # whatever the index serves that day.
+          uv pip install --python dist/wheel-venv/bin/python \
+            --constraint uv.lock dist/*.whl
           dist/wheel-venv/bin/resembl --help
           dist/wheel-venv/bin/resembl-find --help
 
@@ -61,7 +65,8 @@ jobs:
         run: |
           set -euo pipefail
           uv venv --python 3.15.2 dist/sdist-venv
-          uv pip install --python dist/sdist-venv/bin/python dist/*.tar.gz
+          uv pip install --python dist/sdist-venv/bin/python \
+            --constraint uv.lock dist/*.tar.gz
           dist/sdist-venv/bin/resembl --help
           dist/sdist-venv/bin/resembl-find --help
 

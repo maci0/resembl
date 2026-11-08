@@ -41,3 +41,18 @@ to it, so passing `service/` as the build context fails):
 ```sh
 docker build -f service/Dockerfile --build-arg VERSION=<tag> .
 ```
+
+Runs non-root (`USER 65532:65532`), exposes `8080`, and has no shell or
+HTTP client in the `scratch` runtime, so `HEALTHCHECK NONE` is deliberate:
+probe `GET /healthz` (HTTP 204, no dependency I/O) from your orchestrator
+instead. The binary defaults to `127.0.0.1:8080`, which inside a container
+is the container's own loopback and unreachable from outside; pass
+`-listen 0.0.0.0:8080` to serve on the published port, and keep a trusted
+authenticated TLS proxy and network controls in front of a non-loopback
+listen address. `-custody` and `-token-file` must be host paths the
+operator pre-creates and mounts into the container (mode `0700` or stricter
+on the custody directory, readable only by the service for the token file);
+the image carries neither, and startup fails without `-custody`. The
+`-engine` URL stays loopback relative to the container, so the `resembl
+serve` backend must run in the same container or an adjacent one sharing a
+network namespace.

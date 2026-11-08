@@ -44,6 +44,38 @@ class CiImagePinTests(unittest.TestCase):
         self.assertRegex(text, r"ARG GO_IMAGE=\S+@sha256:[0-9a-f]{64}")
         self.assertIn("FROM ${GO_IMAGE} AS build", text)
 
+    def test_db_service_wiring_agrees_between_workflows(self) -> None:
+        """tests.yml and coverage.yml declare the same PostgreSQL/MySQL services.
+
+        Both workflows stand up the integration databases so the reported
+        coverage covers them too. A change to one file's service block
+        (image, credential, health check, integration URL) without the
+        other would make the two runs test different databases while
+        claiming the same coverage.
+        """
+        tests = (_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+        coverage = (_ROOT / ".github" / "workflows" / "coverage.yml").read_text(encoding="utf-8")
+        for needle in (
+            "image: postgres:",
+            "image: mysql:",
+            "POSTGRES_PASSWORD:",
+            "MYSQL_ROOT_PASSWORD:",
+            "MYSQL_PASSWORD:",
+            "pg_isready",
+            "mysqladmin ping",
+            "RESEMBL_TEST_PG_URL:",
+            "RESEMBL_TEST_MYSQL_URL:",
+        ):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, tests)
+                self.assertIn(needle, coverage)
+        # Each workflow wires each service exactly once: a second copy
+        # would hide a drifted duplicate.
+        for name, text in (("tests.yml", tests), ("coverage.yml", coverage)):
+            with self.subTest(workflow=name):
+                self.assertEqual(text.count("image: postgres:"), 1)
+                self.assertEqual(text.count("image: mysql:"), 1)
+
     def test_go_version_agrees_everywhere(self) -> None:
         """go.mod, Dockerfile, Makefile and docs name the same Go version."""
         mod = (_ROOT / "service" / "go.mod").read_text(encoding="utf-8")
