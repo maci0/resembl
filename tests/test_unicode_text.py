@@ -96,13 +96,17 @@ class TestNameNormalization(BaseDBTest):
         self.session.commit()
         found = Snippet.get_by_name(self.session, _NFC_NAME)
         self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.checksum, snippet.checksum)
 
     def test_get_by_name_still_handles_quotes_and_backslashes(self):
         """The escaping the probe does must not break these two."""
         tricky = 'we"ird\\name'
-        snippet_add(self.session, tricky, "MOV EAX, 1")
+        added = snippet_add(self.session, tricky, "MOV EAX, 1")
         found = Snippet.get_by_name(self.session, tricky)
         self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.checksum, added.checksum)
 
     def test_get_by_name_letter_wildcards_are_not_wildcards(self):
         """A name containing ``%``/``_`` matches itself, not everything."""

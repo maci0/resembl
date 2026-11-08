@@ -547,7 +547,10 @@ class TestSnippetCoreFunctions(_IsolatedDBTest):
         snippet_add(self.session, "s1", "MOV EAX, 1")
         snippet_add(self.session, "s2", "MOV EAX, 2")
         similarity = db_calculate_average_similarity(self.session)
-        self.assertIsInstance(similarity, float)
+        # Both normalize to the same token stream, so the sole pair has
+        # Jaccard 1.0; a broken pairwise mean would not be caught by a
+        # type-only assertion.
+        self.assertEqual(similarity, 1.0)
 
     def test_random_snippet_rows_samples_distinctly(self):
         """Keyset random sampling returns distinct rows and wraps around."""

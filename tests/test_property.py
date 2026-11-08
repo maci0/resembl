@@ -41,6 +41,8 @@ class TestPropertyTokenize(unittest.TestCase):
         """code_tokenize(normalize=False) must never raise."""
         result = code_tokenize(code, normalize=False)
         self.assertIsInstance(result, list)
+        for token in result:
+            self.assertIsInstance(token, str)
 
 
 class TestPropertyChecksum(unittest.TestCase):
@@ -97,6 +99,8 @@ class TestPropertyMinHash(unittest.TestCase):
         """code_create_minhash must return a MinHash for any input."""
         m = code_create_minhash(code)
         self.assertIsInstance(m, MinHash)
+        self.assertEqual(m.jaccard(m), 1.0)
+        self.assertTrue(0.0 <= m.jaccard(code_create_minhash("")) <= 1.0)
 
     @given(code=asm_text)
     @settings(max_examples=100, deadline=2000)

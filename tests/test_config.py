@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from resembl.config import (
     DEFAULTS,
+    VALUE_BOUNDS,
     ConfigError,
     ResemblConfig,
     load_config,
@@ -371,7 +372,19 @@ class TestConfigValueRanges(unittest.TestCase):
         """Each out-of-range value comes back with a reason, not applied."""
         for key, value in self.OUT_OF_RANGE:
             with self.subTest(key=key, value=value):
-                self.assertIsNotNone(validate_value(key, value))
+                reason = validate_value(key, value)
+                self.assertIsNotNone(reason)
+                assert reason is not None
+                # The reason names the bound that was crossed, so a range
+                # table that silently moves a bound cannot pass with a
+                # generic "invalid" message.
+                bound = VALUE_BOUNDS[key]
+                expected = (
+                    f"at least {bound.low:g}"
+                    if value < bound.low
+                    else f"{'at most' if bound.high_inclusive else 'below'} {bound.high:g}"
+                )
+                self.assertIn(expected, reason)
 
     def test_validate_value_accepts_defaults(self):
         """The shipped defaults are inside their own ranges."""
@@ -418,13 +431,13 @@ class TestConfigValueRanges(unittest.TestCase):
 
     def test_validate_value_rejects_unknown_key_and_wrong_type(self):
         """An unknown key or a cross-type value reports a reason, not None."""
-        self.assertIsNotNone(validate_value("bogus_key", 1))
-        self.assertIsNotNone(validate_value("top_n", 1.5))
-        self.assertIsNotNone(validate_value("top_n", "5"))
-        self.assertIsNotNone(validate_value("top_n", True))
+        self.assertEqual(validate_value("bogus_key", 1), "unknown configuration key: 'bogus_key'")
+        for bad in (1.5, "5", True):
+            with self.subTest(value=bad):
+                self.assertEqual(validate_value("top_n", bad), "expected a int")
         self.assertIsNone(validate_value("top_n", 5))
         self.assertIsNone(validate_value("format", "json"))
-        self.assertIsNotNone(validate_value("format", "yaml"))
+        self.assertEqual(validate_value("format", "yaml"), "expected one of: table, json, csv")
 
 
 class TestDatabaseUrlEnv(unittest.TestCase):

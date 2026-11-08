@@ -195,8 +195,12 @@ class TestTagCore(BaseDBTest):
     def test_tag_remove_nonexistent(self):
         """Removing a tag that doesn't exist should return the snippet unchanged."""
         snippet = snippet_add(self.session, "func", "XOR EAX, EAX")
+        snippet_tag_add(self.session, snippet.checksum, "keep")
         result = snippet_tag_remove(self.session, snippet.checksum, "nosuch")
         self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.checksum, snippet.checksum)
+        self.assertEqual(result.tag_list, ["keep"])
 
     def test_tag_add_to_nonexistent_snippet(self):
         """Adding a tag to a nonexistent snippet should return None."""
@@ -725,9 +729,11 @@ class TestModelMethods(BaseDBTest):
 
     def test_snippet_get_by_name(self):
         """Snippet.get_by_name should find snippets by their alias."""
-        snippet_add(self.session, "my_function", "PUSH EBP; MOV EBP, ESP")
+        added = snippet_add(self.session, "my_function", "PUSH EBP; MOV EBP, ESP")
         found = Snippet.get_by_name(self.session, "my_function")
         self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.checksum, added.checksum)
 
     def test_snippet_get_by_name_special_characters(self):
         """Names with quotes, backslashes, or LIKE wildcards stay findable.
@@ -738,9 +744,11 @@ class TestModelMethods(BaseDBTest):
         not widen the SQL pattern.
         """
         for name in ('quote"name', "back\\slash", "percent%name", "under_score"):
-            snippet_add(self.session, name, f"NOP  # {name}")
+            added = snippet_add(self.session, name, f"NOP  # {name}")
             found = Snippet.get_by_name(self.session, name)
             self.assertIsNotNone(found, name)
+            assert found is not None, name
+            self.assertEqual(found.checksum, added.checksum, name)
 
     def test_snippet_get_by_collection_empty(self):
         """get_by_collection should return empty for nonexistent collection."""
