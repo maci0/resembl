@@ -284,7 +284,12 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
-        except OSError, ValueError:
+        except OSError, ValueError, RecursionError:
+            # RecursionError is not a ValueError: a deeply nested
+            # manifest from a hostile backup directory recurses once
+            # per level in the decoder and must skip the candidate,
+            # not abort the caller — the same guard _string_list_or_none
+            # applies to stored JSON columns.
             continue
         if isinstance(manifest, dict) and manifest.get("content_hash") == content_hash:
             return os.path.join(backup_dir, newest)
@@ -2021,7 +2026,11 @@ def _export_manifest_read(export_dir: str) -> set[str]:
     try:
         with open(os.path.join(export_dir, _EXPORT_MANIFEST_NAME), encoding="utf-8") as f:
             data = json.load(f)
-    except OSError, ValueError:
+    except OSError, ValueError, RecursionError:
+        # RecursionError is not a ValueError: a deeply nested manifest
+        # from a hostile export directory recurses once per level in
+        # the decoder and must disable pruning, not abort the export —
+        # the same guard _string_list_or_none applies to stored JSON.
         return set()
     if not isinstance(data, list):
         return set()
@@ -2822,7 +2831,12 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 data = json.load(f)
-        except OSError, ValueError:
+        except OSError, ValueError, RecursionError:
+            # RecursionError is not a ValueError: a deeply nested
+            # manifest from a hostile backup directory recurses once
+            # per level in the decoder and must skip the candidate,
+            # not abort verification — the same guard
+            # _string_list_or_none applies to stored JSON columns.
             continue
         # The shared manifest records only the newest backup's own name,
         # so treat it as this file's contract only when it names this
