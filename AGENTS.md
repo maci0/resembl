@@ -7,13 +7,14 @@ are exercised, and both must be updated together.
 
 ## Environment
 
-Defaults to Python 3.15.2; Python 3.14+ remains supported for consumers. Requires uv 0.12.13 or newer; CI installs uv 0.13.6.
+Defaults to Python 3.15.2; Python 3.14+ remains supported. Requires uv
+0.12.13 or newer; CI installs uv 0.13.6.
 On macOS, install Homebrew `make` and prepend `$(brew --prefix make)/libexec/gnubin`
 to `PATH`; Apple's old Make ignores the recipe shell flags. CI does this too.
-`pyproject.toml` sets it as the floor under `[tool.uv] required-version`, so an
-older uv fails at the first command instead of after it has rewritten the
-lockfile; the floor is not an exact pin because Dependabot's `uv` ecosystem
-regenerates `uv.lock` with its own uv release.
+`pyproject.toml` sets the floor under `[tool.uv] required-version` (a floor,
+not a pin, because Dependabot's `uv` ecosystem regenerates `uv.lock` with its
+own uv release), so an older uv fails at the first command instead of after it
+has rewritten the lockfile.
 
 ```bash
 make install   # uv sync --locked --extra dev, then the git hooks; same as CI
@@ -27,8 +28,8 @@ drifted and then gates the code against a lockfile nobody else has.
 
 ## Quality gates
 
-The pre-commit hooks run, over the project rather than the staged files
-(`pass_filenames: false`):
+The pre-commit hooks run over the project rather than the staged files
+(`pass_filenames: false` on the four local hooks):
 
 | Hook   | Command            | Scope                      |
 | ------ | ------------------ | -------------------------- |
@@ -40,9 +41,8 @@ The pre-commit hooks run, over the project rather than the staged files
 The same config also runs three mirror hooks: `check-yaml`,
 `end-of-file-fixer` and `trailing-whitespace`. No CI workflow runs them, so
 `make hygiene` reproduces the two that touch repository files and `make check`
-runs it first; a green `make check` is therefore a commit the hooks accept.
-`check-yaml` stays hook-only, because validating the workflows is a job CI does
-by running them.
+runs it first. `check-yaml` stays hook-only: workflows are validated by CI
+running them.
 
 The hooks run **no tests**. Before handing work over, run the full gate
 yourself:
@@ -226,15 +226,13 @@ authority that overrides it. The same commit turns `[Unreleased]` into
 supported-versions table in `SECURITY.md`; `tests/test_changelog.py` holds the
 manifest, the sections, the break markers and that table to each other. Verify
 `uv run --locked pytest` green and a wheel that answers `resembl --help` before
-tagging;
-the `Build` workflow runs both halves of that on the tag before it is cut.
+tagging; the `Build` workflow runs both halves of that on the tag before it is
+cut. Publish the bytes that workflow attested (`attest` job), since an
+attestation over artifacts nobody published proves nothing to a consumer.
 The artifacts come from `make dist`, never a bare `uv build`: it pins the build
 clock to the commit's `SOURCE_DATE_EPOCH` and normalizes the sdist archive
 metadata, so the same commit always produces the same bytes. `make
 dist-verify` builds twice and compares the sha256 sums.
-Push the tag, then confirm the published version imports and runs. Pushing the
-tag also runs the `Build` workflow's `attest` job, which records a provenance
-attestation for both archives; publish the bytes it attested, since an
-attestation over artifacts nobody published proves nothing to a consumer. A
+Push the tag, then confirm the published version imports and runs. A
 published version is immutable: something wrong means a new patch, never a
 re-upload.

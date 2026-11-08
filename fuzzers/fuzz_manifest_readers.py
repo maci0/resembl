@@ -117,8 +117,8 @@ def _build_document(fdp: atheris.FuzzedDataProvider) -> bytes:
         return f"{opener * depth}{closer * depth}".encode()
     if mode == 4:
         # A truncated well-formed manifest: every byte prefix of one.
-        doc = json.dumps({"content_hash": "abc", "num_snippets": 3}).encode()
-        return doc[: fdp.ConsumeIntInRange(0, len(doc))]
+        doc_bytes = json.dumps({"content_hash": "abc", "num_snippets": 3}).encode()
+        return doc_bytes[: fdp.ConsumeIntInRange(0, len(doc_bytes))]
     # Raw junk bytes and invalid UTF-8.
     return fdp.ConsumeBytes(fdp.ConsumeIntInRange(0, 64))
 
@@ -182,13 +182,13 @@ def _check_verify_backup(raw: bytes, tmp: str) -> None:
         connection.close()
     with open(os.path.join(tmp, _db_backup_manifest_name(backup)), "wb") as fh:
         fh.write(raw)
-    result = db_verify_backup(None, backup)
+    result = db_verify_backup(None, backup)  # type: ignore[arg-type]
     assert isinstance(result, dict), f"verify returned non-dict: {result!r}"
     assert isinstance(result["ok"], bool), f"ok is not a bool: {result!r}"
     assert isinstance(result["issues"], list), f"issues is not a list: {result!r}"
     assert all(isinstance(issue, str) for issue in result["issues"])
     # Fixed point: verifying the same bytes twice yields the same verdict.
-    assert db_verify_backup(None, backup) == result, "verify is not a fixed point"
+    assert db_verify_backup(None, backup) == result, "verify is not a fixed point"  # type: ignore[arg-type]
 
 
 def _check_missing_and_directory(tmp: str) -> None:
