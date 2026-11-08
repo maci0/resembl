@@ -37,7 +37,16 @@ file is removed when the server exits.
 export RESEMBL_DATABASE_URL=sqlite:///assembly.db
 resembl serve &
 
-port=$(cat ~/.cache/resembl/server_$(printf %s "$RESEMBL_DATABASE_URL" | sha1sum | cut -c1-12).port)
+# Print the port-file path with Python (stdlib only), so the same command
+# works on Linux, macOS and Windows shells where sha1sum/cut/$() do not.
+# On PowerShell, quote the -c argument with single quotes instead.
+port=$(python3 -c "import hashlib, os; print(hashlib.sha1(os.environ['RESEMBL_DATABASE_URL'].encode()).hexdigest()[:12])")
+port_file="$HOME/.cache/resembl/server_${port}.port"
+# XDG_CACHE_HOME / RESEMBL_CACHE_DIR override the ~/.cache default above;
+# on Windows expanduser reads USERPROFILE, so the same path resolves there.
+# With an override set, read it from Python instead:
+#   python3 -c "from resembl.paths import db_url_get, cache_dir_get, server_port_path; print(server_port_path(db_url_get(), cache_dir_get()))"
+port=$(cat "$port_file")
 curl -s "http://127.0.0.1:$port/find" \
   -H 'Content-Type: application/json' \
   -d '{"query": "push ebx\nmov eax, 5\npop ebx\nret"}'
