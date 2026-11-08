@@ -2196,23 +2196,22 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
             meta = lsh_meta_get(session)
             if not lsh_meta_matches(
                 meta, find_defaults.lsh_threshold, find_defaults.num_permutations
+            ) and (
+                lsh_index_build(
+                    session, find_defaults.lsh_threshold, find_defaults.num_permutations
+                )
+                is None
             ):
-                if (
-                    lsh_index_build(
-                        session, find_defaults.lsh_threshold, find_defaults.num_permutations
-                    )
-                    is None
-                ):
-                    # Serving without the index would answer every find with
-                    # zero matches while lsh_meta still advertises a complete
-                    # index — the silent-data-loss shape the reindex check
-                    # above already refuses.  Fail startup instead (the
-                    # enclosing `except BaseException` disposes the engine).
-                    raise IndexBuildError(
-                        "could not build the LSH index at startup (another "
-                        "process may be writing to this database, or the "
-                        "parameters are invalid); retry once it is idle"
-                    )
+                # Serving without the index would answer every find with
+                # zero matches while lsh_meta still advertises a complete
+                # index — the silent-data-loss shape the reindex check
+                # above already refuses.  Fail startup instead (the
+                # enclosing `except BaseException` disposes the engine).
+                raise IndexBuildError(
+                    "could not build the LSH index at startup (another "
+                    "process may be writing to this database, or the "
+                    "parameters are invalid); retry once it is idle"
+                )
     except BaseException:
         # A warm-up failure (e.g. a database error during the migration
         # reindex or index build) must not leak the engine either: it holds

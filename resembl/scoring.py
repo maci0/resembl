@@ -839,9 +839,8 @@ def cfg_extract(code: str) -> dict:
                 # where ``foo:`` follows immediately.
                 if target_block is not None and target_block not in adj[i]:
                     adj[i].append(target_block)
-        else:
-            if i + 1 < len(blocks):
-                adj[i].append(i + 1)
+        elif i + 1 < len(blocks):
+            adj[i].append(i + 1)
 
     num_edges = sum(len(succs) for succs in adj.values())
     block_sizes = [len(b) for b in blocks]
