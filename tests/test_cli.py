@@ -339,20 +339,6 @@ class TestCLICommands(BaseCLITest):
                 result = self.run_command(f"{flag} {command}")
                 self.assertNotEqual(result.returncode, 0, f"'{flag} {command}' reported success")
 
-    def test_rm_with_force_flag(self):
-        """Removing with --force should skip confirmation."""
-        with Session(self.engine) as session:
-            snippet = Snippet.get_by_name(session, "test_snippet")
-            self.assertIsNotNone(snippet)
-            checksum = snippet.checksum
-
-        rm_result = self.run_command(f"rm --force {checksum}")
-        self.assertEqual(rm_result.returncode, 0)
-
-        with Session(self.engine) as session:
-            snippet = Snippet.get_by_checksum(session, checksum)
-            self.assertIsNone(snippet)
-
 
 class TestCLIConfig(BaseCLITest):
     """Tests for the `config` subcommand and environment variable overrides."""

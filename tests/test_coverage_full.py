@@ -159,53 +159,37 @@ class TestFindMatchesEmpty(BaseDBTest):
         self.assertIn("could not clear the index (locked)", str(ctx.exception))
 
 
-# snippet_export_yara — covers lines 544-580
-
-
 class TestExportYara(BaseDBTest):
     """Tests for snippet_export_yara."""
 
-    def test_export_yara_basic(self):
-        """Exporting a snippet to YARA should produce a valid rule file (line 544-580)."""
-        snippet_add(self.session, "test_func", "MOV EAX, 1; RET")
+    def _export(self, name, code):
+        """Add one snippet and export it to a YARA file; return the rule text."""
+        snippet_add(self.session, name, code)
         with tempfile.NamedTemporaryFile(suffix=".yar", delete=False, mode="w") as f:
             out_path = f.name
         try:
             result = snippet_export_yara(self.session, out_path)
             self.assertEqual(result["num_exported"], 1)
             with open(out_path, encoding="utf-8") as f:
-                content = f.read()
-            self.assertIn("rule resembl_test_func", content)
-            self.assertIn("$asm", content)
+                return f.read()
         finally:
             os.unlink(out_path)
+
+    def test_export_yara_basic(self):
+        """Exporting a snippet to YARA should produce a valid rule file."""
+        content = self._export("test_func", "MOV EAX, 1; RET")
+        self.assertIn("rule resembl_test_func", content)
+        self.assertIn("$asm", content)
 
     def test_export_yara_special_chars(self):
         """YARA export should escape special characters in code."""
-        snippet_add(self.session, "esc_test", 'MOV EAX, "hello\\nworld"')
-        with tempfile.NamedTemporaryFile(suffix=".yar", delete=False, mode="w") as f:
-            out_path = f.name
-        try:
-            result = snippet_export_yara(self.session, out_path)
-            self.assertEqual(result["num_exported"], 1)
-            with open(out_path, encoding="utf-8") as f:
-                content = f.read()
-            self.assertNotIn('\n"', content.split("$asm")[1].split("nocase")[0])
-        finally:
-            os.unlink(out_path)
+        content = self._export("esc_test", 'MOV EAX, "hello\\nworld"')
+        self.assertNotIn('\n"', content.split("$asm")[1].split("nocase")[0])
 
     def test_export_yara_numeric_first_char(self):
-        """YARA rule names starting with a digit should be prefixed (line 552-553)."""
-        snippet_add(self.session, "123invalid", "RET")
-        with tempfile.NamedTemporaryFile(suffix=".yar", delete=False, mode="w") as f:
-            out_path = f.name
-        try:
-            snippet_export_yara(self.session, out_path)
-            with open(out_path, encoding="utf-8") as f:
-                content = f.read()
-            self.assertIn("rule resembl_r_", content)
-        finally:
-            os.unlink(out_path)
+        """YARA rule names starting with a digit should be prefixed."""
+        content = self._export("123invalid", "RET")
+        self.assertIn("rule resembl_r_", content)
 
     def test_export_yara_empty_db(self):
         """Exporting from empty DB should produce empty file."""
