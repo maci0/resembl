@@ -6,8 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `snippet_version_list` now takes an optional keyword-only `limit` parameter (`None` by default, preserving the historical unbounded behavior); a positive limit caps the fetch, and `limit <= 0` returns an empty list.
+- The wheel and sdist now ship the `resembl/py.typed` marker (via `MANIFEST.in`), so type checkers treat `resembl` as typed on install.
+
 ### Fixed
 
+- `db_merge` no longer leaks credentials from a URL source into its error return or failure log: the source URL is masked via `db_url_mask` before it is interpolated, matching the CLI/server open paths; plain filesystem paths pass through intact.
 - `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
 - `resembl serve` now answers `413` with the `{"error": "request too large"}` envelope to a request body larger than 8 MiB, matching the Go service and the Lambda proxy for the same cap; it previously answered `400`, indistinguishable from a malformed body.
 - `cfg_similarity` now rejects non-integer counts and block sizes (NaN, infinity, bools, floats) with `ValueError` instead of returning `NaN` for a `NaN` block count, and clamps the cosine term so float rounding can no longer push the score just above `1.0`.

@@ -140,8 +140,8 @@ Extract a simplified control-flow graph from assembly code. Returns `{num_blocks
 ### `cfg_similarity(cfg1: dict, cfg2: dict) → float`
 Compute structural similarity between two CFGs (0.0–1.0) using block/edge ratios and cosine similarity on block-size histograms.
 
-### `snippet_version_list(session, checksum: str) → list[dict]`
-Return version history for a snippet (metadata columns only; no code or fingerprint is loaded).
+### `snippet_version_list(session, checksum: str, *, limit: int | None = None) → list[dict]`
+Return version history for a snippet (metadata columns only; no code or fingerprint is loaded). *limit* caps the fetch (`None` keeps the historical unbounded behavior; `limit <= 0` returns an empty list).
 
 ### `snippet_search_by_name(session, pattern: str, limit: int = 50) → list[Snippet]`
 Case-insensitive substring search over snippet names (NFC-normalized, `casefold` comparison). Names live in a JSON column so no index can answer the search; it scans `(checksum, names)` in checksum order and verifies each decoded name in Python. *limit* caps the result after verification.
