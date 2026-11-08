@@ -17,6 +17,15 @@ dist
 __pycache__
 **/__pycache__
 *.pyc
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.hypothesis
+**.hypothesis
+docs
+tests
+fuzzers
 *.db
 **.db
 *.sqlite3

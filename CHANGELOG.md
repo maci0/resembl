@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The `resembl-service` container image now carries the `LICENSE` and `NOTICE` text at `/licenses/`: the image previously shipped only the binary with the GPL-3.0-only grant in an OCI label, so the license text did not accompany the copy as GPL-3.0 requires. `service/.dockerignore` now mirrors the root `.dockerignore`'s cache, docs and test exclusions, so the two contexts cannot drift again.
+
 ### Added
 
 - `rm`, `clean`, and `collection delete` now take a verified pre-delete backup (`db_backup_for_delete`) before deleting; pass `--no-backup` to opt out. A failed backup aborts the deletion instead of proceeding unverified, closing the foot-gun where a destructive command had no restore point.

@@ -20,6 +20,10 @@ ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service
 FROM scratch
 COPY --from=build /resembl-service /resembl-service
+# GPL-3.0-only: the license text must accompany the binary in the image,
+# not just in the OCI label. NOTICE carries the MIT grant for the vendored
+# MinHash/LSH pieces, so both travel with every copy.
+COPY LICENSE NOTICE /licenses/
 ARG VERSION=dev
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="resembl-service" org.opencontainers.image.description="Experimental Go query service for one pinned Resembl index" org.opencontainers.image.source="https://github.com/maci0/resembl" org.opencontainers.image.licenses="GPL-3.0-only" org.opencontainers.image.version="${VERSION}" org.opencontainers.image.revision="${REVISION}"
