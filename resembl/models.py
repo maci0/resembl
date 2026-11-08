@@ -132,6 +132,11 @@ def monotonic_now() -> float:
     """
     override = os.environ.get(CLOCK_ENV_VAR)
     if override is not None and override.strip():
+        # Fail fast like timestamp_now(): an unparseable pin must not
+        # silently pin every duration to 0.0 on read paths that never
+        # stamp a row, where the typo would otherwise go unnoticed.
+        if parse_instant(override) is None:
+            raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant")
         return 0.0
     return time.monotonic()
 

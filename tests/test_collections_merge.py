@@ -348,6 +348,21 @@ class TestTimestampNow(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, CLOCK_ENV_VAR):
                 timestamp_now()
 
+    def test_monotonic_now_rejects_unparseable_override(self):
+        """The duration clock fails fast on a bad pin instead of pinning to 0.
+
+        Read paths (stats, server latency) call ``monotonic_now`` without
+        ever stamping a row, so an unparseable ``RESEMBL_NOW`` there used to
+        silently pin every elapsed value to 0.0 with no error anywhere.
+        """
+        from resembl.models import monotonic_now
+
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "not-a-date"}):
+            with self.assertRaisesRegex(ValueError, CLOCK_ENV_VAR):
+                monotonic_now()
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "2024-06-01T10:00:00+00:00"}):
+            self.assertEqual(monotonic_now(), 0.0)
+
 
 # DB Merge tests
 

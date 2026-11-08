@@ -255,7 +255,7 @@ The configured database URL, read from the environment at call time:
 `~/.cache/resembl` or `~/.config/resembl`.
 
 ### `server_port_path(db_url: str, cache_dir: str) → str`
-The port file `resembl serve` advertises itself with, named from a SHA-1 prefix
+The port file `resembl serve` advertises itself with, named from a SHA-256 prefix
 of the *unmasked* URL. The client resolves the same path, so a
 credential-carrying `DATABASE_URL` stays discoverable.
 
