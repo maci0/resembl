@@ -249,11 +249,17 @@ def _db_file_fingerprint(path: str) -> tuple[int, int] | None:
     """
     try:
         st = os.stat(path)
-    except OSError:
+    except OSError as e:
+        # An unreadable database file disables the result cache for this
+        # request (callers bypass on None).  Logged at debug: a transient
+        # stat race is expected under rotation, but a persistent failure
+        # that silently disabled caching would otherwise be invisible.
+        logger.debug("Could not stat database file %s for cache fingerprint: %s", path, e)
         return None
     try:
         wal_size = os.path.getsize(path + "-wal") if os.path.exists(path + "-wal") else 0
-    except OSError:
+    except OSError as e:
+        logger.debug("Could not stat database WAL %s for cache fingerprint: %s", path + "-wal", e)
         return None
     return (st.st_mtime_ns, st.st_size + wal_size)
 
@@ -2265,13 +2271,18 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # pattern as resembl.core._sync_dir).
         try:
             dir_fd = os.open(os.path.dirname(port_file), os.O_RDONLY)
-        except OSError:
+        except OSError as e:
+            logger.warning(
+                "Could not open directory %s for port-file sync: %s",
+                os.path.dirname(port_file),
+                e,
+            )
             dir_fd = None
         if dir_fd is not None:
             try:
                 os.fsync(dir_fd)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Could not sync port-file directory: %s", e)
             finally:
                 os.close(dir_fd)
     except BaseException:

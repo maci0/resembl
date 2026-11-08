@@ -19,10 +19,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 import re
 import sys
 import tempfile
+
+logger = logging.getLogger(__name__)
 
 #: Database URL used when the environment names none.
 DEFAULT_DB_URL = "sqlite:///assembly.db"
@@ -170,8 +173,10 @@ def port_file_cleanup(port_file: str, port: int) -> None:
             if f.read().strip() != str(port):
                 return
         os.remove(port_file)
-    except OSError:
-        pass
+    except OSError as e:
+        # A stale port file left behind steers find clients to a dead
+        # port (they fall back, but churn).  Log so the leak is visible.
+        logger.debug("Could not remove port file %s: %s", port_file, e)
 
 
 def _encoding_is_utf8(encoding: str) -> bool:

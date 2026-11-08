@@ -140,16 +140,19 @@ def _sync_path(path: str) -> None:
     cache: an OS crash can leave a zero-length or short file at the
     published name.  Filesystems that do not support fsync (some network
     mounts) must not fail an otherwise complete backup, so ``OSError`` is
-    swallowed.
+    swallowed — but logged at warning level, since the published file is
+    then not durable against an OS crash and an operator should know the
+    backup's durability guarantee is weaker than usual.
     """
     try:
         fd = os.open(path, os.O_RDONLY)
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not open %s for sync: %s", path, e)
         return
     try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning("Could not sync %s: %s", path, e)
     finally:
         os.close(fd)
 
@@ -163,12 +166,13 @@ def _sync_dir(path: str) -> None:
     """
     try:
         fd = os.open(path, os.O_RDONLY)
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not open %s for sync: %s", path, e)
         return
     try:
         os.fsync(fd)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning("Could not sync %s: %s", path, e)
     finally:
         os.close(fd)
 
@@ -271,7 +275,12 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
     """
     try:
         names = os.listdir(backup_dir)
-    except OSError:
+    except OSError as e:
+        # An unreadable backup directory means no reuse candidate can be
+        # trusted; a fresh backup is written instead.  Log it so a silent
+        # permission change that makes every backup look new (and prunes
+        # retention oddly) is visible.
+        logger.warning("Could not list backup directory %s for reuse: %s", backup_dir, e)
         return None
     candidates = sorted(
         name
@@ -2683,7 +2692,11 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
     """
     try:
         names = os.listdir(backup_dir)
-    except OSError:
+    except OSError as e:
+        # Pruning is skipped, but an unreadable directory is an operator-
+        # visible condition: retention silently not running with no log
+        # would let the directory grow until disk pressure.
+        logger.warning("Could not list backup directory %s for pruning: %s", backup_dir, e)
         return 0
     candidates = sorted(
         name
