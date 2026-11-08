@@ -430,6 +430,12 @@ class Snippet(SQLModel, table=True):
     def _keyset_batches(session: Session, batch_size: int, columns: tuple) -> Iterator[list]:
         if batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+        # When the full entity is projected, ``exec`` returns ORM objects
+        # (no subscript); a column projection returns ``Row`` tuples.
+        # The keyset cursor is always the first column, so index 0 holds
+        # the checksum in both shapes, but reaching it must not assume
+        # ``row[0]`` works on a ``Snippet``.
+        entity_projected = any(isinstance(c, type) and issubclass(c, SQLModel) for c in columns)
         last: str | None = None
         while True:
             stmt = select(*columns).order_by(Snippet.checksum).limit(batch_size)
@@ -439,7 +445,11 @@ class Snippet(SQLModel, table=True):
             if not batch:
                 return
             yield batch
-            last = batch[-1].checksum if hasattr(batch[-1], "checksum") else batch[-1][0]
+            last = (
+                batch[-1].checksum
+                if entity_projected or hasattr(batch[-1], "checksum")
+                else batch[-1][0]
+            )
 
     @classmethod
     def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:
