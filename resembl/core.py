@@ -65,6 +65,7 @@ from .models import (
     timestamp_normalize,
     timestamp_now,
 )
+from .paths import db_url_mask
 from .scoring import (
     NUM_PERMUTATIONS,
     cfg_extract,
@@ -2794,8 +2795,12 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         source_engine = create_db_engine(source_url)
         source_session = Session(source_engine)
     except Exception as e:
-        logger.exception("Failed to open source database %r: %s", source_db_path, e)
-        return {"error": f"failed to open source database {source_db_path}: {e}"}
+        # Mask credentials: a URL source may embed a password, and the
+        # exception/log path must not persist it (same rule as db_url_mask
+        # in the CLI/server open paths). Plain paths pass through intact.
+        masked = db_url_mask(source_db_path)
+        logger.exception("Failed to open source database %r: %s", masked, e)
+        return {"error": f"failed to open source database {masked}: {e}"}
 
     added = 0
     updated = 0
@@ -3016,7 +3021,7 @@ def db_merge(session: Session, source_db_path: str) -> dict:
         if added:
             _fingerprint_stamps_clear(session)
     except Exception as e:
-        logger.exception("Merge failed for %r: %s", source_db_path, e)
+        logger.exception("Merge failed for %r: %s", db_url_mask(source_db_path), e)
         # Chunks already through ``flush_new_rows`` are committed (it commits
         # as each chunk fills), so a failure can leave a partial merge behind.
         # End the aborted transaction so the caller's session stays usable,
