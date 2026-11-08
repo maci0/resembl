@@ -900,6 +900,15 @@ class TestCLIServeLifecycle(BaseCLITest):
 class TestServerFallback(unittest.TestCase):
     """The thin-client fallback must not orphan a slow-but-live server."""
 
+    @staticmethod
+    def _opener_with(open_side_effect):
+        """Return a fake OpenerDirector whose open() has the given behavior."""
+        from unittest.mock import MagicMock
+
+        opener = MagicMock()
+        opener.open.side_effect = open_side_effect
+        return opener
+
     def setUp(self):
         import hashlib
 
@@ -934,8 +943,8 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=urllib.error.URLError(TimeoutError("server busy")),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(urllib.error.URLError(TimeoutError("server busy"))),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -954,8 +963,10 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=urllib.error.URLError(ConnectionResetError("connection reset")),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(
+                urllib.error.URLError(ConnectionResetError("connection reset"))
+            ),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -976,8 +987,8 @@ class TestServerFallback(unittest.TestCase):
                 return b"<html>not json</html>"
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=lambda request, timeout=None: _BadResponse(),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(lambda request, timeout=None: _BadResponse()),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -991,8 +1002,10 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(
+                urllib.error.URLError(ConnectionRefusedError("no server"))
+            ),
         ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
@@ -1020,7 +1033,9 @@ class TestServerFallback(unittest.TestCase):
                 f.write("6789")
             raise urllib.error.URLError(ConnectionRefusedError("no server"))
 
-        with patch("urllib.request.OpenerDirector.open", side_effect=refused_after_retarget):
+        with patch(
+            "urllib.request.build_opener", return_value=self._opener_with(refused_after_retarget)
+        ):
             result = cli._find_via_server("MOV EAX, 1", 5, 0.5, True, 3)
         self.assertIsNone(result)
         with open(self.port_file, encoding="utf-8") as f:
@@ -1034,16 +1049,18 @@ class TestServerFallback(unittest.TestCase):
         import resembl.cli as cli
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=urllib.error.URLError(TimeoutError("server busy")),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(urllib.error.URLError(TimeoutError("server busy"))),
         ):
             result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)
         self.assertIsNone(result)
         self.assertTrue(os.path.exists(self.port_file), "port file must survive a timeout")
 
         with patch(
-            "urllib.request.OpenerDirector.open",
-            side_effect=urllib.error.URLError(ConnectionRefusedError("no server")),
+            "urllib.request.build_opener",
+            return_value=self._opener_with(
+                urllib.error.URLError(ConnectionRefusedError("no server"))
+            ),
         ):
             result = cli._find_batch_via_server(["MOV EAX, 1", "MOV EBX, 2"], 5, 0.5, True, 3)
         self.assertIsNone(result)

@@ -704,10 +704,12 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         # Loopback must not go through a proxy (http_proxy): the server is
         # on this host, and a proxied request would either fail or send the
         # corpus query to a third party.  ProxyHandler({}) disables proxies.
-        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
-            request,
-            timeout=timeout,
-        ) as response:
+        # urlopen()'s context is an SSLContext, not an opener: passing an
+        # opener there only wrapped it as an HTTPSHandler context, so the
+        # default opener's env ProxyHandler still proxied the http request.
+        # OpenerDirector.open() is the opener-aware path.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as response:
             payload = json.loads(_read_bounded_server_response(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # A 4xx/5xx answer is a decision, not an outage: the server is

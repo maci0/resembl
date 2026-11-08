@@ -113,6 +113,15 @@ class _ServeTestCase(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    @staticmethod
+    def _opener_with(open_side_effect):
+        """Return a fake OpenerDirector whose open() has the given behavior."""
+        from unittest.mock import MagicMock
+
+        opener = MagicMock()
+        opener.open.side_effect = open_side_effect
+        return opener
+
     def _start_server(self):
         """Serve the fixture database on a background thread; return the port."""
         from resembl.server import serve
@@ -550,6 +559,11 @@ class TestServerMode(_ServeTestCase):
         captured: dict = {}
 
         class _FakeResponse:
+            def __init__(self):
+                import io as _io
+
+                self._stream = _io.BytesIO(b'{"lsh_candidates": 0, "matches": []}')
+
             def __enter__(self):
                 return self
 
@@ -557,14 +571,11 @@ class TestServerMode(_ServeTestCase):
                 return False
 
             def read(self, size=-1):
-                if getattr(self, "_done", False):
-                    return b""
-                self._done = True
-                return b'{"lsh_candidates": 0, "matches": []}'
+                return self._stream.read(size)
 
-        # Signature-conformance stub for urllib.request.urlopen; the real
+        # Signature-conformance stub for OpenerDirector.open; the real
         # call site passes timeout but the fake needs no fetch delay.
-        def fake_urlopen(request, timeout=5, context=None):  # pylint: disable=unused-argument
+        def fake_open(request, timeout=5):  # pylint: disable=unused-argument
             captured["body"] = json.loads(request.data)
             return _FakeResponse()
 
@@ -573,7 +584,10 @@ class TestServerMode(_ServeTestCase):
             "resembl.find_client._load_config",
             return_value={"lsh_threshold": 0.7, "ngram_size": 2},
         ):
-            with _patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with _patch(
+                "urllib.request.build_opener",
+                return_value=self._opener_with(fake_open),
+            ):
                 rc = _main(["--query", "mov", "--json"])
         self.assertEqual(rc, 0)
         self.assertEqual(captured["body"]["threshold"], 0.7)
@@ -610,8 +624,10 @@ class TestServerMode(_ServeTestCase):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             with patch(
-                "urllib.request.urlopen",
-                side_effect=urllib.error.URLError(ConnectionRefusedError("connection refused")),
+                "urllib.request.build_opener",
+                return_value=self._opener_with(
+                    urllib.error.URLError(ConnectionRefusedError("connection refused"))
+                ),
             ):
                 rc = _main(["--query", "mov eax, 5"])
         self.assertEqual(rc, 1)
@@ -680,6 +696,11 @@ class TestServerMode(_ServeTestCase):
         from resembl.find_client import _main
 
         class _FakeResponse:
+            def __init__(self):
+                import io as _io
+
+                self._stream = _io.BytesIO(b'{"error": "threshold too high"}')
+
             def __enter__(self):
                 return self
 
@@ -687,17 +708,14 @@ class TestServerMode(_ServeTestCase):
                 return False
 
             def read(self, size=-1):
-                if getattr(self, "_done", False):
-                    return b""
-                self._done = True
-                return b'{"error": "threshold too high"}'
+                return self._stream.read(size)
 
         self._start_server()  # writes a valid port file
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             with patch(
-                "urllib.request.urlopen",
-                side_effect=lambda request, timeout=5, context=None: _FakeResponse(),
+                "urllib.request.build_opener",
+                return_value=self._opener_with(lambda request, timeout=5: _FakeResponse()),
             ):
                 rc = _main(["--query", "mov eax, 5", "--json"])
         self.assertEqual(rc, 1)
@@ -720,13 +738,15 @@ class TestServerMode(_ServeTestCase):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             with patch(
-                "urllib.request.urlopen",
-                side_effect=urllib.error.HTTPError(
-                    "http://127.0.0.1/find",
-                    400,
-                    "Bad Request",
-                    {},
-                    io.BytesIO(b'{"error": "threshold 5.0 is not in [0.0, 1.0]"}'),
+                "urllib.request.build_opener",
+                return_value=self._opener_with(
+                    urllib.error.HTTPError(
+                        "http://127.0.0.1/find",
+                        400,
+                        "Bad Request",
+                        {},
+                        io.BytesIO(json.dumps({"error": "threshold 5.0 is not in range"}).encode()),
+                    )
                 ),
             ):
                 rc = _main(["--query", "mov eax, 5", "--threshold", "5"])
@@ -751,7 +771,9 @@ class TestServerMode(_ServeTestCase):
 
         class _FakeResponse:
             def __init__(self, body):
-                self._body = body
+                import io as _io
+
+                self._stream = _io.BytesIO(body)
 
             def __enter__(self):
                 return self
@@ -760,19 +782,16 @@ class TestServerMode(_ServeTestCase):
                 return False
 
             def read(self, size=-1):
-                if getattr(self, "_done", False):
-                    return b""
-                self._done = True
-                return self._body
+                return self._stream.read(size)
 
         self._start_server()  # writes a valid port file
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             with patch(
-                "urllib.request.urlopen",
-                side_effect=lambda request, timeout=5, context=None: _FakeResponse(
-                    json.dumps(payload).encode("utf-8")
+                "urllib.request.build_opener",
+                return_value=self._opener_with(
+                    lambda request, timeout=5: _FakeResponse(json.dumps(payload).encode("utf-8"))
                 ),
             ):
                 rc = _main(["--query", "mov eax, 5"])
