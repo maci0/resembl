@@ -441,6 +441,30 @@ class TestDbBackup(FileDBTest):
         self.assertNotEqual(second["backup"], first["backup"])
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
 
+    def test_backup_after_a_fingerprint_change_writes_a_new_file(self):
+        """A reindex rewrites minhash blobs for the same checksums: that is a
+        content change the reuse check must see."""
+        from sqlmodel import select
+
+        from resembl.core import db_reindex
+        from resembl.models import Snippet
+
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        self.assertTrue(db_verify_backup(self.session, first["backup"])["ok"])
+        row = self.session.exec(select(Snippet)).first()
+        assert row is not None
+        row.minhash = b"rewritten-fingerprint-blob"
+        self.session.add(row)
+        self.session.commit()
+        second = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(second["backup"], first["backup"])
+        self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+        db_reindex(self.session, jobs=1)
+        third = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(third["backup"], second["backup"])
+
     def test_backup_reuse_does_not_drain_the_retention_window(self):
         """Duplicate runs never prune: only genuinely new content does."""
         backup_dir = os.path.join(self._tmpdir.name, "backups")

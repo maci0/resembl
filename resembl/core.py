@@ -226,28 +226,35 @@ def _db_backup_config_read() -> tuple[bytes | None, str | None]:
 def _db_content_hash(session: Session) -> str:
     """Return a stable identity for the snippet corpus in *session*.
 
-    The SHA-256 hex digest over ``(checksum, names, tags, collection)`` in
-    primary-key order.  Two databases holding the same snippets — however
-    their files happen to be paged — hash identically, which is what makes a
-    re-executed backup recognizable as the same logical backup instead of a
-    new one.  The metadata columns are part of the identity: an alias, tag,
-    or collection change alters the corpus a restore would hand back, so a
-    backup taken before it must not be reused after it (that reuse returned
-    a stale copy as if it were current).  Code and fingerprint payloads are
-    keyed by checksum, so they need no separate hashing.
+    The SHA-256 hex digest over ``(checksum, names, tags, collection,
+    minhash)`` in primary-key order.  Two databases holding the same snippets
+    — however their files happen to be paged — hash identically, which is what
+    makes a re-executed backup recognizable as the same logical backup instead
+    of a new one.  The metadata columns are part of the identity: an alias,
+    tag, or collection change alters the corpus a restore would hand back, so a
+    backup taken before it must not be reused after it (that reuse returned a
+    stale copy as if it were current).  The fingerprint payload is part of the
+    identity too: a reindex (new n-gram, new permutation count, or healing a
+    corrupt blob) rewrites ``minhash`` for the same checksums, and a backup
+    taken before that rewrite holds different fingerprints than the live
+    database — reusing it would hand back a stale restore point while
+    reporting success.  Code is keyed by checksum (the checksum is taken over
+    the normalized code), so it needs no separate hashing.
     """
     digest = hashlib.sha256()
     # Stream: the old ``.all()`` materialized every row (O(corpus) memory)
     # just to hash it.  Iterating the result keeps this O(1) extra memory.
     rows = session.exec(
-        select(Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection).order_by(
-            Snippet.checksum
-        )
+        select(
+            Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection, Snippet.minhash
+        ).order_by(Snippet.checksum)
     ).yield_per(1000)
-    for checksum, names, tags, collection in rows:
+    for checksum, names, tags, collection, minhash in rows:
         for value in (checksum, names, tags, collection or ""):
             digest.update(value.encode("utf-8"))
             digest.update(b"\0")
+        digest.update(minhash)
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -2821,20 +2828,23 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         if "snippet" in tables:
             row = connection.execute("SELECT COUNT(*) FROM snippet").fetchone()
             num_snippets = int(row[0]) if row else 0
-            # Corpus identity: SHA-256 over (checksum, names, tags, collection)
-            # in PK order (the same digest _db_content_hash computes).  Catches
-            # a backup whose row count matches its manifest but whose rows are
-            # not the rows promised (half-overwritten, truncated-then-padded
-            # copy).
+            # Corpus identity: SHA-256 over (checksum, names, tags, collection,
+            # minhash) in PK order (the same digest _db_content_hash computes).
+            # Catches a backup whose row count matches its manifest but whose
+            # rows are not the rows promised (half-overwritten,
+            # truncated-then-padded copy, or fingerprints rewritten by a
+            # reindex the manifest predates).
             digest = hashlib.sha256()
             # Streamed, not fetchall(): a large backup would otherwise be
             # materialized whole just to hash it (same fix as _db_content_hash).
             for row in connection.execute(
-                "SELECT checksum, names, tags, collection FROM snippet ORDER BY checksum"
+                "SELECT checksum, names, tags, collection, minhash FROM snippet ORDER BY checksum"
             ):
-                for value in row:
+                for value in row[:-1]:
                     digest.update(str(value or "").encode("utf-8"))
                     digest.update(b"\0")
+                digest.update(row[-1] or b"")
+                digest.update(b"\0")
             content_hash = digest.hexdigest()
         # integrity_check: a flipped or zeroed page that still answers
         # COUNT(*) must not pass as restorable.
