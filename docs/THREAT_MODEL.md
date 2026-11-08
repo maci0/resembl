@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`08ee7a1`. Every reference below was re-read in that tree on that
+`5f9337c`. Every reference below was re-read in that tree on that
 date, except where a line number is explicitly historical. The
 `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
@@ -35,6 +35,24 @@ now stream / select only needed columns (`ec7a77d`); and `cfg_similarity`
 (`resembl/scoring.py:1315`, twice) and a cluster of stale line numbers in
 `resembl/server.py` / `resembl/core.py` / `resembl/cli.py`; those are corrected
 where this pass touched them and otherwise left historical per the note above.
+A later 2026-11-09 pass re-checked the commits after `f896006`: `db_merge`
+no longer returns raw driver/SQL error text to callers, only a stable
+message naming the masked source (`c1eb6cb`, `db_merge` in
+`resembl/core.py`, logged at `logger.exception`), which closes the B6
+failure-path leak; the port-file name now hashes the database URL with
+SHA-256 instead of SHA-1 (`c1eb6cb`, `server_port_path` in
+`resembl/paths.py`), which corrects R9 below; `db_backup` now also copies
+the live `config.toml` to a `<backup-stem>.config.toml` sidecar (mode
+`0600`) and records its SHA-256 as `config_sha256` in the manifest,
+with `verify-backup` cross-checking that sidecar (`8616290`, `db_backup`
+and `db_verify_backup` in `resembl/core.py`), which extends R17; and a
+failed `COMMIT` on the pinned path now answers `503 pinned index
+unavailable` instead of `200` (`1e1fa33`, `_handle_find_pinned` in
+`resembl/server.py`). The Go engine adapter now honors the caller's
+per-request timeout instead of a hardcoded 30s (`1e1fa33`,
+`NewLocalEngineWithTimeout` in `service/http_engine.go`,
+`NewPinnedSQLiteEngineWithTimeout` in `service/pinned_engine.go`),
+closing the gap where a handler could outlive its custody claim.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -62,10 +80,10 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | none on a cache directory that already existed (`resembl/find_client.py:118`, `resembl/cli.py:429`); the server's own directory is `0o700` (`serve` in `resembl/server.py:2116`) |
 | R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`log_message`/`log_request` in `resembl/server.py:1760`); the only default-level per-request trace is a slow-request WARNING (`resembl/server.py:1790`) and exception logs on failure (`resembl/server.py:1521`) |
 | R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at an attacker-chosen host; config read from an attacker-chosen directory | none, by design (`docs/adr/006-paths-module-owns-environment.md`, `resembl/paths.py:57`, `resembl/paths.py:81`, `resembl/paths.py:97`) |
-| R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows; a source that fails to open has its raw driver error text returned to the caller | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host; a driver error can name a host/port | Fingerprints recomputed, never deserialized (`db_merge` in `resembl/core.py:2770`); the source URL is masked for display in the error path (`db_url_mask` in `resembl/core.py:2812`), but the exception text itself is returned unsanitized (`resembl/core.py:2814`) |
+| R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`db_merge` in `resembl/core.py`); the source URL is masked for display in the error path (`db_url_mask` in `resembl/paths.py`), and callers get only a stable message naming the masked source — driver/SQL detail stays in the operator log, not the return value (`c1eb6cb`, `db_merge` in `resembl/core.py`) |
 | R7 | `import` holds every matching path in memory and spawns a worker process per CPU over the set, and `reindex` does the same over every row of the corpus, with no count or size cap on either | B2 | Process, memory, and CPU exhaustion from a hostile directory | Chunked database writes only (`resembl/cli.py:1010`, `resembl/cli.py:1049`) |
 | R8 | The in-process result cache keeps the 128 most recent find results resident | B1 | Snippet checksums and names (the result payload) sit in process memory beyond the request | 128-entry LRU whose key is a SHA-256 digest of the query, so the query text itself is not retained (`resembl/server.py:618`) |
-| R9 | The port-file name is a 12-hex-digit SHA1 of the raw, unmasked database URL | B5, B7 | A truncated hash of a credentialed URL is written to disk under the cache dir | none (`resembl/paths.py:118`) |
+| R9 | The port-file name is a 12-hex-digit SHA-256 of the raw, unmasked database URL | B5, B7 | A truncated hash of a credentialed URL is written to disk under the cache dir | none (`server_port_path` in `resembl/paths.py`, upgraded from SHA-1 in `c1eb6cb`; stale SHA-1 files are ignored) |
 | R10 | `find-batch --file` reads the whole query file into a list before chunking it into requests | B2 | Memory exhaustion from an oversized input file | Chunking on the wire only (`resembl/cli.py:1571`, `resembl/cli.py:526`) |
 | R11 | A release tag is not statically analyzed or dependency-reviewed when it is cut; only the SBOM runs on the tag | B8 | A tagged release ships whatever the tag's tree contains, with no pre-release SAST or CVE gate on the tag itself | SAST on push and pull request to `main` plus a weekly cron, Python and Go (`.github/workflows/codeql.yml:4`), dependency review on pull requests to `main` only (`.github/workflows/dependency-review.yml:11`), SBOM on `main` and on `v*` (`.github/workflows/sbom.yml:9`); `service.yml` runs `gofmt`/`go vet`/`go test -race` on `service/` push/PR |
 | R12 | The vulnerability reporting channel the documentation names is not enabled on the repository | Outside the process | A reporter following `SECURITY.md` finds no private channel and is pushed toward a public issue | none; the one working route is a public issue, which the same document forbids for an unfixed vulnerability |
@@ -73,7 +91,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`_handle_find_pinned` in `resembl/server.py:1529`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, latency, and uptime. The Python `GET /health` additionally reports database reachability and probe latency; the Go `GET /healthz` is liveness only | B1, B9 | Process internals (traffic volume, hit rate, latency) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:767`); Python `GET /metrics` (`_handle_metrics` in `resembl/server.py:1467`) exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` latency and `resembl_server_result_cache_total` hit/miss, and `GET /health` (`_handle_health` in `resembl/server.py:1413`) returns database status plus `latency_ms`; Go `GET /metrics` (`service/service.go:212`) exposes `resembl_service_up`, `resembl_service_uptime_seconds`, `resembl_service_requests_total` by path and status, and `resembl_service_request_duration_seconds` histogram, and `GET /healthz` (`service/service.go:203`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:123`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:261`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
-| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, writes backup and manifest mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup` |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256`, the `<backup-stem>.config.toml` sidecar must also exist and hash to it (`8616290`, `db_verify_backup` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged triple still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, writes backup, manifest, and config sidecar mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup` |
 | R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
@@ -131,12 +149,16 @@ tool's own process:
 - `add`, `show`, `rm`, `name *`, `tag *`, `collection *` write to the
   database.
 - `backup <dir>` writes a consistent SQLite copy of the corpus plus a
-  per-backup manifest (`<backup-stem>.json`, mode `0600`) into a
-  caller-chosen directory, pruning to the newest `--keep` (default 7)
-  (`resembl/cli.py:2032`, `resembl/core.py:1922`); `verify-backup <path>`
-  opens a backup read-only, checks the expected tables, and compares the
-  live snippet count against that manifest (`resembl/cli.py:2059`,
-  `resembl/core.py:2111`).
+  per-backup manifest (`<backup-stem>.json`, mode `0600`) and a config
+  sidecar (`<backup-stem>.config.toml`, mode `0600`, copied verbatim
+  from the live `config.toml`) into a caller-chosen directory, pruning
+  to the newest `--keep` (default 7)
+  (`resembl/cli.py`, `db_backup` in `resembl/core.py`); `verify-backup
+  <path>` opens a backup read-only, checks the expected tables, and
+  compares the live snippet count and content hash against that
+  manifest, cross-checking the config sidecar when the manifest records
+  its hash (`resembl/cli.py`, `db_verify_backup` in
+  `resembl/core.py`).
 
 `list` (`resembl/cli.py:1198`) prints every snippet in the corpus to stdout
 unless `--range` narrows it, and `verify` (`resembl/cli.py:1361`) counts
@@ -302,7 +324,7 @@ network fetch at import.
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`_handle_find_pinned` in `resembl/server.py:1529`) |
-| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup and per-backup manifest `<backup-stem>.json` mode `0600` |
+| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup, per-backup manifest `<backup-stem>.json`, and `<backup-stem>.config.toml` config sidecar, all mode `0600` |
 
 ## Threats per boundary
 
@@ -369,13 +391,18 @@ content-hash manifest. `verify-backup`
 (`db_verify_backup` in `resembl/core.py`) opens the file read-only, checks
 expected tables, runs `PRAGMA integrity_check`, and compares the live
 count and `content_hash` against the manifest: a tampered backup whose
-manifest is edited to match passes (R17). Backup and manifest are written
-mode `0600` (`db_backup` in `resembl/core.py`) but the manifest is otherwise
+manifest is edited to match passes (R17). Newer backups also carry a
+`<backup-stem>.config.toml` sidecar, copied verbatim from the live
+`config.toml` and hashed as `config_sha256` in the manifest; when the
+manifest records that hash, `db_verify_backup` requires the sidecar to
+exist and hash to it, and a missing or mismatched sidecar is a hard
+failure (`8616290`). Backup, manifest, and sidecar are written mode
+`0600` (`db_backup` in `resembl/core.py`) but the manifest is otherwise
 unauthenticated, so anyone who can write the backup directory can forge
-both. `db_backup` re-verifies the just-published file and deletes it on
-failure, so a backup that `backup` reported as success has verified at
-write time; that does not make a later `verify-backup` of a hand-supplied
-pair trustworthy.
+all three. `db_backup` re-verifies the just-published file and deletes
+it on failure, so a backup that `backup` reported as success has
+verified at write time; that does not make a later `verify-backup` of a
+hand-supplied triple trustworthy.
 
 *Denial of service.* `import` has no cap on file count or file size: the
 walk materialises every matching path into a list (`resembl/cli.py:1010`),
@@ -435,16 +462,14 @@ sends those credentials to the named host (`db_merge` in
 `resembl/core.py:2770`). The URL is masked for display (`db_url_mask` in
 `resembl/paths.py:68`) but that is a display control, not a network one.
 
-*Information disclosure, the failure path.* When the source will not open,
-`db_merge` returns the raw exception text to the caller
-(`resembl/core.py:2814`) rather than a fixed message. The CLI prints it, so
-whatever the driver puts in the exception, including the host and port it
-dialled, reaches the terminal and any log that captures it. The source URL
-itself is masked (`db_url_mask` in `resembl/core.py:2812`, `0afeba7`), which
-closes the credential-in-error case; this remains the only error path in the
-codebase that returns unsanitized driver text to a caller. The HTTP handlers
-replaced theirs with a fixed body (`resembl/server.py:1336`,
-`resembl/server.py:1525`).
+*Information disclosure, the failure path.* When the source will not open
+or the merge fails, `db_merge` logs the exception with `logger.exception`
+and returns only a stable message naming the masked source (`c1eb6cb`,
+`db_merge` in `resembl/core.py`); driver/SQL/port detail no longer reaches
+the caller. The source URL is masked (`db_url_mask` in
+`resembl/paths.py`, `0afeba7`), which closes the credential-in-error
+case. Earlier revisions of this model recorded the raw driver text as a
+live leak here; the code no longer emits it.
 
 ### B9, Go service to pinned engine
 
@@ -516,6 +541,9 @@ workflow does not re-run either.
 | Dependency CVE floor | `pyproject.toml:34` | The Pygments ReDoS advisory |
 | CI static analysis and dependency review | `.github/workflows/codeql.yml:29` (`language: [ 'python', 'go' ]`), `.github/workflows/dependency-review.yml:50` (`fail-on-severity: moderate`) | Python and Go SAST and dependency review of `main` and of pull requests; the Go tree in `service/` also gets `gofmt`/`go vet`/`go test -race` via `.github/workflows/service.yml` (`make service-check`). None of the SAST or dependency review runs on a release tag (R11) |
 | Release SBOM | `.github/workflows/sbom.yml:9` | An inventory of the runtime graph attached to the build, on `main` and on `v*` tags |
+| Merge error text stays in the operator log | A hostile or misconfigured source must not leak host, file-path, or SQL detail through the merge error | `db_merge` in `resembl/core.py` (`c1eb6cb`) logs with `logger.exception` and returns only a stable message naming the masked source |
+| Port-file hash upgraded to SHA-256 | A credential-carrying URL must not be content-addressed with deprecated SHA-1 | `server_port_path` in `resembl/paths.py` (`c1eb6cb`); stale SHA-1 port files are ignored |
+| Backup config sidecar cross-check | A backup that promised tuned config must not verify without it | `db_verify_backup` in `resembl/core.py` (`8616290`): when `config_sha256` is present in the manifest, the `<backup-stem>.config.toml` sidecar must exist and hash to it |
 | Go Authorizer gate | service/service.go:244 | B9 caller authentication; fails closed on error or missing authority |
 | Lambda event adapter caps | `service/internal/lambdaproxy/proxy.go` | B9 Lambda input/output bound (8 MiB in, 4 MiB out), duplicate-header and malformed-event rejection; gateway identity claims never treated as a grant |
 | TokenAuthority constant-time compare | service/token_authority.go:54 | B9 credential verification |
@@ -536,8 +564,9 @@ enforced.
 R3's server-side `0o700` closes the case where `serve` created the cache
 directory itself and leaves open the case where something else created it
 first, which is the case a shared cache directory actually is. R6's
-recomputed fingerprints are a control; its error path masks the source URL
-(`0afeba7`) but still returns raw driver text to the caller.
+recomputed fingerprints are a control, and its error path now masks the
+source URL (`0afeba7`) and keeps driver text in the operator log
+(`c1eb6cb`), so the B6 failure-path leak is closed.
 
 R11 and R12 have no mitigation and no code that could carry one: R11 is a
 workflow-trigger gap and R12 is a repository setting. Both are recorded here
@@ -624,11 +653,12 @@ fingerprints has them recomputed from its own code
 (`db_merge` in `resembl/core.py:2770`). The corpus now contains code the
 operator never reviewed, ranked by similarity alongside genuine findings.
 
-**Merge error as an information leak.** Pointing `merge` at a URL whose host
-answers with a slow or hostile handshake makes the driver raise; the raw
-text of that error is returned and printed (`resembl/core.py:2814`). The
-source URL itself is masked (`db_url_mask` in `resembl/core.py:2812`), so
-the credentialed-URL case is closed (`0afeba7`); the driver text remains.
+**Merge error as an information leak (closed).** Pointing `merge` at a
+URL whose host answers with a slow or hostile handshake makes the driver
+raise; earlier revisions returned that raw text to the caller. `db_merge`
+now logs it and returns only a stable message naming the masked source
+(`c1eb6cb`, `db_merge` in `resembl/core.py`), so a hostile source cannot
+leak host, file-path, or SQL detail through the merge error.
 
 Token holder reuse. A holder of the Go service bearer token (service/token_authority.go:54) can query the whole pinned index repeatedly; the token grants all holders the same access, is read once at startup, and cannot be revoked short of restart, so a leaked token is a standing credential with no per-caller audit trail.
 

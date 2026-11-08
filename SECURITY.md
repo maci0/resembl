@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `08ee7a1`. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `5f9337c`. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
@@ -97,22 +97,23 @@ relies on, not configuration options.
   snippets, names, tags, and collections into the local corpus. Point it only
   at databases you control. Its one closed edge is fingerprint
   deserialization: blobs without the `RMLH` magic are rejected and
-  recomputed rather than unpickled. The failure path is not fully closed: a
-  source that will not open makes `merge` print the driver's own error text,
-  which can name the host and port it dialled. Its source URL is masked for
-  display, so a credentialed URL no longer appears in that error, but the
-  driver text itself is still returned unsanitized.
+  recomputed rather than unpickled. The failure path is also closed: a
+  source that will not open makes `merge` log the driver's error text and
+  return only a stable message naming the masked source, so host, port,
+  file-path, and SQL detail no longer reach the caller.
 - **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` (default `http://127.0.0.1:8081`) and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
-  the SQLite corpus plus a per-backup manifest into a caller-chosen
+  the SQLite corpus plus a per-backup manifest and a `<backup-stem>.config.toml`
+  config sidecar into a caller-chosen
   directory, pruning to the newest `--keep` (default 7), and re-verifies
   the published file before reporting success (removing it on failure;
   exits 1 when the manifest could not be written). `verify-backup`
-  checks tables, runs `PRAGMA integrity_check`, and compares the snippet
-  count and content hash against the manifest, but the manifest is
-  unauthenticated: a tampered backup with an edited manifest passes. Keep the
-  backup directory private (backup and manifest are mode `0600`) and
-  treat any backup whose manifest you did not write as untrusted
-  (THREAT_MODEL.md R17).
+  checks tables, runs `PRAGMA integrity_check`, compares the snippet
+  count and content hash against the manifest, and cross-checks the
+  config sidecar against its recorded `config_sha256`, but the manifest is
+  unauthenticated: a tampered backup with an edited manifest (and sidecar)
+  passes. Keep the backup directory private (backup, manifest, and sidecar
+  are mode `0600`) and treat any backup whose manifest you did not write
+  as untrusted (THREAT_MODEL.md R17).
 
 - Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
