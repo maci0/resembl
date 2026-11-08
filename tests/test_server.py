@@ -2220,16 +2220,12 @@ class TestScoreEndpoints(_ServeTestCase):
 
         port = self._start_server()
         before = self._scheme(port)["id"]
-        server_mod._scheme_id.cache_clear()
-        self.addCleanup(server_mod._scheme_id.cache_clear)
         # Same parameters, different shingle weighting: the probe listing
         # fingerprints differently, so the id must move.
         with patch("resembl.scoring._shingle_weight_tokens", return_value=1):
             changed = self._scheme(port)["id"]
-        server_mod._scheme_id.cache_clear()
         with patch.object(server_mod, "FINGERPRINT_VERSION", 999):
             bumped = self._scheme(port)
-        server_mod._scheme_id.cache_clear()
         self.assertEqual(self._scheme(port)["id"], before)
         self.assertNotEqual(changed, before)
         self.assertEqual(bumped["version"], 999)
@@ -2241,9 +2237,7 @@ class TestScoreEndpoints(_ServeTestCase):
 
         port = self._start_server()
         before = self._scheme(port)
-        self.addCleanup(server_mod._scheme_id.cache_clear)
         self.addCleanup(scoring._MINHASH_TEMPLATES.clear)
-        server_mod._scheme_id.cache_clear()
         scoring._MINHASH_TEMPLATES.clear()
         with patch.object(scoring, "MINHASH_SEED", 7), patch.object(server_mod, "MINHASH_SEED", 7):
             seeded = self._scheme(port)
