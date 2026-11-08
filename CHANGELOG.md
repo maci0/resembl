@@ -9,6 +9,7 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `rm`, `clean`, and `collection delete` now take a verified pre-delete backup (`db_backup_for_delete`) before deleting; pass `--no-backup` to opt out. A failed backup aborts the deletion instead of proceeding unverified, closing the foot-gun where a destructive command had no restore point.
+- A caller-supplied `X-Request-Id` is now adopted end to end: the Go query service forwards the id it minted for the client to the Python engine (`LocalEngine` sets the header from the request context), and `resembl serve` adopts an incoming id (bounded to 64 chars and printable-only, so a log-forging or unbounded header falls back to a minted one) instead of reminting per hop. The Go service's logs, the engine's log records, and the `X-Request-Id` response header now quote one id for a request, so an operator can pivot from a service log line to the engine records that explain it.
 - Two new fuzz targets cover the remaining untrusted-input readers: `fuzz_stored_metadata.py` drives the merge-source `names`/`tags` JSON readers (`_string_list_or_none` / `_source_lists_or_none`) with corrupt, deeply nested and non-list documents, and `fuzz_runtime_manifest.py` drives the `/find-pinned` runtime-manifest reader (`verify_runtime`) with malformed, truncated and deeply nested manifests. Run them with `make fuzz FUZZER=fuzz_stored_metadata.py` (or `fuzz_runtime_manifest.py`); `make fuzz` and the CI smoke run pick them up automatically.
 
 ### Changed

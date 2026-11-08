@@ -1179,6 +1179,43 @@ class _FindHandler(BaseHTTPRequestHandler):
     path: str = ""
     command: str = ""
 
+    #: Longest caller-supplied correlation id adopted verbatim.  An id
+    #: longer than this is dropped for a server-minted one: the id is
+    #: echoed on every response and written into every log record, so an
+    #: unbounded header would let one client inflate both.
+    _MAX_REQUEST_ID_CHARS = 64
+
+    def _correlation_id(self) -> str:
+        """Return the request's correlation id, adopting the caller's.
+
+        A caller that already named this request (the Go query service,
+        a proxy, a client quoting an earlier failure) — ``X-Request-Id``
+        on the request — keeps that id end to end: the Go service's
+        logs, the metric, and this server's records all quote it, which
+        is the one investigative path through the MELT signals.  The
+        header is request-controlled, so only a bounded, printable id
+        is adopted; anything else (too long, or carrying a control char
+        that could forge a log line) falls back to the id minted before
+        dispatch.  Read after ``parse_request`` (see
+        :meth:`handle_one_request`): before it, ``self.headers`` does
+        not yet hold the request line.
+        """
+        supplied = None
+        headers = getattr(self, "headers", None)
+        if headers is not None:
+            try:
+                supplied = headers.get("X-Request-Id")
+            except Exception:
+                # A headers-like that raises on read must not kill the
+                # request: fall back to a server-minted id.
+                supplied = None
+        if supplied is not None:
+            supplied = supplied.strip()
+            if supplied and len(supplied) <= self._MAX_REQUEST_ID_CHARS:
+                if all(0x20 <= ord(ch) != 0x7F for ch in supplied):
+                    return supplied
+        return self.request_id
+
     def handle_one_request(self) -> None:
         """Run one request, draining any body the handler left unread.
 
@@ -1186,6 +1223,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         calls this again for every request on a keep-alive connection, which
         is the only place the id can be attached before any record is made.
         """
+        # The incoming X-Request-Id is only readable after parse_request
+        # runs inside the stdlib's handle_one_request, so this method
+        # mints before dispatch and adopts in send_response (see there),
+        # which every answer passes through.
         self.request_id = _seeded_uuid_hex()[:12]
         self._request_start = monotonic_now()
         self._body_read = False
@@ -1253,6 +1294,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         own ``send_error`` paths, so one hook covers the whole surface instead
         of leaving an operator with a request that never appears in a metric.
         """
+        # Adopt the caller's correlation id before any answer is written:
+        # parse_request has now run, so the header is readable, and
+        # every response from _respond onward (logs, headers, metrics)
+        # quotes the one id.  Safe to call repeatedly: it is idempotent
+        # once the caller's id is in place.
+        self.request_id = self._correlation_id()
         _METRICS.record_request(self.route or self.path, code, self.request_seconds())
         super().send_response(code, message)
 
@@ -1885,6 +1932,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         to WARNING, because a warm find that stopped being warm leaves no
         other trace and a saturated pool only shows up as latency.
         """
+        # Adopt the caller's id here too: log_request runs after the
+        # handler returns, at a point where a response may have been
+        # written without send_response ever firing (none in this tree,
+        # but the stdlib also calls this for its own error paths).
+        self.request_id = self._correlation_id()
         seconds = self.request_seconds()
         peer = self.client_address[0]
         record = f"{self.command} {self.path} {self.request_version}".translate(_LOG_CONTROL_CHARS)

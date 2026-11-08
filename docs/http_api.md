@@ -351,10 +351,15 @@ at the port cannot reinterpret a response as a page.
 
 ## Logging
 
-Every record the server makes leads with a correlation id, twelve hex digits
-of a fresh id per request. A `500` traceback, a failed `/find-batch` query, a
-slow request and the request's own DEBUG line all quote the same one, so a
-client report that carries an id (or a timestamp and a peer) reaches the rest.
+Every record the server makes leads with a correlation id. A request that
+carries its own `X-Request-Id` (the Go query service forwards the id it
+minted for the client) keeps that id end to end; otherwise the server mints
+twelve hex digits per request. A supplied id is adopted only when it is
+bounded and printable, and anything else falls back to the minted one. A
+`500` traceback, a failed `/find-batch` query, a slow request and the
+request's own DEBUG line all quote the same one, so a client report that
+carries an id (or a timestamp and a peer) reaches the rest. The id is also
+echoed on the response as `X-Request-Id`.
 
 At the default level the server records two things: a `500`, with its
 traceback, and a request slower than a second. A served find is ~1.4 ms, so

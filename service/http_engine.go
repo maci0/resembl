@@ -107,6 +107,12 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Forward the caller's correlation id so the engine's logs, metrics
+	// and response name the same request the service logged: without it
+	// the engine mints a fresh id and the trail breaks at this hop.
+	if id := requestIDFromContext(ctx); id != "" {
+		req.Header.Set("X-Request-Id", id)
+	}
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return nil, err

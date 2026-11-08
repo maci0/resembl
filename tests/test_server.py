@@ -2493,6 +2493,34 @@ class TestServerObservability(_ServeTestCase):
         self.assertTrue(header_id and header_id != "-")
         self.assertTrue(any(f"[{header_id}]" in line for line in captured.output))
 
+    def test_supplied_request_id_is_adopted_not_reminted(self):
+        port = self._start_server()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/find",
+            data=json.dumps({"query": "push ebx"}).encode(),
+            headers={"Content-Type": "application/json", "X-Request-Id": "upstream-42"},
+        )
+        with self.assertLogs("resembl.server", level="DEBUG") as captured:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                self.assertEqual(response.headers.get("X-Request-Id"), "upstream-42")
+        # The engine records quote the upstream id, so the trail the
+        # upstream service logged reaches this server's records.
+        self.assertTrue(any("[upstream-42]" in line for line in captured.output), captured.output)
+
+    def test_oversized_or_control_char_request_id_is_reminted(self):
+        port = self._start_server()
+        for bad in ("x" * 65, "bad\x7fid"):  # DEL is a control char a client can send
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/find",
+                data=json.dumps({"query": "push ebx"}).encode(),
+                headers={"Content-Type": "application/json", "X-Request-Id": bad},
+            )
+            with urllib.request.urlopen(request, timeout=10) as response:
+                got = response.headers.get("X-Request-Id")
+            # An unbounded or log-forging id is dropped for a server
+            # id rather than echoed or written into the log.
+            self.assertTrue(got and got != bad and "\n" not in got, got)
+
     def test_metrics_include_find_pinned_and_runtime_generation_labels(self):
         port = self._start_server()
         self._get(port, "/runtime-generation")

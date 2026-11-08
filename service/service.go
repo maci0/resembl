@@ -302,9 +302,28 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
+// requestIDContextKey carries the correlation id ServeHTTP minted for a
+// request, so the engine hop downstream can forward it unchanged.
+type requestIDContextKey struct{}
+
+// requestIDFromContext returns the correlation id ServeHTTP stored on
+// ctx, or "" when none was. Engines that forward that id downstream
+// (LocalEngine) read it here, so one id names a request at every hop.
+func requestIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(requestIDContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := newRequestID()
 	started := time.Now()
+	// Carry the id on the request context so the engine hop downstream
+	// can forward it (LocalEngine sets X-Request-Id): one id then names
+	// this request in the service's logs, in the engine's logs, and on
+	// the response the client gets back.
+	r = r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, reqID))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Request-Id", reqID)
 	rec := &statusRecorder{ResponseWriter: w}
