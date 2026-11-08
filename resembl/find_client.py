@@ -316,6 +316,18 @@ def _main(argv: list[str] | None = None) -> int:
             1,
             json_on=json_on,
         )
+    # The port file is attacker-writable on a shared host (cache dir is
+    # user-owned but a malicious process can plant an arbitrary port).  A
+    # port outside the ephemeral range (1024-65535) is not a valid serve
+    # port and must not be dialed — an attacker could name a privileged or
+    # sensitive local service (e.g. 22, 3306, 6379) and exfiltrate its
+    # response as find results.
+    if not (1024 <= port <= 65535):
+        return _fail(
+            f"no server running for {db_url_mask(db_url)} (start `resembl serve`)",
+            1,
+            json_on=json_on,
+        )
 
     # The fallbacks below must mirror ``ResemblConfig``'s defaults
     # (resembl.config); this client stays stdlib-only and cannot import it.

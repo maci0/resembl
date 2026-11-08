@@ -531,7 +531,7 @@ def _find_one(
     request = _parse_find_request(body, params)
     # The masked URL identifies the served database without retaining
     # credentials in the long-lived cache keys.
-    db_id = str(_session_engine(session).url)
+    db_id = _session_engine(session).url.render_as_string(hide_password=True)
     key = (
         _query_cache_key(query),
         request.top_n,

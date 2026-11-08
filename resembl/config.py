@@ -276,12 +276,16 @@ def save_config(config: dict | ResemblConfig) -> None:
     os.makedirs(cfg_dir, exist_ok=True)
 
     data = config if isinstance(config, dict) else config.to_dict()
+    # 0o600: the config directory may be on a shared host; other users must
+    # not read the file (it can carry tuning that reveals internal
+    # thresholds, and a future field could hold a credential).
     with tempfile.NamedTemporaryFile("wb", dir=cfg_dir, delete=False) as tmp:
         tmp_path = tmp.name
         try:
             tomli_w.dump(data, tmp)
             tmp.flush()
             os.fsync(tmp.fileno())
+            os.chmod(tmp_path, 0o600)
         except BaseException:
             # The half-written temp file must not outlive a failed save, and
             # a Ctrl-C lands here as often as a serialization error: the
