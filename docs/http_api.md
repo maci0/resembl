@@ -328,6 +328,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
 | `405` | A known path addressed with the wrong verb (including `HEAD` and `OPTIONS`, which carry the same headers without a body), with an `Allow` header naming the verb the path serves. |
+| `413` | A request body larger than 8 MiB (the same status the Go service answers for the same cap). |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |
 | `409` | `/find-pinned` only: the index digest does not match. |

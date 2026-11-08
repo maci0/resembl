@@ -9,6 +9,7 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
+- `resembl serve` now answers `413` with the `{"error": "request too large"}` envelope to a request body larger than 8 MiB, matching the Go service and the Lambda proxy for the same cap; it previously answered `400`, indistinguishable from a malformed body.
 
 ## [4.0.0] - 2026-11-05
 

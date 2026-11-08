@@ -449,8 +449,8 @@ class TestServerMode(_ServeTestCase):
             conn.putheader("Content-Length", str(64 * 1024 * 1024))
             conn.endheaders()
             response = conn.getresponse()
-            self.assertEqual(response.status, 400)
-            self.assertIn(b"bad request body", response.read())
+            self.assertEqual(response.status, 413)
+            self.assertEqual(json.loads(response.read()), {"error": "request too large"})
         finally:
             conn.close()
 

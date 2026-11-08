@@ -1174,6 +1174,7 @@ class _FindHandler(BaseHTTPRequestHandler):
     # Set by :meth:`handle_one_request` before dispatch; read after it to
     # decide whether the request body still needs draining.
     _body_read: bool = False
+    _body_too_large: bool = False
 
     def version_string(self) -> str:
         """Return a generic server banner with no interpreter version.
@@ -1268,7 +1269,13 @@ class _FindHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
             return None
-        if length < 0 or length > _MAX_BODY_BYTES:
+        if length < 0:
+            return None
+        if length > _MAX_BODY_BYTES:
+            # Answered 413, as the Go service and lambdaproxy answer the
+            # same oversized body: the envelope is identical, only the
+            # status distinguishes "too large" from "malformed".
+            self._body_too_large = True
             return None
         self._body_read = True
         try:
@@ -1323,7 +1330,10 @@ class _FindHandler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         if body is None:
-            self._respond(400, {"error": "bad request body"})
+            if getattr(self, "_body_too_large", False):
+                self._respond(413, {"error": "request too large"})
+            else:
+                self._respond(400, {"error": "bad request body"})
             return
         if self.route == "/find-pinned":
             self._handle_find_pinned(body)
