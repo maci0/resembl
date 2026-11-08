@@ -237,7 +237,13 @@ class TestCLICollections(BaseCLITest):
         with Session(self.engine) as session:
             collection_create(session, "to_delete")
         result = self.run_command("collection delete to_delete")
-        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Deleted collection", result.stdout)
+        self.assertIn("to_delete", result.stdout)
+        with Session(self.engine) as session:
+            from resembl.models import Collection
+
+            self.assertIsNone(Collection.get_by_name(session, "to_delete"))
 
     def test_collection_add_snippet(self):
         """Adding a snippet to a collection via CLI."""
@@ -248,7 +254,12 @@ class TestCLICollections(BaseCLITest):
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         result = self.run_command(f"collection add target_col {checksum}")
-        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("target_col", result.stdout)
+        with Session(self.engine) as session:
+            from resembl.models import Snippet
+
+            self.assertEqual(Snippet.get_by_checksum(session, checksum).collection, "target_col")
 
     def test_collection_remove_snippet(self):
         """Removing a snippet from its collection via CLI."""
@@ -261,7 +272,11 @@ class TestCLICollections(BaseCLITest):
             collection_add_snippet(session, "my_col", s.checksum)
             checksum = s.checksum
         result = self.run_command(f"collection remove {checksum}")
-        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with Session(self.engine) as session:
+            from resembl.models import Snippet
+
+            self.assertIsNone(Snippet.get_by_checksum(session, checksum).collection)
 
     def test_collection_list_quiet(self):
         """--quiet should suppress collection list output."""
@@ -349,7 +364,9 @@ class TestCLIVersion(BaseCLITest):
             s = Snippet.get_by_name(session, "test_snippet")
             checksum = s.checksum
         result = self.run_command(f"version {checksum}")
-        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The base fixture added no version rows, so the human form says so.
+        self.assertIn("No version history", result.stdout)
 
     def test_version_without_history_is_empty_not_an_error(self):
         """No recorded version is a message in table mode, empty in the
@@ -686,6 +703,7 @@ class TestCLIShowCommand(BaseCLITest):
         """show with invalid checksum should fail."""
         result = self.run_command("show ffffffffffffffff")
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("No snippet found", result.stderr)
 
     def test_compare_corrupt_blob_heals_from_code(self):
         """compare on a corrupt fingerprint heals it from code, never a traceback.
