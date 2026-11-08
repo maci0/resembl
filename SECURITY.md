@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `a4dba24`, with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `429f11d`, with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
@@ -27,12 +27,11 @@ JSON `405` envelope for any unhandled verb, the verified pre-delete backup
 before `rm`/`clean`/`collection delete` and the verified pre-merge backup
 before `merge` (`db_backup_for_delete`, `resembl/core.py`, with `--no-backup`
 to opt out), the single-file backup publication (`3d77755`, `db_backup` in
-`resembl/core.py`), the fail-fast
+`resembl/core.py`), the end-to-end `X-Request-Id` adoption (bounded to 64 chars,
+printable-only; `26e95cf`), the fail-fast
 `RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths (base-10
 only), the
-warm-server refusal log line before the in-process fallback, the
-correlation-id forwarding from the Go service to the Python engine
-(`26e95cf`, `X-Request-Id`), and the Go
+warm-server refusal log line before the in-process fallback, and the Go
 service's graceful drain on SIGINT/SIGTERM) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
@@ -77,7 +76,11 @@ that is a concern for other processes on the same host, and on a
 non-loopback bind it is the same exposure as the bind itself. Run
 `resembl serve -v` if the served queries have to be attributable after the
 fact; nothing is recorded per request at the default log level except a
-slow-request warning (over 1s) and exception logs on failure.
+slow-request warning (over 1s) and exception logs. A caller-supplied
+`X-Request-Id` is adopted end to end (bounded to 64 chars,
+printable-only), so a request carrying one can be pivoted from the Go
+service's log line to the engine's records, without adding a
+default-level per-request record.
 
 ## Deployment assumptions
 
@@ -126,9 +129,11 @@ relies on, not configuration options.
 - **Merge sources are trusted.** `resembl merge` inserts another database's
   snippets, names, tags, and collections into the local corpus. Point it only
   at databases you control. It first takes a verified pre-merge backup
-  (default to `.resembl-pre-delete-backups/`, `--no-backup` to opt out),
-  so a bad merge is restorable; the backup does not authenticate the source.
-  Its one closed edge is fingerprint
+  (default to `.resembl-pre-delete-backups/`, `db_backup_for_delete` in
+  `resembl/core.py`, aborting with exit 1 on failure, `--no-backup` to opt
+  out), so a bad merge is restorable; the backup does not authenticate the
+  source, and is SQLite-only and forgeable like any backup directory
+  (THREAT_MODEL.md R17). Its one closed edge is fingerprint
   deserialization: blobs without the `RMLH` magic are rejected and
   recomputed rather than unpickled. The failure path is also closed: a
   source that will not open makes `merge` log the driver's error text and
@@ -175,4 +180,4 @@ relies on, not configuration options.
   stamping writes; the Go service validates both at startup and refuses
   to start. `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
   rejects `2**32` permutations (`9aeab2b`, `1f210e7`).
-- Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default, with the Go `resembl-service` draining in-flight queries on SIGINT/SIGTERM (30s bound) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
+- Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default, with the Go `resembl-service` draining in-flight queries on SIGINT/SIGTERM (30s bound) and retiring pooled engine connections on shutdown (`CloseIdleConnections`) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
