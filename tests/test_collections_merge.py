@@ -879,7 +879,12 @@ class TestDBMergeFailure(unittest.TestCase):
         bad_names["names"] = "not json"
         bad_tags = self._raw_row(3)
         bad_tags["tags"] = "{nope"
-        source_path = self._create_raw_source_db([good, bad_names, bad_tags])
+        nested_names = self._raw_row(4)
+        # A deeply nested document recurses in the JSON decoder and
+        # raises RecursionError, which is not a ValueError: the merge
+        # must skip that row like any other corrupt metadata row.
+        nested_names["names"] = "[" * 200000 + "]" * 200000
+        source_path = self._create_raw_source_db([good, bad_names, bad_tags, nested_names])
 
         # A local row sharing the corrupt-names checksum exercises the
         # existing-row branch of the merge as well as the new-row one.
@@ -895,7 +900,7 @@ class TestDBMergeFailure(unittest.TestCase):
         try:
             result = db_merge(self.session, source_path)
             self.assertEqual(result["added"], 1)
-            self.assertEqual(result["skipped"], 2)
+            self.assertEqual(result["skipped"], 3)
             # Every stored names column still parses: reads cannot crash
             # on metadata, and the pre-existing row kept its own names.
             stored = {

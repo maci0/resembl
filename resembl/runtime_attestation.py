@@ -18,11 +18,26 @@ MAX_BYTES = 512 * 1024 * 1024
 
 
 def verify_runtime(manifest_path: str, expected: str) -> None:
-    """Require the pinned manifest to cover interpreter and all loaded modules."""
-    raw = Path(manifest_path).read_bytes()
+    """Require the pinned manifest to cover interpreter and all loaded modules.
+
+    Every rejection is a :class:`ValueError`: the ``/find-pinned``
+    handler answers any other exception as a ``503`` with internal text
+    in the log, so a malformed manifest must not escape as a second
+    type.  That includes a missing or unreadable file (``OSError``) and
+    a deeply nested document (``RecursionError`` from the JSON decoder,
+    which is not a ``ValueError``), both of which the manifest bytes
+    can produce without ever being a valid manifest.
+    """
+    try:
+        raw = Path(manifest_path).read_bytes()
+    except OSError as exc:
+        raise ValueError("runtime manifest unreadable") from exc
     if len(raw) > 2 * 1024 * 1024 or hashlib.sha256(raw).hexdigest() != expected:
         raise ValueError("runtime manifest mismatch")
-    document = json.loads(raw)
+    try:
+        document = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("invalid runtime manifest") from exc
     if not isinstance(document, dict) or not document or len(document) > MAX_FILES:
         raise ValueError("invalid runtime manifest")
     required = {str(Path(sys.executable).resolve())}

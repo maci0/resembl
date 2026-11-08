@@ -586,7 +586,11 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
         return None
     try:
         value = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # ``RecursionError`` is not a ``ValueError``: a deeply nested
+        # document (``[[[...]]]``) from a hostile merge source recurses
+        # once per level in the decoder and must skip the row, not abort
+        # the whole merge — the same guard ``_read_body`` applies.
         return None
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return None
