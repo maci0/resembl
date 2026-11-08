@@ -56,7 +56,17 @@ FUZZ_SECONDS ?= 60
 # target re-pins them explicitly for the uv build invocation as well.
 export LC_ALL := C
 export TZ := UTC
+# The `?=` default only applies when the variable is unset: it does not
+# override an inherited one, and GitHub Actions injects SOURCE_DATE_EPOCH=0
+# into every step's environment (service.yml works around it for Docker).
+# Left alone, CI `dist` builds stamp 1980 and a local build stamps the
+# commit time, so the same commit yields different bytes in the two places.
+# An explicit operator value still wins; only the injected 0 falls through
+# to the commit time.
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
+ifeq ($(SOURCE_DATE_EPOCH),0)
+SOURCE_DATE_EPOCH := $(shell git log -1 --format=%ct 2>/dev/null || echo 0)
+endif
 
 # The PostgreSQL and MySQL integration modules skip themselves unless
 # RESEMBL_TEST_PG_URL / RESEMBL_TEST_MYSQL_URL are set.  CI sets both, so a
