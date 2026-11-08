@@ -60,6 +60,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    avg_time_per_item,
     monotonic_now,
     name_normalize,
     timestamp_normalize,
@@ -1348,7 +1349,7 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
     return {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": ((time_elapsed / num_exported) if num_exported > 0 else 0),
+        "avg_time_per_snippet": avg_time_per_item(time_elapsed, num_exported),
     }
 
 
@@ -1543,7 +1544,7 @@ def _db_reindex(
     return {
         "num_reindexed": reindexed,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": time_elapsed / num_snippets,
+        "avg_time_per_snippet": avg_time_per_item(time_elapsed, num_snippets),
     }
 
 
@@ -2022,7 +2023,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
     result = {
         "num_exported": num_exported,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": (time_elapsed / num_exported if num_exported > 0 else 0),
+        "avg_time_per_snippet": avg_time_per_item(time_elapsed, num_exported),
         "manifest_written": manifest_written,
     }
     if num_removed:

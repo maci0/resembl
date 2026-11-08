@@ -95,7 +95,7 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
-from .models import monotonic_now, parse_instant
+from .models import avg_time_per_item, monotonic_now, parse_instant
 from .paths import (
     cache_dir_get,
     console_utf8_reconfigure,
@@ -1544,7 +1544,7 @@ def import_cmd(
         "num_imported": added_total,
         "aliased": aliased_total,
         "time_elapsed": time_elapsed,
-        "avg_time_per_snippet": (time_elapsed / added_total) if added_total > 0 else 0,
+        "avg_time_per_snippet": avg_time_per_item(time_elapsed, added_total),
     }
     if rejects:
         stats["skipped"] = rejects

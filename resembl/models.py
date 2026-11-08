@@ -136,6 +136,15 @@ def monotonic_now() -> float:
     return time.monotonic()
 
 
+def avg_time_per_item(time_elapsed: float, item_count: int) -> float:
+    """Return the exact per-item seconds for *item_count* processed items.
+
+    *time_elapsed* is in seconds; *item_count* is a 1-based count, so 0
+    (nothing processed) yields 0.0 rather than dividing by zero.
+    """
+    return time_elapsed / item_count if item_count > 0 else 0.0
+
+
 def timestamp_normalize(value: str | None) -> str | None:
     """Normalize a ``created_at`` string to the canonical stored form.
 
@@ -407,8 +416,9 @@ class Snippet(SQLModel, table=True):
             batch = session.exec(stmt).all()
             if not batch:
                 return
-            yield [(row[0], row[1]) for row in batch]
-            last = batch[-1][0]
+            pairs = [(row[0], row[1]) for row in batch]
+            yield pairs
+            last = pairs[-1][0]
 
     @classmethod
     def get_by_collection(
