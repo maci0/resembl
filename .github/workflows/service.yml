@@ -12,6 +12,13 @@ concurrency:
   group: service-${{ github.ref }}
   cancel-in-progress: true
 
+# Every `run:` step gets `set -euo pipefail`, so a failed command in a
+# pipeline fails the step instead of passing silently.  Each `run:` block
+# names it explicitly as well, because a step-level shell can be overridden.
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 
@@ -49,4 +56,6 @@ jobs:
         # host. `resembl-service -h` prints the flag list without needing a
         # custody directory, token or engine; Go's flag package exits 1 on
         # -h, so the check is the output, not the exit code.
-        run: docker run --rm resembl-service:ci -h 2>&1 | grep -q 'Usage of resembl-service:'
+        run: |
+          set -euo pipefail
+          docker run --rm resembl-service:ci -h 2>&1 | grep -q 'Usage of resembl-service:'

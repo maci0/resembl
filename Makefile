@@ -56,6 +56,9 @@ FUZZ_SECONDS ?= 60
 # target re-pins them explicitly for the uv build invocation as well.
 export LC_ALL := C
 export TZ := UTC
+# Pin umask for the `dist` recipe (see there): wheel zip permissions copy
+# umask-affected source modes, so `umask 002` yields 664 and `umask 022`
+# yields 644, and the bytes differ.
 # The `?=` default only applies when the variable is unset: it does not
 # override an inherited one, and GitHub Actions injects SOURCE_DATE_EPOCH=0
 # into every step's environment (service.yml works around it for Docker).
@@ -244,6 +247,7 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 		echo "make dist needs GNU tar (--sort=name); on macOS install gnu-tar"; exit 1; }
 	rm -rf dist
 	rm -rf build/lib build/bdist.* resembl.egg-info
+	umask 022; \
 	SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" LC_ALL=C TZ=UTC uv build --out-dir dist
 	@set -e; mkdir -p .scratch; for sdist in dist/*.tar.gz; do \
 		unpack=$$(mktemp -d .scratch/sdist-XXXXXX); \

@@ -21,6 +21,12 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Every `run:` step gets `set -euo pipefail`, so a failed command in a
+# pipeline fails the step instead of passing silently (see service.yml).
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 

@@ -18,6 +18,12 @@ concurrency:
   group: sbom-${{ github.ref }}
   cancel-in-progress: true
 
+# Every `run:` step gets `set -euo pipefail`, so a failed command in a
+# pipeline fails the step instead of passing silently (see service.yml).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   sbom:
     # Pinned, not ubuntu-latest: the floating label migrates OS versions

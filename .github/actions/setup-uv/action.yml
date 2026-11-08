@@ -63,12 +63,22 @@ runs:
       shell: bash
       # The input reaches the script through the environment, never spliced
       # into it, so a caller cannot turn a version string into shell code.
+      # The installer is checksum-verified before it runs: it is fetched from
+      # a mutable URL, and pinning only the version in the URL does not stop a
+      # compromised mirror from serving different bytes for the same version.
       env:
         UV_VERSION: "0.13.6"
+        UV_INSTALLER_SHA256: "f7a56e7afaec49a3bcbc3ac3cdbe917e7c6ce30e0d815308a12e531aa5ef23b7"
         UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
       run: |
         set -euo pipefail
-        curl --proto '=https' --retry 3 -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+        curl --proto '=https' --retry 3 -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" -o /tmp/uv-install.sh
+        if command -v sha256sum >/dev/null 2>&1; then
+          echo "${UV_INSTALLER_SHA256}  /tmp/uv-install.sh" | sha256sum -c -
+        else
+          echo "${UV_INSTALLER_SHA256}  /tmp/uv-install.sh" | shasum -a 256 --check -
+        fi
+        sh /tmp/uv-install.sh
         # The installer prints where it put the binary and leaves PATH alone.
         # The Linux and macOS runner images already carry a uv, so only the
         # Windows leg noticed; there the next step failed with "The term 'uv'
