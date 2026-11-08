@@ -218,7 +218,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
     their own backup tooling.  Backup and manifest files are mode `0600`.
     Exits 1 when the backup file is complete but its manifest could not
     be written — such a backup is unverified, not safe.  RPO is the time
-    since the last backup;
+    since the last verified backup;
     RTO is the time to copy the file back to `assembly.db` and run
     `verify` (the index is rebuilt by the next `find` if it is stale).
     The full restore procedure, including removing stale `-wal`/`-shm`

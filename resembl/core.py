@@ -2326,20 +2326,34 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
                 pass
         reused = None
     if reused is not None:
-        try:
-            num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
-        except Exception as e:
-            # As in the fresh-backup path below: never fabricate a 0 count,
-            # which db_verify_backup reads as an empty database.
-            logger.warning("Could not count snippets for the reused backup: %s", e)
-            num_snippets = None
-        return {
-            "backup": reused,
-            "num_snippets": num_snippets,
-            "snippet_count_known": num_snippets is not None,
-            "fingerprint_version": fingerprint_version_get(session),
-            "num_removed": 0,
-        }
+        # A reused backup was verified when it was written, but its file can
+        # be corrupted afterwards (bit rot, a truncated copy, a hand edit).
+        # Only report success when it still verifies now — otherwise fall
+        # through and write a fresh backup instead of handing the caller a
+        # restore point that would fail at restore time.
+        check = db_verify_backup(session, reused)
+        if check["ok"]:
+            try:
+                num_snippets = session.exec(select(func.count(Snippet.checksum))).one()  # type: ignore[arg-type]
+            except Exception as e:
+                # As in the fresh-backup path below: never fabricate a 0 count,
+                # which db_verify_backup reads as an empty database.
+                logger.warning("Could not count snippets for the reused backup: %s", e)
+                num_snippets = None
+            return {
+                "backup": reused,
+                "num_snippets": num_snippets,
+                "snippet_count_known": num_snippets is not None,
+                "fingerprint_version": fingerprint_version_get(session),
+                "num_removed": 0,
+                "manifest_written": True,
+                "verified": True,
+            }
+        logger.warning(
+            "Reused backup %s failed verification (%s); writing a fresh backup.",
+            reused,
+            "; ".join(check["issues"]),
+        )
     # Stamped in UTC, not local time: the name is a sort key for prune
     # (legacy local stamps sort 01:30 EDT and 01:30 EST identically across
     # a fall-back, so the hour that was taken second can sort oldest and

@@ -25,7 +25,11 @@ new database files in a storage format that DuckDB before 2.0 cannot read. An
 existing file created by an earlier version keeps its storage version when 2.0
 writes to it. Keep a copy when testing an upgrade. The
 [DuckDB 2.0 migration guide](https://duckdb.org/docs/2.0/operations_manual/migration)
-covers files that older readers must open.
+covers files that older readers must open. DuckDB is file-backed, so
+the corpus file itself is the backup unit; `resembl backup` does not
+cover it, so copy the file only when no DuckDB process has it open and
+prove the restore by opening the copy with the DuckDB version that
+wrote it — see `docs/restore.md`.
 
 The schema is portable: string primary keys carry explicit lengths and long
 text columns use `TEXT`, so `SQLModel.metadata.create_all` emits valid DDL on

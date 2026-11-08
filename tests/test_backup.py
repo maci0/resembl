@@ -479,6 +479,29 @@ class TestDbBackup(FileDBTest):
         third = db_backup(self.session, backup_dir, keep=7)
         self.assertEqual(third["backup"], second["backup"])
 
+    def test_corrupted_reused_backup_is_replaced(self):
+        """A reused backup corrupted after it was written is not handed back.
+
+        Regression: the reuse path returned the existing file by manifest
+        hash alone, so a backup corrupted in place (bit rot, a truncated
+        copy) was reported as a fresh verified success and the system
+        kept no restorable copy. The reuse path now re-verifies, so the
+        corrupt file is replaced by a fresh verified backup.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        first = db_backup(self.session, backup_dir, keep=7)
+        reused = db_backup(self.session, backup_dir, keep=7)
+        self.assertEqual(reused["backup"], first["backup"])
+        self.assertTrue(reused["verified"])
+        with open(reused["backup"], "r+b") as f:
+            f.truncate(10)
+        self.assertFalse(db_verify_backup(self.session, reused["backup"])["ok"])
+        replaced = db_backup(self.session, backup_dir, keep=7)
+        self.assertNotEqual(replaced["backup"], first["backup"])
+        self.assertTrue(replaced["verified"])
+        self.assertTrue(db_verify_backup(self.session, replaced["backup"])["ok"])
+
 
 class TestDbVerifyBackup(FileDBTest):
     """db_verify_backup fails a backup whose contents disagree with its manifest."""
