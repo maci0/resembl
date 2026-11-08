@@ -132,7 +132,12 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         collection=True,
     ),
     _command("compare", "Compare two snippets.", "read_only"),
-    _command("clean", "Drop the LSH index and vacuum the database.", "idempotent"),
+    _command(
+        "clean",
+        "Drop the LSH index and vacuum the database.",
+        "idempotent",
+        confirmation="--force",
+    ),
     _command(
         "backup",
         "Write a consistent, restorable copy of the database.",
@@ -146,7 +151,9 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     ),
     _command(
         "merge",
-        "Copy snippets from another resembl database into this one.",
+        "Copy snippets from another resembl database into this one. It proceeds"
+        " without a confirmation prompt (the --force flag is accepted for"
+        " symmetry but no prompt is shown).",
         "idempotent",
     ),
     _command("name add", "Attach one more name to a snippet.", "idempotent"),
@@ -157,7 +164,9 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "collection delete",
         "Delete a collection. A second run reports the collection as missing"
-        " and leaves the database unchanged.",
+        " and leaves the database unchanged. It proceeds without a confirmation"
+        " prompt (the --force flag is accepted for symmetry but no prompt is"
+        " shown).",
         "idempotent",
     ),
     _command(
@@ -295,7 +304,7 @@ _RESEMBL_ERRORS: list[dict[str, Any]] = [
         "exit_code": 1,
         "retryable": False,
         "description": (
-            "export, export-yara, import, rm, reindex, and backup need a terminal"
+            "export, export-yara, import, rm, reindex, clean, and backup need a terminal"
             " to confirm. Pass --force to proceed without a prompt."
         ),
     },

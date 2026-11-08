@@ -284,9 +284,13 @@ def _main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--query", help="Query string (single-line ';' = separator).")
     parser.add_argument("--file", help="Path to a file containing the query ('-' for stdin).")
-    parser.add_argument("--top-n", type=int, default=None)
-    parser.add_argument("--threshold", type=float, default=None)
-    parser.add_argument("--no-normalization", action="store_true")
+    parser.add_argument("--top-n", type=int, default=None, help="How many matches to return.")
+    parser.add_argument("--threshold", type=float, default=None, help="LSH threshold override.")
+    parser.add_argument(
+        "--no-normalization",
+        action="store_true",
+        help="Do not fold registers and immediates.",
+    )
     parser.add_argument(
         "--output",
         "-o",
