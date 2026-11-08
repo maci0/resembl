@@ -1,7 +1,8 @@
 # Security policy
 
-Last reviewed: 2026-11-05, against the tree at version 4.0.0
-(`pyproject.toml:3`). This review covers the Python surfaces and the
+Last reviewed: 2026-11-09, against the tree at version 4.0.0
+(`pyproject.toml:3`) plus post-4.0.0 commits through `08ee7a1`. This review
+covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
 the Lambda event adapter in `service/internal/lambdaproxy/`) and the
@@ -9,7 +10,9 @@ the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 
 The `serve` controls below (the loopback `Host` check, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, the 1000-row
-`top_n` cap, the 96 handler-thread bound in `resembl/server.py`, and the
+`top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
+`413` envelope for oversized bodies in `resembl/server.py` `_read_body`,
+and the
 JSON `405` envelope for any unhandled verb) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
@@ -53,7 +56,8 @@ capped at 1000 rows, but a sequence of requests is not. On a loopback bind
 that is a concern for other processes on the same host, and on a
 non-loopback bind it is the same exposure as the bind itself. Run
 `resembl serve -v` if the served queries have to be attributable after the
-fact; nothing is recorded at the default log level.
+fact; nothing is recorded per request at the default log level except a
+slow-request warning (over 1s) and exception logs on failure.
 
 ## Deployment assumptions
 
@@ -93,9 +97,11 @@ relies on, not configuration options.
   snippets, names, tags, and collections into the local corpus. Point it only
   at databases you control. Its one closed edge is fingerprint
   deserialization: blobs without the `RMLH` magic are rejected and
-  recomputed rather than unpickled. The failure path is not closed: a source
-  that will not open makes `merge` print the driver's own error text, which
-  can name the host and port it dialled.
+  recomputed rather than unpickled. The failure path is not fully closed: a
+  source that will not open makes `merge` print the driver's own error text,
+  which can name the host and port it dialled. Its source URL is masked for
+  display, so a credentialed URL no longer appears in that error, but the
+  driver text itself is still returned unsanitized.
 - **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` (default `http://127.0.0.1:8081`) and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
   the SQLite corpus plus a per-backup manifest into a caller-chosen
