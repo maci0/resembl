@@ -816,7 +816,16 @@ def snippet_add_batch(
             }
             for s in new_snippets
         ]
-        _insert_snippet_rows(session, rows, batch_size)
+        try:
+            _insert_snippet_rows(session, rows, batch_size)
+        except IntegrityError:
+            # A concurrent batch committed the same checksums between the
+            # dedup read above and this bulk insert (two import processes,
+            # or a retry racing the original).  The rows now exist, so
+            # converge by re-running the dedup pass — the same strategy the
+            # index-sync block below already uses for the same race.
+            session.rollback()
+            return snippet_add_batch(session, prepared_items, batch_size, ngram_size)
     if new_snippets or aliased:
         # The index rows join the snippet rows' transaction: a commit that
         # publishes a snippet must publish the buckets that make it findable.
