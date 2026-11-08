@@ -1,9 +1,17 @@
-"""Bounded identity of a SQLite index while its caller holds a writer fence."""
+"""Bounded identity of a SQLite index while its caller holds a writer fence.
+
+Non-finite ``REAL`` values (``Inf``; SQLite stores ``NaN`` as ``NULL``)
+raise :class:`ValueError` instead of leaking a ``json.dumps`` error whose
+message names the encoder internals: the digest is an identity proof, and
+a stored ``Inf`` threshold is corrupt data the pinned endpoint must
+refuse as one, not as a 500.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 from typing import Any
 
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
@@ -17,9 +25,17 @@ def _snapshot_value(value: Any) -> list[Any]:
         return ["null", None]
     if isinstance(value, bytes | memoryview):
         return ["blob", bytes(value).hex()]
+    if isinstance(value, bool):
+        # bool is a subclass of int: a REAL 1.0/0.0 read back through
+        # sqlite3 is float, but a value fetched as bool must not
+        # serialize as ``true``/``false`` (json.dumps of True) and
+        # thereby change the digest vs its writer.
+        return ["integer", int(value)]
     if isinstance(value, int):
         return ["integer", value]
     if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("unsupported SQLite snapshot value")
         return ["real", value]
     if isinstance(value, str):
         return ["text", value]

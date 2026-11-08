@@ -417,6 +417,18 @@ def test_snapshot_refuses_non_sqlite_connection():
         index_digest(Connection())
 
 
+def test_snapshot_rejects_non_finite_real(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'inf.db'}")
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO lsh_meta (id,threshold,num_perm) VALUES (1, ?, 128)", (float("inf"),)
+        )
+        with pytest.raises(ValueError, match="unsupported SQLite snapshot value"):
+            index_digest(connection)
+    engine.dispose()
+
+
 def test_snapshot_enforces_row_limit(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'limit.db'}")
     SQLModel.metadata.create_all(engine)
