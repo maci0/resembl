@@ -14,6 +14,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - `resembl backup` now copies the live `config.toml` verbatim to a `<backup-stem>.config.toml` sidecar beside each SQLite backup (mode `0600`), records its SHA-256 in the manifest as `config_sha256` (`null` when no config existed), and `verify-backup` cross-checks the sidecar: a missing or mismatched sidecar fails verification instead of passing on the database copy alone. A restore can now recover tuned config, not just the corpus; see `docs/restore.md`.
 - Two new fuzz targets cover the remaining untrusted-input readers: `fuzz_stored_metadata.py` drives the merge-source `names`/`tags` JSON readers (`_string_list_or_none` / `_source_lists_or_none`) with corrupt, deeply nested and non-list documents, and `fuzz_runtime_manifest.py` drives the `/find-pinned` runtime-manifest reader (`verify_runtime`) with malformed, truncated and deeply nested manifests. Run them with `make fuzz FUZZER=fuzz_stored_metadata.py` (or `fuzz_runtime_manifest.py`); `make fuzz` and the CI smoke run pick them up automatically.
+- `snippet_list` now caps an unbounded call (`end=None`, no explicit `limit`) at 1000 rows so it cannot materialize the whole corpus (the `code` column included) in memory. Pass `limit=None` explicitly with `end=None` for a full unbounded list, or use `Snippet.stream_all` for a bounded-memory full scan.
 
 ### Fixed
 

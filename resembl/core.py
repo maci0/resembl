@@ -1639,13 +1639,29 @@ def snippet_compare(session: Session, checksum1: str, checksum2: str) -> dict | 
     }
 
 
-def snippet_list(session: Session, start: int = 0, end: int | None = None) -> list[Snippet]:
+_SNIPPET_LIST_DEFAULT_LIMIT = 1000
+
+#: Sentinel for ``snippet_list``'s ``limit``: distinguishes "not given"
+#: (apply :data:`_SNIPPET_LIST_DEFAULT_LIMIT`) from an explicit
+#: ``limit=None`` (unbounded, historical behavior).
+_SNIPPET_LIST_LIMIT_UNSET = object()
+
+
+def snippet_list(
+    session: Session,
+    start: int = 0,
+    end: int | None = None,
+    limit: int | None = _SNIPPET_LIST_LIMIT_UNSET,  # type: ignore[assignment]
+) -> list[Snippet]:
     """List snippets, optionally within a given half-open ``[start, end)`` range.
 
-    *end* of ``None`` (the default) lists everything.  The window is selected
-    by an explicit ``end``, not by ``end > 0``: a caller asking for the
-    ``0-0`` window means "no rows", and the old sentinel answered it with the
-    entire database.
+    *end* of ``None`` lists from *start* to the end, capped by *limit*.
+    When neither *end* nor *limit* is given, *limit* defaults to
+    :data:`_SNIPPET_LIST_DEFAULT_LIMIT` so an unbounded call cannot
+    materialize the whole corpus (``code`` column included) in memory.
+    Pass ``limit=None`` explicitly with ``end=None`` only when a full
+    unbounded list is intended; prefer :meth:`Snippet.stream_all` for
+    bounded-memory full scans.
 
     Ordered by the checksum primary key, so a paged window selects the same
     rows on every run: an unordered ``OFFSET``/``LIMIT`` over the same
@@ -1676,12 +1692,28 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
                 select(Snippet).order_by(Snippet.checksum).offset(start).limit(limit)
             ).all()
         )
-    # Unbounded: stream (checksum, names) in keyset batches so memory stays
-    # flat and the code column never enters the ORM.  ``Snippet`` objects
-    # are reconstructed with empty code/minhash — the listing only renders
-    # checksum and names (``name_list`` parses ``names``).
+    if limit is _SNIPPET_LIST_LIMIT_UNSET:
+        limit = _SNIPPET_LIST_DEFAULT_LIMIT
+    if limit is not None and limit <= 0:
+        return []
+    if limit is not None:
+        rows = session.exec(
+            select(Snippet.checksum, Snippet.names)
+            .order_by(Snippet.checksum)
+            .offset(start)
+            .limit(limit)
+        ).all()
+        return [
+            Snippet(checksum=checksum, names=names, code="", minhash=b"")
+            for checksum, names in rows
+        ]
+    # Unbounded (limit=None): stream (checksum, names) in keyset batches so
+    # memory stays flat and the code column never enters the ORM.
+    # ``Snippet`` objects are reconstructed with empty code/minhash — the
+    # listing only renders checksum and names (``name_list`` parses ``names``).
     result: list[Snippet] = []
     last: str | None = None
+    skipped = 0
     page_size = 1000
     while True:
         stmt = select(Snippet.checksum, Snippet.names).order_by(Snippet.checksum).limit(page_size)
@@ -1691,6 +1723,9 @@ def snippet_list(session: Session, start: int = 0, end: int | None = None) -> li
         if not rows:
             break
         for checksum, names in rows:
+            if skipped < start:
+                skipped += 1
+                continue
             result.append(Snippet(checksum=checksum, names=names, code="", minhash=b""))
         last = rows[-1][0]
     return result
@@ -2114,7 +2149,12 @@ def snippet_export(session: Session, export_dir: str) -> dict:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, file_path)
-            _sync_dir(abs_export_dir)
+            # Directory fsync is deferred to once after the loop (below):
+            # one fsync of the directory entry per file costs O(n) durable
+            # flushes for a single directory, dominating the per-file
+            # fsync at scale.  A single ``_sync_dir`` after the loop makes
+            # every rename in this export durable with one flush, the same
+            # contract as batching the group-commit elsewhere.
         except BaseException:
             try:
                 os.unlink(tmp_path)
@@ -2122,6 +2162,9 @@ def snippet_export(session: Session, export_dir: str) -> dict:
                 pass
             raise
         num_exported += 1
+
+    # One durable flush for every directory entry this export created.
+    _sync_dir(abs_export_dir)
 
     # Every file is on disk: drop what a previous run wrote for snippets the
     # database no longer holds, then record this run's files for the next one.

@@ -80,10 +80,15 @@ Insert many prepared snippets in one pass (content-addressable dedup, alias merg
 ### `snippet_get(session, checksum: str) → Snippet | None`
 Retrieve a snippet by checksum.
 
-### `snippet_list(session, start: int = 0, end: int | None = None) → list[Snippet]`
+### `snippet_list(session, start: int = 0, end: int | None = None, limit=None) → list[Snippet]`
 List snippets, optionally within a `[start, end)` window of the full listing.
-`end=None` (the default) lists everything; an explicit `end` selects a window,
-so `end=0` is the empty window rather than "no window".
+`end=None` lists from `start` to the end, capped by `limit`; when neither
+`end` nor `limit` is given, `limit` defaults to 1000 so an unbounded call
+cannot materialize the whole corpus (the `code` column included) in memory.
+An explicit `end` selects a window, so `end=0` is the empty window rather
+than "no window". Pass `limit=None` explicitly with `end=None` only when a
+full unbounded list is intended; prefer `Snippet.stream_all` for
+bounded-memory full scans.
 
 ### `snippet_delete(session, checksum: str, quiet: bool = False) → bool`
 Delete a snippet. Returns `True` on success. With `quiet=True`, a missing snippet returns `False` without logging an error.
@@ -96,7 +101,9 @@ when the run dropped files an earlier run had written. The run converges: the
 wrote, and a later run removes the ones the database no longer produces (a
 snippet renamed or deleted since). Only manifest entries are ever removed,
 and only as plain file names, so nothing else in the directory is touched; a
-missing or damaged manifest disables pruning for that run.
+missing or damaged manifest disables pruning for that run. Each file is
+written atomically and `fsync`ed before publish; the directory entry is
+`fsync`ed once after the loop rather than once per file.
 
 ### `snippet_find_matches(session, query_string: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
 Find similar snippets. Returns the LSH candidate count and the top matches
