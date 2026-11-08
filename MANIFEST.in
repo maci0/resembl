@@ -7,3 +7,4 @@
 # travel with the sdist as well.
 graft tests/test_data
 graft docs
+include resembl/py.typed
