@@ -124,6 +124,12 @@ _RESULT_CACHE_LOCK = threading.Lock()
 #: engine pool size (32 + 64) keeps excess connections in the listen
 #: backlog, where they time out, instead of in a thread.
 _MAX_HANDLER_THREADS = 96
+#: Upper bound on how long the accept loop waits for a handler slot (see
+#: :meth:`_FindServer.process_request`).  A slot is held for one request,
+#: and one request is bounded by the handler timeout (30 s), so a wait
+#: longer than that cannot recover by waiting further; the queued
+#: connection is closed instead of wedging the accept loop.
+_HANDLER_SLOT_TIMEOUT_SECONDS = 30.0
 
 
 def _query_cache_key(query: str) -> str:
@@ -675,6 +681,21 @@ def _result_cache_put(
         _RESULT_CACHE.move_to_end(key)
         while len(_RESULT_CACHE) > _RESULT_CACHE_MAX:
             _RESULT_CACHE.popitem(last=False)
+
+
+def _result_cache_release(db_id: str) -> None:
+    """Drop every cached payload built for the database *db_id*.
+
+    The cache is process-wide and its keys end with the serving engine's
+    URL, so a stopped server generation's entries outlived the engine that
+    produced them until the LRU evicted them.  Releasing them where the
+    engine is released (see :meth:`_FindServer.server_close`) keeps the
+    cache's lifetime the serving generation's, not the process's.
+    """
+    with _RESULT_CACHE_LOCK:
+        stale = [key for key in _RESULT_CACHE if key[-1] == db_id]
+        for key in stale:
+            del _RESULT_CACHE[key]
 
 
 #: Maximum accepted request body (8 MiB — orders of magnitude above any real
@@ -1955,9 +1976,21 @@ class _FindServer(
 
         Acquired in the accept loop, released when the handler thread
         finishes: excess connections queue in the listen backlog rather
-        than spawning unbounded threads.
+        than spawning unbounded threads.  The acquire is bounded: an
+        unbounded acquire in the accept loop means stalled handlers (a
+        client that never sends its body, a request holding the pool)
+        freeze ``serve_forever`` itself, so new accepts and ``shutdown``
+        never run and the process wedges until the handler timeout expires.
+        A timed-out slot closes the queued connection instead, and the
+        client retries against a recovered loop.
         """
-        self._handler_slots.acquire()  # pylint: disable=consider-using-with  # slot released in process_request_thread
+        # pylint: disable=consider-using-with  # slot released in process_request_thread
+        if not self._handler_slots.acquire(timeout=_HANDLER_SLOT_TIMEOUT_SECONDS):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
         try:
             super().process_request(request, client_address)
         except BaseException:
@@ -1973,8 +2006,14 @@ class _FindServer(
 
     def server_close(self) -> None:
         super().server_close()
+        # Release this generation's entries from the process-wide result
+        # cache, whose keys carry the engine URL.  Without this a stopped
+        # generation's payloads (up to 32 MiB) outlived the engine that
+        # produced them, and a process cycling servers accumulated them
+        # until the LRU happened to evict past them.
         engine = getattr(self, "engine", None)
         if engine is not None:
+            _result_cache_release(engine.url.render_as_string(hide_password=True))
             # The result cache's per-database version probe holds a second
             # connection to this same database; releasing it with the engine
             # it was created for keeps the handle from outliving the
