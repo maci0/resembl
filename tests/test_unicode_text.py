@@ -208,6 +208,11 @@ class TestNameNormalization(BaseDBTest):
         assert removed is not None
         self.assertNotIn(_NFC_NAME, [name_normalize(n) for n in removed.name_list])
 
+    def test_collection_description_is_stored_nfc(self):
+        """A decomposed description must not persist as decomposed text."""
+        col = collection_create(self.session, "desc-test", _NFD_NAME)
+        self.assertEqual(col.description, _NFC_NAME)
+
     def test_collection_is_one_row_per_name(self):
         collection_create(self.session, _NFD_NAME)
         collection_create(self.session, _NFC_NAME)

@@ -2912,7 +2912,9 @@ def collection_create(session: Session, name: str, description: str = "") -> Col
     existing = Collection.get_by_name(session, name)
     if existing is not None:
         return existing
-    collection = Collection(name=name_normalize(name), description=description)
+    collection = Collection(
+        name=name_normalize(name), description=normalize_unicode(description)
+    )
     session.add(collection)
     try:
         session.commit()
