@@ -123,7 +123,11 @@ def _sample_key() -> str:
     return sample_randbytes(32).hex()
 
 
-def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
+def _random_snippet_rows(
+    session: Session,
+    limit: int,
+    columns: tuple = (Snippet,),
+) -> list:
     """Return up to *limit* uniformly random snippet rows via the checksum PK.
 
     ``ORDER BY random() LIMIT n`` evaluates the random function for every
@@ -134,17 +138,21 @@ def _random_snippet_rows(session: Session, limit: int) -> list[Snippet]:
     table size (~0.6 ms measured).  Keys near the end of the key space wrap
     around via a second indexed query.  The starting key comes from
     :func:`_sample_key`, so the sample is reproducible from a seed.
+
+    Callers that need only a subset of columns pass *columns* (e.g.
+    ``(Snippet.checksum, Snippet.minhash)``) so the dominant ``code``
+    column never enters the ORM for a sample that discards it.
     """
     key = _sample_key()
     rows = list(
         session.exec(
-            select(Snippet).where(Snippet.checksum >= key).order_by(Snippet.checksum).limit(limit)
+            select(*columns).where(Snippet.checksum >= key).order_by(Snippet.checksum).limit(limit)
         ).all()
     )
     if len(rows) < limit:
         rows += list(
             session.exec(
-                select(Snippet)
+                select(*columns)
                 .where(Snippet.checksum < key)
                 .order_by(Snippet.checksum)
                 .limit(limit - len(rows))
@@ -169,8 +177,11 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
 
     if count > sample_size:
         # Random sample directly in SQL — no need to load the whole table.
-        sample_snippets = _random_snippet_rows(session, sample_size)
-        sample_rows = [(s.checksum, s.minhash) for s in sample_snippets]
+        # Only (checksum, minhash) are needed; fetching full rows would pull
+        # the dominant ``code`` column through the ORM for nothing.
+        sample_rows = list(
+            _random_snippet_rows(session, sample_size, (Snippet.checksum, Snippet.minhash))
+        )
     else:
         # Small database (count <= sample_size): only (checksum, minhash)
         # are needed for the similarity estimate.  ``Snippet.get_all``
@@ -252,7 +263,8 @@ def db_stats(session: Session) -> dict:
     # Vocabulary: tokenize a bounded random sample so the command stays
     # constant-time at scale (tokenizing every code took ~1 min at 500k).
     # For small databases the sample is the whole corpus (exact).
-    sample_codes = [s.code for s in _random_snippet_rows(session, 2000)]
+    # Only the ``code`` column is fetched; the rest of the row is discarded.
+    sample_codes = [row[0] for row in _random_snippet_rows(session, 2000, (Snippet.code,))]
     all_tokens: set[str] = set()
     for code in sample_codes:
         all_tokens.update(code_tokenize(code))

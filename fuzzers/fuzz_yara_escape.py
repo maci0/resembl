@@ -98,6 +98,7 @@ _INTERESTING = (
 
 #: One YARA escape sequence as the lexer reads it.
 _ESCAPE_RE = re.compile(r'\\(?:x[0-9a-f]{2}|[\\"nrt])')
+_RULE_NAME_INVALID_CHARS = re.compile(r"[^a-zA-Z0-9_]")
 
 
 def _build_text(fdp: atheris.FuzzedDataProvider) -> str:
@@ -217,7 +218,7 @@ def test_one_input(data):
     _check_filename(text)
     # The name path the YARA exporter actually uses: the rule identifier
     # derived from the same untrusted name must stay a valid identifier.
-    rule_name = re.sub(r"[^a-zA-Z0-9_]", "_", text)
+    rule_name = _RULE_NAME_INVALID_CHARS.sub("_", text)
     if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
         rule_name = "r_" + rule_name
     assert re.fullmatch(
