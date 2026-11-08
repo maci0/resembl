@@ -411,7 +411,7 @@ class Snippet(SQLModel, table=True):
             if not batch:
                 return
             yield batch
-            last = batch[-1][0]
+            last = batch[-1].checksum if hasattr(batch[-1], "checksum") else batch[-1][0]
 
     @classmethod
     def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:
