@@ -103,6 +103,16 @@ def _expand_home(path: str) -> str:
     return os.path.normpath(expanded)
 
 
+def _xdg_dir(env_var: str, xdg_var: str, default: str) -> str:
+    override = os.environ.get(env_var)
+    if override and override.strip():
+        return _expand_home(override.strip())
+    xdg = os.environ.get(xdg_var)
+    if xdg and xdg.strip() and os.path.isabs(xdg.strip()):
+        return os.path.join(xdg.strip(), "resembl")
+    return _expand_home(default)
+
+
 def cache_dir_get() -> str:
     """Return the cache directory, respecting override environment variables.
 
@@ -111,13 +121,7 @@ def cache_dir_get() -> str:
     historical ``~/.cache/resembl`` default.  Per that spec a relative
     ``$XDG_CACHE_HOME`` is invalid and ignored.
     """
-    override = os.environ.get("RESEMBL_CACHE_DIR")
-    if override and override.strip():
-        return _expand_home(override.strip())
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg and xdg.strip() and os.path.isabs(xdg.strip()):
-        return os.path.join(xdg.strip(), "resembl")
-    return _expand_home(DEFAULT_CACHE_DIR)
+    return _xdg_dir("RESEMBL_CACHE_DIR", "XDG_CACHE_HOME", DEFAULT_CACHE_DIR)
 
 
 def config_dir_get() -> str:
@@ -128,13 +132,7 @@ def config_dir_get() -> str:
     historical ``~/.config/resembl`` default.  Per that spec a relative
     ``$XDG_CONFIG_HOME`` is invalid and ignored.
     """
-    override = os.environ.get("RESEMBL_CONFIG_DIR")
-    if override and override.strip():
-        return _expand_home(override.strip())
-    xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg and xdg.strip() and os.path.isabs(xdg.strip()):
-        return os.path.join(xdg.strip(), "resembl")
-    return _expand_home(DEFAULT_CONFIG_DIR)
+    return _xdg_dir("RESEMBL_CONFIG_DIR", "XDG_CONFIG_HOME", DEFAULT_CONFIG_DIR)
 
 
 def config_path_get() -> str:

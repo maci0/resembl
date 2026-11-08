@@ -172,6 +172,10 @@ def _sync_dir(path: str) -> None:
         os.close(fd)
 
 
+def _backup_stem(backup_path: str) -> str:
+    return os.path.splitext(os.path.basename(backup_path))[0]
+
+
 def _db_backup_manifest_name(backup_path: str) -> str:
     """Return the per-backup manifest name for *backup_path*.
 
@@ -182,8 +186,7 @@ def _db_backup_manifest_name(backup_path: str) -> str:
     against counts that were never its own and reported a mismatch on
     every backup but the latest.
     """
-    stem, _ = os.path.splitext(os.path.basename(backup_path))
-    return f"{stem}.json"
+    return f"{_backup_stem(backup_path)}.json"
 
 
 def _db_backup_config_name(backup_path: str) -> str:
@@ -193,8 +196,7 @@ def _db_backup_config_name(backup_path: str) -> str:
     several backups keeps each backup's config with its own database copy,
     exactly like the per-backup ``<backup-stem>.json`` manifest.
     """
-    stem, _ = os.path.splitext(os.path.basename(backup_path))
-    return f"{stem}.config.toml"
+    return f"{_backup_stem(backup_path)}.config.toml"
 
 
 def _db_backup_config_read() -> tuple[bytes | None, str | None]:
@@ -594,9 +596,7 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
         # once per level in the decoder and must skip the row, not abort
         # the whole merge — the same guard ``_read_body`` applies.
         return None
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        return None
-    return value
+    return value if isinstance(value, list) and all(isinstance(i, str) for i in value) else None
 
 
 def _source_lists_or_none(source_snippet: Snippet) -> tuple[list[str], list[str]] | None:

@@ -398,6 +398,21 @@ class Snippet(SQLModel, table=True):
             raise ValueError(f"batch_size must be >= 1, got {batch_size}")
         yield from session.exec(select(cls).order_by(cls.checksum)).yield_per(batch_size)
 
+    @staticmethod
+    def _keyset_batches(session: Session, batch_size: int, columns: tuple) -> Iterator[list]:
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+        last: str | None = None
+        while True:
+            stmt = select(*columns).order_by(Snippet.checksum).limit(batch_size)
+            if last is not None:
+                stmt = stmt.where(Snippet.checksum > last)
+            batch = list(session.exec(stmt).all())
+            if not batch:
+                return
+            yield batch
+            last = batch[-1][0]
+
     @classmethod
     def iter_batches(cls, session: Session, batch_size: int = 1000) -> Iterator[list[Snippet]]:
         """Yield ``Snippet`` lists via keyset pagination on the checksum PK.
@@ -408,18 +423,7 @@ class Snippet(SQLModel, table=True):
         otherwise raises ``database is locked`` when a write happens while a
         read cursor is still open on the connection.
         """
-        if batch_size < 1:
-            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-        last: str | None = None
-        while True:
-            stmt = select(cls).order_by(cls.checksum).limit(batch_size)
-            if last is not None:
-                stmt = stmt.where(cls.checksum > last)
-            batch = list(session.exec(stmt).all())
-            if not batch:
-                return
-            yield batch
-            last = batch[-1].checksum
+        yield from cls._keyset_batches(session, batch_size, (cls,))
 
     @classmethod
     def iter_minhash_batches(
@@ -434,19 +438,10 @@ class Snippet(SQLModel, table=True):
         batch is fully consumed before yielding, so callers may write to the
         same connection between batches).
         """
-        if batch_size < 1:
-            raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-        last: str | None = None
-        while True:
-            stmt = select(cls.checksum, cls.minhash).order_by(cls.checksum).limit(batch_size)
-            if last is not None:
-                stmt = stmt.where(cls.checksum > last)
-            batch = session.exec(stmt).all()
-            if not batch:
-                return
-            pairs = [(row[0], row[1]) for row in batch]
-            yield pairs
-            last = pairs[-1][0]
+        yield from (
+            ([(row[0], row[1]) for row in batch])
+            for batch in cls._keyset_batches(session, batch_size, (cls.checksum, cls.minhash))
+        )
 
     @classmethod
     def get_by_collection(
