@@ -14,7 +14,10 @@ from resembl import (
 
 Additional helpers (`snippet_search_by_name`, `snippet_name_add`,
 `snippet_name_remove`, `snippet_tag_add`, `snippet_tag_remove`, `db_verify`,
-`db_backup`, `db_verify_backup`, `snippet_export_yara`) are imported from
+`db_backup`, `db_verify_backup`, `snippet_export`, `snippet_export_yara`,
+`snippet_version_list`, `db_clean`, `db_merge`, `db_stats`, `db_reindex`,
+`collection_create`, `collection_delete`, `collection_list`,
+`collection_add_snippet`, `collection_remove_snippet`) are imported from
 `resembl.core`, not from the package root.
 
 ## Text encoding
@@ -95,8 +98,8 @@ Delete a snippet. Returns `True` on success. With `quiet=True`, a missing snippe
 
 ### `snippet_export(session, export_dir: str) → dict`
 Write every snippet to `export_dir` as `<primary name>.asm`. Returns
-`num_exported`, `time_elapsed`, `avg_time_per_snippet`, and `num_removed`
-when the run dropped files an earlier run had written. The run converges: the
+`num_exported`, `time_elapsed`, `avg_time_per_snippet`, `manifest_written`,
+and `num_removed` when the run dropped files an earlier run had written. The run converges: the
 `.resembl-export.json` manifest in `export_dir` records the files this export
 wrote, and a later run removes the ones the database no longer produces (a
 snippet renamed or deleted since). Only manifest entries are ever removed,

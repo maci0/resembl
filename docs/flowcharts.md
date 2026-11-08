@@ -158,9 +158,14 @@ graph LR
         J -- Yes --> L["Write Code to 'name.asm' File"]
     end
 
+    subgraph "Convergence"
+        L --> X["Remove Stale Files Listed in Previous Manifest"]
+        K --> X
+        X --> Y["Write Export Manifest for Next Run"]
+    end
+
     subgraph "Output"
-        L --> M[Report Export Statistics]
-        K --> M
+        Y --> M[Report Export Statistics]
     end
 
     A --> B

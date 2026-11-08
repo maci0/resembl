@@ -216,7 +216,8 @@ Global options go before the subcommand: `resembl --format json find ...`.
     SQLite's online backup API, so the copy is a single database file
     the current binary can open — not a raw copy of `assembly.db`
     paired with a stale WAL.  Also writes a manifest (snippet count,
-    fingerprint version) beside it.  SQLite only; other backends use
+    fingerprint version, content hash, creation time, and config
+    SHA-256) beside it.  SQLite only; other backends use
     their own backup tooling.  Backup and manifest files are mode `0600`.
     Exits 1 when the backup file is complete but its manifest could not
     be written or the published copy fails verification — such a backup
