@@ -940,8 +940,6 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
     arrays) is ~15x faster and yields identical permutations (seed
     :data:`MINHASH_SEED`), so fingerprints are byte-for-byte the same.
     """
-    import copy
-
     from .minhash import MinHash
 
     if isinstance(num_perm, bool) or not isinstance(num_perm, int):
@@ -961,7 +959,7 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
                 # that inherited ``_permutations = None`` regenerated the
                 # table on its first update (~290 µs) — exactly the cost this
                 # template exists to avoid, making the cache a no-op.  Reading
-                # the property here means every clone deep-copies the ready
+                # the property here means every clone copies the ready
                 # arrays instead (~10 µs per fingerprint, ~30x faster).
                 _ = template.permutations
                 # Evict the oldest entry (dicts keep insertion order) before
@@ -970,7 +968,18 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
                 if len(_MINHASH_TEMPLATES) >= _MINHASH_TEMPLATES_MAX:
                     del _MINHASH_TEMPLATES[next(iter(_MINHASH_TEMPLATES))]
                 _MINHASH_TEMPLATES[num_perm] = template
-    return copy.deepcopy(template)
+    # Explicit copy of the two numpy arrays deepcopy manages: ~2x faster
+    # than copy.deepcopy (which walks the object graph, memo dict and
+    # __reduce__ machinery per clone) and identical result — the template
+    # holds only seed/num_perm/hashvalues/permutations, all covered below.
+    # ``hashvalues`` is copied (update mutates it); the permutation arrays
+    # are read-only in update, but copied anyway so a caller mutating them
+    # cannot corrupt the shared template.
+    clone = MinHash(num_perm=template.num_perm, seed=template.seed)
+    clone.hashvalues = template.hashvalues.copy()
+    pa, pb = template.permutations
+    clone._permutations = (pa.copy(), pb.copy())  # pylint: disable=protected-access
+    return clone
 
 
 def minhash_num_perm(data: bytes) -> int:
@@ -1189,9 +1198,14 @@ def minhash_from_tokens(
     if len(tokens) < ngram_size:
         m.update(" ".join(tokens).encode("utf8", errors="surrogatepass"))
         return m
-    shingles: set[tuple[str, ...]] = set()
-    for i in range(len(tokens) - ngram_size + 1):
-        shingles.add(tuple(tokens[i : i + ngram_size]))
+    # ``zip`` over the offset slices builds the same shingle set without
+    # per-window index arithmetic and tuple slicing: measured ~2x faster
+    # at ngram_size=5 on a 5k-token snippet (the range loop allocates a
+    # slice copy per window).  ``len(tokens) >= ngram_size`` here, so the
+    # slices are non-empty and zip yields at least one shingle.
+    shingles: set[tuple[str, ...]] = set(
+        zip(*[tokens[i:] for i in range(ngram_size)], strict=False)
+    )
     # Weighted insertion: a weight-w shingle contributes w *distinct*
     # pseudo-elements, so its hash values are w times as likely to be the
     # per-position minimum — the documented "boost" for rare instructions.
