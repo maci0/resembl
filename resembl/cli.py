@@ -1333,7 +1333,12 @@ def add(
     name: str = typer.Argument(help="The name or alias for the snippet."),
     code: str = typer.Argument(help="The assembly code of the snippet."),
 ) -> None:
-    """Add a new snippet or an alias to existing code."""
+    """Add a new snippet or an alias to existing code.
+
+    Examples:
+      resembl add "memcpy" "mov ecx, ebx"
+      resembl add "memcpy" "mov ecx, ebx; add eax, 1"
+    """
     snippet = snippet_add(state.session, name, code, ngram_size=state.config.ngram_size)
     if snippet:
         if state.format in ("json", "csv"):
@@ -1653,7 +1658,14 @@ def list_cmd(
         None, "--range", help="A range of snippets to list (e.g., 10-30)."
     ),
 ) -> None:
-    """List all snippets."""
+    """List all snippets.
+
+    Examples:
+      resembl list
+      resembl list --range 10-30
+      resembl --format json list
+      resembl -o json list
+    """
     start, end = 0, None
     if range_str:
         parts = range_str.split("-")
@@ -1919,6 +1931,11 @@ def find(
 
     The query comes from --query, from --file ('-' reads stdin), or from
     stdin itself when neither is given and stdin is not a terminal.
+
+    Examples:
+      resembl find --query "push ebp; mov ebp, esp"
+      resembl find --file routine.asm --top-n 10
+      cat routine.asm | resembl --format json find
     """
     effective_top_n = top_n if top_n is not None else state.config.top_n
     effective_threshold = threshold if threshold is not None else state.config.lsh_threshold
@@ -2118,7 +2135,13 @@ def search(
         50, "--limit", help="Maximum number of results to return (default: 50)."
     ),
 ) -> None:
-    """Search for snippets by matching their names."""
+    """Search for snippets by matching their names.
+
+    Examples:
+      resembl search memcpy
+      resembl search memcpy --limit 20
+      resembl --format json search memcpy
+    """
     snippets = snippet_search_by_name(state.session, pattern, limit=limit)
 
     if state.format in ("json", "csv"):
