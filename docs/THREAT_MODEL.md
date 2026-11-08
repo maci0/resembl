@@ -1,6 +1,6 @@
 # resembl threat model
 
-Last reviewed: 2026-11-05, against the code at version 3.12.0
+Last reviewed: 2026-11-05, against the code at version 4.0.0
 (`pyproject.toml:3`). Every reference below was re-read in that tree on that
 date. The `file:line` references are historical: later releases moved the
 code, so find a cited function by name before relying on a line number. The
@@ -257,7 +257,11 @@ than a control. The Pygments floor sits above the ReDoS advisory
 (`pyproject.toml:34`), and a tag build records a provenance attestation over
 the sdist and the wheel (`.github/workflows/build.yml:93`, the `attest` job,
 tag-only by its `if:` at `.github/workflows/build.yml:96`), so a consumer can
-check an artifact against this repository and the commit that built it. No
+check an artifact against this repository and the commit that built it. The
+root `.dockerignore` excludes local databases, benchmark data, and build
+output from the `service/Dockerfile` build context, which is the repository
+root (`docker build -f service/Dockerfile .`), so sensitive corpus data never
+ships in the service image context (`.dockerignore`). No
 packaging step pulls code at install time; nothing in `resembl/` executes a
 network fetch at import.
 
@@ -468,12 +472,14 @@ workflow does not re-run either.
 | Disconnect failures swallowed | `resembl/server.py:983` | Traceback spam from connection churn, not a security control |
 | Double-serve check | `resembl/server.py:1012` | Two servers advertising one database |
 | Atomic file publication | `resembl/server.py:1145`, `resembl/config.py:245`, `resembl/core.py:1043` | Partial-file reads by a concurrent client |
+| Durable file publication (fsync) | `resembl/core.py:125` (`_sync_path`), `resembl/core.py:146` (`_sync_dir`) | An OS crash after rename leaving a zero-length or renamed-away backup/export at its published name; `_sync_path` fsyncs the file before publish and `_sync_dir` fsyncs its directory entry after rename, failures ignored on filesystems that refuse them |
 | Cache directory created `0o700` | `resembl/server.py:1133` | Another local user reading or writing the port file, for a directory the server itself creates |
 | Port file created `0o600` | `resembl/server.py:1142` | The same, for the file inside it. Neither checks a directory that already existed |
 | Fingerprint magic check | `resembl/scoring.py:1315` | Deserialization of attacker-controlled bytes from a hostile database or merge source |
 | Legacy cache files never deserialized | `resembl/cache.py:8`, `resembl/cache.py:316` | Code execution from a planted cache file |
 | Backup filename percent-encoded before SQLite URI | `resembl/core.py:2129` | A `?`/`#` in a backup filename injecting SQLite URI params (e.g. `?mode=rwc`) and escaping the read-only mode |
 | Go container runs unprivileged | `service/Dockerfile` (`FROM scratch`, `USER 65532:65532`) | A compromised service process holding root in the image |
+| Docker build context exclusions | `.dockerignore` (root and `service/.dockerignore`) | Local databases, benchmark data, and build output shipped in the service image context (`docker build -f service/Dockerfile .` uses the repository root as context) |
 | YARA string escaping | `resembl/core.py:989` | A snippet name breaking out of a generated rule string |
 | Config value coercion and range check | `resembl/config.py:157`, `resembl/config.py:74` | A hand-edited config putting a raw TOML type or an out-of-range value into a numeric field |
 | `LIKE` metacharacter escaping | `resembl/cli.py:726`, `resembl/models.py:180` | A checksum prefix like `%` resolving to an arbitrary snippet |

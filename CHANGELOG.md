@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
+
 ## [4.0.0] - 2026-11-05
 
 ### Fixed
