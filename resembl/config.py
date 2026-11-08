@@ -245,6 +245,8 @@ def _config_file_lock() -> Iterator[None]:
     so a crashed process cannot leave a stale lock behind; platforms with
     neither locking API fall back to the historical unlocked behavior.
     """
+    import time
+
     os.makedirs(config_dir_get(), exist_ok=True)
     fd = os.open(config_path_get() + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
@@ -256,8 +258,24 @@ def _config_file_lock() -> Iterator[None]:
             try:
                 import msvcrt
 
-                # typeshed provides these attributes for Windows only.
-                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+                # msvcrt.locking locks nbytes at the current file position,
+                # so seek to the start to pin the region every holder locks.
+                # A fresh sidecar is 0 bytes and Windows refuses to lock a
+                # byte that does not exist, so ensure one byte is present.
+                os.lseek(fd, 0, os.SEEK_SET)
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                    os.lseek(fd, 0, os.SEEK_SET)
+                # LK_LOCK retries ~10 times then raises OSError, while
+                # flock waits indefinitely; a config update that loses to a
+                # slow holder must wait, not crash, so poll LK_NBLCK.
+                while True:
+                    try:
+                        # typeshed provides these attributes for Windows only.
+                        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+                        break
+                    except OSError:
+                        time.sleep(0.05)
             except ImportError:
                 # A platform with neither locking API (some non-CPython
                 # builds) runs unlocked rather than refusing every config
