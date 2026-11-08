@@ -10,7 +10,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - CI now lints `benchmarks/` in the pre-commit hook as well as in the Makefile and the pylint workflow (the hook had been left on the old scope when the benchmark scripts moved out of `tests/`, so a finding there could pass locally and fail remotely); the SBOM workflow validates its JSON with the uv-managed interpreter instead of the runner's bare `python3`; and the uv installer fetch refuses non-HTTPS redirects and retries transient failures. No behavior change for contributors beyond the hook now covering `benchmarks/`.
 - The clispec schema now declares `clean` in its `confirmation_required` error and adds its `--force` confirmation bypass: the CLI already required a terminal (or `--force`) for `clean`, but the schema document omitted it. The schema also now states that `merge` and `collection delete` proceed without a confirmation prompt, matching their established unattended behavior.
-
+- The Go service's custody claim no longer fails when the platform cannot fsync a directory handle (Windows): the best-effort directory sync now matches the Python `_sync_dir` contract instead of returning the sync error and dropping the slot.
 - The `resembl-service` container image now carries the `LICENSE` and `NOTICE` text at `/licenses/`: the image previously shipped only the binary with the GPL-3.0-only grant in an OCI label, so the license text did not accompany the copy as GPL-3.0 requires. `service/.dockerignore` now mirrors the root `.dockerignore`'s cache, docs and test exclusions, so the two contexts cannot drift again.
 
 ### Added

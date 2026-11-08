@@ -150,6 +150,28 @@ class CiImagePinTests(unittest.TestCase):
         self.assertIn("--proto '=https'", text, "uv installer curl protocol")
         self.assertIn("--retry", text, "uv installer curl retry")
 
+    def test_os_classifiers_match_ci_portability_matrix(self) -> None:
+        """pyproject.toml OS classifiers name exactly the CI-tested platforms.
+
+        The classifiers are the claim indexers and users read; the CI matrix
+        is the evidence.  A classifier added without a runner (or a runner
+        dropped without removing the classifier) makes support asserted and
+        never tested.  Linux is the `test` job's `ubuntu-24.04`; macOS and
+        Windows are the `portability` job's matrix.
+        """
+        text = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        for classifier in (
+            "Operating System :: POSIX :: Linux",
+            "Operating System :: MacOS",
+            "Operating System :: Microsoft :: Windows",
+        ):
+            with self.subTest(classifier=classifier):
+                self.assertIn(classifier, text)
+        self.assertNotIn('"Operating System :: OS Independent"', text)
+        workflows = (_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+        self.assertIn("runs-on: ubuntu-24.04", workflows)
+        self.assertIn("os: [macos-15, windows-2025]", workflows)
+
     def test_go_version_agrees_everywhere(self) -> None:
         """go.mod, Dockerfile, Makefile and docs name the same Go version."""
         mod = (_ROOT / "service" / "go.mod").read_text(encoding="utf-8")
