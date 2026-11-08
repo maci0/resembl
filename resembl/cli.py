@@ -458,12 +458,23 @@ def _csv_safe(value: object) -> object:
     meaning).  Non-strings and safe strings pass through unchanged.
     Whitespace and invisible characters before the trigger are stripped
     for the check, because spreadsheets ignore them when parsing a
-    formula, so ``" =1+1"`` is as live as ``"=1+1"``.
+    formula, so ``" =1+1"`` is as live as ``"=1+1"``.  The two classes
+    are stripped in a loop, as ``name_normalize`` does: they can sit on
+    either side of each other (``"\ufeff =1+1"``), so a single
+    ``lstrip().lstrip(BOM)`` leaves the space that followed the BOM and
+    the formula evades the check.
     """
-    if isinstance(value, str) and (
-        value.startswith(_CSV_FORMULA_PREFIXES)
-        or value.lstrip().lstrip("\ufeff\u200b\u200c\u200d").startswith(_CSV_FORMULA_PREFIXES)
-    ):
+    if not isinstance(value, str):
+        return value
+    if value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    stripped = value
+    while True:
+        next_stripped = stripped.strip().lstrip("\ufeff\u200b\u200c\u200d")
+        if next_stripped == stripped:
+            break
+        stripped = next_stripped
+    if stripped.startswith(_CSV_FORMULA_PREFIXES):
         return "'" + value
     return value
 

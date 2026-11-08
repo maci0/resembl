@@ -116,6 +116,17 @@ class TestCSVFormulaGuard(unittest.TestCase):
         # A formula hiding behind any Unicode space is just as live.
         for payload in ("\u00a0=1+1", "\u3000=1+1", "\u200b=1+1", "\ufeff=1+1"):
             self.assertEqual(_csv_safe(payload), "'" + payload, repr(payload))
+        # Interleaved invisible characters and whitespace are just as live:
+        # a BOM followed by a space left the space behind a single
+        # lstrip().lstrip(BOM) pass, so the check saw " =1+1".
+        for payload in (
+            "\ufeff =1+1",
+            " \ufeff =1+1",
+            "\u200b =1+1",
+            "\ufeff \u200b=1+1",
+            "\ufeff\u200b =1+1",
+        ):
+            self.assertEqual(_csv_safe(payload), "'" + payload, repr(payload))
         # Safe values pass through unchanged (including non-strings).
         self.assertEqual(_csv_safe("plain name"), "plain name")
         self.assertEqual(_csv_safe(""), "")
