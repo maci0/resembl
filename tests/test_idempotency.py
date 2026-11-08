@@ -23,12 +23,15 @@ from resembl.core import (
     collection_add_snippet,
     collection_create,
     collection_delete,
+    collection_remove_snippet,
+    db_clean,
     db_merge,
     db_reindex,
     snippet_add,
     snippet_add_batch,
     snippet_delete,
     snippet_export,
+    snippet_export_yara,
     snippet_name_add,
     snippet_name_remove,
     snippet_prepare,
@@ -176,6 +179,39 @@ class TestSnippetWrites(BaseDBTest):
         # deletion changing the state again.
         self.assertFalse(snippet_delete(self.session, snippet.checksum, quiet=True))
         self.assertEqual(_state(self.session), after_first)
+
+
+class TestCollectionMembershipWrites(BaseDBTest):
+    def test_add_remove_twice_converges(self):
+        snippet = snippet_add(self.session, "proc", "MOV EAX, 1")
+        collection_create(self.session, "col")
+        collection_add_snippet(self.session, "col", snippet.checksum)
+        after_first = _state(self.session)
+        collection_add_snippet(self.session, "col", snippet.checksum)
+        self.assertEqual(_state(self.session), after_first)
+        collection_remove_snippet(self.session, snippet.checksum)
+        after_remove = _state(self.session)
+        collection_remove_snippet(self.session, snippet.checksum)
+        self.assertEqual(_state(self.session), after_remove)
+
+
+class TestCleanAndBackupWrites(BaseDBTest):
+    def test_clean_twice_leaves_same_state(self):
+        snippet_add(self.session, "proc", "MOV EAX, 1")
+        db_clean(self.session)
+        after_first = _state(self.session)
+        db_clean(self.session)
+        self.assertEqual(_state(self.session), after_first)
+
+    def test_export_yara_twice_is_stable(self):
+        snippet_add(self.session, "proc", "MOV EAX, 1")
+        with tempfile.TemporaryDirectory() as out:
+            path = os.path.join(out, "out.yara")
+            snippet_export_yara(self.session, path)
+            first = open(path, encoding="utf-8").read()
+            snippet_export_yara(self.session, path)
+            second = open(path, encoding="utf-8").read()
+        self.assertEqual(second, first)
 
 
 class TestCollectionWrites(BaseDBTest):

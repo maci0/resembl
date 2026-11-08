@@ -63,24 +63,24 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "add",
         "Store one snippet, or add an alias when that code is already stored.",
-        "non_idempotent",
+        "idempotent",
     ),
     _command(
         "export",
         "Write every snippet into a directory.",
-        "non_idempotent",
+        "idempotent",
         confirmation="--force",
     ),
     _command(
         "export-yara",
         "Write snippets as YARA string patterns.",
-        "non_idempotent",
+        "idempotent",
         confirmation="--force",
     ),
     _command(
         "import",
         "Load snippets from a file or a directory of assembly files.",
-        "non_idempotent",
+        "idempotent",
         confirmation="--force",
     ),
     _command(
@@ -96,8 +96,9 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     ),
     _command(
         "rm",
-        "Remove one snippet by checksum or unique prefix.",
-        "non_idempotent",
+        "Remove one snippet by checksum or unique prefix. A second run"
+        " reports the snippet as missing and leaves the database unchanged.",
+        "idempotent",
         confirmation="--force",
     ),
     _command("stats", "Show database statistics.", "read_only"),
@@ -110,7 +111,7 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "reindex",
         "Recompute every MinHash in the database.",
-        "non_idempotent",
+        "idempotent",
         confirmation="--force",
     ),
     _command(
@@ -131,11 +132,11 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         collection=True,
     ),
     _command("compare", "Compare two snippets.", "read_only"),
-    _command("clean", "Drop the LSH index and vacuum the database.", "non_idempotent"),
+    _command("clean", "Drop the LSH index and vacuum the database.", "idempotent"),
     _command(
         "backup",
         "Write a consistent, restorable copy of the database.",
-        "non_idempotent",
+        "idempotent",
         confirmation="--force",
     ),
     _command(
@@ -146,14 +147,19 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "merge",
         "Copy snippets from another resembl database into this one.",
-        "non_idempotent",
+        "idempotent",
     ),
-    _command("name add", "Attach one more name to a snippet.", "non_idempotent"),
-    _command("name remove", "Detach one name from a snippet.", "non_idempotent"),
-    _command("tag add", "Attach one tag to a snippet.", "non_idempotent"),
-    _command("tag remove", "Detach one tag from a snippet.", "non_idempotent"),
-    _command("collection create", "Create an empty collection.", "non_idempotent"),
-    _command("collection delete", "Delete a collection.", "non_idempotent"),
+    _command("name add", "Attach one more name to a snippet.", "idempotent"),
+    _command("name remove", "Detach one name from a snippet.", "idempotent"),
+    _command("tag add", "Attach one tag to a snippet.", "idempotent"),
+    _command("tag remove", "Detach one tag from a snippet.", "idempotent"),
+    _command("collection create", "Create an empty collection.", "idempotent"),
+    _command(
+        "collection delete",
+        "Delete a collection. A second run reports the collection as missing"
+        " and leaves the database unchanged.",
+        "idempotent",
+    ),
     _command(
         "collection list",
         "List collections.",
@@ -169,12 +175,12 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "collection add",
         "Put a snippet into a collection.",
-        "non_idempotent",
+        "idempotent",
     ),
     _command(
         "collection remove",
         "Take a snippet out of its collection.",
-        "non_idempotent",
+        "idempotent",
     ),
     _command(
         "version",
@@ -185,8 +191,8 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command("config path", "Print the config file path.", "read_only"),
     _command("config list", "Print the current settings.", "read_only"),
     _command("config get", "Print one setting.", "read_only"),
-    _command("config set", "Change one setting.", "non_idempotent"),
-    _command("config unset", "Return one setting to its default.", "non_idempotent"),
+    _command("config set", "Change one setting.", "idempotent"),
+    _command("config unset", "Return one setting to its default.", "idempotent"),
     _command("schema", "Print the clispec 0.3 JSON document for this CLI.", "read_only"),
 )
 
