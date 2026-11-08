@@ -19,6 +19,7 @@ project follows [Semantic Versioning](https://semver.org/).
 - `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
 - `resembl serve` now answers `413` with the `{"error": "request too large"}` envelope to a request body larger than 8 MiB, matching the Go service and the Lambda proxy for the same cap; it previously answered `400`, indistinguishable from a malformed body.
 - `cfg_similarity` now rejects non-integer counts and block sizes (NaN, infinity, bools, floats) with `ValueError` instead of returning `NaN` for a `NaN` block count, and clamps the cosine term so float rounding can no longer push the score just above `1.0`.
+- `make install` now names the missing `uv` prerequisite (uv 0.12.13 or newer, with an install link) instead of failing with a bare `uv: command not found`.
 - `docs/THREAT_MODEL.md` and `SECURITY.md` now record that `db_merge` masks credentials in its source-URL error path (`0afeba7`) and that `serve` answers `413` for oversized bodies (`2cd23c9`), and correct stale `file:line` references (including two out-of-range `resembl/scoring.py:1315` citations) so the model matches the code it describes.
 
 ## [4.0.0] - 2026-11-05

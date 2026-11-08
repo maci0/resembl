@@ -69,6 +69,11 @@ help:  ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Create .venv from uv.lock and install the git hooks
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "make install needs uv 0.12.13 or newer (see pyproject.toml [tool.uv] required-version)."; \
+		echo "Install uv from https://docs.astral.sh/uv/getting-started/installation/ and re-run 'make install'."; \
+		exit 1; \
+	fi
 	uv sync --locked --extra dev
 	uv run --locked pre-commit install
 

@@ -104,3 +104,24 @@ class MakefileShellTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("needs Go 1.26+", result.stdout + result.stderr)
         self.assertIn("https://go.dev/dl/", result.stdout + result.stderr)
+
+    def test_install_names_missing_uv(self) -> None:
+        """Without uv on PATH, install names uv and its install docs."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ)
+            env["PATH"] = directory
+            result = subprocess.run(
+                [make, "install"],
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("needs uv 0.12.13", result.stdout + result.stderr)
+        self.assertIn("https://docs.astral.sh/uv/", result.stdout + result.stderr)
