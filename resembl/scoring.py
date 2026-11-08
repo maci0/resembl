@@ -568,7 +568,7 @@ def _lexed_pass(
     tokens: Iterable[tuple[object, str]],
     normalize: bool,
     want_tokens: bool,
-    want_normalized: bool,
+    want_normalized: bool = False,
 ) -> tuple[list[str], str]:
     """Single pass over a lexer token stream producing tokens and/or a string.
 
@@ -661,7 +661,7 @@ def _lexed_pass(
 
 def code_tokenize_lexed(tokens: Iterable[tuple[object, str]], normalize: bool = True) -> list[str]:
     """Tokenize an already-lexed token stream (no re-lexing)."""
-    return _lexed_pass(tokens, normalize, want_tokens=True, want_normalized=False)[0]
+    return _lexed_pass(tokens, normalize, want_tokens=True)[0]
 
 
 def code_tokenize_normalize_lexed(
