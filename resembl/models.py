@@ -10,7 +10,7 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text
 from sqlmodel import Field, Session, SQLModel, select
 
 # Re-exported for external backward compatibility only
@@ -230,16 +230,25 @@ class SnippetVersion(SQLModel, table=True):
     yet; the versioning feature should assign ids explicitly when it lands.
     """
 
+    __table_args__ = (
+        Index("ix_snippetversion_checksum_created", "snippet_checksum", "created_at"),
+    )
+
     id: int | None = Field(
         default=None,
         sa_column=Column(Integer, primary_key=True, autoincrement=False),
     )
+    # No single-column index here: the composite
+    # (snippet_checksum, created_at) index declared via Index below
+    # covers every lookup on this column (its leftmost prefix is
+    # snippet_checksum).  The database-level helper `_ensure_indexes`
+    # creates that composite on existing databases; the plain
+    # single-column index would only duplicate it.
     snippet_checksum: str = Field(
         sa_column=Column(
             String(64),
             ForeignKey("snippet.checksum"),
             nullable=False,
-            index=True,
         )
     )
     code: str = Field(sa_column=Column(Text, nullable=False))
@@ -269,18 +278,24 @@ class SnippetVersion(SQLModel, table=True):
 class Snippet(SQLModel, table=True):
     """Model representing a stored assembly snippet."""
 
+    __table_args__ = (Index("ix_snippet_collection_checksum", "collection", "checksum"),)
+
     checksum: str = Field(primary_key=True, max_length=64)
     names: str = Field(sa_column=Column(Text, nullable=False))  # JSON-encoded list
     code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
     tags: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    # No single-column index here: the composite (collection, checksum)
+    # index declared via Index below covers every lookup on this column
+    # (its leftmost prefix is collection).  The database-level helper
+    # `_ensure_indexes` creates that composite on existing databases;
+    # the plain single-column index would only duplicate it.
     collection: str | None = Field(
         default=None,
         sa_column=Column(
             String(128),
             ForeignKey("collection.name"),
             nullable=True,
-            index=True,
         ),
     )
 

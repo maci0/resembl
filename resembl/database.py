@@ -133,15 +133,20 @@ def _ensure_indexes(eng: Engine) -> None:
     statements = (
         # SnippetVersion.get_by_checksum / snippet_version_list:
         # WHERE snippet_checksum = ? ORDER BY created_at DESC.  The
-        # single-column index on snippet_checksum alone still sorts every
-        # version row for a popular snippet.
+        # composite index (snippet_checksum, created_at) covers the
+        # single-column prefix lookups on snippet_checksum, so the old
+        # single-column ix_snippetversion_snippet_checksum was redundant
+        # and is dropped below.
         (
             "CREATE INDEX IF NOT EXISTS ix_snippetversion_checksum_created "
             "ON snippetversion (snippet_checksum, created_at DESC)"
         ),
         # Snippet.get_by_collection: WHERE collection = ? ORDER BY checksum.
-        # The existing ix_snippet_collection index does not cover the
-        # checksum ordering; a composite (collection, checksum) does.
+        # The composite (collection, checksum) index covers the ordering
+        # and the single-column prefix lookups on collection (GROUP BY
+        # collection, the bulk UPDATE on collection delete), so the old
+        # single-column ix_snippet_collection was redundant and is
+        # dropped below.
         (
             "CREATE INDEX IF NOT EXISTS ix_snippet_collection_checksum "
             "ON snippet (collection, checksum)"
@@ -152,6 +157,16 @@ def _ensure_indexes(eng: Engine) -> None:
         # interrupted.
         ("CREATE INDEX IF NOT EXISTS ix_lsh_bucket_checksum ON lsh_bucket (checksum)"),
     )
+    # Redundant single-column indexes: covered by the composites above
+    # (leftmost prefix).  Dropping them saves write amplification on
+    # every snippet insert and leaves existing databases with the same
+    # query plans.  IF EXISTS makes this a no-op on fresh databases.
+    drops = (
+        "DROP INDEX IF EXISTS ix_snippet_collection",
+        "DROP INDEX IF EXISTS ix_snippetversion_snippet_checksum",
+    )
     with eng.begin() as conn:
         for stmt in statements:
+            conn.execute(_text(stmt))
+        for stmt in drops:
             conn.execute(_text(stmt))
