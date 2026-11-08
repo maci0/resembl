@@ -1311,7 +1311,7 @@ def _yara_string_escape(text: str) -> str:
     parts: list[str] = []
     for ch in escaped:
         code = ord(ch)
-        if 0x20 <= code != 0x7F and not 0xD800 <= code <= 0xDFFF:
+        if 0x20 <= code and not 0x7F <= code <= 0x9F and not 0xD800 <= code <= 0xDFFF:
             parts.append(ch)
         elif code < 0x100:
             # YARA ``\xNN`` takes exactly two hex digits: ``f"\x{ord:02x}"``
