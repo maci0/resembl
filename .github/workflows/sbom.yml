@@ -50,7 +50,7 @@ jobs:
         run: make sbom
 
       - name: Validate SBOM parses as JSON
-        run: python3 -c "import json; json.load(open('build/sbom.cdx.json'))"
+        run: uv run --locked python -c "import json; json.load(open('build/sbom.cdx.json'))"
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

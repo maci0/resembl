@@ -6,7 +6,9 @@
 # serves the newest uv and a run months from now would drive a different tool
 # against the same uv.lock, and it is exported for the script itself. The
 # pipeline runs under `pipefail`, so a curl that dies mid-download fails the
-# step instead of piping a truncated script into sh.
+# step instead of piping a truncated script into sh. `--proto '=https'`
+# refuses a redirect to plain HTTP, and `--retry 3` rides out a transient
+# 5xx from astral.sh instead of failing the job on the first attempt.
 #
 # The cache key is keyed on uv.lock and the interpreter, because uv keys its
 # wheel cache by Python version, so each interpreter uses its own wheels.
@@ -66,7 +68,7 @@ runs:
         UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
       run: |
         set -euo pipefail
-        curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+        curl --proto '=https' --retry 3 -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
         # The installer prints where it put the binary and leaves PATH alone.
         # The Linux and macOS runner images already carry a uv, so only the
         # Windows leg noticed; there the next step failed with "The term 'uv'

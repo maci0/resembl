@@ -109,6 +109,47 @@ class CiImagePinTests(unittest.TestCase):
                 self.assertEqual(text.count("image: postgres:"), 1)
                 self.assertEqual(text.count("image: mysql:"), 1)
 
+    def test_pylint_scope_agrees_everywhere(self) -> None:
+        """The pre-commit hook, Makefile, CI and AGENTS.md lint the same trees.
+
+        A scope that differs between the commit gate and CI lets a file
+        pass locally and fail remotely (or the reverse): the benchmarks/ move
+        left the hook checking fewer trees than `make check` and pylint.yml.
+        """
+        scope = "resembl/ tests/ fuzzers/ benchmarks/"
+        pre_commit = (_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        for tree in ("resembl/", "tests/", "fuzzers/", "benchmarks/"):
+            self.assertIn(f'"{tree}"', pre_commit, f".pre-commit-config.yaml {tree}")
+        pylint_yml = (_ROOT / ".github" / "workflows" / "pylint.yml").read_text(encoding="utf-8")
+        self.assertIn(scope, pylint_yml, "pylint.yml pylint invocation")
+        makefile = (_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn(scope, makefile, "Makefile pylint invocation")
+        agents = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn(scope, agents, "AGENTS.md pylint scope")
+
+    def test_sbom_validation_uses_uv_python(self) -> None:
+        """The SBOM JSON check runs on the pinned interpreter, not bare python3.
+
+        The runner's system python3 is unpinned and uncached, so the check
+        would parse with whatever the image ships while uv manages 3.15.2.
+        """
+        text = (_ROOT / ".github" / "workflows" / "sbom.yml").read_text(encoding="utf-8")
+        self.assertNotIn("python3 -c", text, "sbom.yml uses bare python3")
+        self.assertIn("uv run --locked python", text, "sbom.yml validation step")
+
+    def test_uv_installer_is_https_only_and_retried(self) -> None:
+        """The uv installer fetch refuses non-HTTPS and retries transient failures.
+
+        `curl | sh` with no protocol restriction would silently follow a
+        downgrade to plain HTTP if astral.sh ever redirected, and a transient
+        5xx would fail the whole job instead of retrying the pinned download.
+        """
+        text = (_ROOT / ".github" / "actions" / "setup-uv" / "action.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--proto '=https'", text, "uv installer curl protocol")
+        self.assertIn("--retry", text, "uv installer curl retry")
+
     def test_go_version_agrees_everywhere(self) -> None:
         """go.mod, Dockerfile, Makefile and docs name the same Go version."""
         mod = (_ROOT / "service" / "go.mod").read_text(encoding="utf-8")
