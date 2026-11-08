@@ -6,7 +6,7 @@ Each story's acceptance criteria are the requirement: a criterion that no
 command or test can check is a defect in the criterion, not a loose goal. Keep
 them in step with the CLI in the same change that moves the behavior.
 
-Last reviewed: 2026-09-27.
+Last reviewed: 2026-11-08.
 
 ---
 
@@ -86,7 +86,8 @@ Last reviewed: 2026-09-27.
 - `resembl find` transparently talks to the running server and falls back to the in-process path when no server is reachable.
 - The standalone `resembl-find` client queries the running server directly; it imports only the standard library so each call skips the full CLI startup cost.
 - Binding a non-loopback interface is refused unless `--allow-unauthenticated` is given (with the flag, it warns that the service is unauthenticated and proceeds).
-- The HTTP endpoints (`POST /find`, `POST /find-batch`) are documented in [http_api.md](http_api.md): every response, success or error, is JSON, and a rejected parameter answers `400` with `{"error": ...}` naming the field.
+- The HTTP endpoints (`POST /find`, `POST /find-batch`, `POST /find-pinned`, `POST /score`, `POST /band-keys`, `GET /scheme`, `GET /runtime-generation`) are documented in [http_api.md](http_api.md): every response, success or error, is JSON, and a rejected parameter answers `400` with `{"error": ...}` naming the field.
+- `resembl serve --stateless` opens no database and writes no port file: only `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` answer; `/find`, `/find-batch`, `/find-pinned` and `GET /runtime-generation` answer `501` naming the mode.
 - `GET /health` reports whether the served database still answers; a probe that fails answers `503` rather than reporting a server that cannot search.
 - `GET /metrics` reports requests by path and status, a request-latency histogram, the result-cache hit rate, and the per-query failures an otherwise-`200` `/find-batch` hides, in the Prometheus text format; every other response is `application/json`.
 
@@ -235,7 +236,7 @@ Last reviewed: 2026-09-27.
 - `resembl collection remove <checksum>` removes a snippet from its collection.
 - `resembl collection show <name>` displays all snippets in a collection.
 - `resembl collection list` lists all collections with snippet counts.
-- `resembl collection delete <name>` deletes a collection without removing snippets.
+- `resembl collection delete <name>` deletes a collection without removing snippets; it takes a verified pre-delete backup first (`--no-backup` skips it, `--backup-dir <DIR>` names the directory).
 
 ---
 
@@ -248,6 +249,7 @@ Last reviewed: 2026-09-27.
 **Acceptance Criteria:**
 - `resembl clean` removes the LSH index (buckets and metadata). Legacy pickle cache files are removed by the next index write, not by `clean`.
 - `resembl clean` vacuums the database to reclaim unused space (SQLite only).
+- `resembl clean` takes a verified pre-delete backup first; `--no-backup` skips it and `--backup-dir <DIR>` names the directory.
 - The LSH index is rebuilt automatically on the next `find`.
 
 ---
@@ -261,6 +263,7 @@ Last reviewed: 2026-09-27.
 **Acceptance Criteria:**
 - `resembl rm <checksum>` removes a snippet from the database.
 - Checksum prefixes are accepted.
+- `resembl rm` takes a verified pre-delete backup first; `--no-backup` skips it and `--backup-dir <DIR>` names the directory.
 - The tool prompts for confirmation before deleting.
 - The user can bypass the confirmation prompt with the `--force` flag.
 
@@ -274,6 +277,7 @@ Last reviewed: 2026-09-27.
 
 **Acceptance Criteria:**
 - `resembl merge <source>` accepts a path to another database file, or a full database URL for non-SQLite sources.
+- `resembl merge` takes a verified pre-merge backup first; `--no-backup` skips it and `--backup-dir <DIR>` names the directory.
 - Snippets already present (same checksum) are skipped, not duplicated.
 - For existing snippets, names and tags from the source are merged in.
 - The summary reports added, updated, skipped, and total source counts.
@@ -392,6 +396,33 @@ host's `TZ` moved under me.
 - A fixed offset (`+02:00`) is refused, naming one instant of the year rather
   than a zone that follows daylight saving; an unknown zone name is refused
   the same way.
+
+---
+
+### Title: Back up and verify a restorable copy
+
+**As a** database maintainer (Chris),
+**I want to** use the `backup` and `verify-backup` commands to write and check a consistent, restorable copy of the database,
+**so that** a restore point is verified, not assumed.
+
+**Acceptance Criteria:**
+- `resembl backup <directory>` writes a single-file copy of the default SQLite database into `<directory>`, pruned to the newest `--keep` backups (default 7), and copies the live `config.toml` verbatim beside it as `<backup-stem>.config.toml` with its SHA-256 recorded in the manifest as `config_sha256` (`null` when no config file existed).
+- The backup is written via SQLite's online backup API (not a raw file copy paired with a stale WAL), published atomically, and immediately re-verified; a copy whose manifest could not be written or that fails verification exits `1` and is reported as unverified/unrestorable.
+- `resembl backup` is SQLite only; on other backends it refuses with a message naming the backend.
+- `resembl verify-backup <path>` checks that a backup file opens, holds every table, passes `PRAGMA integrity_check`, and matches its manifest's snippet count and corpus `content_hash`; it exits `1` when the backup is not restorable.
+- `resembl backup` prompts for confirmation before writing and can bypass it with `--force`; `verify-backup` only reads and takes no confirmation prompt.
+
+---
+
+### Title: Print the CLI schema
+
+**As a** security researcher (Ben),
+**I want to** use the `schema` command to print the clispec 0.3 JSON document for the CLI,
+**so that** tooling can discover commands without parsing help text.
+
+**Acceptance Criteria:**
+- `resembl schema` prints the clispec 0.3 JSON document and does not open a database, read config, or contact a server.
+- `resembl schema <command>...` limits the document to the named command path; an unknown path is a usage error naming the path.
 
 ---
 
