@@ -594,9 +594,25 @@ class TestCLIServeWarnings(BaseCLITest):
         self.assertEqual(result.returncode, 1, result.stderr)
         return result
 
-    def test_non_loopback_bind_warns_about_authentication(self):
-        """Binding a routable interface says the service is unauthenticated."""
+    def test_non_loopback_bind_refused_without_flag(self):
+        """Binding a routable interface is refused without the explicit flag."""
         result = self.run_serve("0.0.0.0")
+        self.assertIn("non-loopback", result.stderr)
+        self.assertIn("--allow-unauthenticated", result.stderr)
+        self.assertNotIn("unauthenticated find service", result.stdout)
+
+    def test_non_loopback_bind_warns_with_flag(self):
+        """With the flag, binding a routable interface warns it is unauthenticated."""
+        import socket
+
+        with socket.socket() as taken:
+            taken.bind(("0.0.0.0", 0))
+            port = taken.getsockname()[1]
+            taken.listen(1)
+            result = self.run_command(
+                f"serve --host 0.0.0.0 --port {port} --allow-unauthenticated"
+            )
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("non-loopback", result.stdout)
         self.assertIn("unauthenticated", result.stdout)
 

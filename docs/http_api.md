@@ -6,10 +6,11 @@ and `resembl find-batch` use it automatically when it is running; the
 endpoints are documented here so other clients can use the same server.
 
 The server has no authentication: it is a single-user local tool, not a
-service. It binds `127.0.0.1` by default, but `--host` overrides that and a
-non-loopback address only prints a warning; the bind proceeds. Any process
-that can reach the port can read the whole snippet corpus. Do not expose the
-port.
+service. It binds `127.0.0.1` by default. A non-loopback `--host` is refused
+unless `--allow-unauthenticated` is given, in which case it prints a warning
+and proceeds. Any process that can reach the port can read the whole snippet
+corpus. Do not expose the port; only use `--allow-unauthenticated` behind a
+network gate that provides authentication.
 
 A loopback bind additionally checks the request's `Host` header and answers
 `403` to anything but `127.0.0.1`, `localhost` or `::1` (with or without the
@@ -63,7 +64,7 @@ share no state, so a load balancer can spread `/score` and `/band-keys` over
 any number of them, and `/health` reports only that the process answers.
 
 ```bash
-resembl serve --stateless --host 0.0.0.0 --port 8080
+resembl serve --stateless --host 0.0.0.0 --port 8080 --allow-unauthenticated
 ```
 
 ## Endpoints

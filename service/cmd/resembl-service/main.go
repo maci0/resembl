@@ -4,9 +4,12 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	service "github.com/maci0/resembl/service"
@@ -39,6 +42,14 @@ func newServer(args []string) (*http.Server, error) {
 	if *resource == "" {
 		return nil, errors.New("-resource is required")
 	}
+	// Fail closed: without a token the service denies every query, which is
+	// safe but useless; on a routable interface it would also expose
+	// unauthenticated /healthz and /metrics. Require a token file for any
+	// non-loopback listen address so the operator must make the exposure
+	// deliberate.
+	if *tokenFile == "" && !isLoopbackListen(*address) {
+		return nil, fmt.Errorf("-token-file is required when -listen %s is not loopback", *address)
+	}
 	engine, err := service.NewPinnedSQLiteEngineWithTimeout(*engineURL, *index, *artifact, *generation, *timeout)
 	if err != nil {
 		return nil, err
@@ -61,6 +72,9 @@ func newServer(args []string) (*http.Server, error) {
 	if err = handler.SetCustody(custody); err != nil {
 		return nil, err
 	}
+	if *tokenFile == "" && isLoopbackListen(*address) {
+		log.Print("warning: no -token-file configured; all queries will be denied")
+	}
 	return &http.Server{
 		Addr:              *address,
 		Handler:           handler,
@@ -70,4 +84,25 @@ func newServer(args []string) (*http.Server, error) {
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    16 << 10,
 	}, nil
+}
+
+// isLoopbackListen reports whether address binds only loopback. An empty
+// host or a wildcard binds every interface and is not loopback.
+func isLoopbackListen(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	host = strings.TrimSpace(host)
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
 }

@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `resembl serve` now refuses a non-loopback `--host` unless `--allow-unauthenticated` is given; it previously only printed a warning and bound the unauthenticated corpus to the network. The Go `resembl-service` likewise now requires `-token-file` for a non-loopback `-listen`.
+
 ### Added
 
 - `resembl backup` now copies the live `config.toml` verbatim to a `<backup-stem>.config.toml` sidecar beside each SQLite backup (mode `0600`), records its SHA-256 in the manifest as `config_sha256` (`null` when no config existed), and `verify-backup` cross-checks the sidecar: a missing or mismatched sidecar fails verification instead of passing on the database copy alone. A restore can now recover tuned config, not just the corpus; see `docs/restore.md`.

@@ -813,6 +813,15 @@ def serve(
             "/metrics, for replicas that share no state. Find paths answer 501."
         ),
     ),
+    allow_unauthenticated: bool = typer.Option(
+        False,
+        "--allow-unauthenticated",
+        help=(
+            "Allow binding a non-loopback interface without authentication. "
+            "The server has no auth: anyone who can reach the port can read "
+            "the corpus. Only use behind a network gate that provides auth."
+        ),
+    ),
 ) -> None:
     """Serve find queries from a warm process (instant warm finds).
 
@@ -836,6 +845,15 @@ def serve(
         _db_open()
         db_url = _session_db_url(state.session)
     if host not in ("127.0.0.1", "localhost", "::1"):
+        if not allow_unauthenticated:
+            err_console.print(
+                "[red]Error:[/red] refusing to bind non-loopback "
+                f"{_display(host)} without --allow-unauthenticated: the "
+                "server has no authentication and anyone who can reach the "
+                "port can read the corpus. Bind loopback, or put an "
+                "authenticating gate in front of the port."
+            )
+            raise typer.Exit(code=1)
         _echo(
             "[yellow]Warning: binding a non-loopback interface exposes an "
             "unauthenticated find service.[/yellow]"
