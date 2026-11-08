@@ -32,26 +32,23 @@ rendered with the password intact, falling back to `sqlite:///assembly.db`
 when no database URL is set in the environment), so one process can serve several databases. The
 file is removed when the server exits.
 
+Set `RESEMBL_DATABASE_URL` even when you rely on the default (the digest must
+be of the *resolved* URL), start `resembl serve`, then print the port file's
+path with Python (stdlib only) so the same command works on Linux, macOS and
+Windows where `sha256sum`/`cut`/`$()` do not exist:
+
 ```bash
-# any terminal; the digest below must be of the *resolved* URL, so set
-# the database URL even when you rely on the default.
 export RESEMBL_DATABASE_URL=sqlite:///assembly.db
 resembl serve &
-
-# Print the port-file path with Python (stdlib only), so the same command
-# works on Linux, macOS and Windows shells where sha256sum/cut/$() do not.
+python3 -c "from resembl.paths import db_url_get, cache_dir_get, server_port_path; print(server_port_path(db_url_get(), cache_dir_get()))"
 # On PowerShell, quote the -c argument with single quotes instead.
-port=$(python3 -c "import hashlib, os; print(hashlib.sha256(os.environ['RESEMBL_DATABASE_URL'].encode()).hexdigest()[:12])")
-port_file="$HOME/.cache/resembl/server_${port}.port"
-# XDG_CACHE_HOME / RESEMBL_CACHE_DIR override the ~/.cache default above;
-# on Windows expanduser reads USERPROFILE, so the same path resolves there.
-# With an override set, read it from Python instead:
-#   python3 -c "from resembl.paths import db_url_get, cache_dir_get, server_port_path; print(server_port_path(db_url_get(), cache_dir_get()))"
-port=$(cat "$port_file")
-curl -s "http://127.0.0.1:$port/find" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "push ebx\nmov eax, 5\npop ebx\nret"}'
 ```
+
+On PowerShell, set the variable with
+`$env:RESEMBL_DATABASE_URL = "sqlite:///assembly.db"` and run the same
+`python3 -c` command. Read the port from the printed file's contents and
+post to `http://127.0.0.1:<port>/find` with any HTTP client (for example
+`curl -s "http://127.0.0.1:<port>/find" -H 'Content-Type: application/json' -d '{"query": "push ebx\nmov eax, 5\npop ebx\nret"}'`).
 
 ## Stateless mode
 

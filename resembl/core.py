@@ -2760,9 +2760,13 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     )
     try:
         # Percent-encode so '?'/'#' in a filename cannot inject URI params
-        # (e.g. "?mode=rwc") and escape the read-only mode.
+        # (e.g. "?mode=rwc") and escape the read-only mode.  Normalize to
+        # forward slashes first: a SQLite URI uses '/' as the separator on
+        # every platform, and the Windows backslash spelling percent-encoded
+        # (``file:C%3A%5C...``) is not the absolute form SQLite opens there.
+        _uri_path = os.path.abspath(backup_path).replace(os.sep, "/")
         connection = sqlite3.connect(
-            f"file:{quote(os.path.abspath(backup_path), safe='/')}?mode=ro", uri=True
+            f"file:{quote(_uri_path, safe='/')}?mode=ro", uri=True
         )
     except sqlite3.Error as e:
         return {"ok": False, "num_snippets": 0, "issues": [f"cannot open backup: {e}"]}
