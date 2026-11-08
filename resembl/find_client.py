@@ -411,6 +411,11 @@ def _main(argv: list[str] | None = None) -> int:
         return _fail(f"server unreachable: {exc}", 1, json_on=json_on)
     if "error" in payload:
         return _fail(str(payload["error"]), 1, json_on=json_on)
+    if "lsh_candidates" not in payload or "matches" not in payload:
+        # A server answer without the promised fields is a malformed
+        # response, not an empty result: indexing into it would raise
+        # KeyError and lose the result table entirely.
+        return _fail("server returned a malformed find response", 1, json_on=json_on)
 
     if json_on:
         print(json.dumps(payload, separators=(",", ":")))

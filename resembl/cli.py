@@ -691,11 +691,17 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(_read_bounded_server_response(response).decode("utf-8"))
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as exc:
         # A 4xx/5xx answer is a decision, not an outage: the server is
         # healthy and deliberately refused this request.  Fall back to the
         # in-process path, which validates the same parameters and reports
-        # the same errors on the caller's terms.
+        # the same errors on the caller's terms.  Log the refusal: falling
+        # back silently hides a server-side 500 from the operator.
+        logger.warning(
+            "Server request to %s failed with HTTP %s; falling back to the in-process path.",
+            path,
+            getattr(exc, "code", "?"),
+        )
         return None
     except (urllib.error.URLError, OSError, ValueError) as exc:
         # Only a verifiably dead server (connection refused: nothing is
@@ -704,6 +710,11 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         # *healthy* server under load (connection churn surfaces as RST);
         # removing the advertisement there would orphan the warm process
         # for every other find client until it restarts.
+        logger.debug(
+            "Server request to %s failed (%s); falling back to the in-process path.",
+            path,
+            exc,
+        )
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
         if isinstance(reason, ConnectionRefusedError):
             # Retire the stale advertisement only while it still names the

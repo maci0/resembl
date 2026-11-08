@@ -963,7 +963,7 @@ class TestServerFallback(unittest.TestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
+            def read(self, size=-1):
                 return b"<html>not json</html>"
 
         with patch(

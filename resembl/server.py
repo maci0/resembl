@@ -1578,8 +1578,13 @@ class _FindHandler(BaseHTTPRequestHandler):
                 def _release_fence() -> None:
                     try:
                         connection.exec_driver_sql("ROLLBACK")
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "[%s] pinned fence ROLLBACK failed (writer lock may "
+                            "be held until the connection returns to the pool): %s",
+                            self.request_id,
+                            exc,
+                        )
 
                 try:
                     actual = index_digest(connection)
@@ -2052,8 +2057,19 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
                     "another serve process is already running for this "
                     f"database (port {existing_port})"
                 )
-        except OSError:
+        except ConnectionRefusedError:
             pass  # stale port file — nothing listening; we'll replace it
+        except OSError as exc:
+            # A timeout (or any other transport error) does not prove the
+            # advertised server is dead: a healthy server under load can
+            # time out the 1s probe.  Treating it as stale would orphan
+            # the live process by overwriting its port file.  Fail
+            # closed instead so the caller retries once the first server
+            # is confirmed gone.
+            raise ValueError(
+                "another serve process is already running for this "
+                f"database (port {existing_port})"
+            ) from exc
 
     # Larger than the default pool: requests run one thread per connection,
     # and the default (5 + 10 overflow) was exhausted under concurrent load,
