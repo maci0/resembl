@@ -349,11 +349,11 @@ which the server cannot watch for external writers. `X-Content-Type-Options`,
 `X-Frame-Options`, and `Content-Security-Policy` are set so a browser pointed
 at the port cannot reinterpret a response as a page.
 
-## Logging
+## Logging and the investigative path
 
 Every record the server makes leads with a correlation id. A request that
-carries its own `X-Request-Id` (the Go query service forwards the id it
-minted for the client) keeps that id end to end; otherwise the server mints
+carries its own `X-Request-Id` (the Go query service adopts the client's id
+and forwards the id it minted for the client) keeps that id end to end; otherwise the server mints
 twelve hex digits per request. A supplied id is adopted only when it is
 bounded and printable, and anything else falls back to the minted one. A
 `500` traceback, a failed `/find-batch` query, a slow request and the
@@ -366,6 +366,16 @@ traceback, and a request slower than a second. A served find is ~1.4 ms, so
 the slow-request WARNING is the signal that the warm process has stopped
 being warm; it names the id, the verb, the path, the status and the elapsed
 time.
+
+The signals connect through that one id. A metric anomaly on
+`resembl_server_requests_total` or on `resembl_server_request_duration_seconds`
+names a path and a status; the access line at DEBUG names the id, the peer,
+the status and the latency for the individual request; and the id is echoed
+on the response `X-Request-Id`, so a client report carrying it searches the
+Go service's log, this server's records and the metric for the same request.
+A failed `/find-batch` query is also counted on
+`resembl_server_query_errors_total`, because the batch itself still answers
+`200` and would otherwise be invisible to anything reading status codes.
 
 Started with `-v` (`resembl serve -v`) it also records every request at
 DEBUG: peer address, request line, status and latency. That is the fuller

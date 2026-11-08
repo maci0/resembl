@@ -326,6 +326,17 @@ func (s *Service) now() time.Time {
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := newRequestID()
+	// Adopt the caller's correlation id the same way the Python engine
+	// does (_correlation_id in resembl/server.py): one id then names the
+	// request in the Go service's logs, in the engine's logs, and on the
+	// response the client gets back, so an operator holding a client
+	// report can search every hop for it. The header is request-controlled,
+	// so only a bounded, printable id is adopted; anything else (too long,
+	// or carrying a control char that could forge a log line) falls back
+	// to the server-minted id.
+	if supplied := strings.TrimSpace(r.Header.Get("X-Request-Id")); supplied != "" && len(supplied) <= 64 && safeLogPath(supplied) == supplied {
+		reqID = supplied
+	}
 	started := s.now()
 	// Carry the id on the request context so the engine hop downstream
 	// can forward it (LocalEngine sets X-Request-Id): one id then names
@@ -502,6 +513,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if msg == "" {
 					msg = "engine rejected request"
 				}
+				log.Printf("[%s] engine rejected request: status=%d", reqID, engErr.Status)
 				writeError(w, engErr.Status, msg)
 				return
 			}
