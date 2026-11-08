@@ -79,6 +79,15 @@ class MinHash:
             values = list(hashvalues)
             if not values:
                 raise ValueError("Cannot have an empty hashvalues sequence")
+            # Stored fingerprints are uint32 (see minhash_pack) and the
+            # permutation arithmetic masks to 32 bits, so a value outside
+            # [0, 2**32) would silently truncate on pack: two distinct
+            # fingerprints would compare equal once stored.  Reject it here
+            # instead, matching the constructor's other range checks.
+            if any(isinstance(v, bool) or not 0 <= v <= int(_MAX_HASH) for v in values):
+                raise ValueError(
+                    f"hashvalues must be integers in [0, {int(_MAX_HASH)}], got {values!r}"
+                )
             self.num_perm = len(values)
             self.hashvalues = np.array(values, dtype=np.uint64)
         else:

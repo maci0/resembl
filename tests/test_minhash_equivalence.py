@@ -167,6 +167,15 @@ class TestConstructorFromHashvalues(unittest.TestCase):
         with self.assertRaises(ValueError):
             MinHash(hashvalues=[])
 
+    def test_rejects_out_of_range_hashvalues(self):
+        """Values outside uint32 would silently truncate on pack."""
+        bad = ([4294967296, 7], [-1, 7])
+        for values in bad:
+            with self.assertRaises(ValueError):
+                MinHash(hashvalues=values)
+        m = MinHash(hashvalues=[0, 4294967295])
+        self.assertEqual([int(v) for v in m.digest()], [0, 4294967295])
+
 
 class TestOptimalParamMatchesDatasketch(unittest.TestCase):
     """Banding search must pick datasketch's exact (b, r) parameters.
