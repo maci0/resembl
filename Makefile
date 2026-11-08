@@ -220,18 +220,20 @@ check:  ## Run every check CI runs, plus the commit-gate file checks
 # The tar normalization below pins all four (reproducible-builds.org), so
 # `make dist` twice from the same commit yields identical sha256 sums.
 #
-# `build/` and `resembl.egg-info/` go first because setuptools stages the
-# wheel in `build/lib` and would otherwise zip whatever an earlier build left
-# there: a module deleted from the source tree survives in the artifact until
-# someone cleans the directory by hand.  Both are gitignored build output, and
-# uv build rewrites them.  The sdist is unpacked under `.scratch/` rather than
-# `mktemp -d`'s default, which is a tmpfs on Linux: the normalization of a
-# full source tree then costs page cache, not RAM.
+# `build/lib`, `build/bdist.*` and `resembl.egg-info/` go first because
+# setuptools stages the wheel in `build/lib` and would otherwise zip whatever
+# an earlier build left there: a module deleted from the source tree survives
+# in the artifact until someone cleans the directory by hand.  Only the
+# staged-wheel rows go: `build/` also holds the sbom and coverage reports
+# (`sbom`, `coverage`), which a dist run must not delete.  All three are
+# gitignored build output, and uv build rewrites them.  The sdist is unpacked
+# under `.scratch/` rather than `mktemp -d`'s default, which is a tmpfs on
+# Linux: the normalization of a full source tree then costs page cache, not RAM.
 dist:  ## Build the sdist and wheel into dist/ reproducibly
 	@tar --sort=name --help >/dev/null 2>&1 || { \
 		echo "make dist needs GNU tar (--sort=name); on macOS install gnu-tar"; exit 1; }
 	rm -rf dist
-	rm -rf build resembl.egg-info
+	rm -rf build/lib build/bdist.* resembl.egg-info
 	SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" LC_ALL=C TZ=UTC uv build --out-dir dist
 	@set -e; mkdir -p .scratch; for sdist in dist/*.tar.gz; do \
 		unpack=$$(mktemp -d .scratch/sdist-XXXXXX); \
