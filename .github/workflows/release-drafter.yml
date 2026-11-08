@@ -31,7 +31,9 @@ jobs:
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0 # v7.10.0

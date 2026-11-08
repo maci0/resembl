@@ -16,7 +16,9 @@ concurrency:
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       actions: read

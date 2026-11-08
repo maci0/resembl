@@ -25,7 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.14.10", "3.15.2"]
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
@@ -110,7 +112,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # Pinned, not -latest: the floating labels migrate OS versions
+        # under a green run. Bump deliberately, like a digest pin.
+        os: [macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -131,7 +135,9 @@ jobs:
         run: uv run --locked pytest -q
 
   fuzz:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

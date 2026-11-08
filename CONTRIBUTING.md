@@ -116,7 +116,7 @@ resembl is developed test-first.
     ```
     `make check` prints a note naming the skipped modules when either variable is unset, so the gap is never silent.
 
-- **Platforms:** the test suite runs on `ubuntu-latest`, `macos-latest` and `windows-latest`, so the portability surface the docs claim (path separators and Windows-reserved filenames in `export`, `spawn` process pools, `msvcrt` config locking, text-mode line endings, the `os.replace` port-file publication) is exercised rather than assumed. A change that only works on the machine you wrote it on fails here, not in a user's report. Output that a user consumes (CSV records, exported `.asm` and YARA files) is written with LF on every platform, so a diff between two exports is a real change and not a line-ending one.
+- **Platforms:** the test suite runs on `ubuntu-24.04`, `macos-15` and `windows-2025`, so the portability surface the docs claim (path separators and Windows-reserved filenames in `export`, `spawn` process pools, `msvcrt` config locking, text-mode line endings, the `os.replace` port-file publication) is exercised rather than assumed. A change that only works on the machine you wrote it on fails here, not in a user's report. Output that a user consumes (CSV records, exported `.asm` and YARA files) is written with LF on every platform, so a diff between two exports is a real change and not a line-ending one.
 - **Check Test Coverage:** To ensure that your changes are well-tested, you can generate a test coverage report. This project uses `pytest-cov` for line-level coverage measurement.
     ```bash
     make coverage

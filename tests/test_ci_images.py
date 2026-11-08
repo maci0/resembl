@@ -1,10 +1,16 @@
-"""The CI service containers stay digest-pinned.
+"""The CI service containers and runners stay pinned.
 
 A tag alone moves between pulls, so an unpinned `image:` in a workflow
 would test against a different database image than the one reviewed.
 Each workflow that declares a service container must pin it by digest,
 and every pinned image must be watched by Dependabot's docker ecosystem
 so a new upstream release only arrives as a reviewed pull request.
+
+The same holds for the hosted runner OS: a `-latest` label migrates
+between OS versions under a green run, so every `runs-on:` and every
+portability matrix entry must name a versioned label. The portability
+matrix is covered by the `runs-on:` check through its `${{ matrix.os }}`
+indirection: the matrix values are the labels, so they are checked too.
 """
 
 import re
@@ -32,6 +38,33 @@ class CiImagePinTests(unittest.TestCase):
                     )
                 checked += len(images)
         self.assertGreater(checked, 0, "no service images found to check")
+
+    def test_runner_labels_are_version_pinned(self) -> None:
+        """No workflow may use a floating `-latest` runner label."""
+        checked = 0
+        for workflow in _WORKFLOWS:
+            text = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("runs-on:"):
+                        if "${{" in stripped:
+                            continue
+                        self.assertRegex(
+                            stripped,
+                            r"^runs-on:\s+\S+-\d",
+                            f"{workflow.name}: unpinned runs-on: {stripped!r}",
+                        )
+                        checked += 1
+                    if stripped.startswith("os: ["):
+                        for label in re.findall(r"[\w-]+-\d[\w.]*", stripped):
+                            self.assertRegex(
+                                label,
+                                r"^(ubuntu|macos|windows)-\d+(?:\.\d+)?$",
+                                f"{workflow.name}: unpinned matrix os {label!r}",
+                            )
+                            checked += 1
+        self.assertGreater(checked, 0, "no runner labels found to check")
 
     def test_dependabot_watches_docker(self) -> None:
         text = (_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")

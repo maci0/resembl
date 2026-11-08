@@ -16,7 +16,9 @@ permissions:
 
 jobs:
   coverage:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Same service and env wiring as the test gate, so the reported
     # percentage covers the database integration tests too.

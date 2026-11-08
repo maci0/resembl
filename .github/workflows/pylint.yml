@@ -21,7 +21,9 @@ jobs:
   # requires-python in pyproject.toml), so a 3.12 leg could not even
   # install the lockfile.
   build:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the floating label migrates OS versions
+    # under a green run. Bump deliberately, like a digest pin.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       matrix:

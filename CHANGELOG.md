@@ -8,6 +8,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- CI runners are now pinned to versioned labels (`ubuntu-24.04`, `macos-15`, `windows-2025`) instead of the floating `-latest` labels, so a GitHub OS migration can no longer move the test platform under a green run; `tests/test_ci_images.py` now fails a workflow that reintroduces a `-latest` label.
 - `docs/THREAT_MODEL.md` now records the fsync-before-publish durability controls (`_sync_path` / `_sync_dir` in `resembl/core.py`) and the `.dockerignore` build-context exclusions for local databases and benchmark data, and its header now names the current 4.0.0 release instead of 3.12.0.
 - `resembl serve` now answers `413` with the `{"error": "request too large"}` envelope to a request body larger than 8 MiB, matching the Go service and the Lambda proxy for the same cap; it previously answered `400`, indistinguishable from a malformed body.
 - `cfg_similarity` now rejects non-integer counts and block sizes (NaN, infinity, bools, floats) with `ValueError` instead of returning `NaN` for a `NaN` block count, and clamps the cosine term so float rounding can no longer push the score just above `1.0`.
