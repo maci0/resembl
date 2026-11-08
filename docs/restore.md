@@ -9,7 +9,7 @@
 | Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite) — copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable — defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
 | Legacy pickle cache, port file | `~/.cache/resembl/` | **No** | Yes — cache, never loaded; port file rewritten by `serve` |
 | Export files + export manifest | Export directory chosen at `export` time (`DIRECTORY/.resembl-export.json`) | **No** (the export itself is the copy) | Yes — re-export from restored corpus; manifest rewritten by next `export` |
-| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | **No** | Regenerable only by regenerating hashes of interpreter + loaded modules; store copy + SHA-256 (`artifact_sha256`) with backup set, write-protected — writable manifest can attest tampered code |
+| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | Yes (SQLite) — copied verbatim to `<backup-stem>.runtime-manifest.json` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `runtime_sha256`, cross-checked by `verify-backup` | Regenerable only by regenerating hashes of interpreter + loaded modules; copy + SHA-256 (`artifact_sha256`) with backup set, write-protected — writable manifest can attest tampered code |
 
 Non-SQLite backends (PostgreSQL/MySQL/DuckDB) are **not** covered by
 `resembl backup`: use that backend's own tooling (`pg_dump`, etc.) and test
@@ -27,14 +27,20 @@ Backups taken by `resembl backup` and the pre-delete/pre-merge backups in
 `.gitignore` ignores `.resembl-pre-delete-backups/` and database files, and
 `git check-ignore` must report both ignored. A backup that re-enters the
 tree re-enters the build context and ships corpus data and its config with
-the repo. Schedule the operator backup explicitly (e.g. cron
-`resembl backup <off-host-dir> --force`) and keep that directory on
-different storage from `assembly.db` (see Failure-domain notes below).
+the repo. Schedule the operator backup explicitly: `make backup
+BACKUP_DIR=<off-host-dir>` (or cron-wrap `resembl backup <off-host-dir>
+--force`) and keep that directory on different storage from
+`assembly.db` (see Failure-domain notes below). The make target fails
+loudly when `BACKUP_DIR` is unset, when the backup exits non-zero, or
+when the published copy fails verification, so a cron job that never
+ran is visible instead of a silent gap in the restore points.
 
 A backup that has never been restored is a hypothesis: run a restore drill
-at least quarterly — copy the newest verified backup to a scratch path,
-`resembl verify` it, and record (date, backup filename, verify result)
-beside the backup directory. `db_backup` re-verifies a reused retained
+at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>` —
+it copies the newest verified backup to a scratch path, `verify-backup`
+proves it there, and records (date, backup filename, verify result) in
+`<off-host-dir>/.restore-drill.log` beside the backup directory.
+`db_backup` re-verifies a reused retained
 backup and refuses a copy with a `-wal`/`-shm` sidecar, but only the drill
 proves the restore procedure itself.
 ## RPO / RTO
@@ -99,9 +105,12 @@ write-protected, and confirm its SHA-256 still equals the
 `artifact_sha256` pinned by the Go service (`-artifact-sha256`).
 `/find-pinned` refuses to answer until manifest, index digest, and
 process generation all match; a missing or mismatched manifest is a
-fail-closed `503`, not a silent unpinned find.  The manifest is **not**
-copied by `resembl backup`: a host loss that takes it leaves
-`/find-pinned` unrestorable even though the corpus restores cleanly.
+fail-closed `503`, not a silent unpinned find.  The manifest **is**
+copied by `resembl backup` to `<backup-stem>.runtime-manifest.json`
+(mode `0600`, SHA-256 in the manifest as `runtime_sha256`, cross-checked
+by `verify-backup`); a backup taken before that sidecar existed leaves
+`/find-pinned` unrestorable even though the corpus restores cleanly, so
+re-take it rather than restoring an old copy alone.
 
 ## Restore (logical corruption — bad code wrote bad data for hours)
 

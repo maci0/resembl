@@ -112,6 +112,66 @@ class TestDbBackup(FileDBTest):
         check = db_verify_backup(self.session, result["backup"])
         self.assertTrue(check["ok"], check["issues"])
 
+    def test_backup_includes_runtime_manifest_sidecar_and_verifies_it(self):
+        """db_backup copies RESEMBL_RUNTIME_MANIFEST beside the backup.
+
+        It pins interpreter + module hashes for /find-pinned and cannot
+        be regenerated without re-attesting the exact runtime.
+        """
+        import hashlib
+
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        runtime_path = os.path.join(self._tmpdir.name, "runtime.json")
+        runtime_bytes = b'{"python":"deadbeef"}\n'
+        with open(runtime_path, "wb") as f:
+            f.write(runtime_bytes)
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch.dict(os.environ, {"RESEMBL_RUNTIME_MANIFEST": runtime_path}):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        sidecar = os.path.join(backup_dir, f"{stem}.runtime-manifest.json")
+        self.assertTrue(os.path.isfile(sidecar))
+        with open(sidecar, "rb") as f:
+            self.assertEqual(f.read(), runtime_bytes)
+        with open(os.path.join(backup_dir, f"{stem}.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertEqual(manifest["runtime_sha256"], hashlib.sha256(runtime_bytes).hexdigest())
+        self.assertEqual(manifest["runtime_manifest"], f"{stem}.runtime-manifest.json")
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
+    def test_corrupted_runtime_sidecar_fails_verification(self):
+        """A runtime sidecar that disagrees with its manifest must fail."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        runtime_path = os.path.join(self._tmpdir.name, "runtime.json")
+        with open(runtime_path, "wb") as f:
+            f.write(b'{"python":"deadbeef"}\n')
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch.dict(os.environ, {"RESEMBL_RUNTIME_MANIFEST": runtime_path}):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        sidecar = os.path.join(backup_dir, f"{stem}.runtime-manifest.json")
+        with open(sidecar, "wb") as f:
+            f.write(b'{"python":"beefdead"}\n')
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertFalse(check["ok"])
+        self.assertTrue(any("runtime mismatch" in i for i in check["issues"]), check["issues"])
+
+    def test_backup_without_runtime_manifest_records_absent(self):
+        """No RESEMBL_RUNTIME_MANIFEST: manifest records null, verify passes."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        env = {k: v for k, v in os.environ.items() if k != "RESEMBL_RUNTIME_MANIFEST"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = db_backup(self.session, backup_dir)
+        stem = os.path.splitext(os.path.basename(result["backup"]))[0]
+        self.assertFalse(os.path.exists(os.path.join(backup_dir, f"{stem}.runtime-manifest.json")))
+        with open(os.path.join(backup_dir, f"{stem}.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertIsNone(manifest["runtime_sha256"])
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
     def test_backup_without_config_records_absent_config(self):
         """No live config.toml: manifest records null, verify still passes."""
         snippet_add(self.session, "foo", "mov eax, 1\nret")

@@ -125,3 +125,36 @@ class MakefileShellTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("needs uv 0.12.13", result.stdout + result.stderr)
         self.assertIn("https://docs.astral.sh/uv/", result.stdout + result.stderr)
+
+    def test_backup_names_missing_backup_dir(self) -> None:
+        """Without BACKUP_DIR, backup fails loud instead of backing up nowhere."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [make, "backup"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("make backup needs BACKUP_DIR", result.stdout + result.stderr)
+        self.assertIn("docs/restore.md", result.stdout + result.stderr)
+
+    def test_backup_drill_names_missing_backup_dir(self) -> None:
+        """Without BACKUP_DIR, backup-drill fails loud for the same reason."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [make, "backup-drill"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("make backup-drill needs BACKUP_DIR", result.stdout + result.stderr)

@@ -212,12 +212,14 @@ Global options go before the subcommand: `resembl --format json find ...`.
     the live `config.toml` verbatim to `<backup-stem>.config.toml` beside the
     backup (mode `0600`, SHA-256 recorded in the manifest as `config_sha256`,
     `null` when no config file existed) and `verify-backup` cross-checks it.
-    Uses
+    Also copies the `RESEMBL_RUNTIME_MANIFEST` file (when set) verbatim to
+    `<backup-stem>.runtime-manifest.json` (`runtime_sha256` in the
+    manifest, cross-checked by `verify-backup`).  Uses
     SQLite's online backup API, so the copy is a single database file
     the current binary can open — not a raw copy of `assembly.db`
     paired with a stale WAL.  Also writes a manifest (snippet count,
-    fingerprint version, content hash, creation time, and config
-    SHA-256) beside it.  SQLite only; other backends use
+    fingerprint version, content hash, creation time, config and
+    runtime SHA-256) beside it.  SQLite only; other backends use
     their own backup tooling.  Backup and manifest files are mode `0600`.
     Exits 1 when the backup file is complete but its manifest could not
     be written or the published copy fails verification — such a backup

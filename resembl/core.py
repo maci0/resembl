@@ -131,6 +131,17 @@ DB_BACKUP_MANIFEST_NAME = ".resembl-backup.json"
 #: A missing config is recorded as ``null`` rather than failing the backup.
 DB_BACKUP_CONFIG_NAME = "config.toml"
 
+#: Name of the runtime-manifest sidecar :func:`db_backup` writes beside a
+#: backup.  ``RESEMBL_RUNTIME_MANIFEST`` names the file ``serve`` requires
+#: for ``/find-pinned``; it pins interpreter + module hashes and cannot be
+#: regenerated without re-attesting the exact runtime, so a host loss that
+#: drops it leaves ``/find-pinned`` unrestorable even when the corpus
+#: restores cleanly.  Like ``config.toml`` it is copied verbatim, mode
+#: ``0600``, hashed into the manifest (``runtime_sha256``), and
+#: cross-checked by :func:`db_verify_backup`.  A missing manifest is
+#: recorded as ``null`` rather than failing the backup.
+DB_BACKUP_RUNTIME_NAME = "runtime-manifest.json"
+
 
 def _sync_path(path: str) -> None:
     """Flush *path*'s data to disk (fsync), ignoring filesystems that refuse it.
@@ -206,6 +217,58 @@ def _db_backup_config_name(backup_path: str) -> str:
     exactly like the per-backup ``<backup-stem>.json`` manifest.
     """
     return f"{_backup_stem(backup_path)}.config.toml"
+
+
+def _db_backup_runtime_name(backup_path: str) -> str:
+    """Return the runtime-manifest sidecar name for a backup path.
+
+    The sidecar is ``<backup-stem>.runtime-manifest.json`` so a directory
+    retaining several backups keeps each backup's pinned runtime with its
+    own database copy, exactly like the config and manifest sidecars.
+    """
+    return f"{_backup_stem(backup_path)}.{DB_BACKUP_RUNTIME_NAME}"
+
+
+def _db_backup_runtime_read() -> tuple[bytes | None, str | None]:
+    """Return ``(raw_bytes, sha256)`` for the live runtime manifest.
+
+    ``(None, None)`` when ``RESEMBL_RUNTIME_MANIFEST`` is unset or names no
+    file: no pinned runtime is in use, so it is recorded as absent rather
+    than failing the backup.  An unreadable path raises ``OSError`` so the
+    caller fails loud rather than reporting a complete backup that drops
+    pinned state.
+    """
+    manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "").strip()
+    if not manifest_path:
+        return None, None
+    try:
+        with open(manifest_path, "rb") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return None, None
+    return data, hashlib.sha256(data).hexdigest()
+
+
+def _write_sidecar(backup_dir: str, name: str, data: bytes) -> str:
+    """Write *data* beside a backup as a mode-``0600`` file, durably.
+
+    Used for the config and runtime-manifest sidecars so both publish the
+    same way: same-directory temp file, fsync, atomic rename, directory
+    fsync.  Returns the sidecar path.
+    """
+    sidecar_path = os.path.join(backup_dir, name)
+    tmp = os.path.join(backup_dir, f"{name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with open(fd, "wb") as f:
+            f.write(data)
+        _sync_path(tmp)
+        os.replace(tmp, sidecar_path)
+        _sync_dir(backup_dir)
+    except OSError:
+        _remove_quietly(tmp)
+        raise
+    return sidecar_path
 
 
 def _db_backup_config_read() -> tuple[bytes | None, str | None]:
@@ -2413,6 +2476,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     :func:`_db_backup_manifest_name`) records the snippet count and
     fingerprint version of the source at backup time; the manifest is the
     contract a restore is verified against (:func:`db_verify_backup`).
+    It also copies ``config.toml`` and the ``RESEMBL_RUNTIME_MANIFEST``
+    file (when set) verbatim beside the backup, modes ``0600``, with
+    SHA-256 hashes recorded in the manifest (``config_sha256`` /
+    ``runtime_sha256``; ``null`` when that file did not exist).
     Non-SQLite backends have no offline copy here —
     their own backup tooling (``pg_dump``, ``mysqldump``) owns that — so this
     raises :class:`ValueError` naming the backend.
@@ -2464,6 +2531,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             reused,
             os.path.join(backup_dir, _db_backup_manifest_name(reused)),
             os.path.join(backup_dir, _db_backup_config_name(reused)),
+            os.path.join(backup_dir, _db_backup_runtime_name(reused)),
         ):
             _remove_quietly(_stale)
         reused = None
@@ -2479,6 +2547,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             reused,
             os.path.join(backup_dir, _db_backup_manifest_name(reused)),
             os.path.join(backup_dir, _db_backup_config_name(reused)),
+            os.path.join(backup_dir, _db_backup_runtime_name(reused)),
         ):
             _remove_quietly(_stale)
         reused = None
@@ -2640,17 +2709,20 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     config_name = _db_backup_config_name(backup_name)
     config_path = os.path.join(backup_dir, config_name)
     if config_data is not None:
-        tmp_config = os.path.join(backup_dir, f"{config_name}.{os.getpid()}.tmp")
         try:
-            fd = os.open(tmp_config, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with open(fd, "wb") as f:
-                f.write(config_data)
-            _sync_path(tmp_config)
-            os.replace(tmp_config, config_path)
-            _sync_dir(backup_dir)
+            _write_sidecar(backup_dir, config_name, config_data)
         except OSError:
-            _remove_quietly(tmp_config)
             _remove_quietly(final_path)
+            raise
+    runtime_data, runtime_hash = _db_backup_runtime_read()
+    runtime_name = _db_backup_runtime_name(backup_name)
+    runtime_path = os.path.join(backup_dir, runtime_name)
+    if runtime_data is not None:
+        try:
+            _write_sidecar(backup_dir, runtime_name, runtime_data)
+        except OSError:
+            _remove_quietly(final_path)
+            _remove_quietly(config_path)
             raise
     manifest = {
         "backup": backup_name,
@@ -2660,6 +2732,8 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         "created_at": timestamp_now(),
         "config_sha256": config_hash,
         "config": config_name if config_data is not None else None,
+        "runtime_sha256": runtime_hash,
+        "runtime_manifest": runtime_name if runtime_data is not None else None,
     }
     manifest_name = _db_backup_manifest_name(backup_name)
     manifest_path = os.path.join(backup_dir, manifest_name)
@@ -2685,9 +2759,10 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # backup will write a fresh one, and the caller was already told
         # via ``manifest_written``.
         _remove_quietly(final_path)
-        # A manifest-less backup must not keep its config sidecar either:
+        # A manifest-less backup must not keep its sidecars either:
         # a later verify would find a sidecar no manifest vouches for.
         _remove_quietly(config_path)
+        _remove_quietly(runtime_path)
         return {
             "backup": final_path,
             "num_snippets": manifest["num_snippets"],
@@ -2714,6 +2789,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         _remove_quietly(final_path)
         _remove_quietly(manifest_path)
         _remove_quietly(config_path)
+        _remove_quietly(runtime_path)
         return {
             "backup": final_path,
             "num_snippets": manifest["num_snippets"],
@@ -2778,6 +2854,7 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
             # is worth an operator-visible record.
             logger.warning("Could not remove manifest for pruned backup %s: %s", name, e)
         _remove_quietly(os.path.join(backup_dir, _db_backup_config_name(name)))
+        _remove_quietly(os.path.join(backup_dir, _db_backup_runtime_name(name)))
     return removed
 
 
@@ -2907,6 +2984,8 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     manifest_hash: str | None = None
     manifest_config_hash: str | None = None
     manifest_config_name: str | None = None
+    manifest_runtime_hash: str | None = None
+    manifest_runtime_name: str | None = None
     manifest_present = False
     for manifest_path in (per_backup_path, shared_path):
         try:
@@ -2935,6 +3014,14 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             )
             manifest_config_name = (
                 data.get("config") if isinstance(data.get("config"), str) else None
+            )
+            manifest_runtime_hash = (
+                data.get("runtime_sha256") if isinstance(data.get("runtime_sha256"), str) else None
+            )
+            manifest_runtime_name = (
+                data.get("runtime_manifest")
+                if isinstance(data.get("runtime_manifest"), str)
+                else None
             )
             manifest_present = True
         elif isinstance(data, dict) and data.get("num_snippets") is None:
@@ -2976,6 +3063,33 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
                     issues.append("config mismatch: backup config differs from manifest")
             except OSError:
                 issues.append("config mismatch: backup config sidecar missing")
+    # Runtime-manifest sidecar cross-check: when the manifest records a
+    # runtime hash, the sidecar must exist and hash to it, exactly like
+    # the config sidecar.  A missing or mismatched sidecar is a hard
+    # failure: the backup promised pinned state it no longer holds, and
+    # /find-pinned would be unrestorable.  Legacy manifests without the
+    # field are skipped.  The manifest is untrusted, so a
+    # ``runtime_manifest`` value carrying a traversal must not be
+    # followed outside the backup directory either (same guard as
+    # the config sidecar above).
+    if manifest_runtime_hash is not None:
+        runtime_sidecar_name = manifest_runtime_name or _db_backup_runtime_name(backup_path)
+        if (
+            runtime_sidecar_name in {"", ".", ".."}
+            or os.path.basename(runtime_sidecar_name) != runtime_sidecar_name
+        ):
+            issues.append("runtime mismatch: backup runtime manifest sidecar missing")
+        else:
+            runtime_sidecar_path = os.path.join(manifest_dir, runtime_sidecar_name)
+            try:
+                with open(runtime_sidecar_path, "rb") as f:
+                    runtime_sidecar_data = f.read()
+                if hashlib.sha256(runtime_sidecar_data).hexdigest() != manifest_runtime_hash:
+                    issues.append(
+                        "runtime mismatch: backup runtime manifest differs from manifest"
+                    )
+            except OSError:
+                issues.append("runtime mismatch: backup runtime manifest sidecar missing")
     # A missing manifest alone does not fail verification: the file may
     # predate manifests, and its contents are what matter.  A missing table,
     # a failed integrity_check, or a count/hash mismatch does.

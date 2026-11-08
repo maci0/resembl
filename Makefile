@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom
+.PHONY: help install format lint types hygiene test bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom backup backup-drill
 
 PYTEST_ARGS ?=
 
@@ -166,6 +166,43 @@ db-test:  ## Run only the PostgreSQL and MySQL integration tests (needs both URL
 		exit 1; \
 	fi
 	uv run --locked pytest -q $(DB_TESTS) $(PYTEST_ARGS)
+
+# Scheduled operator backup (docs/restore.md).  BACKUP_DIR must name a
+# directory on different storage from the live database: a backup that
+# shares the failure domain protects only against a deleted file, not
+# instance loss.  The target fails the cron job loudly — a missing
+# BACKUP_DIR, a non-zero backup exit, or an unverified copy — instead of
+# leaving a silent gap in the restore points.  `resembl backup` already
+# verifies the published copy and exits 1 when it cannot be trusted.
+BACKUP_DIR ?=
+BACKUP_KEEP ?= 7
+
+backup:  ## Take a verified backup into BACKUP_DIR (cron entry point, docs/restore.md)
+	@if [ -z "$(BACKUP_DIR)" ]; then \
+		echo "make backup needs BACKUP_DIR=<off-host-dir> (docs/restore.md)."; \
+		echo "Point it at different storage from the live database, e.g.:"; \
+		echo "  make backup BACKUP_DIR=/mnt/backups/resembl"; \
+		exit 1; \
+	fi
+	uv run --locked python -m resembl backup "$(BACKUP_DIR)" --keep "$(BACKUP_KEEP)" --force
+
+# Restore drill (docs/restore.md): copies the newest verified backup to a
+# scratch directory, proves it opens and verifies there, and records the
+# result beside the backup directory so the next operator knows restore
+# was last proven when.  A backup never restored is a hypothesis.
+backup-drill:  ## Prove the newest backup restores (docs/restore.md)
+	@if [ -z "$(BACKUP_DIR)" ]; then \
+		echo "make backup-drill needs BACKUP_DIR=<off-host-dir> (docs/restore.md)."; \
+		exit 1; \
+	fi
+	@set -e; \
+	newest=$$(ls -t "$(BACKUP_DIR)"/assembly-*.db 2>/dev/null | head -n 1); \
+	if [ -z "$$newest" ]; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
+	scratch=$$(mktemp -d); trap 'rm -rf "$$scratch"' EXIT; \
+	cp "$$newest" "$$scratch/restored.db"; \
+	uv run --locked python -m resembl verify-backup "$$scratch/restored.db"; \
+	printf '%s\t%s\t%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(basename "$$newest")" "verify-backup ok (drill)" >> "$(BACKUP_DIR)/.restore-drill.log"; \
+	echo "backup-drill: $$newest restored and verified in $$scratch"
 
 # The experimental Go query service in service/ has its own module and its own
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a

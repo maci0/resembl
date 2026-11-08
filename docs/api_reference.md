@@ -140,12 +140,15 @@ manifest holding the snippet count, fingerprint version and a content
 hash, pruned to the newest `keep` backups. It also copies the live
 `config.toml` verbatim to a `<backup-stem>.config.toml` sidecar (mode
 `0600`) and records its SHA-256 in the manifest as `config_sha256`
-(`null` when no config file existed). Re-running it on unchanged
+(`null` when no config file existed). It also copies the
+`RESEMBL_RUNTIME_MANIFEST` file (when set) verbatim to a
+`<backup-stem>.runtime-manifest.json` sidecar and records its SHA-256
+as `runtime_sha256`. Re-running it on unchanged
 content returns the existing backup without writing or pruning, so a
 retried call cannot drain the retention window. `db_verify_backup`
 checks a backup opens, holds every table, and matches its manifest,
-including the config sidecar hash when the manifest records one (a
-missing or mismatched sidecar is a hard failure).
+including the config and runtime sidecar hashes when the manifest
+records one (a missing or mismatched sidecar is a hard failure).
 SQLite only; other backends raise `ValueError`. The CLI forms are
 `resembl backup DIR` and `resembl verify-backup PATH` (see `docs/man.md`).
 
