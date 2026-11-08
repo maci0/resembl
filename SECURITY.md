@@ -1,14 +1,16 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `1c03f6f`. This review
+(`pyproject.toml:3`) plus post-4.0.0 commits through `6cbddc6`. This review
 covers the Python surfaces and the
 experimental Go service in `service/`; the threat-model boundaries B9 and
 risks R13-R18 in `docs/THREAT_MODEL.md` record the Go surface (including
 the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 `backup` / `verify-backup` commands.
 
-The `serve` controls below (the loopback `Host` check, `serve -v` request
+The `serve` controls below (the loopback `Host` check, the non-loopback
+bind refusal without `--allow-unauthenticated`, the Go service's
+`-token-file` requirement for a non-loopback `-listen`, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, the `0600`
 config file on save, the standalone client's 1024-65535 port-range check,
 the 1000-row `top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
@@ -68,9 +70,12 @@ relies on, not configuration options.
 
 - **`resembl serve` stays on loopback.** It binds `127.0.0.1` by default and
   answers every request that reaches the port. Passing `--host` with a
-  non-loopback address publishes an unauthenticated read of the whole
-  snippet corpus to that network and prints a warning that does not stop the
-  bind. Do not put it behind a reverse proxy that does not authenticate.
+  non-loopback address is refused unless `--allow-unauthenticated` is
+  given; with the flag it binds and publishes an unauthenticated read of
+  the whole snippet corpus to that network, printing a warning that does
+  not stop the bind. Do not put it behind a reverse proxy that does not
+  authenticate. The Go `resembl-service` likewise requires `-token-file`
+  for a non-loopback `-listen`.
 - **The cache directory is private to the user.** The port file in it is
   read as an unauthenticated port number by every `find` client, which then
   dials that port on `127.0.0.1`. The standalone client `resembl-find`
@@ -113,8 +118,11 @@ relies on, not configuration options.
   config sidecar into a caller-chosen
   directory, pruning to the newest `--keep` (default 7), and re-verifies
   the published file before reporting success (removing it on failure;
-  exits 1 when the manifest could not be written). `verify-backup`
-  checks tables, runs `PRAGMA integrity_check`, compares the snippet
+  exits 1 when the manifest could not be written). A retained backup is
+  re-verified before reuse and replaced by a fresh self-verified copy
+  when it no longer verifies. `verify-backup`
+  checks tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm`
+  sidecar beside the backup, compares the snippet
   count and content hash against the manifest, and cross-checks the
   config sidecar against its recorded `config_sha256`, but the manifest is
   unauthenticated: a tampered backup with an edited manifest (and sidecar)
