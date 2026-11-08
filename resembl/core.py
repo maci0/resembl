@@ -2771,7 +2771,8 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         # instead of reporting the file unopenable.  surrogateescape
         # encodes the raw byte as %FF, which SQLite decodes back to it.
         connection = sqlite3.connect(
-            f"file:{quote(_uri_path, safe='/', encoding='utf-8', errors='surrogateescape')}?mode=ro",
+            f"file:{quote(_uri_path, safe='/', encoding='utf-8', errors='surrogateescape')}"
+            "?mode=ro",
             uri=True,
         )
     except sqlite3.Error as e:

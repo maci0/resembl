@@ -239,6 +239,9 @@ select = [
     "PERF",
     "N",
     "T10",
+    "E501",
+    "Q",
+    "INT",
     # Bug-prone correctness group: raises inside except without explicit
     # chaining (B904), zip() without strict= (B905), mutable/loop hazards.
     "B",
