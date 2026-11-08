@@ -317,9 +317,16 @@ func requestIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+func (s *Service) now() time.Time {
+	if s.metrics != nil && s.metrics.now != nil {
+		return s.metrics.now()
+	}
+	return time.Now()
+}
+
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	reqID := newRequestID()
-	started := time.Now()
+	started := s.now()
 	// Carry the id on the request context so the engine hop downstream
 	// can forward it (LocalEngine sets X-Request-Id): one id then names
 	// this request in the service's logs, in the engine's logs, and on
@@ -333,7 +340,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		elapsed := time.Since(started)
+		elapsed := s.now().Sub(started)
 		if s.metrics != nil {
 			s.metrics.record(r.URL.Path, status, elapsed.Seconds())
 		}
