@@ -160,6 +160,11 @@ def _retry_sleep(delay: float) -> None:
     """
     override = os.environ.get(CLOCK_ENV_VAR)
     if override is not None and override.strip():
+        # Fail fast like timestamp_now()/monotonic_now(): an unparseable pin
+        # must not silently skip the wait on read/retry paths where no row
+        # is stamped, where the typo would otherwise go unnoticed.
+        if parse_instant(override) is None:
+            raise ValueError(f"{CLOCK_ENV_VAR}={override!r} is not an ISO 8601 instant")
         return
     # The caller's module keeps a ``time`` attribute (patched in tests);
     # resolving through the caller frame lets ``resembl.<module>.time.sleep``

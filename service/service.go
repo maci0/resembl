@@ -152,7 +152,25 @@ func New(authority Authorizer, engine Engine, resource string, concurrency int, 
 	if v, pinned := os.LookupEnv("RESEMBL_NOW"); pinned && strings.TrimSpace(v) != "" {
 		// Pin started to a fixed instant so uptime renders 0.000 under
 		// RESEMBL_NOW, matching Python monotonic_now behaviour.
+		// Validate the value at startup (fail-fast): an unparseable pin
+		// must not silently pin the clock, matching Python's
+		// timestamp_now/monotonic_now ValueError contract. Mirror
+		// resembl.models.parse_instant: extended YYYY-MM-DDTHH:MM:SS with
+		// T/t/space separator, optional fractional seconds and offset,
+		// trailing Z/z normalized to +00:00.
+		trimmed := strings.TrimSpace(v)
+		if !isISO8601Instant(trimmed) {
+			return nil, fmt.Errorf("RESEMBL_NOW=%q is not an ISO 8601 instant", v)
+		}
 		now = m_started_fixed
+	}
+	// Validate RESEMBL_SEED at startup (fail-fast): an unparseable seed
+	// must not silently fall back to OS randomness, matching Python's
+	// sample_rng ValueError contract.
+	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
+		if _, err := strconv.ParseInt(strings.TrimSpace(seed), 0, 64); err != nil {
+			return nil, fmt.Errorf("RESEMBL_SEED=%q is not an integer", seed)
+		}
 	}
 	return &Service{Authority: authority, Engine: engine, Resource: resource, slots: make(chan struct{}, concurrency), timeout: timeout, metrics: &serviceMetrics{requests: make(map[[2]string]int64), buckets: make(map[[2]interface{}]int64), sums: make(map[string]float64), counts: make(map[string]int64), started: now(), now: now}}, nil
 }
@@ -190,6 +208,45 @@ var (
 )
 
 func m_started_fixed() time.Time { return time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC) }
+
+// isISO8601Instant mirrors resembl.models.parse_instant: the extended
+// YYYY-MM-DDTHH:MM:SS shape (T/t/space separator) with optional fractional
+// seconds and offset, trailing Z/z treated as +00:00. Date-only and
+// minute-precision forms are not instants and return false.
+func isISO8601Instant(s string) bool {
+	if len(s) < 19 || s[4] != '-' || s[7] != '-' || (s[10] != 'T' && s[10] != 't' && s[10] != ' ') {
+		return false
+	}
+	if s[13] != ':' || s[16] != ':' {
+		return false
+	}
+	candidate := s
+	if strings.HasSuffix(candidate, "z") || strings.HasSuffix(candidate, "Z") {
+		candidate = candidate[:len(candidate)-1] + "+00:00"
+	}
+	if len(candidate) > 10 && candidate[10] == 't' {
+		candidate = candidate[:10] + "T" + candidate[11:]
+	}
+	// Go requires T separator for RFC3339; normalize space before parsing.
+	rfcCandidate := candidate
+	if len(rfcCandidate) > 10 && rfcCandidate[10] == ' ' {
+		rfcCandidate = rfcCandidate[:10] + "T" + rfcCandidate[11:]
+	}
+	if _, err := time.Parse(time.RFC3339Nano, rfcCandidate); err == nil {
+		return true
+	}
+	naive := candidate
+	if len(naive) > 10 && naive[10] == ' ' {
+		naive = naive[:10] + "T" + naive[11:]
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.999999999", naive); err == nil {
+		return true
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05", naive); err == nil {
+		return true
+	}
+	return false
+}
 
 func newRequestID() string {
 	if seed := os.Getenv("RESEMBL_SEED"); strings.TrimSpace(seed) != "" {
