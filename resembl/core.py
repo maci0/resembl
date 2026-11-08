@@ -2338,6 +2338,25 @@ def db_clean(session: Session) -> dict:
     }
 
 
+def db_backup_for_delete(
+    session: Session, backup_dir: str = ".resembl-pre-delete-backups", *, keep: int = 7
+) -> dict:
+    """Take a verified backup before a destructive operation.
+
+    Returns the verified result; raises ValueError/OSError when the backup
+    cannot be written or verified, so callers must not proceed with the
+    deletion. The default directory lives beside the working directory,
+    not inside the live database file, and is a single restore point.
+    """
+    result = db_backup(session, backup_dir, keep=keep)
+    if result.get("verified") is not True or result.get("manifest_written") is not True:
+        raise ValueError(
+            f"pre-delete backup did not verify: {result.get('backup')!r} "
+            f"{'; '.join(result.get('verify_issues') or [])}".strip()
+        )
+    return result
+
+
 def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     """Write a consistent, restorable copy of the database into *backup_dir*.
 

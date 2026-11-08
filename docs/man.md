@@ -77,8 +77,8 @@ Global options go before the subcommand: `resembl --format json find ...`.
 **add** *NAME* *CODE*
 :   Add a new snippet to the database.
 
-**rm** *CHECKSUM* [--force]
-:   Delete a snippet by its checksum (or a unique prefix).
+**rm** *CHECKSUM* [--force] [--no-backup] [--backup-dir *DIR*]
+:   Delete a snippet by its checksum (or a unique prefix). The verified pre-delete backup is taken first; pass `--no-backup` to skip it.
 
 **show** *CHECKSUM*
 :   Show details of a snippet.  Accepts a unique checksum prefix.
@@ -199,10 +199,10 @@ Global options go before the subcommand: `resembl --format json find ...`.
     metadata naming parameters no index can be built from, means
     `reindex --force` should run).  Exits 1 when issues are found.
 
-**clean**
+**clean** [--force] [--no-backup] [--backup-dir *DIR*]
 :   Drop the LSH index (bucket rows and metadata), then vacuum the
-    database.  Legacy pickle cache files are removed by the next index
-    write, not by `clean`.
+    database. Legacy pickle cache files are removed by the next index
+    write, not by `clean`. The verified pre-delete backup is taken first; pass `--no-backup` to skip it.
 
 **backup** *DIR* [**--keep** *N*] [**--force**]
 :   Write a consistent, restorable copy of the default SQLite database
@@ -262,8 +262,8 @@ Linux or Windows are one name.
 :   Create a new snippet collection.  A name that already exists is left
     untouched and reported as such, so a re-run exits 0.
 
-**collection delete** *NAME*
-:   Delete a collection (snippets are kept).
+**collection delete** *NAME* [--force] [--no-backup] [--backup-dir *DIR*]
+:   Delete a collection (snippets are kept). The verified pre-delete backup is taken first; pass `--no-backup` to skip it.
 
 **collection list**
 :   List all collections.

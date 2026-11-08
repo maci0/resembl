@@ -67,6 +67,7 @@ from .core import (
     collection_list,
     collection_remove_snippet,
     db_backup,
+    db_backup_for_delete,
     db_clean,
     db_merge,
     db_reindex,
@@ -1783,6 +1784,16 @@ def show(
 def rm(
     checksum: str = typer.Argument(help="The checksum of the snippet to remove."),
     force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+    backup_dir: str = typer.Option(
+        ".resembl-pre-delete-backups",
+        "--backup-dir",
+        help="Directory for the verified pre-delete backup.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the verified pre-delete backup (not recommended).",
+    ),
 ) -> None:
     """Remove a snippet by its checksum (or prefix)."""
     resolved = _resolve_checksum(checksum)
@@ -1792,6 +1803,12 @@ def rm(
         f"Are you sure you want to delete the snippet with checksum '{resolved}'?",
         force,
     )
+    if not no_backup:
+        try:
+            db_backup_for_delete(state.session, backup_dir)
+        except (ValueError, OSError) as e:
+            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
+            raise typer.Exit(code=1) from e
     if not snippet_delete(state.session, resolved, quiet=state.quiet):
         err_console.print(
             f"[red]Error:[/red] Snippet with checksum '{_display(resolved)}' not found."
@@ -2244,8 +2261,27 @@ def compare(
 
 
 @app.command()
-def clean() -> None:
+def clean(
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+    backup_dir: str = typer.Option(
+        ".resembl-pre-delete-backups",
+        "--backup-dir",
+        help="Directory for the verified pre-delete backup.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the verified pre-delete backup (not recommended).",
+    ),
+) -> None:
     """Drop the LSH index and vacuum the database."""
+    _confirm("Drop the LSH index and vacuum the database?", force)
+    if not no_backup:
+        try:
+            db_backup_for_delete(state.session, backup_dir)
+        except (ValueError, OSError) as e:
+            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
+            raise typer.Exit(code=1) from e
     result = db_clean(state.session)
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -2468,8 +2504,26 @@ def collection_create_cmd(
 @collection_app.command("delete")
 def collection_delete_cmd(
     name: str = typer.Argument(help="Name of the collection to delete."),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+    backup_dir: str = typer.Option(
+        ".resembl-pre-delete-backups",
+        "--backup-dir",
+        help="Directory for the verified pre-delete backup.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the verified pre-delete backup (not recommended).",
+    ),
 ) -> None:
     """Delete a collection (snippets are kept but unassigned)."""
+    _confirm(f"Delete collection '{name}'?", force or True)
+    if not no_backup:
+        try:
+            db_backup_for_delete(state.session, backup_dir)
+        except (ValueError, OSError) as e:
+            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
+            raise typer.Exit(code=1) from e
     if collection_delete(state.session, name, quiet=state.quiet):
         _echo(f"[green]✓[/green] Deleted collection [bold]{_display(name)}[/bold]")
     else:

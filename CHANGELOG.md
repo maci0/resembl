@@ -8,6 +8,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `rm`, `clean`, and `collection delete` now take a verified pre-delete backup (`db_backup_for_delete`) before deleting; pass `--no-backup` to opt out. A failed backup aborts the deletion instead of proceeding unverified, closing the foot-gun where a destructive command had no restore point.
 - Two new fuzz targets cover the remaining untrusted-input readers: `fuzz_stored_metadata.py` drives the merge-source `names`/`tags` JSON readers (`_string_list_or_none` / `_source_lists_or_none`) with corrupt, deeply nested and non-list documents, and `fuzz_runtime_manifest.py` drives the `/find-pinned` runtime-manifest reader (`verify_runtime`) with malformed, truncated and deeply nested manifests. Run them with `make fuzz FUZZER=fuzz_stored_metadata.py` (or `fuzz_runtime_manifest.py`); `make fuzz` and the CI smoke run pick them up automatically.
 
 ### Changed

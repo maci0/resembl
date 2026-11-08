@@ -106,9 +106,11 @@ not a pre-delete snapshot:
 
 ## Deletion paths
 
-`resembl rm`, `collection delete`, `clean`, and `export`'s stale-file prune
-are destructive with no soft-delete window. Take a backup *and verify it*
-first:
+`resembl rm`, `collection delete`, and `clean` now take a verified
+pre-delete backup with `db_backup_for_delete` (SQLite only; on other
+backends the ``ValueError`` names the backend and the deletion is
+refused). They are destructive with no soft-delete window, so the
+backup is the soft-delete window: only proceed when it verifies:
 
 ```bash
 resembl backup DIR --force
@@ -117,6 +119,9 @@ resembl verify-backup DIR/assembly-<stamp>.db
 
 Only proceed when `verify-backup` exits 0; for `clean`, the LSH index is
 rebuildable, so the pre-clean backup protects the corpus it vacuums.
+Pass `--no-backup` to opt out. `export`'s stale-file prune is covered
+by the export itself as its own pre-image; verify the export manifest
+before relying on it to restore.
 
 ## Failure-domain notes
 
