@@ -141,7 +141,7 @@ class TestSchemaPortability(unittest.TestCase):
         from sqlalchemy.dialects import mysql, postgresql, sqlite
         from sqlalchemy.schema import CreateTable
 
-        from resembl.models import LSHBucket, Snippet
+        from resembl.models import Collection, LSHBucket, Snippet, SnippetVersion
 
         dialects = {
             "mysql": mysql.dialect(),
@@ -152,10 +152,12 @@ class TestSchemaPortability(unittest.TestCase):
         return (
             str(CreateTable(LSHBucket.__table__).compile(dialect=d)),
             str(CreateTable(Snippet.__table__).compile(dialect=d)),
+            str(CreateTable(Collection.__table__).compile(dialect=d)),
+            str(CreateTable(SnippetVersion.__table__).compile(dialect=d)),
         )
 
     def test_mysql_lsh_bucket_has_indexable_string_pk(self):
-        bucket_ddl, _ = self._ddl("mysql")
+        bucket_ddl, *_ = self._ddl("mysql")
         # No BLOB in the primary key: bucket/checksum are sized VARCHARs.
         # The bucket column is wider than the default band-key size (40
         # chars): higher thresholds / permutation counts grow the key
@@ -167,13 +169,18 @@ class TestSchemaPortability(unittest.TestCase):
         self.assertNotIn("BLOB", bucket_ddl)
 
     def test_mysql_long_columns_are_text(self):
-        _, snippet_ddl = self._ddl("mysql")
+        _, snippet_ddl, collection_ddl, version_ddl = self._ddl("mysql")
         self.assertIn("TEXT", snippet_ddl)
         # String PK has an explicit length.
         self.assertIn("VARCHAR(64)", snippet_ddl)
+        # A plain `str` field renders as VARCHAR(255) on MySQL; unbounded
+        # text columns must be TEXT so long values are not truncated.
+        self.assertIn("description TEXT NOT NULL", collection_ddl)
+        self.assertIn("created_at TEXT NOT NULL", collection_ddl)
+        self.assertIn("created_at TEXT NOT NULL", version_ddl)
 
     def test_all_dialects_compile(self):
         for dialect in ("mysql", "postgresql", "sqlite"):
-            bucket_ddl, snippet_ddl = self._ddl(dialect)
+            bucket_ddl, snippet_ddl, *_ = self._ddl(dialect)
             self.assertTrue(bucket_ddl.strip().startswith("CREATE TABLE lsh_bucket"))
             self.assertTrue(snippet_ddl.strip().startswith("CREATE TABLE snippet"))

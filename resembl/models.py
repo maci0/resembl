@@ -224,8 +224,14 @@ class Collection(SQLModel, table=True):
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 
     name: str = Field(primary_key=True, max_length=128)
-    description: str = ""
-    created_at: str = Field(default_factory=timestamp_now)
+    # Explicit Text: SQLModel infers a plain `str` field as VARCHAR, and
+    # MySQL renders VARCHAR without a length as VARCHAR(255). A collection
+    # description longer than 255 chars would then be silently truncated
+    # (or rejected in strict mode) on MySQL while staying whole on SQLite
+    # and PostgreSQL. TEXT is storage-equivalent everywhere and has no
+    # length cap, so the column cannot lose data on any backend.
+    description: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: str = Field(sa_column=Column(Text, nullable=False), default_factory=timestamp_now)
 
     @classmethod
     def get_all(cls, session: Session, limit: int | None = None) -> Sequence[Collection]:
@@ -281,7 +287,12 @@ class SnippetVersion(SQLModel, table=True):
     )
     code: str = Field(sa_column=Column(Text, nullable=False))
     minhash: bytes
-    created_at: str = Field(default_factory=timestamp_now)
+    # Explicit Text for the same MySQL VARCHAR(255) reason as
+    # Collection.created_at: an ISO-8601 timestamp is short, but a plain
+    # `str` field would still render as VARCHAR(255) on MySQL and the
+    # column should match its TEXT siblings (code) rather than depend on
+    # the value staying under the cap.
+    created_at: str = Field(sa_column=Column(Text, nullable=False), default_factory=timestamp_now)
 
     @classmethod
     def get_by_checksum(
