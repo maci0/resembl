@@ -12,6 +12,11 @@ from resembl import (
 )
 ```
 
+Additional helpers (`snippet_search_by_name`, `snippet_name_add`,
+`snippet_name_remove`, `snippet_tag_add`, `snippet_tag_remove`, `db_verify`,
+`db_backup`, `db_verify_backup`, `snippet_export_yara`) are imported from
+`resembl.core`, not from the package root.
+
 ## Text encoding
 
 Snippet code, names and tags are stored in Unicode Normalization Form C, and
@@ -136,7 +141,7 @@ Extract a simplified control-flow graph from assembly code. Returns `{num_blocks
 Compute structural similarity between two CFGs (0.0–1.0) using block/edge ratios and cosine similarity on block-size histograms.
 
 ### `snippet_version_list(session, checksum: str) → list[dict]`
-Return version history for a snippet.
+Return version history for a snippet (metadata columns only; no code or fingerprint is loaded).
 
 ### `snippet_search_by_name(session, pattern: str, limit: int = 50) → list[Snippet]`
 Case-insensitive substring search over snippet names (NFC-normalized, `casefold` comparison). Names live in a JSON column so no index can answer the search; it scans `(checksum, names)` in checksum order and verifies each decoded name in Python. *limit* caps the result after verification.
@@ -146,6 +151,12 @@ Add a name to an existing snippet's alias list. Idempotent: adding an existing n
 
 ### `snippet_tag_add(session, checksum: str, tag: str, quiet: bool = False) → Snippet | None`
 Add a tag to a snippet. Idempotent: adding an existing tag is a no-op that returns the snippet. With `quiet=True`, a missing snippet or empty tag returns `None` without logging an error.
+
+### `snippet_name_remove(session, checksum: str, name_to_remove: str, quiet: bool = False) → Snippet | None`
+Remove a name from a snippet. Idempotent: removing a missing name is a no-op that returns the snippet. Removing the snippet's last remaining name fails (`None`, logged unless `quiet=True`): a snippet must keep at least one name. With `quiet=True`, a missing snippet returns `None` without logging an error.
+
+### `snippet_tag_remove(session, checksum: str, tag: str, quiet: bool = False) → Snippet | None`
+Remove a tag from a snippet. Idempotent: removing a missing tag is a no-op that returns the snippet. With `quiet=True`, a missing snippet returns `None` without logging an error.
 
 ### `snippet_export_yara(session, output_file: str) → dict`
 Export snippets as YARA string-matching rules to *output_file* (one rule per snippet, `nocase ascii wide`, checksum in metadata). Returns `num_exported` and `time_elapsed`. The file is written to a same-directory temp and published with one atomic rename, so a failure never leaves a truncated rule file at *output_file*.
@@ -162,11 +173,11 @@ Delete a collection (snippets are kept but unassigned). With `quiet=True`, a mis
 ### `collection_list(session) → list[dict]`
 List all collections with snippet counts.
 
-### `collection_add_snippet(session, collection_name: str, checksum: str) → Snippet | None`
-Add a snippet to a collection.
+### `collection_add_snippet(session, collection_name: str, checksum: str, quiet: bool = False) → Snippet | None`
+Add a snippet to a collection. With `quiet=True`, a missing collection or snippet returns `None` without logging an error.
 
-### `collection_remove_snippet(session, checksum: str) → Snippet | None`
-Remove a snippet from its collection.
+### `collection_remove_snippet(session, checksum: str, quiet: bool = False) → Snippet | None`
+Remove a snippet from its collection. With `quiet=True`, a missing snippet returns `None` without logging an error.
 
 ## Models
 
@@ -242,7 +253,7 @@ credential-carrying `DATABASE_URL` stays discoverable.
 Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`). Pass a PostgreSQL URL for team use.
 
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
-Database statistics (count, avg snippet size, vocabulary, sampled avg Jaccard; all SQL-aggregated or sampled, safe at scale); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
+Database statistics (count, avg snippet size, vocabulary estimated from a sample of up to 2000 snippets, sampled avg Jaccard; all SQL-aggregated or sampled, safe at scale; sampling is seeded via `RESEMBL_SEED`, see `resembl.diagnostics.sample_rng`); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
 
 ### `db_verify(session) → dict`
 Report database health: fingerprint format version, LSH metadata, bucket/snippet counts, and any pending work. Returns counts plus `warnings` (self-healing states a next `find` repairs: missing index, stale fingerprints) and `issues` (a bucket/snippet mismatch that `reindex --force` should resolve). Callers exit non-zero only when `issues` is non-empty.
@@ -296,3 +307,9 @@ library, which remains a dev-only test oracle.
 
 ### `Snippet.iter_minhash_batches(session, batch_size=1000)`
 Keyset-paginated iterator over `(checksum, minhash)` pairs only: the projected read the index build uses, so building never loads the (much larger) code bodies.
+
+### `resembl.minhash.optimal_param(threshold: float, num_perm: int, false_positive_weight: float, false_negative_weight: float) → tuple[int, int]`
+The `(b, r)` banding minimizing weighted false-positive plus false-negative error, computed with fixed-node Gauss-Legendre quadrature (numpy only, no scipy). Raises `ValueError` for a non-finite or out-of-range threshold, a `num_perm` below 1, or a non-finite or negative weight.
+
+### `resembl.scoring` helpers
+`code_tokenize_lexed`, `code_tokenize_normalize_lexed`, `string_normalize_lexed` operate on an already-lexed token stream instead of source text (the fused single-pass path `snippet_lex` uses); `minhash_from_tokens` builds a fingerprint from tokens directly; `minhash_num_perm` reads the permutation count from a packed blob's header.
