@@ -222,6 +222,7 @@ Every entry point below is present in the code at the cited location.
 | `POST /find-batch` | `do_POST` in `resembl/server.py:1316` | Unauthenticated, up to 1000 queries per request (`MAX_BATCH_QUERIES` in `resembl/server.py:652`, enforced at `resembl/server.py:1653`). |
 | `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
 | `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are computed per request and deliberately uncached (`_SCHEME_CACHE_MAX = 0`, `d190380`), so a client cycling `normalize`, `bands` and `rows` cannot grow process memory. |
+| `X-Request-Id` header (Python and Go) | `_correlation_id` in `resembl/server.py` (`26e95cf`), `requestIDFromContext` in `service/service.go`, `LocalEngine.find` in `service/http_engine.go` | A caller-supplied id is adopted only when bounded to 64 chars and free of control characters; otherwise the server remints. The Go service forwards its minted id so one id spans both hops and the `X-Request-Id` response header echoes the id the logs record. |
 | `POST /v1/find`, `POST /v1/find-batch` (Go) | `service/service.go:175` (`ServeHTTP`) | Experimental portable boundary in `service/`. Requires an `Authorizer` (`service/service.go:23`); the shipped binary defaults to deny-all (`service/service.go:36`, `cmd/resembl-service/main.go`) unless `-token-file` supplies a bearer credential (`service/token_authority.go:54`). 8 MiB body cap (`service/service.go:277`), concurrency 1..64 (`service/service.go:123`), per-request timeout. `/v1/find-batch` answers `501` on the shipped pinned binary because `PinnedSQLiteEngine` implements `Find` only (`service/pinned_engine.go:32`), so the handler's `BatchEngine` assertion fails (`service/service.go:324`); a `LocalEngine` backend does implement `FindBatch` (`service/http_engine.go:37`). Not a deployable public service (`service/README.md:3`). |
 | `GET /health` (Python) | `_handle_health` in `resembl/server.py:1413` | Unauthenticated; probes the served database with `SELECT 1` and returns `status`, `mode`, `database` reachability, `uptime_seconds`, and `latency_ms` (on success). A stateless server answers `ok` with no database check. |
 | `GET /metrics` (Python) | `_handle_metrics` in `resembl/server.py:1467` | Unauthenticated; exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` histogram, `resembl_server_result_cache_total` hit/miss, and per-path query errors. No user-controlled label values, so cardinality is bounded by fixed paths and status codes (`_metric_path_label` in `resembl/server.py:935`). |
@@ -278,8 +279,10 @@ tool's own process:
   sidecar (`<backup-stem>.config.toml`, mode `0600`, copied verbatim
   from the live `config.toml`) into a caller-chosen directory, pruning
   to the newest `--keep` (default 7)
-  (`resembl/cli.py`, `db_backup` in `resembl/core.py`); `verify-backup
-  <path>` opens a backup read-only, checks the expected tables, and
+  (`resembl/cli.py`, `db_backup` in `resembl/core.py`); the copy is
+  folded to `journal_mode=DELETE` with a `wal_checkpoint(TRUNCATE)`
+  before publishing (`3d77755`) so it is a single-file restore point;
+  `verify-backup <path>` opens a backup read-only, checks the expected tables, and
   compares the live snippet count and content hash against that
   manifest, cross-checking the config sidecar when the manifest records
   its hash (`resembl/cli.py`, `db_verify_backup` in
@@ -374,7 +377,10 @@ unescaped wildcards widen the match set rather than the returned page.
 
 **B6, merge source to local corpus.** Rows from another database are
 inserted after structural checks, not after a trust decision about the source
-(`resembl/core.py:2036`).
+(`resembl/core.py:2036`). `merge` takes a verified pre-merge backup
+first (`db_backup_for_delete` in `resembl/core.py`, `a4dba24`)
+unless `--no-backup` is given, so a merge that corrupts the corpus
+is restorable; the backup does not authenticate the source.
 
 **B7, secrets to code.** The database URL may embed a password. It is masked for display (`resembl/paths.py:63`, used at `resembl/find_client.py:124`) but used unmasked to derive the port-file name (`resembl/paths.py:118`) and to open the connection. The in-process result cache keys on the engine URL rendered with the password hidden (`6273fa0`, `_find_one` in `resembl/server.py`, `render_as_string(hide_password=True)`), so credentials do not persist in the cache keys.
 
@@ -639,6 +645,7 @@ workflow does not re-run either.
 | Index-parameter match check | `resembl/server.py:502` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:72` | An unbounded dict grown by cycling permutation counts |
 | Scheme ids uncached | `_scheme_id` in `resembl/server.py` (`d190380`, `_SCHEME_CACHE_MAX = 0`) | A client cycling `normalize`/`bands`/`rows` growing process memory with distinct parameter sets |
+| `MinHash`/`minhash_pack` count bounds | `resembl/minhash.py` (`9aeab2b` rejects `2**32` in `MinHash`; `1f210e7` rejects counts outside 2..`MAX_NUM_PERM` in `minhash_pack`) | An over-wide count reaching the stored packed format |
 | Result-cache key is a query digest | `resembl/server.py:618` | Query text retained by the result cache, and an entry count standing in for a memory bound |
 | Result-cache key hides the database password | `_find_one` in `resembl/server.py` (`6273fa0`) | Credentials retained in the long-lived cache keys |
 | Per-key compute lock | `resembl/server.py:121` | A burst of identical queries multiplying one find across connections |
@@ -664,6 +671,7 @@ workflow does not re-run either.
 | Handler-slot wait timeout, 30s | `_HANDLER_SLOT_TIMEOUT_SECONDS` in `resembl/server.py` (`7c10336`), `process_request` | A stalled handler wedging the accept loop in an unbounded acquire, so `serve_forever` and `shutdown` never run; a timed-out slot closes the queued connection instead |
 | Result-cache release on server close | `_result_cache_release` in `resembl/server.py` (`7c10336`), `server_close` | A stopped generation's payloads (up to 32 MiB) outliving the engine that produced them in the process-wide cache until LRU eviction |
 | Result-cache version is the bare counter | `_db_version` in `resembl/server.py` (`d190380`) | A replaced database file restarting `data_version` at the same value and serving payloads computed for the previous corpus — the old file-fingerprint pair never caught it either, so a replaced file under a running server now requires a restart |
+| Correlation id adopted only when bounded and printable | `_correlation_id` in `resembl/server.py` (`26e95cf`, `_MAX_REQUEST_ID_CHARS = 64`), `requestIDFromContext` in `service/service.go`, `LocalEngine.find` in `service/http_engine.go` | An unbounded or control-character-bearing `X-Request-Id` inflating the response or forging log lines; the Go service's minted id is forwarded so one id names a request across both hops |
 | Log control-character stripping | `_LOG_CONTROL_CHARS` in `resembl/server.py` (`709d31b`), `safeLogPath` in `service/service.go` | A crafted request path/method forging log lines (log injection) via CR/LF in `logger.exception`/`log.Printf` output and the 404 `unknown path` body |
 | Bounded client response reads, 16 MiB | `_MAX_RESPONSE_BYTES` in `resembl/find_client.py`, `_MAX_SERVER_RESPONSE_BYTES` in `resembl/cli.py` (`709d31b`) | A port-file swap or compromised loopback server pinning unbounded memory via `response.read()` with no size |
 | Loopback proxy bypass | `ProxyHandler({})` in `resembl/cli.py` (`456e464`) and `resembl/find_client.py`, opened via `OpenerDirector.open` (`599923a`): passing the opener as `urlopen`'s context left the default opener's env `ProxyHandler` in charge | A proxied loopback request failing or sending the corpus query to a third party via `http_proxy` |

@@ -26,10 +26,13 @@ and the
 JSON `405` envelope for any unhandled verb, the verified pre-delete backup
 before `rm`/`clean`/`collection delete` and the verified pre-merge backup
 before `merge` (`db_backup_for_delete`, `resembl/core.py`, with `--no-backup`
-to opt out), the fail-fast
+to opt out), the single-file backup publication (`3d77755`, `db_backup` in
+`resembl/core.py`), the fail-fast
 `RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths (base-10
 only), the
-warm-server refusal log line before the in-process fallback, and the Go
+warm-server refusal log line before the in-process fallback, the
+correlation-id forwarding from the Go service to the Python engine
+(`26e95cf`, `X-Request-Id`), and the Go
 service's graceful drain on SIGINT/SIGTERM) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
@@ -122,7 +125,10 @@ relies on, not configuration options.
   confirmation prompt is not a bound.
 - **Merge sources are trusted.** `resembl merge` inserts another database's
   snippets, names, tags, and collections into the local corpus. Point it only
-  at databases you control. Its one closed edge is fingerprint
+  at databases you control. It first takes a verified pre-merge backup
+  (default to `.resembl-pre-delete-backups/`, `--no-backup` to opt out),
+  so a bad merge is restorable; the backup does not authenticate the source.
+  Its one closed edge is fingerprint
   deserialization: blobs without the `RMLH` magic are rejected and
   recomputed rather than unpickled. The failure path is also closed: a
   source that will not open makes `merge` log the driver's error text and
@@ -139,7 +145,10 @@ relies on, not configuration options.
   published copy to a single-file restore point, and re-verifies
   the published file before reporting success (removing it on failure;
   exits 1 when the manifest could not be written or the published copy
-  fails verification). A retained backup is
+  fails verification). The published copy is folded to single-file
+  (`journal_mode=DELETE` with `wal_checkpoint(TRUNCATE)`, `3d77755`,
+  `db_backup` in `resembl/core.py`) so it restores without `-wal`/`-shm`
+  sidecars. A retained backup is
   re-verified before reuse and replaced by a fresh self-verified copy
   when it no longer verifies. `verify-backup`
   checks tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm`
@@ -164,5 +173,6 @@ relies on, not configuration options.
   `RESEMBL_SEED` now raises instead of silently pinning the clock or
   falling back to OS randomness, on read and retry paths as well as on
   stamping writes; the Go service validates both at startup and refuses
-  to start.
+  to start. `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
+  rejects `2**32` permutations (`9aeab2b`, `1f210e7`).
 - Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default, with the Go `resembl-service` draining in-flight queries on SIGINT/SIGTERM (30s bound) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
