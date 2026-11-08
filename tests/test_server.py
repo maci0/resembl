@@ -556,7 +556,10 @@ class TestServerMode(_ServeTestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
+            def read(self, size=-1):
+                if getattr(self, "_done", False):
+                    return b""
+                self._done = True
                 return b'{"lsh_candidates": 0, "matches": []}'
 
         # Signature-conformance stub for urllib.request.urlopen; the real
@@ -683,7 +686,10 @@ class TestServerMode(_ServeTestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
+            def read(self, size=-1):
+                if getattr(self, "_done", False):
+                    return b""
+                self._done = True
                 return b'{"error": "threshold too high"}'
 
         self._start_server()  # writes a valid port file
@@ -753,7 +759,10 @@ class TestServerMode(_ServeTestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
+            def read(self, size=-1):
+                if getattr(self, "_done", False):
+                    return b""
+                self._done = True
                 return self._body
 
         self._start_server()  # writes a valid port file
