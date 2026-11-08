@@ -692,7 +692,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     # Same ephemeral-range guard as the standalone client (find_client.py):
     # a planted port file must not steer the query to a privileged local
     # service (22, 3306, 6379) — treat it as no server and fall back.
-    if not (1024 <= port <= 65535):
+    if not 1024 <= port <= 65535:
         return None
 
     request = urllib.request.Request(

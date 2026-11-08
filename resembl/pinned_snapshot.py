@@ -11,6 +11,21 @@ MAX_SNAPSHOT_ROWS = 1_000_000
 _SNAPSHOT_CHUNK_ROWS = 1000
 
 
+def _snapshot_value(value: Any) -> list[Any]:
+    """Return the JSON encoding of one SQLite value for the digest."""
+    if value is None:
+        return ["null", None]
+    if isinstance(value, bytes | memoryview):
+        return ["blob", bytes(value).hex()]
+    if isinstance(value, int):
+        return ["integer", value]
+    if isinstance(value, float):
+        return ["real", value]
+    if isinstance(value, str):
+        return ["text", value]
+    raise ValueError("unsupported SQLite snapshot value")
+
+
 def index_digest(connection: Any) -> str:
     """Hash the exact decision-bearing rows from the caller's transaction."""
     if connection.dialect.name != "sqlite":
@@ -35,20 +50,7 @@ def index_digest(connection: Any) -> str:
                     break
                 for row in rows_chunk:
                     row_count += 1
-                    values: list[list[Any]] = []
-                    for value in row:
-                        if value is None:
-                            values.append(["null", None])
-                        elif isinstance(value, bytes | memoryview):
-                            values.append(["blob", bytes(value).hex()])
-                        elif isinstance(value, int):
-                            values.append(["integer", value])
-                        elif isinstance(value, float):
-                            values.append(["real", value])
-                        elif isinstance(value, str):
-                            values.append(["text", value])
-                        else:
-                            raise ValueError("unsupported SQLite snapshot value")
+                    values = [_snapshot_value(value) for value in row]
                     raw = json.dumps(
                         values, ensure_ascii=True, separators=(",", ":"), allow_nan=False
                     ).encode("utf-8")

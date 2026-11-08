@@ -945,6 +945,10 @@ def minhash_new(num_perm: int = NUM_PERMUTATIONS) -> MinHash:
 
     from .minhash import MinHash
 
+    if isinstance(num_perm, bool) or not isinstance(num_perm, int):
+        raise ValueError(f"num_perm must be an integer, got {num_perm!r}")
+    if not 2 <= num_perm <= MAX_NUM_PERM:
+        raise ValueError(f"num_perm must be between 2 and {MAX_NUM_PERM}, got {num_perm!r}")
     template = _MINHASH_TEMPLATES.get(num_perm)
     if template is None:
         # Double-checked: re-probe inside the lock so exactly one racer

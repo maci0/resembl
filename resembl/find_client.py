@@ -361,7 +361,7 @@ def _main(argv: list[str] | None = None) -> int:
     # trusted to name the loopback server (THREAT_MODEL R3), and a
     # legitimately bound low port (e.g. ``serve --port 80``) must be
     # dialable, matching ``resembl.cli._server_request``.
-    if not (1 <= port <= 65535):
+    if not 1 <= port <= 65535:
         return _fail(
             f"no server running for {db_url_mask(db_url)} (start `resembl serve`)",
             1,
