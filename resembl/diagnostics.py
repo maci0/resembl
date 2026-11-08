@@ -88,7 +88,10 @@ def sample_rng() -> random.Random:
                 )
             return _SAMPLE_RNG
 
-        seed = int(env_seed, 0)  # an unparseable value aborts the command
+        try:
+            seed = int(env_seed, 0)
+        except ValueError as e:
+            raise ValueError(f"{SEED_ENV_VAR}={env_seed!r} is not an integer") from e
         if _SAMPLE_RNG is None or _SAMPLE_SEED != seed:
             _SAMPLE_SEED = seed
             _SAMPLE_RNG = random.Random(seed)

@@ -1533,7 +1533,7 @@ class _FindHandler(BaseHTTPRequestHandler):
 
         artifact = body.get("artifact_sha256")
         generation = body.get("generation")
-        manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "")
+        manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "").strip()
         if (
             not isinstance(artifact, str)
             or not manifest_path

@@ -109,8 +109,8 @@ def cache_dir_get() -> str:
     if override and override.strip():
         return _expand_home(override.strip())
     xdg = os.environ.get("XDG_CACHE_HOME")
-    if xdg and os.path.isabs(xdg):
-        return os.path.join(xdg, "resembl")
+    if xdg and xdg.strip() and os.path.isabs(xdg.strip()):
+        return os.path.join(xdg.strip(), "resembl")
     return _expand_home(DEFAULT_CACHE_DIR)
 
 
@@ -126,8 +126,8 @@ def config_dir_get() -> str:
     if override and override.strip():
         return _expand_home(override.strip())
     xdg = os.environ.get("XDG_CONFIG_HOME")
-    if xdg and os.path.isabs(xdg):
-        return os.path.join(xdg, "resembl")
+    if xdg and xdg.strip() and os.path.isabs(xdg.strip()):
+        return os.path.join(xdg.strip(), "resembl")
     return _expand_home(DEFAULT_CONFIG_DIR)
 
 
