@@ -636,6 +636,28 @@ def _session_db_url(session: Session) -> str:
     return url.render_as_string(hide_password=False)
 
 
+#: Hard ceiling on a warm-server response the CLI will buffer.  Mirrors
+#: ``resembl.find_client._MAX_RESPONSE_BYTES``: a port-file swap or a
+#: compromised loopback server must not pin unbounded memory via
+#: ``response.read()`` with no size.
+_MAX_SERVER_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+def _read_bounded_server_response(response: object) -> bytes:
+    """Read up to the ceiling from *response*, refusing an oversize body."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = response.read(65536)  # type: ignore[attr-defined]
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_SERVER_RESPONSE_BYTES:
+            raise ValueError("server response exceeds size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     """Send one JSON request to the running ``serve`` process.
 
@@ -668,7 +690,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(_read_bounded_server_response(response).decode("utf-8"))
     except urllib.error.HTTPError:
         # A 4xx/5xx answer is a decision, not an outage: the server is
         # healthy and deliberately refused this request.  Fall back to the
@@ -849,7 +871,28 @@ def serve(
     if not stateless:
         _db_open()
         db_url = _session_db_url(state.session)
-    if host not in ("127.0.0.1", "localhost", "::1"):
+
+    def _is_loopback_bind(h: str) -> bool:
+        """Whether *h* names a loopback interface (same test as server.py).
+
+        ``host not in ("127.0.0.1", "localhost", "::1")`` alone let the
+        whole 127.0.0.0/8 block (127.0.0.2, 127.1.2.3, ...) through as
+        "non-loopback" and demanded --allow-unauthenticated for a bind
+        that only local users can reach — but, more importantly, any
+        future edit that inverted that list would open 127/8 without
+        the warning.  ``ipaddress`` is the authority, matching
+        ``resembl.server._loopback_allowed_hosts``.
+        """
+        if h.casefold() == "localhost":
+            return True
+        try:
+            import ipaddress
+
+            return ipaddress.ip_address(h).is_loopback
+        except ValueError:
+            return False
+
+    if not _is_loopback_bind(host):
         if not allow_unauthenticated:
             err_console.print(
                 "[red]Error:[/red] refusing to bind non-loopback "

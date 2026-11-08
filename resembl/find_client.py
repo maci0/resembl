@@ -36,6 +36,36 @@ from .paths import (
 #: The find defaults this client falls back to, mirroring
 #: ``ResemblConfig`` (resembl.config cannot be imported here: it pulls in
 #: ``tomli_w`` and the scoring module, which this client must not pay for).
+#: Hard ceiling on a find response the client will hold in memory.  The
+#: server's own result payloads are bounded by its body cap (8 MiB for the
+#: request, and the response is the matches list); 16 MiB is the documented
+#: ceiling — a larger body is a misbehaving or hostile endpoint, not a
+#: triage result, and reading it unbounded would let a local attacker pin
+#: gigabytes via a port-file swap (see _read_bounded_response).
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+def _read_bounded_response(response: object, limit: int = _MAX_RESPONSE_BYTES) -> bytes:
+    """Read up to *limit* bytes from *response*, refusing an oversize body.
+
+    ``response.read()`` with no size would buffer an unbounded body
+    (a hostile or compromised loopback server could stream indefinitely).
+    Read in chunks and stop once the limit is exceeded, raising ValueError
+    so the caller reports "server unreachable" instead of OOM.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = response.read(65536)  # type: ignore[attr-defined]
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise ValueError("response exceeds size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 _CFG_DEFAULTS: dict[str, float] = {
     "top_n": 5,
     "lsh_threshold": 0.5,
@@ -367,13 +397,13 @@ def _main(argv: list[str] | None = None) -> int:
     )
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(_read_bounded_response(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # A 4xx answer carries the server's own JSON error envelope: report
         # it verbatim rather than the transport-level "HTTP Error 400", which
         # tells the caller nothing about which parameter was refused.
         try:
-            detail = json.loads(exc.read().decode("utf-8")).get("error", "")
+            detail = json.loads(_read_bounded_response(exc).decode("utf-8")).get("error", "")
         except ValueError, OSError, AttributeError:
             detail = ""
         return _fail(str(detail or exc.reason), 1, json_on=json_on)

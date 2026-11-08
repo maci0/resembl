@@ -1379,7 +1379,11 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(403, {"error": "host not allowed"}, send_body=send_body)
             return
         if self.route not in _ALL_PATHS:
-            self._respond(404, {"error": f"unknown path: {self.route}"}, send_body=send_body)
+            # self.route is request-controlled (path split on '?'): strip
+            # control chars so a crafted path cannot inject headers or a
+            # second JSON line via CR/LF in the error message.
+            safe_route = (self.route or "").translate(_LOG_CONTROL_CHARS)
+            self._respond(404, {"error": f"unknown path: {safe_route}"}, send_body=send_body)
             return
         allowed = "GET" if self.route in _GET_PATHS else "POST"
         self._respond(
@@ -1518,7 +1522,13 @@ class _FindHandler(BaseHTTPRequestHandler):
             # A long-lived serve process prints nothing per request (see
             # ``log_message``): without this record, 500s are completely
             # unobserved and an on-call operator has no trace to debug.
-            logger.exception("[%s] POST %s failed", self.request_id, self.path)
+            # self.path is attacker-controlled; strip control chars so it
+            # cannot forge log lines (log injection).
+            logger.exception(
+                "[%s] POST %s failed",
+                self.request_id,
+                (self.path or "").translate(_LOG_CONTROL_CHARS),
+            )
             # The full exception text stays in the log only: driver and ORM
             # messages carry SQL fragments, bind parameters, and file paths,
             # which must not reach the client.
@@ -1611,7 +1621,9 @@ class _FindHandler(BaseHTTPRequestHandler):
                     # than 200 — the caller must not treat a failed
                     # commit-ack as a completed pinned query.
                     logger.exception(
-                        "[%s] POST %s pinned commit failed", self.request_id, self.path
+                        "[%s] POST %s pinned commit failed",
+                        self.request_id,
+                        (self.path or "").translate(_LOG_CONTROL_CHARS),
                     )
                     _release_fence()
                     self._respond(503, {"error": "pinned index unavailable"})
@@ -1628,7 +1640,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         except BadRequestError as exc:
             self._respond(400, {"error": str(exc)})
         except Exception:
-            logger.exception("[%s] POST %s pinned query failed", self.request_id, self.path)
+            logger.exception(
+                "[%s] POST %s pinned query failed",
+                self.request_id,
+                (self.path or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(503, {"error": "pinned index unavailable"})
 
     def _handle_computed(self, compute: Callable[[dict, ResemblConfig], dict], body: dict) -> None:
@@ -1643,7 +1659,12 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(400, {"error": str(exc)})
             return
         except Exception:  # pragma: no cover - defensive, as in _handle_find
-            logger.exception("[%s] %s %s failed", self.request_id, self.command, self.path)
+            logger.exception(
+                "[%s] %s %s failed",
+                self.request_id,
+                (self.command or "").translate(_LOG_CONTROL_CHARS),
+                (self.path or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, payload)
@@ -1714,7 +1735,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         except Exception:
             # Malformed container or session/pool failure — answer 500 rather
             # than dropping the connection with a handler-thread traceback.
-            logger.exception("[%s] POST %s failed", self.request_id, self.path)
+            logger.exception(
+                "[%s] POST %s failed",
+                self.request_id,
+                (self.path or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(500, {"error": "internal server error"})
             return
         self._respond(200, {"results": results})
@@ -1798,11 +1823,11 @@ class _FindHandler(BaseHTTPRequestHandler):
         record = f"{self.command} {self.path} {self.request_version}".translate(_LOG_CONTROL_CHARS)
         logger.debug("[%s] %s %s -> %s in %.3fs", self.request_id, peer, record, code, seconds)
         if seconds >= _SLOW_REQUEST_SECONDS:
+            safe_record = record.translate(_LOG_CONTROL_CHARS)
             logger.warning(
-                "[%s] slow request: %s %s answered %s in %.3fs",
+                "[%s] slow request: %s answered %s in %.3fs",
                 self.request_id,
-                self.command,
-                self.path,
+                safe_record,
                 code,
                 seconds,
             )

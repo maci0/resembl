@@ -51,6 +51,19 @@ type custodyHolder struct {
 	custody Custody
 }
 
+// safeLogPath strips control characters (including CR/LF) from a request path
+// so a crafted URL cannot forge log entries when logged via log.Printf.
+func safeLogPath(p string) string {
+	out := make([]byte, 0, len(p))
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if c >= 0x20 && c != 0x7f {
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
 // latency buckets mirror the Python server's histogram bounds so both
 // exposures answer the same latency questions.
 var latencyBuckets = []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 30.0}
@@ -200,9 +213,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.metrics.record(r.URL.Path, status, elapsed.Seconds())
 		}
 		if status >= 500 {
-			log.Printf("[%s] %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, elapsed)
+			log.Printf("[%s] %s %s -> %d in %v", reqID, safeLogPath(r.Method), safeLogPath(r.URL.Path), status, elapsed)
 		} else if elapsed >= time.Second {
-			log.Printf("[%s] slow %s %s -> %d in %v", reqID, r.Method, r.URL.Path, status, elapsed)
+			log.Printf("[%s] slow %s %s -> %d in %v", reqID, safeLogPath(r.Method), safeLogPath(r.URL.Path), status, elapsed)
 		}
 	}()
 	w = rec
