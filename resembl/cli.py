@@ -1037,6 +1037,21 @@ def _confirm(prompt: str, force: bool) -> None:
     typer.confirm(_strip_controls(prompt), abort=True)
 
 
+def _backup_before_delete(backup_dir: str, no_backup: bool, *, label: str = "Pre-delete") -> None:
+    """Take the verified pre-delete backup unless it was skipped.
+
+    Reports the failure and exits, so callers must not proceed when
+    the backup cannot be written or verified.
+    """
+    if no_backup:
+        return
+    try:
+        db_backup_for_delete(state.session, backup_dir)
+    except (ValueError, OSError) as e:
+        err_console.print(f"[red]Error:[/red] {label} backup failed: {_display(str(e))}")
+        raise typer.Exit(code=1) from e
+
+
 def _validate_find_params(
     threshold: float, num_perm: int, ngram_size: int, top_n: int | None = None
 ) -> None:
@@ -1838,12 +1853,7 @@ def rm(
         f"Are you sure you want to delete the snippet with checksum '{resolved}'?",
         force,
     )
-    if not no_backup:
-        try:
-            db_backup_for_delete(state.session, backup_dir)
-        except (ValueError, OSError) as e:
-            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
-            raise typer.Exit(code=1) from e
+    _backup_before_delete(backup_dir, no_backup)
     if not snippet_delete(state.session, resolved, quiet=state.quiet):
         err_console.print(
             f"[red]Error:[/red] Snippet with checksum '{_display(resolved)}' not found."
@@ -2311,12 +2321,7 @@ def clean(
 ) -> None:
     """Drop the LSH index and vacuum the database."""
     _confirm("Drop the LSH index and vacuum the database?", force)
-    if not no_backup:
-        try:
-            db_backup_for_delete(state.session, backup_dir)
-        except (ValueError, OSError) as e:
-            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
-            raise typer.Exit(code=1) from e
+    _backup_before_delete(backup_dir, no_backup)
     result = db_clean(state.session)
     if state.format in ("json", "csv"):
         _echo_format(result)
@@ -2420,12 +2425,7 @@ def merge(
         f"Merge snippets from '{db_url_mask(source_path)}' into the current database?",
         force or True,
     )
-    if not no_backup:
-        try:
-            db_backup_for_delete(state.session, backup_dir)
-        except (ValueError, OSError) as e:
-            err_console.print(f"[red]Error:[/red] Pre-merge backup failed: {_display(str(e))}")
-            raise typer.Exit(code=1) from e
+    _backup_before_delete(backup_dir, no_backup, label="Pre-merge")
     result = db_merge(state.session, source_path)
 
     if "error" in result:
@@ -2576,12 +2576,7 @@ def collection_delete_cmd(
 ) -> None:
     """Delete a collection (snippets are kept but unassigned)."""
     _confirm(f"Delete collection '{name}'?", force or True)
-    if not no_backup:
-        try:
-            db_backup_for_delete(state.session, backup_dir)
-        except (ValueError, OSError) as e:
-            err_console.print(f"[red]Error:[/red] Pre-delete backup failed: {_display(str(e))}")
-            raise typer.Exit(code=1) from e
+    _backup_before_delete(backup_dir, no_backup)
     if collection_delete(state.session, name, quiet=state.quiet):
         _echo(f"[green]✓[/green] Deleted collection [bold]{_display(name)}[/bold]")
     else:

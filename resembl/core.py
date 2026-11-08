@@ -259,6 +259,35 @@ def _db_content_hash(session: Session) -> str:
     return digest.hexdigest()
 
 
+def _db_backup_candidates(backup_dir: str, names: list[str]) -> list[str]:
+    """Backup files in *backup_dir*, oldest first by mtime.
+
+    Order by modification time, not by name: a backup directory that
+    holds a hand-supplied or clock-skewed ``assembly-*.db`` whose name
+    sorts newest would otherwise hide the genuinely newest restore
+    point or prune it first.  mtime is the only chronological signal
+    that survives a renamed or retimestamped copy; the 6-digit
+    microsecond suffix is a tie-breaker only within the same second.
+    """
+
+    def _mtime(name: str) -> tuple[float, str]:
+        try:
+            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
+        except OSError:
+            return (0.0, name)
+
+    return sorted(
+        (
+            name
+            for name in names
+            if name.startswith("assembly-")
+            and name.endswith(".db")
+            and os.path.isfile(os.path.join(backup_dir, name))
+        ),
+        key=_mtime,
+    )
+
+
 def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
     """Return the newest existing backup of identical content, or ``None``.
 
@@ -276,25 +305,7 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
     except OSError:
         return None
 
-    # Newest-first by mtime, like ``_db_backup_prune``: name order inverts
-    # on a hand-supplied copy with a late timestamp, which would hide the
-    # genuinely newest matching backup behind a stale one.
-    def _reuse_mtime(name: str) -> tuple[float, str]:
-        try:
-            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
-        except OSError:
-            return (0.0, name)
-
-    candidates = sorted(
-        (
-            name
-            for name in names
-            if name.startswith("assembly-")
-            and name.endswith(".db")
-            and os.path.isfile(os.path.join(backup_dir, name))
-        ),
-        key=_reuse_mtime,
-    )
+    candidates = _db_backup_candidates(backup_dir, names)
     for newest in reversed(candidates):
         manifest_path = os.path.join(backup_dir, _db_backup_manifest_name(newest))
         try:
@@ -2745,29 +2756,7 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
     except OSError:
         return 0
 
-    # Prune by file modification time, not by name: a backup directory
-    # that holds a hand-supplied or clock-skewed ``assembly-*.db`` whose
-    # name sorts newest would otherwise make name-order pruning delete
-    # genuinely newer restore points first.  mtime is the only
-    # chronological signal that survives a renamed or retimestamped
-    # copy; the 6-digit microsecond suffix is a prune tie-breaker only
-    # within the same second, not a global order.
-    def _mtime(name: str) -> tuple[float, str]:
-        try:
-            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
-        except OSError:
-            return (0.0, name)
-
-    candidates = sorted(
-        (
-            name
-            for name in names
-            if name.startswith("assembly-")
-            and name.endswith(".db")
-            and os.path.isfile(os.path.join(backup_dir, name))
-        ),
-        key=_mtime,
-    )
+    candidates = _db_backup_candidates(backup_dir, names)
     removed = 0
     for name in candidates[: max(0, len(candidates) - keep)]:
         if preserve is not None and name == preserve:
