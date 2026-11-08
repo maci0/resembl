@@ -22,3 +22,18 @@ fuzzers
 *.sqlite3
 data
 scale_data
+# Go test and fuzz files are never compiled into the service binary;
+# excluding them keeps test-only edits from invalidating the image layer
+# and keeps test dependencies out of the build context.
+service/custody_test.go
+service/fuzz_service_test.go
+service/http_engine_drain_test.go
+service/http_engine_timeout_test.go
+service/service_fix_test.go
+service/service_test.go
+service/token_authority_test.go
+service/cmd/resembl-lambda/main_test.go
+service/cmd/resembl-service/main_test.go
+service/internal/lambdaproxy/fuzz_handle_test.go
+service/internal/lambdaproxy/head_test.go
+service/internal/lambdaproxy/proxy_test.go

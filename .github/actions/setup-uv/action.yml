@@ -29,7 +29,7 @@ runs:
       if: runner.os == 'macOS'
       shell: bash
       run: |
-        brew install make
+        HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install make
         echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
     # uv's cache root is platform-specific: the XDG roots on Linux and macOS,
