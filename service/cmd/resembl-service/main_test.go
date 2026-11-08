@@ -34,9 +34,10 @@ func args(t *testing.T, overrides map[string]string) []string {
 }
 
 func TestNewServerAppliesFlags(t *testing.T) {
-	server, err := newServer(args(t, map[string]string{
+	server, engine, err := newServer(args(t, map[string]string{
 		"listen": "127.0.0.1:9", "timeout": "7s", "concurrency": "2",
 	}))
+	defer engine.CloseIdleConnections()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,13 +48,16 @@ func TestNewServerAppliesFlags(t *testing.T) {
 
 func TestNewServerRequiresTokenForNonLoopback(t *testing.T) {
 	for _, addr := range []string{"0.0.0.0:8080", ":8080", "[::]:8080", "192.168.1.10:8080"} {
-		if _, err := newServer(args(t, map[string]string{"listen": addr})); err == nil {
+		if _, _, err := newServer(args(t, map[string]string{"listen": addr})); err == nil {
 			t.Errorf("%s: expected an error without -token-file", addr)
 		}
 	}
 	for _, addr := range []string{"127.0.0.1:8080", "localhost:8080", "[::1]:8080"} {
-		if _, err := newServer(args(t, map[string]string{"listen": addr})); err != nil {
+		_, engine, err := newServer(args(t, map[string]string{"listen": addr}))
+		if err != nil {
 			t.Errorf("%s: loopback should not require a token: %v", addr, err)
+		} else {
+			engine.CloseIdleConnections()
 		}
 	}
 }
@@ -67,7 +71,7 @@ func TestNewServerRejectsBadConfiguration(t *testing.T) {
 		"missing custody":  {"custody": "/nonexistent-custody"},
 		"unknown flag":     {"nope": "1"},
 	} {
-		if _, err := newServer(args(t, overrides)); err == nil {
+		if _, _, err := newServer(args(t, overrides)); err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
