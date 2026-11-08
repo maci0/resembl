@@ -2535,6 +2535,14 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             destination = sqlite3.connect(tmp_path)
             try:
                 sqlite_connection.backup(destination)
+                # The online backup copies the source's journal mode
+                # (WAL for every live database), so the published file
+                # would carry -wal/-shm sidecars on the next read-only
+                # open and fail db_verify_backup's single-file check.
+                # Fold it to DELETE and checkpoint so the backup is a
+                # true single-file restore point.
+                destination.execute("PRAGMA journal_mode=DELETE")
+                destination.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             finally:
                 destination.close()
             # fsync before publish: an OS crash after ``os.replace`` but
