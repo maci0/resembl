@@ -8,6 +8,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The clispec schema now declares `serve` as `idempotent` instead of `non_idempotent`: a second start for the same database reports the already-running server and leaves the database unchanged, so a retry is safe.
 - CI now lints `benchmarks/` in the pre-commit hook as well as in the Makefile and the pylint workflow (the hook had been left on the old scope when the benchmark scripts moved out of `tests/`, so a finding there could pass locally and fail remotely); the SBOM workflow validates its JSON with the uv-managed interpreter instead of the runner's bare `python3`; and the uv installer fetch refuses non-HTTPS redirects and retries transient failures. No behavior change for contributors beyond the hook now covering `benchmarks/`.
 - The clispec schema now declares `clean` in its `confirmation_required` error and adds its `--force` confirmation bypass: the CLI already required a terminal (or `--force`) for `clean`, but the schema document omitted it. The schema also now states that `merge` and `collection delete` proceed without a confirmation prompt, matching their established unattended behavior.
 - The Go service's custody claim no longer fails when the platform cannot fsync a directory handle (Windows): the best-effort directory sync now matches the Python `_sync_dir` contract instead of returning the sync error and dropping the slot.

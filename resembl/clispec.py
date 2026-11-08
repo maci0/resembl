@@ -57,8 +57,10 @@ def _command(
 _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "serve",
-        "Serve find queries from one warm process until the process is stopped.",
-        "non_idempotent",
+        "Serve find queries from one warm process until the process is stopped."
+        " A second start for the same database reports the running server"
+        " and leaves the database unchanged.",
+        "idempotent",
     ),
     _command(
         "add",
