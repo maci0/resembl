@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`db64fab`, with the loopback-client fix (mypy `urlopen` context
+`9d6f2f0`, with the loopback-client fix (mypy `urlopen` context
 replaced by `OpenerDirector.open`, `resembl/cli.py` `_server_request`
 and `resembl/find_client.py` `_main`, and the pinning tests in
 `tests/test_cli_extended.py` `TestServerFallback` retargeted to
@@ -110,6 +110,23 @@ and `_db_file_fingerprint` in `resembl/server.py`); and the on-disk JSON
 manifest readers skip deeply nested manifests (`99c4f3a`,
 `_export_manifest_read` / `_db_backup_reuse` / `db_verify_backup` in
 `resembl/core.py`). Those land in R3, B1, B2, B5, and Mitigations below.
+A later 2026-11-09 pass re-checked the commits after `db64fab`:
+`rm`, `clean`, and `collection delete` now take a verified pre-delete
+backup (`db_backup_for_delete` in `resembl/core.py`), which a failed
+backup aborts before deletion (`8dcee74`, `resembl/cli.py` `rm` /
+`clean` / `collection_delete_cmd`); an unparseable `RESEMBL_NOW` or
+`RESEMBL_SEED` now fails fast on the read/retry paths too, not only on
+stamping writes (`ed0705b`, `resembl/models.py` `_retry_sleep`,
+`service/service.go` `New` and `isISO8601Instant`); `parse_instant`
+treats ISO `-00:00` as not-an-instant (`9d6f2f0`,
+`resembl/models.py`); the CLI warm-server client logs a refusal that
+arrives as a `200 {"error": ...}` envelope before falling back
+(`1f06887`, `resembl/cli.py` `_server_request`); the Go
+`resembl-service` drains in-flight queries on SIGINT/SIGTERM
+(`1f06887`, `service/cmd/resembl-service/main.go`); and
+`db_verify_backup` caps the `integrity_check` read at three rows
+(`eed3273`, `resembl/core.py`). Those land in R17, B2, B3, B8, B9,
+Assets, and Mitigations below.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
 vulnerabilities and their fixes are not tracked here; each risk names the code
@@ -135,7 +152,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R1 | `POST /find` is unauthenticated and answers any local caller, so the corpus is readable a page at a time | B1 | Full corpus disclosure to any same-host process; memory pressure on the server | `top_n` capped at 1000 per request (`_MAX_TOP_N` in `resembl/server.py:662`, enforced in `_parse_find_request` at `resembl/server.py:469`, lower bound at `resembl/server.py:426`), which bounds one response but not a sequence of them; the config layer leaves the local `top_n` unbounded (`resembl/config.py:63`), and the served default is clamped to the same cap (`resembl/server.py:1950`) |
 | R2 | The find server has no authentication and no rate limit; a non-loopback bind is refused unless the operator explicitly allows it | B1 | R1 plus sustained exhaustion | Non-loopback `--host` refused without `--allow-unauthenticated` (`6cbddc6`, `serve` in `resembl/cli.py`); Go `resembl-service` requires `-token-file` for a non-loopback `-listen` (`6cbddc6`, `isLoopbackListen` in `service/cmd/resembl-service/main.go`); `Host` check on a loopback bind, which answers `403` to a rebound name (`_host_allowed` in `resembl/server.py:1301`, `_loopback_allowed_hosts` in `resembl/server.py:672`); loopback default only (`resembl/cli.py:578`) |
 | R3 | The port file is an unauthenticated channel: both clients trust its contents and forward the query text to whatever loopback port it names | B5 | Query text (attacker-supplied source code) sent to an attacker-controlled loopback listener | The standalone client `resembl-find` refuses a port-file port outside 1-65535 before dialing it (`6406aee`, `_main` in `resembl/find_client.py`), so a planted out-of-range value is no longer dialed; the in-process `find` client guards the narrower ephemeral range 1024-65535 (`cdabd39`, `_server_request` in `resembl/cli.py`), so a planted port naming a privileged local service (22, 3306, 6379) is no longer dialed there; a forged port inside the admitted range still reaches an attacker listener, and the cache directory the server did not create is still unchecked (`serve` in `resembl/server.py:2116` makes its own directory `0o700`) |
-| R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`log_message`/`log_request` in `resembl/server.py:1760`); the only default-level per-request trace is a slow-request WARNING (`resembl/server.py:1790`) and exception logs on failure (`resembl/server.py:1521`) |
+| R4 | Nothing is recorded per request at the default log level, so queries are unattributable unless `serve -v` is running | B1 | No way to investigate a suspected scrape or a hostile client | `serve -v` logs every request at DEBUG with its peer and outcome (`log_message`/`log_request` in `resembl/server.py:1760`); the only default-level per-request trace is a slow-request WARNING (`resembl/server.py:1790`) and exception logs on failure (`resembl/server.py:1521`). The CLI warm-server client now logs a `200 {"error": ...}` refusal at WARNING before it falls back to the in-process path (`1f06887`, `resembl/cli.py` `_server_request`), so a server that only ever refused with envelopes is no longer silent in the operator log |
 | R5 | `RESEMBL_DATABASE_URL` / `DATABASE_URL`, `RESEMBL_CACHE_DIR`, and `RESEMBL_CONFIG_DIR` are trusted verbatim from the environment, including credentials and a remote host | B3 | Database pointed at an attacker-chosen host; config read from an attacker-chosen directory | none, by design (`docs/adr/006-paths-module-owns-environment.md`, `resembl/paths.py:57`, `resembl/paths.py:81`, `resembl/paths.py:97`) |
 | R6 | `merge` opens an arbitrary source URL, including a credentialed remote database, and inserts its rows | B6 | Rows from a hostile source enter the corpus; credentials sent to a chosen host | Fingerprints recomputed, never deserialized (`db_merge` in `resembl/core.py`); the source URL is masked for display in the error path (`db_url_mask` in `resembl/paths.py`), and callers get only a stable message naming the masked source — driver/SQL detail stays in the operator log, not the return value (`c1eb6cb`, `db_merge` in `resembl/core.py`) |
 | R7 | `import` holds every matching path in memory and spawns a worker process per CPU over the set, and `reindex` does the same over every row of the corpus, with no count or size cap on either | B2 | Process, memory, and CPU exhaustion from a hostile directory | Chunked database writes only (`resembl/cli.py:1010`, `resembl/cli.py:1049`) |
@@ -148,7 +165,7 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`_handle_find_pinned` in `resembl/server.py:1529`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, latency, and uptime. The Python `GET /health` additionally reports database reachability and probe latency; the Go `GET /healthz` is liveness only | B1, B9 | Process internals (traffic volume, hit rate, latency) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:767`); Python `GET /metrics` (`_handle_metrics` in `resembl/server.py:1467`) exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` latency and `resembl_server_result_cache_total` hit/miss, and `GET /health` (`_handle_health` in `resembl/server.py:1413`) returns database status plus `latency_ms`; Go `GET /metrics` (`service/service.go:212`) exposes `resembl_service_up`, `resembl_service_uptime_seconds`, `resembl_service_requests_total` by path and status, and `resembl_service_request_duration_seconds` histogram, and `GET /healthz` (`service/service.go:203`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:123`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:261`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
-| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only, checks expected tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm` sidecar beside the backup (`e95b19d`, `db_verify_backup` in `resembl/core.py`), and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256`, the `<backup-stem>.config.toml` sidecar must also exist and hash to it (`8616290`, `db_verify_backup` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged triple still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, re-verifies a retained backup before reusing it and writes a fresh self-verified copy instead of reporting success for a corrupt one (`0e258ed`, `db_backup` in `resembl/core.py`), writes backup, manifest, and config sidecar mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup` |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `verify-backup` opens the backup read-only (capping the `integrity_check` read at three rows, `eed3273`, `db_verify_backup` in `resembl/core.py`), checks expected tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm` sidecar beside the backup (`e95b19d`, `db_verify_backup` in `resembl/core.py`), and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256`, the `<backup-stem>.config.toml` sidecar must also exist and hash to it (`8616290`, `db_verify_backup` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged triple still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, re-verifies a retained backup before reusing it and writes a fresh self-verified copy instead of reporting success for a corrupt one (`0e258ed`, `db_backup` in `resembl/core.py`), writes backup, manifest, and config sidecar mode `0600`, and the CLI exits 1 when the manifest could not be written (`resembl/cli.py`, `backup` command) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup`. `rm`, `clean`, and `collection delete` now take that verified backup first via `db_backup_for_delete` (`8dcee74`, `db_backup_for_delete` in `resembl/core.py`, `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`), and a failed backup aborts the deletion with exit 1 rather than proceeding unverified |
 | R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim once surrounding whitespace is trimmed, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap trims the value and treats a blank one as unset, defaulting to `http://127.0.0.1:8081` (`6963a53`, `service/cmd/resembl-lambda/main.go`, `strings.TrimSpace`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
@@ -206,7 +223,11 @@ tool's own process:
 - `export <file>`, `export-yara <file>` write to a caller-chosen path
   (`resembl/cli.py:896`, `resembl/cli.py:926`).
 - `add`, `show`, `rm`, `name *`, `tag *`, `collection *` write to the
-  database.
+  database. `rm`, `clean`, and `collection delete` first take a verified
+  pre-delete backup (`db_backup_for_delete` in `resembl/core.py`) unless
+  `--no-backup` is given; a failed backup aborts the deletion (`8dcee74`,
+  `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`), on non-SQLite
+  backends the `ValueError` from `db_backup` refuses the deletion.
 - `backup <dir>` writes a consistent SQLite copy of the corpus plus a
   per-backup manifest (`<backup-stem>.json`, mode `0600`) and a config
   sidecar (`<backup-stem>.config.toml`, mode `0600`, copied verbatim
@@ -224,7 +245,9 @@ unless `--range` narrows it, and `verify` (`resembl/cli.py:1361`) counts
 snippets and buckets and checks index consistency across the whole corpus, so
 both walk the corpus with no row cap; `stats` (`resembl/cli.py:1336`) and
 `clean` (`resembl/cli.py:1739`) read or drop the LSH index, and `clean` is
-the only command that destroys derived state. None of the four is a network
+the command that destroys derived state (while `rm` and `collection delete`
+destroy rows and collections; both now take the verified pre-delete backup
+above, `8dcee74`). None of the four is a network
 surface, but each is an availability or disclosure path when the corpus is
 large.
 
@@ -249,8 +272,8 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `RESEMBL_ENGINE_URL` (Lambda only) | `service/cmd/resembl-lambda/main.go:17` | Trusted verbatim once surrounding whitespace is trimmed, and a blank value counts as unset (`6963a53`, `strings.TrimSpace`); selects the loopback engine the adapter dials. `NewLocalEngine` refuses a non-loopback host. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
-| `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. |
-| `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. Refused unless it parses as ISO 8601. |
+| `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. An unparseable value fails fast: `ValueError` in `sample_rng` (`resembl/diagnostics.py`) and in `_retry_sleep` (`resembl/models.py`, `ed0705b`); the Go service validates it at startup in `New` (`service/service.go`, `ed0705b`). |
+| `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. An unparseable value fails fast on every read path (`timestamp_now`/`monotonic_now`/`_retry_sleep` in `resembl/models.py`, `ed0705b`); the Go service validates it at startup in `New` via `isISO8601Instant` (`service/service.go`, `ed0705b`) and `parse_instant` treats ISO `-00:00` as not-an-instant (`9d6f2f0`). |
 | `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). |
 
 The config file holds six fields (`resembl/config.py:114`):
@@ -288,11 +311,11 @@ server accepts is treated as untrusted: body size
 input. It is lexed and fingerprinted (`resembl/scoring.py:954`), and on
 export it is embedded in generated YARA rules (`resembl/core.py:1028`).
 
-**B3, environment to runtime.** The variables above are read at call time and
+**B3, environment to runtime.** The variables above that name paths are read at call time and
 are never validated beyond being non-empty. `RESEMBL_SEED` and
 `RESEMBL_NOW` are the sharp two: neither is a path, and both change results
 without changing what the operator can see (`resembl/diagnostics.py:61`,
-`resembl/models.py:48`).
+`resembl/models.py:48`); both now fail fast when unparseable (`ed0705b`).
 
 **B4, application to database.** The ORM parameterizes every query, so
 untrusted text is not concatenated into SQL. Three places build a `LIKE`
@@ -332,7 +355,9 @@ runtime manifest before and after (`resembl/server.py:1568`,
 supervisor, not remote attestation (`service/README.md:13`). Custody slots
 (`service/custody.go:24`) are claimed before dispatch and retained after an
 uncertain backend outcome, including across restarts; the operator must
-verify the engine stopped before repairing a slot.
+verify the engine stopped before repairing a slot (shutdown now drains
+in-flight queries for up to 30s, `1f06887`, so a clean SIGTERM/SIGINT
+no longer orphans them).
 
 **B8, build to release.** The published wheel carries the runtime surface
 above plus whatever the release pipeline admits. An SBOM workflow exports a
@@ -372,7 +397,7 @@ network fetch at import.
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`_handle_find_pinned` in `resembl/server.py:1529`) |
-| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17) | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup, per-backup manifest `<backup-stem>.json`, and `<backup-stem>.config.toml` config sidecar, all mode `0600` |
+| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17). The pre-delete backups taken by `rm`/`clean`/`collection delete` (default `.resembl-pre-delete-backups`, `db_backup_for_delete` in `resembl/core.py`) are the same asset with the same forgeability; `--no-backup` removes the restore point entirely | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup, per-backup manifest `<backup-stem>.json`, and `<backup-stem>.config.toml` config sidecar, all mode `0600` |
 
 ## Threats per boundary
 
@@ -568,6 +593,11 @@ workflow does not re-run either.
 | Content-Type check, 415 | `_content_type_ok` in `resembl/server.py:1292` | B1 request shape |
 | Backup published only after verification | A truncated or page-flipped copy must not be handed to a restore drill as the newest restore point | `db_backup` in `resembl/core.py` re-verifies with `db_verify_backup` and removes the file and manifest on failure; a retained backup is re-verified before reuse and replaced by a fresh self-verified copy when it no longer verifies (`0e258ed`, `db_backup` in `resembl/core.py`); `backup` CLI in `resembl/cli.py` exits 1 when `manifest_written` is false |
 | Verify-backup WAL sidecar refusal | A backup that verifies with its `-wal` beside it but restores empty alone | `db_verify_backup` in `resembl/core.py` fails when a `-wal`/`-shm` sidecar is present (`e95b19d`) |
+| Verified pre-delete backup before destructive commands | A `rm`/`clean`/`collection delete` with no restore point; a silent corruption or sourceless deletion cannot be undone | `db_backup_for_delete` in `resembl/core.py` (`8dcee74`): takes `db_backup` and raises unless `verified` and `manifest_written` are both true; `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd` catch `(ValueError, OSError)` and exit 1 before deleting, with `--no-backup` as the explicit opt-out |
+| Unparseable `RESEMBL_NOW`/`RESEMBL_SEED` fails fast | A typo silently pinning the clock on read/retry paths, or silently falling back to OS randomness | `resembl/models.py` `_retry_sleep` (`ed0705b`) raises `ValueError` like `timestamp_now`/`monotonic_now`; `service/service.go` `New` validates both at startup (`ed0705b`, `isISO8601Instant`); `parse_instant` treats `-00:00` as not-an-instant (`9d6f2f0`) |
+| Warm-server refusal logged before fallback | A server that only ever answered with `200 {"error": ...}` failing silently in the operator log | `resembl/cli.py` `_server_request` (`1f06887`) logs the envelope at WARNING before returning `None` for the in-process fallback |
+| Go service drains on shutdown | A SIGTERM/SIGINT mid-request orphaning custody slots and engine calls | `service/cmd/resembl-service/main.go` (`1f06887`) `signal.NotifyContext` + `http.Server.Shutdown` with a 30s bound; `ListenAndServe` returns `http.ErrServerClosed` on drain |
+| Capped `integrity_check` read in verify-backup | A heavily corrupt backup reporting one row per damaged page and `fetchall()` materializing the whole list | `resembl/core.py` `db_verify_backup` (`eed3273`) reads at most three rows, the number ever rendered |
 | LSH metadata read is fail-closed | A transient `database is locked` read must not trigger a rebuild that overwrites a live index's metadata mid-build | `lsh_meta_get` in `resembl/lsh.py` returns `None` only for a missing table; any other `OperationalError` is logged and re-raised |
 | CSV export formula guard covers Unicode leading characters | A formula hiding behind any Unicode space, BOM, or invisible character is as live in a spreadsheet as a bare `=1+1` | `_csv_safe` in `resembl/cli.py` strips whitespace and BOM/zero-width characters before checking `_CSV_FORMULA_PREFIXES` |
 | YARA export escapes code points above U+00FF | A hex escape on a surrogate or high code point parses as two hex digits plus literal text, corrupting the emitted pattern | `_yara_string_escape` in `resembl/core.py` writes UTF-8 bytes for code points above U+00FF and `?` for lone surrogates |

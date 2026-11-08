@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `db64fab`, with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `9d6f2f0`, with the
 loopback-client fix (mypy `urlopen` context replaced by
 `OpenerDirector.open`, `resembl/cli.py` `_server_request` and
 `resembl/find_client.py` `_main`) re-verified on that date. This review
@@ -22,7 +22,12 @@ stripping on both servers,
 the 1000-row `top_n` cap, the 96 handler-thread bound in `resembl/server.py`, the
 `413` envelope for oversized bodies in `resembl/server.py` `_read_body`,
 and the
-JSON `405` envelope for any unhandled verb) are documented in `CHANGELOG.md`.
+JSON `405` envelope for any unhandled verb, the verified pre-delete backup
+before `rm`/`clean`/`collection delete` (`db_backup_for_delete`,
+`resembl/core.py`, with `--no-backup` to opt out), the fail-fast
+`RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths, the
+warm-server refusal log line before the in-process fallback, and the Go
+service's graceful drain on SIGINT/SIGTERM) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability
 
@@ -137,5 +142,19 @@ relies on, not configuration options.
   passes. Keep the backup directory private (backup, manifest, and sidecar
   are mode `0600`) and treat any backup whose manifest you did not write
   as untrusted (THREAT_MODEL.md R17).
-
-- Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
+- **Destructive commands take a verified pre-delete backup.** `resembl rm`,
+  `resembl clean`, and `resembl collection delete` write a verified backup
+  first (`db_backup_for_delete` in `resembl/core.py`, default to
+  `.resembl-pre-delete-backups/` beside the working directory); a backup
+  that does not verify aborts the deletion with exit 1. The backup is
+  SQLite-only: on other backends the deletion is refused unless
+  `--no-backup` is passed, which removes the restore point entirely. The
+  pre-delete directory has the same forgeability as any backup directory
+  (THREAT_MODEL.md R17): it protects against accidents and corruption, not
+  against a writer to that directory.
+- **Environment pins fail fast.** An unparseable `RESEMBL_NOW` or
+  `RESEMBL_SEED` now raises instead of silently pinning the clock or
+  falling back to OS randomness, on read and retry paths as well as on
+  stamping writes; the Go service validates both at startup and refuses
+  to start.
+- Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default, with the Go `resembl-service` draining in-flight queries on SIGINT/SIGTERM (30s bound) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.
