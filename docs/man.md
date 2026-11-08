@@ -147,7 +147,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
 
 ### Database
 
-**serve** [--host HOST] [--port PORT] [--stateless]
+**serve** [--host HOST] [--port PORT] [--stateless] [--allow-unauthenticated]
 :   Start a warm server for this database (default: loopback, auto-assigned
     port).  `find` then talks to it over localhost in a few milliseconds
     instead of paying ~450 ms of interpreter startup per query; the port file
@@ -171,7 +171,9 @@ Global options go before the subcommand: `resembl --format json find ...`.
     second is recorded without `-v`.  On a
     loopback bind it answers `403` to a request whose `Host` header is not
     `127.0.0.1`, `localhost` or `::1`, so a page that rebinds its hostname
-    onto 127.0.0.1 cannot reach the endpoints.
+    onto 127.0.0.1 cannot reach the endpoints.  A non-loopback `--host`
+    is refused unless `--allow-unauthenticated` is given (with the flag,
+    it warns that the server is unauthenticated and proceeds).
     `--stateless` opens no database and writes no port file: the server
     answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, and
     `501` to the find paths, so replicas behind a load balancer share no
@@ -367,8 +369,9 @@ Linux or Windows are one name.
     Every row written during the run, every timestamp printed back by
     `collection list` and `version`, and every backup filename and manifest
     takes this value, so a run replayed with the same inputs produces the
-    same database and the same output. An unparseable value aborts the
-    command.
+    same database and the same output.  It also pins duration metrics
+    (`time_elapsed`, `latency_ms`, `uptime_seconds`) to 0.0 for the same
+    replay.  An unparseable value aborts the command.
 
 ## CONFIGURATION
 

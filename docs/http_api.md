@@ -27,7 +27,7 @@ resolves to it.
 `resembl serve` writes the port it bound to
 `server_<dbhash>.port` in the cache directory (resolved as
 [man.md](man.md#environment) describes). The hash is the first 12
-hex digits of the SHA1 of the **resolved** database URL (the engine's URL as
+hex digits of the SHA-256 of the **resolved** database URL (the engine's URL as
 rendered with the password intact, falling back to `sqlite:///assembly.db`
 when no database URL is set in the environment), so one process can serve several databases. The
 file is removed when the server exits.

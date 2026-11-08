@@ -85,7 +85,7 @@ Last reviewed: 2026-09-27.
 - `resembl serve` binds to loopback (127.0.0.1) by default; the port is auto-assigned when not given.
 - `resembl find` transparently talks to the running server and falls back to the in-process path when no server is reachable.
 - The standalone `resembl-find` client queries the running server directly; it imports only the standard library so each call skips the full CLI startup cost.
-- Binding a non-loopback interface prints a warning that the service is unauthenticated.
+- Binding a non-loopback interface is refused unless `--allow-unauthenticated` is given (with the flag, it warns that the service is unauthenticated and proceeds).
 - The HTTP endpoints (`POST /find`, `POST /find-batch`) are documented in [http_api.md](http_api.md): every response, success or error, is JSON, and a rejected parameter answers `400` with `{"error": ...}` naming the field.
 - `GET /health` reports whether the served database still answers; a probe that fails answers `503` rather than reporting a server that cannot search.
 - `GET /metrics` reports requests by path and status, a request-latency histogram, the result-cache hit rate, and the per-query failures an otherwise-`200` `/find-batch` hides, in the Prometheus text format; every other response is `application/json`.

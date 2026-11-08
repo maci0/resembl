@@ -395,7 +395,9 @@ The [Contributor Guide](./CONTRIBUTING.md) covers the test suite (`uv run --lock
 ## Security
 
 resembl is a single-user local tool with no authentication: `resembl serve`
-answers anyone who reaches its port, so keep it on loopback. Report a
+answers anyone who reaches its port, so keep it on loopback; a non-loopback
+bind is refused unless `--allow-unauthenticated` is given, in which case it
+warns and proceeds. Report a
 vulnerability the way [SECURITY.md](./SECURITY.md) describes, and see it for
 the supported versions and the deployment assumptions the code relies on. The
 full surface, boundaries, and ranked
