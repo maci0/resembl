@@ -2423,7 +2423,7 @@ def merge(
         _echo(f"Merging from [bold]{_display(db_url_mask(source_path))}[/bold]...")
     _confirm(
         f"Merge snippets from '{db_url_mask(source_path)}' into the current database?",
-        force or True,
+        force,
     )
     _backup_before_delete(backup_dir, no_backup, label="Pre-merge")
     result = db_merge(state.session, source_path)
@@ -2575,7 +2575,7 @@ def collection_delete_cmd(
     ),
 ) -> None:
     """Delete a collection (snippets are kept but unassigned)."""
-    _confirm(f"Delete collection '{name}'?", force or True)
+    _confirm(f"Delete collection '{name}'?", force)
     _backup_before_delete(backup_dir, no_backup)
     if collection_delete(state.session, name, quiet=state.quiet):
         _echo(f"[green]✓[/green] Deleted collection [bold]{_display(name)}[/bold]")

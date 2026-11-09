@@ -143,29 +143,16 @@ DB_BACKUP_CONFIG_NAME = "config.toml"
 DB_BACKUP_RUNTIME_NAME = "runtime-manifest.json"
 
 
-def _sync_path(path: str) -> None:
-    """Flush *path*'s data to disk (fsync), ignoring filesystems that refuse it.
+def _fsync_quiet(path: str) -> None:
+    """Flush *path* to disk, ignoring filesystems that refuse it.
 
     A backup renamed into place without an fsync is durable only in the page
-    cache: an OS crash can leave a zero-length or short file at the
-    published name.  Filesystems that do not support fsync (some network
-    mounts) must not fail an otherwise complete backup, so ``OSError`` is
-    swallowed.
+    cache: an OS crash can leave a zero-length or short file at the published
+    name, or lose the directory entry that names it even though the data
+    survived.  Filesystems that do not support fsync (some network mounts,
+    Windows directories) must not fail an otherwise complete backup, so
+    ``OSError`` is swallowed.
     """
-    _fsync_quiet(path)
-
-
-def _sync_dir(path: str) -> None:
-    """Flush directory *path*'s entries to disk, where the platform allows it.
-
-    fsyncing the file does not persist the directory entry that names it:
-    after an OS crash the rename can be lost even though the data survived.
-    Windows cannot open a directory for fsync, so failures are ignored.
-    """
-    _fsync_quiet(path)
-
-
-def _fsync_quiet(path: str) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
     except OSError as e:
@@ -264,9 +251,9 @@ def _write_sidecar(backup_dir: str, name: str, data: bytes) -> str:
         os.fchmod(fd, 0o600)
         with open(fd, "wb") as f:
             f.write(data)
-        _sync_path(tmp)
+        _fsync_quiet(tmp)
         os.replace(tmp, sidecar_path)
-        _sync_dir(backup_dir)
+        _fsync_quiet(backup_dir)
     except OSError:
         _remove_quietly(tmp)
         raise
@@ -2179,7 +2166,7 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, os.path.join(export_dir, _EXPORT_MANIFEST_NAME))
-        _sync_dir(export_dir)
+        _fsync_quiet(export_dir)
     except OSError as e:
         logger.warning("Could not write the export manifest: %s", e)
         try:
@@ -2275,7 +2262,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
             # Directory fsync is deferred to once after the loop (below):
             # one fsync of the directory entry per file costs O(n) durable
             # flushes for a single directory, dominating the per-file
-            # fsync at scale.  A single ``_sync_dir`` after the loop makes
+            # fsync at scale.  A single ``_fsync_quiet`` after the loop makes
             # every rename in this export durable with one flush, the same
             # contract as batching the group-commit elsewhere.
         except BaseException:
@@ -2287,7 +2274,7 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         num_exported += 1
 
     # One durable flush for every directory entry this export created.
-    _sync_dir(abs_export_dir)
+    _fsync_quiet(abs_export_dir)
 
     # Every file is on disk: drop what a previous run wrote for snippets the
     # database no longer holds, then record this run's files for the next one.
@@ -2528,12 +2515,8 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     # expensive part — a duplicate run costs one checksum scan.
     content_hash = _db_content_hash(session)
     reused = _db_backup_reuse(backup_dir, content_hash)
-    # A reused backup with a WAL/SHM sidecar must never be served as a
-    # restore point: ``db_verify_backup`` refuses such a copy because a
-    # single-file restore would not carry the sidecar's pages.
-    if reused is not None and any(
-        os.path.exists(reused + _sidecar) for _sidecar in ("-wal", "-shm")
-    ):
+
+    def _drop_reused() -> None:
         for _stale in (
             reused,
             os.path.join(backup_dir, _db_backup_manifest_name(reused)),
@@ -2541,6 +2524,14 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             os.path.join(backup_dir, _db_backup_runtime_name(reused)),
         ):
             _remove_quietly(_stale)
+
+    # A reused backup with a WAL/SHM sidecar must never be served as a
+    # restore point: ``db_verify_backup`` refuses such a copy because a
+    # single-file restore would not carry the sidecar's pages.
+    if reused is not None and any(
+        os.path.exists(reused + _sidecar) for _sidecar in ("-wal", "-shm")
+    ):
+        _drop_reused()
         reused = None
     if reused is not None and not db_verify_backup(session, reused)["ok"]:
         # A retained backup whose manifest still matches the live content
@@ -2550,13 +2541,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # restores — the exact failure db_backup's fresh path refuses by
         # deleting an unverifiable copy.  Drop the trio and fall through
         # to write a fresh, self-verified backup.
-        for _stale in (
-            reused,
-            os.path.join(backup_dir, _db_backup_manifest_name(reused)),
-            os.path.join(backup_dir, _db_backup_config_name(reused)),
-            os.path.join(backup_dir, _db_backup_runtime_name(reused)),
-        ):
-            _remove_quietly(_stale)
+        _drop_reused()
         reused = None
     if reused is not None:
         # A reused backup was verified when it was written, but its file can
@@ -2671,13 +2656,13 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             # fsync before publish: an OS crash after ``os.replace`` but
             # before the file's data hits disk leaves a backup that looks
             # complete but restores empty/corrupt — ack'd-but-not-durable.
-            _sync_path(tmp_path)
+            _fsync_quiet(tmp_path)
             try:
                 os.chmod(tmp_path, 0o600)
             except OSError as e:
                 logger.warning("Could not set permissions on backup %s: %s", tmp_path, e)
             os.replace(tmp_path, final_path)
-            _sync_dir(backup_dir)
+            _fsync_quiet(backup_dir)
         except BaseException:
             try:
                 os.unlink(tmp_path)
@@ -2757,7 +2742,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_manifest, manifest_path)
-        _sync_dir(backup_dir)
+        _fsync_quiet(backup_dir)
     except OSError:
         _remove_quietly(tmp_manifest)
         # The backup file is complete but unverifiable: a restore checked

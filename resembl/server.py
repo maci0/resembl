@@ -2320,7 +2320,7 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # without it the port file can vanish while the server keeps
         # listening, orphaning it for every find client.  Windows cannot
         # open a directory for fsync, so failures are ignored (same
-        # pattern as resembl.core._sync_dir).
+        # pattern as resembl.core._fsync_quiet).
         try:
             dir_fd = os.open(os.path.dirname(port_file), os.O_RDONLY)
         except OSError:

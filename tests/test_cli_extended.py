@@ -236,7 +236,7 @@ class TestCLICollections(BaseCLITest):
         """Deleting a collection should succeed."""
         with Session(self.engine) as session:
             collection_create(session, "to_delete")
-        result = self.run_command("collection delete to_delete")
+        result = self.run_command("collection delete --force to_delete")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Deleted collection", result.stdout)
         self.assertIn("to_delete", result.stdout)
@@ -326,7 +326,7 @@ class TestCLIMerge(BaseCLITest):
         """Merging a source DB should report results."""
         source_path = self._create_source_db()
         try:
-            result = self.run_command(f"merge {source_path}")
+            result = self.run_command(f"merge --force {source_path}")
             self.assertEqual(result.returncode, 0)
             self.assertIn("Merge Complete", result.stdout)
         finally:
@@ -336,7 +336,7 @@ class TestCLIMerge(BaseCLITest):
         """Merging with --format json should produce valid JSON."""
         source_path = self._create_source_db()
         try:
-            result = self.run_command(f"--format json merge {source_path}")
+            result = self.run_command(f"--format json merge --force {source_path}")
             self.assertEqual(result.returncode, 0)
             data = json.loads(result.stdout)
             self.assertIn("added", data)
