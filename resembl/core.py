@@ -309,7 +309,7 @@ def _db_content_hash(session: Session) -> str:
     # Stream: the old ``.all()`` materialized every row (O(corpus) memory)
     # just to hash it.  Iterating the result keeps this O(1) extra memory.
     rows = session.exec(
-        select(
+        select(  # type: ignore[call-overload]
             Snippet.checksum, Snippet.names, Snippet.tags, Snippet.collection, Snippet.minhash
         ).order_by(Snippet.checksum)
     ).yield_per(1000)

@@ -101,11 +101,16 @@ lint:  ## Run ruff and pylint
 types:  ## Run mypy over resembl/, tests/, fuzzers/ and benchmarks/
 	uv run --locked mypy
 
-# The tracked text files the pre-commit hygiene hooks rewrite.  The pathspecs
-# mirror what the hooks see (files git tracks), which is why they are listed
-# here instead of globbing the working tree: a build artifact in the tree must
-# not fail a check the commit would not have run.
-HYGIENE_FILES = $(shell git ls-files '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.cfg' '*.txt' '*.asm' '*.json' '*.go' '*.typed' '*.in' '*.lock' '*Dockerfile*' '*dockerignore*' '*.version' 'LICENSE' 'NOTICE' 'brand-source.json' Makefile .pre-commit-config.yaml .gitattributes .gitignore)
+# The text files the pre-commit hygiene hooks rewrite.  The pathspecs mirror
+# what the hooks see (files git tracks or would add), which is why they are
+# listed here instead of globbing the working tree: `git ls-files --cached
+# --others --exclude-standard` lists the tracked files plus the untracked
+# ones git would actually add, so a tracked file matching an ignore pattern
+# (the pre-delete backups that shipped before that ignore existed) still
+# reaches the commit and still needs the check, while an ignored scratch
+# file a contributor never commits no longer fails a gate that claims to
+# reproduce the commit gate.
+HYGIENE_FILES = $(shell git ls-files --cached --others --exclude-standard '*.py' '*.md' '*.yml' '*.yaml' '*.toml' '*.cfg' '*.txt' '*.asm' '*.json' '*.go' '*.typed' '*.in' '*.lock' '*Dockerfile*' '*dockerignore*' '*.version' 'LICENSE' 'NOTICE' 'brand-source.json' Makefile .pre-commit-config.yaml .gitattributes .gitignore)
 
 # The pre-commit config runs trailing-whitespace and end-of-file-fixer over
 # every commit; no CI workflow runs them.  That leaves the commit gate and
