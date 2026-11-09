@@ -688,7 +688,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     try:
         with open(port_file, encoding="utf-8") as f:
             port = int(f.read().strip())
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return None
     # Same ephemeral-range guard as the standalone client (find_client.py):
     # a planted port file must not steer the query to a privileged local
@@ -1493,7 +1493,7 @@ def _import_prepare_file(args: tuple[str, int, int]) -> tuple[str, str, str, byt
     try:
         with open(file_path, encoding="utf-8") as f:
             code = f.read()
-    except OSError, UnicodeDecodeError:
+    except (OSError, UnicodeDecodeError):
         # Unreadable or non-UTF-8 files are rejected, never fatal.
         return None
     name = os.path.splitext(os.path.basename(file_path))[0]

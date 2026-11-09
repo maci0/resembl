@@ -196,7 +196,7 @@ class ResemblConfig:
                 value = int(value)
             try:
                 value = type(default)(value)
-            except TypeError, ValueError, OverflowError:
+            except (TypeError, ValueError, OverflowError):
                 logger.warning(
                     "Ignoring %s: expected %s, got %r.",
                     key,
