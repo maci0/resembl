@@ -406,7 +406,7 @@ host's `TZ` moved under me.
 **so that** a restore point is verified, not assumed.
 
 **Acceptance Criteria:**
-- `resembl backup <directory>` writes a single-file copy of the default SQLite database into `<directory>`, pruned to the newest `--keep` backups (default 7), and copies the live `config.toml` verbatim beside it as `<backup-stem>.config.toml` with its SHA-256 recorded in the manifest as `config_sha256` (`null` when no config file existed).
+- `resembl backup <directory>` writes a single-file copy of the default SQLite database into `<directory>`, pruned to the newest `--keep` backups (default 7), and copies the live `config.toml` verbatim beside it as `<backup-stem>.config.toml` with its SHA-256 recorded in the manifest as `config_sha256` (`null` when no config file existed). When `RESEMBL_RUNTIME_MANIFEST` is set, the runtime manifest is copied verbatim to `<backup-stem>.runtime-manifest.json` (mode `0600`) with its SHA-256 recorded as `runtime_sha256`; `verify-backup` cross-checks that sidecar when it is present.
 - The backup is written via SQLite's online backup API (not a raw file copy paired with a stale WAL), published atomically, and immediately re-verified; a copy whose manifest could not be written or that fails verification exits `1` and is reported as unverified/unrestorable.
 - `resembl backup` is SQLite only; on other backends it refuses with a message naming the backend.
 - `resembl verify-backup <path>` checks that a backup file opens, holds every table, passes `PRAGMA integrity_check`, and matches its manifest's snippet count and corpus `content_hash`; it exits `1` when the backup is not restorable.
