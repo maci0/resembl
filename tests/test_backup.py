@@ -821,5 +821,27 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertNotIn("select ", joined.casefold())
 
 
+class TestFchmodPortability(FileDBTest):
+    """``os.fchmod`` is POSIX-only; Windows lacks it (windows-2025 CI leg).
+
+    The sidecar/manifest writes in core.py used to call it unconditionally,
+    raising ``AttributeError`` on Windows and aborting backup/export.
+    Simulating its absence must not abort the write: the helper falls
+    back to ``os.chmod`` by path.
+    """
+
+    def test_backup_without_fchmod(self):
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with mock.patch.object(os, "fchmod", side_effect=AttributeError, create=True):
+            # Hide the name entirely, as on Windows: getattr(os, "fchmod", None)
+            # must return None, not raise.
+            with mock.patch.dict(os.__dict__, {"fchmod": None}):
+                del os.__dict__["fchmod"]
+                result = db_backup(self.session, backup_dir)
+        self.assertTrue(result["verified"])
+        self.assertTrue(db_verify_backup(self.session, result["backup"])["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
