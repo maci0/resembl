@@ -238,11 +238,12 @@ Typed config with fields: `lsh_threshold`, `num_permutations`, `top_n`, `ngram_s
 
 ### `load_config() → ResemblConfig`
 Load `config_path_get()` (see [Paths](#paths)). A missing, malformed, or unreadable file yields the
-defaults (malformed and unreadable files are logged as errors). The one
-exception is `resembl serve`: a present but malformed or unreadable
-`config.toml` fails startup (`ConfigError`) instead of silently serving
-defaults, so a server never binds with thresholds the operator did not
-configure.
+defaults (malformed and unreadable files are logged as errors). Two startup paths
+fail instead of silently running on defaults: `resembl serve` and every CLI
+command (the callback gates on `_read_config_dict`, `ConfigError`, exit 2), so
+a server or a `find`/`stats`/`list` never answers with thresholds the
+operator did not configure. Library callers of `load_config` keep the
+report-and-default behavior.
 
 ### `validate_value(key: str, value: object) → str | None`
 The one configuration-value check: returns why *value* is unusable as a
@@ -291,7 +292,7 @@ as unset for every one. The full manual-page reference is in
 | `RESEMBL_ENGINE_URL` | `http://127.0.0.1:8081` | Loopback engine URL the Lambda bootstrap dials (Go service only) |
 | `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
 | `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |
-| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | — | Non-blank value authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
+| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | — | Non-blank value except `0`/`false`/`no`/`off` (case-insensitive) authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
 | `RESEMBL_LOG_LEVEL` | `INFO` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`); `-v`/`-q` win when set; invalid aborts the command |
 
 Database URLs may carry credentials (`postgresql+pg8000://user:pass@host/db`);

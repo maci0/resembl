@@ -175,9 +175,17 @@ def serve_allow_unauthenticated_get() -> bool:
     Read at call time, like :func:`db_url_get`: a deployment that
     exports the variable after import still gets the value it set.
     A blank value counts as unset, matching every other override.
+    Case-insensitive ``0``/``false``/``no``/``off`` count as an
+    explicit opt-out: a conventional ``RESEMBL_SERVE_ALLOW_UNAUTHENTICATED=0``
+    exported by a base image or a previous deploy (or copied from a
+    ``DATABASE_URL``-style boolean) must not silently authorize an
+    unauthenticated non-loopback bind, which is the R1 corpus exposure.
+    Every other non-blank value opts in, including ``1``/``true``/``yes``.
     """
     value = os.environ.get(SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR)
-    return value is not None and bool(value.strip())
+    if value is None or not value.strip():
+        return False
+    return value.strip().casefold() not in ("0", "false", "no", "off")
 
 
 def runtime_manifest_path_get() -> str | None:

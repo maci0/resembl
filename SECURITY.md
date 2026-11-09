@@ -191,11 +191,11 @@ relies on, not configuration options.
   to start. `RESEMBL_NOW` without an offset is UTC, never host local zone
   (`5d2aaa3`). `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
   rejects `2**32` permutations (`9aeab2b`, `1f210e7`). A malformed or
-  unreadable `config.toml` now fails `serve` startup instead of the
-  server silently binding with built-in defaults (`_find_defaults_load`
+  readable `config.toml` fails `serve` and every CLI command startup instead of
+  the server silently binding with built-in defaults (`_find_defaults_load`
   in `resembl/server.py` via `_read_config_dict` in `resembl/config.py`,
-  `ConfigError`); interactive commands keep the report-and-default
-  behavior of `load_config`. `pinned_snapshot.index_digest` raises
+  `ConfigError`, and the CLI callback's `_read_config_dict` gate);
+  library `load_config` keeps the report-and-default behavior. `pinned_snapshot.index_digest` raises
   `ValueError` on a stored non-finite `REAL` instead of leaking a
   `json.dumps` encoder message (`_snapshot_value` in
   `resembl/pinned_snapshot.py`).

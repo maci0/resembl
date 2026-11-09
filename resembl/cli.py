@@ -48,11 +48,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
-from .clock import avg_time_per_item, monotonic_now, parse_instant
+from .clock import CLOCK_ENV_VAR, avg_time_per_item, monotonic_now, parse_instant
 from .config import (
     DEFAULTS,
     FORMATS,
+    ConfigError,
     ResemblConfig,
+    _read_config_dict,
     config_path_get,
     load_config,
     remove_config_key,
@@ -1296,6 +1298,34 @@ def app_callback(
             )
             raise typer.Exit(code=2)
         log_level = getattr(logging, env_level)
+    # Fail fast on an invalid pinned clock / seed, the same validation
+    # RESEMBL_LOG_LEVEL gets above: today an invalid RESEMBL_NOW (or
+    # RESEMBL_SEED) only raises when a write/stats path happens to stamp
+    # or sample, so `resembl list` / `resembl --version`-adjacent
+    # commands exit 0 with the typo silently ignored while `resembl
+    # stats` on a non-empty store and `serve` crash mid-run with a
+    # ValueError.  Validate once here so every command refuses a bad
+    # pin/seed at startup with a clear message, instead of depending on
+    # which code path happens to read it.
+    clock_override = os.environ.get(CLOCK_ENV_VAR)
+    if clock_override is not None and clock_override.strip():
+        if parse_instant(clock_override) is None:
+            err_console.print(
+                f"[red]Error:[/red] {CLOCK_ENV_VAR}={clock_override!r} is not an "
+                "ISO 8601 instant."
+            )
+            raise typer.Exit(code=2)
+    from .diagnostics import SEED_ENV_VAR
+
+    seed_override = os.environ.get(SEED_ENV_VAR)
+    if seed_override is not None and seed_override.strip():
+        try:
+            int(seed_override.strip(), 10)
+        except ValueError:
+            err_console.print(
+                f"[red]Error:[/red] {SEED_ENV_VAR}={seed_override!r} is not an integer."
+            )
+            raise typer.Exit(code=2) from None
     if quiet:
         log_level = logging.WARNING
     elif verbose:
@@ -1310,6 +1340,19 @@ def app_callback(
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
+    try:
+        _read_config_dict()
+    except ConfigError as e:
+        # A present but malformed/unreadable config.toml must fail fast at
+        # startup, the way `serve` already does: the CLI answers every
+        # find/stats/list from this config, so a silently discarded tuned
+        # threshold (top_n=999 + a typo line) would run the whole command
+        # on defaults with exit 0 and an ERROR log line interleaved in
+        # stderr, while `config set` on the same file exits 1.  load_config
+        # keeps its report-and-default contract for library callers; the
+        # CLI boundary is where the fail-fast belongs.
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
+        raise typer.Exit(code=USAGE_ERROR) from e
     state.config = load_config()
     if format_opt is not None:
         state.format = format_opt

@@ -380,8 +380,9 @@ Linux or Windows are one name.
 **RESEMBL_SERVE_ALLOW_UNAUTHENTICATED**
 :   Non-blank value authorizes a non-loopback `serve --host` bind
     without `--allow-unauthenticated`, for deployments configured
-    through the environment. A blank value counts as unset. The
-    flag and this variable are an OR: either opts in.
+    through the environment. A blank value counts as unset, and
+    `0`/`false`/`no`/`off` (case-insensitive) count as an explicit
+    opt-out. The flag and this variable are an OR: either opts in.
 
 **RESEMBL_LOG_LEVEL**
 :   Log level for every command: `DEBUG`, `INFO`, `WARNING`,

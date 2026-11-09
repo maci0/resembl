@@ -10,6 +10,10 @@
 # Tuning only: database credentials belong in RESEMBL_DATABASE_URL,
 # never in this file.
 #
+# A present but malformed or unreadable file fails startup (exit 2)
+# for `serve` and every CLI command; a missing file is the default run.
+# A value outside the range below is reported and ignored.
+#
 # Uncomment a line to override its default.
 
 # Minimum LSH Jaccard similarity.  Range: 0.0 <= v < 0.99.  Default: 0.5
