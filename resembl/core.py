@@ -354,7 +354,19 @@ def _db_backup_candidates(backup_dir: str, names: list[str]) -> list[str]:
         stem = name.removeprefix("assembly-").removesuffix(".db")
         # ``stem`` is ``YYYYMMDDTHHMMSS-ffffff`` for names this module
         # writes; anything else (hand-supplied, legacy) sorts oldest.
-        if len(stem) == 22 and stem[8] == "T" and stem[15] == "-":
+        # The digit positions must be ASCII digits too: a length/shape
+        # match on a lexicographic sort would let a name like
+        # ``assembly-29991231T235959-999999.db`` (all digits, valid shape)
+        # sort newest and pin the prune window, while a non-digit payload
+        # that happens to match the shape would sort above real stamps
+        # ('z' > '9') and evict genuine backups.  Only all-digit stamps
+        # count as embedded timestamps.
+        if (
+            len(stem) == 22
+            and stem[8] == "T"
+            and stem[15] == "-"
+            and all(part.isascii() and part.isdigit() for part in (stem[:8], stem[9:15], stem[16:]))
+        ):
             return (stem, name)
         return ("", name)
 
@@ -2749,8 +2761,15 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
                 # would carry -wal/-shm sidecars on the next read-only
                 # open and fail db_verify_backup's single-file check.
                 # Fold it to DELETE and checkpoint so the backup is a
-                # true single-file restore point.
+                # true single-file restore point.  Verify the mode actually
+                # changed: a checkpoint that cannot complete (e.g. another
+                # connection still holds a read mark) silently leaves WAL
+                # sidecars beside the published copy, and the later
+                # single-file verify fails the backup for it.  Fail loud
+                # here instead of publishing a copy restore cannot ship.
                 destination.execute("PRAGMA journal_mode=DELETE")
+                if destination.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
+                    raise RuntimeError("db_backup: could not switch backup to journal_mode=DELETE")
                 destination.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             finally:
                 destination.close()
@@ -2765,10 +2784,14 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             os.replace(tmp_path, final_path)
             _fsync_quiet(backup_dir)
         except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            # The temp database and any WAL sidecars from the backup
+            # connection must not survive a failed publish: a ``-wal``
+            # left beside the destination name would make the next
+            # verify-backup fail with "wal sidecar present" for a file
+            # that was never published.
+            _remove_quietly(tmp_path)
+            _remove_quietly(tmp_path + "-wal")
+            _remove_quietly(tmp_path + "-shm")
             raise
     finally:
         try:
@@ -2930,8 +2953,19 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
         return 0
 
     candidates = _db_backup_candidates(backup_dir, names)
+    # Keep exactly ``keep`` files, newest by embedded stamp.  ``preserve``
+    # (the backup just written) must survive even when its stamp sorts
+    # oldest (clock skew, or hand-supplied far-future names): skip it in
+    # the removal window AND still honor ``keep`` by extending the window
+    # past it — otherwise a preserved oldest file leaves ``keep + 1``
+    # backups retained, defeating retention.
+    if preserve is not None and preserve in candidates:
+        others = [n for n in candidates if n != preserve]
+        to_remove = others[: max(0, len(others) - max(0, keep - 1))]
+    else:
+        to_remove = candidates[: max(0, len(candidates) - keep)]
     removed = 0
-    for name in candidates[: max(0, len(candidates) - keep)]:
+    for name in to_remove:
         if preserve is not None and name == preserve:
             continue
         try:
