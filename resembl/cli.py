@@ -966,7 +966,7 @@ def serve(
         # above rejects it first; keep this as a safety net so a future
         # caller that bypasses it still gets a clean usage error.
         err_console.print(f"[red]Error:[/red] --port must be between 0 and 65535 (got {port}).")
-        raise typer.Exit(code=USAGE_ERROR)
+        raise typer.Exit(code=USAGE_ERROR) from None
     except OSError as e:
         # e.g. --port already in use by another process.
         err_console.print(
