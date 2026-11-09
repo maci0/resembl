@@ -785,6 +785,60 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
         self.assertFalse(os.path.exists(first["backup"]))
 
+    def test_stale_backup_fails_age_bound_and_fresh_passes(self):
+        """A backup older than max_age_days fails; a fresh one passes.
+
+        Retention is by count, not age, so a directory whose newest copy
+        is weeks old verifies on contents alone while the RPO gap stays
+        invisible.  ``db_verify_backup(..., max_age_days=...)`` must
+        report the stale copy as unrestorable.  Age is measured from the
+        manifest ``created_at`` against the logical clock (RESEMBL_NOW),
+        not mtime, so the check replays deterministically.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        os.makedirs(backup_dir)
+        # Pinned-clock backup: created_at is 2024-06-01.
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-01T12:00:00+00:00"}):
+            old_result = db_backup(self.session, backup_dir)
+        self.assertTrue(old_result["verified"])
+        old_path = old_result["backup"]
+        # Fresh check long after: 2024-06-10 -> 9 days old.
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-10T12:00:00+00:00"}):
+            stale = db_verify_backup(self.session, old_path, max_age_days=7)
+        self.assertFalse(stale["ok"], stale)
+        self.assertIn("exceeds max_age_days", " ".join(stale["issues"]))
+
+        # Fresh backup at the later instant passes the same bound.  The
+        # content is unchanged so db_backup would reuse the old file;
+        # add a snippet first so a genuinely new backup is written.
+        snippet_add(self.session, "bar", "mov eax, 2\nret")
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-10T12:00:00+00:00"}):
+            new_result = db_backup(self.session, backup_dir)
+        self.assertTrue(new_result["verified"])
+        self.assertNotEqual(new_result["backup"], old_path)
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-10T12:00:00+00:00"}):
+            fresh = db_verify_backup(self.session, new_result["backup"], max_age_days=7)
+        self.assertTrue(fresh["ok"], fresh)
+        # Without a bound the stale copy still passes on contents alone.
+        with mock.patch.dict(os.environ, {"RESEMBL_NOW": "2024-06-10T12:00:00+00:00"}):
+            unbounded = db_verify_backup(self.session, old_path)
+        self.assertTrue(unbounded["ok"], unbounded)
+
+    def test_legacy_manifest_without_created_at_skips_age_check(self):
+        """A legacy manifest with no created_at is not failed on age."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        manifest_path = result["backup"].rsplit(".db", 1)[0] + ".json"
+        with open(manifest_path, encoding="utf-8") as f:
+            data = json.load(f)
+        data.pop("created_at", None)
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        check = db_verify_backup(self.session, result["backup"], max_age_days=0.001)
+        self.assertTrue(check["ok"], check)
+
     def test_rebackup_of_corrupted_retained_backup_writes_fresh(self):
         """A corrupt retained backup is not reused as a successful backup.
 

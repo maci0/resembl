@@ -133,7 +133,7 @@ band key depends on it, so changing it makes them incomparable with new
 ones; `resembl serve` reports it in the fingerprint scheme (see
 `docs/http_api.md`).
 
-### `db_backup(session, backup_dir: str, *, keep: int = 7) → dict` / `db_verify_backup(session, backup_path: str) → dict`
+### `db_backup(session, backup_dir: str, *, keep: int = 7) → dict` / `db_verify_backup(session, backup_path: str, *, max_age_days: float | None = None) → dict`
 `db_backup` writes a consistent, restorable copy of the default SQLite
 database into `backup_dir` (via SQLite's online backup API) with a
 manifest holding the snippet count, fingerprint version and a content
@@ -152,6 +152,10 @@ retried call cannot drain the retention window. `db_verify_backup`
 checks a backup opens, holds every table, and matches its manifest,
 including the config and runtime sidecar hashes when the manifest
 records one (a missing or mismatched sidecar is a hard failure).
+With `max_age_days` set, a backup whose manifest `created_at` is
+older than that many days fails as stale (a hard failure), so a
+directory whose newest copy aged past the RPO target is reported
+instead of passing on contents alone.
 SQLite only; other backends raise `ValueError`. The CLI forms are
 `resembl backup DIR` and `resembl verify-backup PATH` (see `docs/man.md`).
 

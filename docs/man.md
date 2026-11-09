@@ -233,10 +233,13 @@ Global options go before the subcommand: `resembl --format json find ...`.
     The full restore procedure, including removing stale `-wal`/`-shm`
     sidecars before copying, is in `docs/restore.md`.
 
-**verify-backup** *PATH*
+**verify-backup** *PATH* [**--max-age-days** *N*]
 :   Check that a backup file opens, holds every table, and matches its
     manifest's snippet count.  Exits 1 when the backup is not
-    restorable.  Run this after a restore to prove the copy is good —
+    restorable.  `--max-age-days N` fails a backup whose manifest
+    `created_at` is older than *N* days, so a directory whose newest
+    copy silently ages past the RPO target does not pass on contents
+    alone.  Run this after a restore to prove the copy is good —
     a backup never restored is a hypothesis, not a backup.
 
 **merge** *PATH* [--force] [--no-backup] [--backup-dir *DIR*]

@@ -19,7 +19,7 @@ import re
 import tempfile
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, update
@@ -2955,7 +2955,9 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
     return removed
 
 
-def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: disable=unused-argument
+def db_verify_backup(
+    session: Session, backup_path: str, *, max_age_days: float | None = None
+) -> dict:  # pylint: disable=unused-argument
     """Check that *backup_path* opens and holds the data its manifest promised.
 
     Opens the backup as a read-only SQLite database, runs
@@ -2977,6 +2979,16 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     integrity check fails, or the counts/hashes disagree.  A missing
     manifest is an issue but not a failure: the file may predate
     manifests, and its contents are what matter.
+
+    *max_age_days* (when given) makes a backup older than that many
+    days a hard failure.  Retention is by count, not by age, so
+    without an age bound a directory whose newest copy is weeks old
+    still verifies and the RPO gap stays invisible.  The age is
+    measured from the manifest ``created_at`` against the logical
+    clock (:func:`resembl.clock.timestamp_now`, honoring
+    ``RESEMBL_NOW``), not from filesystem mtime, so the check replays
+    deterministically.  Legacy manifests without ``created_at`` are
+    skipped rather than failed.
     """
     import sqlite3
     from urllib.parse import quote
@@ -3083,6 +3095,7 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     manifest_config_name: str | None = None
     manifest_runtime_hash: str | None = None
     manifest_runtime_name: str | None = None
+    manifest_created: str | None = None
     manifest_present = False
     for manifest_path in (per_backup_path, shared_path):
         try:
@@ -3120,6 +3133,9 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
                 if isinstance(data.get("runtime_manifest"), str)
                 else None
             )
+            manifest_created = (
+                data.get("created_at") if isinstance(data.get("created_at"), str) else None
+            )
             manifest_present = True
         elif isinstance(data, dict) and data.get("num_snippets") is None:
             # The count was never taken at backup time (the count query
@@ -3137,6 +3153,29 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         )
     if manifest_hash is not None and content_hash is not None and manifest_hash != content_hash:
         issues.append("content hash mismatch: backup contents differ from manifest")
+    # Stale-backup check: retention is by count, not age, so a directory
+    # whose newest copy predates the RPO target still verifies on
+    # contents alone while the restore point silently ages out.  Measure
+    # age from the manifest's ``created_at`` against the logical clock
+    # (``timestamp_now``, honoring ``RESEMBL_NOW``) so the check replays
+    # deterministically and never reads filesystem mtime.  A legacy
+    # manifest without ``created_at`` is skipped rather than failed.
+    if max_age_days is not None and manifest_created is not None:
+        try:
+            _created = datetime.fromisoformat(manifest_created)
+        except ValueError:
+            _created = None
+        if _created is not None:
+            if _created.tzinfo is None:
+                _created = _created.replace(tzinfo=UTC)
+            _now = datetime.fromisoformat(timestamp_now())
+            if _now.tzinfo is None:
+                _now = _now.replace(tzinfo=UTC)
+            _age_days = (_now - _created).total_seconds() / 86400
+            if _age_days > max_age_days:
+                issues.append(
+                    f"backup is {_age_days:.1f} days old, exceeds max_age_days={max_age_days}"
+                )
     # Config sidecar cross-check: when the manifest records a config hash,
     # the sidecar must exist and hash to it.  A missing or mismatched
     # sidecar is a hard failure (the backup promised tuned state it no
@@ -3191,7 +3230,11 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
     hard_failures = [
         i
         for i in issues
-        if "mismatch" in i or "missing tables" in i or "integrity_check" in i or "wal sidecar" in i
+        if "mismatch" in i
+        or "missing tables" in i
+        or "integrity_check" in i
+        or "wal sidecar" in i
+        or "exceeds max_age_days" in i
     ]
     return {"ok": not hard_failures, "num_snippets": num_snippets, "issues": issues}
 

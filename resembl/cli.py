@@ -2459,12 +2459,17 @@ def backup(
 @app.command("verify-backup")
 def verify_backup_cmd(
     backup_path: str = typer.Argument(help="Path to a backup file to check."),
+    max_age_days: float | None = typer.Option(
+        None,
+        "--max-age-days",
+        help="Fail when the backup is older than this many days (RPO bound).",
+    ),
 ) -> None:
     """Check a backup opens and holds its manifest's snippet count."""
     if not os.path.isfile(backup_path):
         err_console.print(f"[red]Error:[/red] File not found: {_display(backup_path)}")
         raise typer.Exit(code=1)
-    result = db_verify_backup(state.session, backup_path)
+    result = db_verify_backup(state.session, backup_path, max_age_days=max_age_days)
     if state.format in ("json", "csv"):
         _echo_format(result)
     else:
