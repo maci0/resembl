@@ -245,6 +245,8 @@ class Collection(SQLModel, table=True):
 
         *limit* caps the fetch symmetrically with :meth:`Snippet.get_all`.
         """
+        if limit is not None and limit <= 0:
+            return []
         stmt = select(cls).order_by(cls.name)
         if limit is not None:
             stmt = stmt.limit(limit)
@@ -306,6 +308,8 @@ class SnippetVersion(SQLModel, table=True):
         an unbounded version list into memory; ``None`` (the default) keeps
         the historical unbounded behavior for callers that need every row.
         """
+        if limit is not None and limit <= 0:
+            return []
         stmt = (
             select(cls)
             .where(cls.snippet_checksum == checksum)
@@ -422,6 +426,8 @@ class Snippet(SQLModel, table=True):
         (the default) keeps the historical unbounded behavior.  Prefer
         :meth:`stream_all` / :meth:`iter_batches` for full scans.
         """
+        if limit is not None and limit <= 0:
+            return []
         stmt = select(cls).order_by(cls.checksum)
         if limit is not None:
             stmt = stmt.limit(limit)
@@ -505,6 +511,8 @@ class Snippet(SQLModel, table=True):
         behavior.  Prefer the streamed ``snippet_collection_names_stream``
         for rendering names without loading the ``code`` column.
         """
+        if limit is not None and limit <= 0:
+            return []
         stmt = (
             select(cls)
             .where(cls.collection == name_normalize(collection_name))
