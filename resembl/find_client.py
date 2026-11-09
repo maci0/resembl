@@ -310,7 +310,12 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a table.")
     parser.add_argument("--version", action="store_true", help="Show the resembl version and exit.")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress informational output.")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Increase output verbosity.")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Increase output verbosity (logs the request URL to stderr).",
+    )
     args = parser.parse_args(args_list)
     if args.version:
         from importlib.metadata import PackageNotFoundError, version
@@ -322,6 +327,11 @@ def _main(argv: list[str] | None = None) -> int:
         print(f"resembl-find {version_str}")
         return 0
     json_on = _json_on(args.output, args.json)
+    if args.verbose and not args.quiet:
+        print(
+            f"resembl-find: query via 127.0.0.1 port file for {db_url_mask(db_url_get())}",
+            file=sys.stderr,
+        )
 
     query = args.query
     if query is None and args.file == "-":
