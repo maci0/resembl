@@ -908,9 +908,19 @@ def serve(
     # accepts before the subcommand name.  serve has no other work to do in
     # the foreground, and the per-request DEBUG log is the only trail a
     # served query leaves, so the flag is repeated here and it is the one
-    # that reaches it.
+    # that reaches it. ``RESEMBL_LOG_LEVEL`` is the env equivalent: the
+    # callback's ``basicConfig(force=True)`` already applied it, but the
+    # serve-local ``-v`` must override just like the global one does.
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+    elif log_level_get() is not None and not state.quiet:
+        # The env level was applied by the callback; re-apply it here so a
+        # serve-invoked-in-process (tests, embedded) that skipped the
+        # callback still honors it. ``state.quiet`` (-q) wins, like the
+        # callback.
+        _env_level = log_level_get()
+        if _env_level is not None:
+            logging.getLogger().setLevel(getattr(logging, _env_level))
 
     db_url: str | None = None
     if not stateless:
@@ -1294,12 +1304,16 @@ def app_callback(
         log_level = logging.DEBUG
     # stderr, not stdout: a warning raised mid-run (a config key ignored, a
     # parallel import falling back) would otherwise be interleaved into the
-    # JSON/CSV array a script is parsing.
+    # JSON/CSV array a script is parsing. ``force=True`` is required: without
+    # it, a second ``basicConfig`` (e.g. the callback running again in the
+    # same process, as in tests or embedded use) is silently ignored and
+    # ``RESEMBL_LOG_LEVEL`` never applies.
     logging.basicConfig(
         level=log_level,
         stream=sys.stderr,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
+        force=True,
     )
 
     state.config = load_config()
