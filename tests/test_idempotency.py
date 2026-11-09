@@ -153,12 +153,12 @@ class TestSnippetWrites(BaseDBTest):
             raise IntegrityError("INSERT INTO snippet", {}, Exception("persistent"))
 
         original = core._insert_snippet_rows
-        core._insert_snippet_rows = _boom  # type: ignore[method-assign]
+        core._insert_snippet_rows = _boom
         try:
             with self.assertRaises(IntegrityError):
                 snippet_add_batch(self.session, prepared)
         finally:
-            core._insert_snippet_rows = original  # type: ignore[method-assign]
+            core._insert_snippet_rows = original
         self.assertEqual(_state(self.session), {"snippets": [], "collections": []})
 
     def test_name_add_twice_is_a_noop(self):
