@@ -1512,6 +1512,23 @@ class _FindHandler(BaseHTTPRequestHandler):
             return True
         return (self.headers.get("Host") or "").strip().casefold() in allowed
 
+    def _non_loopback_refused(self) -> bool:
+        """Whether this request hits an endpoint gated on non-loopback binds.
+
+        A non-loopback bind is reachable by any host that can route to the
+        port and the server has no authentication.  The stateless computed
+        endpoints (``/score``, ``/band-keys``, ``/scheme``) and ``/metrics``
+        are therefore refused there; ``/health`` stays open for probes and
+        ``/find*``/``/find-pinned`` keep their existing operator gate.
+        Loopback binds answer normally.
+        """
+        if not getattr(self.server, "is_non_loopback", False):
+            return False
+        if self.route in ("/score", "/band-keys", "/scheme", "/metrics"):
+            self._respond(403, {"error": "endpoint not exposed on non-loopback bind"})
+            return True
+        return False
+
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
@@ -1527,6 +1544,8 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._respond(404, {"error": f"unknown path: {safe_route}"})
             return
         if self._stateless_refused():
+            return
+        if self._non_loopback_refused():
             return
         if not self._content_type_ok():
             self._respond(415, {"error": "content type must be application/json"})
@@ -1601,6 +1620,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         # path keeps the verb answer, so a stray GET cannot look like a find.
         if not self._host_allowed():
             self._respond(403, {"error": "host not allowed"})
+            return
+        if self._non_loopback_refused():
             return
         if self.route == "/runtime-generation":
             if not self._stateless_refused():
@@ -2091,6 +2112,11 @@ class _FindServer(
     #: ``Host`` values this generation answers to; empty means unrestricted
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()
+    #: Whether bound to a non-loopback interface.  Such a bind is reachable
+    #: by any host that can route to it and the server has no authentication,
+    #: so computed/metrics endpoints are refused there unless the operator
+    #: opted into unauthenticated exposure (see :func:`_FindHandler`).
+    is_non_loopback: bool = False
     #: This generation's exit-hook callback, set by :func:`serve`.
     #: ``server_close`` runs it (retiring the port file) and unregisters it,
     #: so a process cycling servers accumulates neither stale advertisements
@@ -2265,6 +2291,7 @@ def _stateless_serve(host: str, port: int) -> ThreadingHTTPServer:
     httpd.engine = None
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
+    httpd.is_non_loopback = not _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     logger.debug(
         "serving without a database on %s:%d, find defaults %s",
         host,
@@ -2427,6 +2454,7 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     httpd.runtime_generation = _seeded_uuid_hex()
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
+    httpd.is_non_loopback = not httpd.allowed_hosts
     try:
         # 0o700 at creation: the cache dir holds the advertisement, and both
         # clients trust its contents to name the port they send their query

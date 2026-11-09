@@ -2422,6 +2422,54 @@ class TestServerObservability(_ServeTestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10) as response:
             return response.status, response.headers["Content-Type"], response.read().decode()
 
+    def test_non_loopback_bind_refuses_computed_and_metrics(self):
+        """A non-loopback bind refuses /score, /band-keys, /scheme and /metrics.
+
+        The server has no authentication; a routable bind is reachable by
+        any host that can route to it.  Computed endpoints that read no
+        database and the metrics exposition are refused there — /health
+        stays open for probes.
+        """
+        from resembl.server import serve
+
+        httpd = serve(None, host="0.0.0.0", port=0)
+        # serve() bound a real socket on 0.0.0.0; serve_forever in a thread
+        # and hit it via loopback — the gate is the bind flag, not the peer.
+        port = httpd.server_address[1]
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(lambda: thread.join(10))
+        self.addCleanup(httpd.shutdown)
+        # _stateless_serve sets is_non_loopback for 0.0.0.0; assert it.
+        self.assertTrue(getattr(httpd, "is_non_loopback", False))
+        for verb, path in (
+            ("POST", "/score"),
+            ("POST", "/band-keys"),
+            ("GET", "/scheme"),
+            ("GET", "/metrics"),
+        ):
+            with self.subTest(verb=verb, path=path):
+                if verb == "POST":
+                    status, payload = _post_json_status(
+                        port, path, {"source": "ret", "candidates": ["ret"]}
+                    )
+                else:
+                    try:
+                        with urllib.request.urlopen(
+                            f"http://127.0.0.1:{port}{path}", timeout=10
+                        ) as response:
+                            status, payload = response.status, {}
+                    except urllib.error.HTTPError as exc:
+                        status, payload = exc.code, json.loads(exc.read())
+                self.assertEqual(status, 403)
+                self.assertIn("not exposed on non-loopback", payload.get("error", ""))
+        # /health stays open for probes on the same bind.
+        status, _, _ = self._get(port, "/health")
+        self.assertEqual(status, 200)
+
     def test_health_reports_ready_against_a_live_database(self):
         port = self._start_server()
         status, content_type, body = self._get(port, "/health")

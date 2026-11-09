@@ -429,6 +429,23 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed", reqID)
 			return
 		}
+		// Metrics expose request counts, latency and error rates for the
+		// corpus service; they are not liveness. Require the same query
+		// authorization as /v1/find so an unauthenticated caller cannot
+		// read operational data from a token-protected deployment.
+		// /healthz stays unauthenticated for orchestrator probes.
+		metricsCtx, metricsCancel := context.WithTimeout(r.Context(), s.timeout)
+		defer metricsCancel()
+		allowed, err := s.Authority.Allow(metricsCtx, r.Header.Get("Authorization"), s.Resource, "query")
+		if err != nil {
+			log.Printf("[%s] authority unavailable: %v", reqID, err)
+			writeError(w, http.StatusServiceUnavailable, "authority unavailable", reqID)
+			return
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "forbidden", reqID)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		if s.metrics != nil {
 			_, _ = w.Write([]byte(s.metrics.render()))
