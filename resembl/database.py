@@ -42,7 +42,15 @@ def create_db_engine(
     exhausted under concurrent load.
     """
     db_url = url or db_url_get()
-    kwargs: dict[str, object] = {"echo": False}
+    # pool_pre_ping discards a stale pooled connection (a PostgreSQL/MySQL
+    # backend closed by the server or a NAT gateway) on checkout instead of
+    # failing the first statement on it; the default pool has no ping, so a
+    # dead connection surfaced as a spurious query error.  pool_timeout is
+    # passed only where the pool accepts it: SQLite's in-memory pool
+    # (SingletonThreadPool) rejects it at engine creation.
+    kwargs: dict[str, object] = {"echo": False, "pool_pre_ping": True}
+    if not db_url.startswith("sqlite:///:memory:"):
+        kwargs["pool_timeout"] = 30
     if pool_size is not None:
         kwargs["pool_size"] = pool_size
     if max_overflow is not None:
