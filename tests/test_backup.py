@@ -631,6 +631,21 @@ class TestDbBackup(FileDBTest):
                 self.assertEqual(_db_backup_prune(backup_dir, 7), 0)
         self.assertTrue(any("Could not list backup directory" in m for m in logs.output))
 
+    def test_backup_warns_when_co_located_on_same_filesystem(self):
+        """A backup on the live DB's filesystem warns about instance loss.
+
+        The warning is the failure-domain signal: co-located backups
+        protect only against a deleted file, not disk loss.  FileDBTest
+        co-locates backup_dir with assembly.db on one tmpdir, so the
+        warning must fire.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        with self.assertLogs("resembl.core", level="WARNING") as logs:
+            result = db_backup(self.session, backup_dir)
+        self.assertTrue(result["verified"])
+        self.assertTrue(any("same filesystem" in m for m in logs.output))
+
 
 class TestDbVerifyBackup(FileDBTest):
     """db_verify_backup fails a backup whose contents disagree with its manifest."""

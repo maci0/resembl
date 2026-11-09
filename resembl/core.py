@@ -2627,6 +2627,26 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             # collision would overwrite the live file.
             if live_base == backup_name:
                 raise ValueError("backup destination is the live database file")
+        # Failure-domain concentration (docs/restore.md): a backup on the
+        # same filesystem as the live database protects only against a
+        # deleted/corrupted file, not instance/disk loss — both die
+        # together.  Warn loudly (not refuse: tests and in-memory-to-file
+        # flows legitimately co-locate, and some deployments accept the
+        # risk) so an operator who meant off-host storage notices the
+        # silent downgrade before the disaster does.
+        try:
+            if os.stat(live_path).st_dev == os.stat(backup_dir).st_dev:
+                logger.warning(
+                    "db_backup: backup directory %s is on the same filesystem "
+                    "as the live database %s (st_dev=%s); instance/disk loss "
+                    "destroys both — point BACKUP_DIR at different storage "
+                    "(docs/restore.md)",
+                    backup_dir,
+                    live_path,
+                    os.stat(backup_dir).st_dev,
+                )
+        except OSError as e:
+            logger.warning("db_backup: could not check backup filesystem: %s", e)
     dbapi_connection = bind.raw_connection()  # type: ignore[union-attr]
     if dbapi_connection is None:
         raise ValueError("db_backup: no database connection available")

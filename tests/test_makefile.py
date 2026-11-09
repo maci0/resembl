@@ -150,6 +150,64 @@ class MakefileShellTests(unittest.TestCase):
         self.assertIn("make backup needs BACKUP_DIR", result.stdout + result.stderr)
         self.assertIn("docs/restore.md", result.stdout + result.stderr)
 
+    def test_backup_drill_falls_back_to_older_verifying_backup(self) -> None:
+        """A corrupt newest backup does not block the drill for older good ones."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as directory:
+            backup_dir = Path(directory) / "backups"
+            backup_dir.mkdir()
+            # Two copies: newest (corrupt) and older (good, verified via real backup).
+            # Build a good backup using the shipped CLI against a scratch DB.
+            db_path = Path(directory) / "assembly.db"
+            env = dict(os.environ)
+            env["RESEMBL_DATABASE_URL"] = f"sqlite:///{db_path}"
+            env["RESEMBL_CONFIG_DIR"] = str(Path(directory) / "cfg")
+            add = [
+                "uv",
+                "run",
+                "--locked",
+                "python",
+                "-m",
+                "resembl",
+                "add",
+                "foo",
+                "mov eax, 1; ret",
+            ]
+            subprocess.run(add, cwd=root, env=env, capture_output=True, text=True, check=True)
+            bak = [
+                "uv",
+                "run",
+                "--locked",
+                "python",
+                "-m",
+                "resembl",
+                "backup",
+                str(backup_dir),
+                "--force",
+            ]
+            subprocess.run(bak, cwd=root, env=env, capture_output=True, text=True, check=True)
+            good = min(backup_dir.glob("assembly-*.db"))
+            import time as _time
+
+            _time.sleep(0.02)
+            corrupt = backup_dir / "assembly-29991231T235959-999999.db"
+            corrupt.write_bytes(b"corrupt-not-a-db")
+            # Manifest for corrupt would be absent; verify fails for it.
+            # Drill must skip corrupt and prove the good one.
+            result = subprocess.run(
+                [make, "backup-drill", f"BACKUP_DIR={backup_dir}"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("failed verify-backup", result.stdout + result.stderr)
+            self.assertIn(good.name, (backup_dir / ".restore-drill.log").read_text())
+
     def test_backup_drill_names_missing_backup_dir(self) -> None:
         """Without BACKUP_DIR, backup-drill fails loud for the same reason."""
         make = shutil.which("make")

@@ -39,10 +39,22 @@ A backup that has never been restored is a hypothesis: run a restore drill
 at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>` —
 it copies the newest verified backup to a scratch path, `verify-backup`
 proves it there, and records (date, backup filename, verify result) in
-`<off-host-dir>/.restore-drill.log` beside the backup directory.
-`db_backup` re-verifies a reused retained
+`<off-host-dir>/.restore-drill.log` beside the backup directory.  The drill
+walks newest-first and proves the newest backup that *passes* verify-backup,
+so a corrupt newest copy cannot block the drill forever while an older
+good copy sits unproven.  `db_backup` re-verifies a reused retained
 backup and refuses a copy with a `-wal`/`-shm` sidecar, but only the drill
 proves the restore procedure itself.
+
+`make backup-drill` covers SQLite `assembly-*.db` copies only.  For DuckDB,
+PostgreSQL, or MySQL there is no `resembl backup` to drill: stop every
+DuckDB process, copy the `duckdb:///file.db` file to scratch, and open the
+copy with the DuckDB version that wrote it (a DuckDB 2.0 file is not
+readable before 2.0) — see `docs/custom_database.md`.  For PostgreSQL use
+`pg_dump`/`pg_restore` and for MySQL `mysqldump`/`mysql` on the same
+scratch-copy-then-open pattern.  A drill that only ever ran against SQLite
+proves nothing about those backends; record the backend-specific drill
+result in the same `.restore-drill.log` so the gap is visible.
 ## RPO / RTO
 
 - **RPO** = time since the last *verified* backup. No backup job runs
@@ -175,3 +187,8 @@ Backups are caller-chosen and live wherever the caller puts them: if the
 backup directory is on the same disk/volume as `assembly.db`, instance loss
 takes both. Put the backup directory on different storage (or sync it off
 host) for the backup to protect against anything beyond a deleted file.
+`db_backup` logs a warning when the backup directory shares the live
+database's filesystem device (`st_dev`), so a co-located backup is a
+visible, accepted risk rather than a silent downgrade; a backup that
+stays on the same device must be paired with an off-host copy to cover
+instance loss.

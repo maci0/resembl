@@ -216,13 +216,19 @@ backup-drill:  ## Prove the newest backup restores (docs/restore.md)
 		exit 1; \
 	fi
 	@set -e; \
-	newest=$$(ls -t "$(BACKUP_DIR)"/assembly-*.db 2>/dev/null | head -n 1); \
-	if [ -z "$$newest" ]; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
-	scratch=$$(mktemp -d); trap 'rm -rf "$$scratch"' EXIT; \
-	cp "$$newest" "$$scratch/restored.db"; \
-	uv run --locked python -m resembl verify-backup "$$scratch/restored.db"; \
-	printf '%s\t%s\t%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(basename "$$newest")" "verify-backup ok (drill)" >> "$(BACKUP_DIR)/.restore-drill.log"; \
-	echo "backup-drill: $$newest restored and verified in $$scratch"
+	if ! ls "$(BACKUP_DIR)"/assembly-*.db >/dev/null 2>&1; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
+	for candidate in $$(ls -t "$(BACKUP_DIR)"/assembly-*.db 2>/dev/null); do \
+		scratch=$$(mktemp -d); \
+		cp "$$candidate" "$$scratch/restored.db"; \
+		if uv run --locked python -m resembl verify-backup "$$scratch/restored.db" >/dev/null 2>&1; then \
+			printf '%s\t%s\t%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(basename "$$candidate")" "verify-backup ok (drill)" >> "$(BACKUP_DIR)/.restore-drill.log"; \
+			echo "backup-drill: $$candidate restored and verified in $$scratch"; \
+			rm -rf "$$scratch"; exit 0; \
+		fi; \
+		echo "backup-drill: $$candidate failed verify-backup (trying next older backup)"; \
+		rm -rf "$$scratch"; \
+	done; \
+	echo "backup-drill: no assembly-*.db in $(BACKUP_DIR) passed verify-backup"; exit 1
 
 # The experimental Go query service in service/ has its own module and its own
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a
