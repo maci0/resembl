@@ -345,7 +345,7 @@ dist:  ## Build the sdist and wheel into dist/ reproducibly
 	done
 	@set -e; for whl in dist/*.whl; do \
 		tmp=$${whl}.tmp; \
-		uv run --locked python -c "import sys, zipfile; src, dst = sys.argv[1], sys.argv[2]; zi = zipfile.ZipFile(src); zo = zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED); [exec('ni = zipfile.ZipInfo(i.filename, i.date_time)\nni.compress_type = i.compress_type\nni.create_system = i.create_system\nni.external_attr = (0o100644 << 16)\nzo.writestr(ni, zi.read(i.filename))') for i in zi.infolist()]; zo.close(); zi.close()" "$$whl" "$$tmp"; \
+		uv run --locked python -c "import sys, zipfile; src, dst = sys.argv[1], sys.argv[2]; zi = zipfile.ZipFile(src); zo = zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED, compresslevel=9); [exec('ni = zipfile.ZipInfo(i.filename, i.date_time)\nni.compress_type = i.compress_type\nni.create_system = i.create_system\nni.create_version = i.create_version\nni.extract_version = i.extract_version\nni.internal_attr = i.internal_attr\nni.external_attr = (0o100644 << 16)\nni.flag_bits = 0\nzo.writestr(ni, zi.read(i.filename))') for i in sorted(zi.infolist(), key=lambda i: i.filename)]; zo.close(); zi.close()" "$$whl" "$$tmp"; \
 		mv "$$tmp" "$$whl"; \
 	done
 

@@ -18,7 +18,7 @@ COPY service/cmd ./cmd
 COPY service/internal ./internal
 ARG SOURCE_DATE_EPOCH=0
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C GOFLAGS=-mod=readonly GOTOOLCHAIN=local GOPROXY=off
-RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service && mkdir -p /tmp/lic-out/licenses && cp /tmp/licenses-src/LICENSE /tmp/licenses-src/NOTICE /tmp/lic-out/licenses/ && touch -t $(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y%m%d%H%M.%S) /resembl-service /tmp/lic-out/licenses/LICENSE /tmp/lic-out/licenses/NOTICE /tmp/lic-out/licenses
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service && mkdir -p /tmp/lic-out/licenses && cp /tmp/licenses-src/LICENSE /tmp/licenses-src/NOTICE /tmp/lic-out/licenses/ && touch -d "@${SOURCE_DATE_EPOCH}" /resembl-service /tmp/lic-out/licenses/LICENSE /tmp/lic-out/licenses/NOTICE /tmp/lic-out/licenses
 FROM scratch
 COPY --from=build /resembl-service /resembl-service
 # GPL-3.0-only: the license text must accompany the binary in the image,
