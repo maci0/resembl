@@ -168,8 +168,10 @@ def _within_bounds(key: str, number: float) -> bool:
         return 2.0 <= number <= float(1 << 12)  # scoring.MAX_NUM_PERM
     if key == "jaccard_weight":
         return 0.0 <= number <= 1.0
-    if key in {"top_n", "ngram_size"}:
+    if key == "top_n":
         return number >= 1.0
+    if key == "ngram_size":
+        return 1.0 <= number <= 32.0
     return True
 
 

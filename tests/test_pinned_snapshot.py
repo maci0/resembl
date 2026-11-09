@@ -18,8 +18,10 @@ from resembl.pinned_snapshot import index_digest
 
 def test_pinned_query_blocks_writer_and_rejects_changed_snapshot(tmp_path, monkeypatch):
     db = tmp_path / "index.db"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
     monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", "fixture")
+    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", str(manifest))
     monkeypatch.setattr(runtime_attestation, "verify_runtime", lambda *_: None)
     engine = create_engine(f"sqlite:///{db}")
     SQLModel.metadata.create_all(engine)
@@ -100,8 +102,10 @@ def test_pinned_query_blocks_writer_and_rejects_changed_snapshot(tmp_path, monke
 
 def test_pinned_query_executes_real_engine(tmp_path, monkeypatch):
     db = tmp_path / "real.db"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
     monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", "fixture")
+    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", str(manifest))
     monkeypatch.setattr(runtime_attestation, "verify_runtime", lambda *_: None)
     engine = create_engine(f"sqlite:///{db}")
     SQLModel.metadata.create_all(engine)
@@ -136,8 +140,10 @@ def test_pinned_query_executes_real_engine(tmp_path, monkeypatch):
 
 def test_pinned_query_rejects_other_process_generation(tmp_path, monkeypatch):
     db = tmp_path / "generation.db"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
     monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", "fixture")
+    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", str(manifest))
     monkeypatch.setattr(runtime_attestation, "verify_runtime", lambda *_: None)
     engine = create_engine(f"sqlite:///{db}")
     SQLModel.metadata.create_all(engine)
@@ -172,8 +178,10 @@ def test_pinned_query_rejects_other_process_generation(tmp_path, monkeypatch):
 
 def test_warm_restart_rejects_previous_generation(tmp_path, monkeypatch):
     db = tmp_path / "restart.db"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
     monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", "fixture")
+    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", str(manifest))
     monkeypatch.setattr(runtime_attestation, "verify_runtime", lambda *_: None)
     engine = create_engine(f"sqlite:///{db}")
     SQLModel.metadata.create_all(engine)
@@ -309,8 +317,10 @@ def test_snapshot_distinguishes_blob_from_text(tmp_path):
 @pytest.fixture(name="pinned_server")
 def pinned_server_fixture(tmp_path, monkeypatch):
     """A warm engine on an empty SQLite index, with runtime verification stubbed."""
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}")
     monkeypatch.setenv("RESEMBL_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", "fixture")
+    monkeypatch.setenv("RESEMBL_RUNTIME_MANIFEST", str(manifest))
     monkeypatch.setattr(runtime_attestation, "verify_runtime", lambda *_: None)
     engine = create_engine(f"sqlite:///{tmp_path / 'fixture.db'}")
     SQLModel.metadata.create_all(engine)
