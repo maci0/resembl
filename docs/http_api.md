@@ -320,6 +320,7 @@ path cannot grow the series count.
 | `resembl_server_result_cache_total{result}` | counter | Result-cache lookups, `hit` or `miss`. |
 | `resembl_server_result_cache_hit_ratio` | gauge | Share of lookups answered from the version-guarded cache. |
 | `resembl_server_query_errors_total{path}` | counter | Queries that failed inside an otherwise-`200` `/find-batch` request. |
+| `resembl_server_handler_rejected_total` | counter | Connections closed because every handler slot was held; no HTTP response was written, so this is the saturation signal the request counter cannot see. |
 
 A find is ~1.4 ms uncached, so the `le="0.001"` and `le="0.005"` buckets
 separate a cache hit from a cold find. The counters are in-process and reset

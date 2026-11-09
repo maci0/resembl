@@ -1079,7 +1079,18 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
         self._cache_hits = 0
         self._cache_misses = 0
         self._query_errors: dict[str, int] = {}
+        self._handler_rejected = 0
         self._started = monotonic_now()
+
+    def record_handler_rejected(self) -> None:
+        """Record one connection closed for an exhausted handler slot.
+
+        That rejection never reaches :meth:`record_request` (no HTTP
+        response is written), so without this counter saturation is
+        invisible until clients report dropped connections.
+        """
+        with self._lock:
+            self._handler_rejected += 1
 
     def uptime_seconds(self) -> float:
         """Seconds this process has been serving."""
@@ -1132,6 +1143,7 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
             cache_hits = self._cache_hits
             cache_misses = self._cache_misses
             query_errors = sorted(self._query_errors.items())
+            handler_rejected = self._handler_rejected
         lines = [
             "# HELP resembl_server_up 1 while this process is answering requests.",
             "# TYPE resembl_server_up gauge",
@@ -1195,6 +1207,14 @@ class _ServerMetrics:  # pylint: disable=too-many-instance-attributes  # one fie
                 f'resembl_server_query_errors_total{{path="{label}"}} {count}'
                 for label, count in query_errors
             ]
+        lines += [
+            (
+                "# HELP resembl_server_handler_rejected_total Connections closed "
+                "because every handler slot was held; no HTTP response was written."
+            ),
+            "# TYPE resembl_server_handler_rejected_total counter",
+            f"resembl_server_handler_rejected_total {handler_rejected}",
+        ]
         return "\n".join(lines) + "\n"
 
 
@@ -2114,6 +2134,11 @@ class _FindServer(
         """
         # pylint: disable=consider-using-with  # slot released in process_request_thread
         if not self._handler_slots.acquire(timeout=_HANDLER_SLOT_TIMEOUT_SECONDS):
+            _METRICS.record_handler_rejected()
+            logger.warning(
+                "handler slots exhausted: closed connection from %s without a response",
+                client_address[0] if client_address else "unknown",
+            )
             try:
                 request.close()
             except OSError:

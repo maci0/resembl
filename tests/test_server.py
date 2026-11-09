@@ -2462,6 +2462,37 @@ class TestServerObservability(_ServeTestCase):
         )
         self.assertIn('resembl_server_request_duration_seconds_count{path="/find"}', body)
         self.assertIn('resembl_server_result_cache_total{result="miss"}', body)
+        self.assertIn("resembl_server_handler_rejected_total", body)
+
+    def test_handler_slot_rejection_is_logged_and_counted(self):
+        from unittest.mock import MagicMock
+
+        from resembl import server as server_mod
+
+        port = self._start_server()
+        before = self._series_total(
+            self._get(port, "/metrics")[2],
+            "resembl_server_handler_rejected_total",
+        )
+        httpd = server_mod._FindServer.__new__(server_mod._FindServer)
+        import threading as _threading
+
+        httpd._handler_slots = _threading.BoundedSemaphore(1)
+        self.assertTrue(httpd._handler_slots.acquire(blocking=False))
+        request = MagicMock()
+        with (
+            patch.object(server_mod, "_HANDLER_SLOT_TIMEOUT_SECONDS", 0.01),
+            self.assertLogs("resembl.server", level="WARNING") as captured,
+        ):
+            httpd.process_request(request, ("127.0.0.1", 12345))
+        request.close.assert_called_once()
+        self.assertTrue(any("handler slots exhausted" in line for line in captured.output))
+        after = self._series_total(
+            self._get(port, "/metrics")[2],
+            "resembl_server_handler_rejected_total",
+        )
+        self.assertEqual(after, before + 1)
+        httpd._handler_slots.release()
 
     def test_metrics_fold_an_unbounded_path_into_one_series(self):
         port = self._start_server()

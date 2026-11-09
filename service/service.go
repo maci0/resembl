@@ -82,6 +82,13 @@ type serviceMetrics struct {
 	counts   map[string]int64
 	started  time.Time
 	now      func() time.Time
+	busy     int64
+}
+
+func (m *serviceMetrics) recordBusy() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.busy++
 }
 
 func (m *serviceMetrics) record(path string, status int, seconds float64) {
@@ -112,6 +119,8 @@ func (m *serviceMetrics) render() string {
 		now = time.Now
 	}
 	fmt.Fprintf(&b, "resembl_service_uptime_seconds %.3f\n", now().Sub(m.started).Seconds())
+	b.WriteString("# HELP resembl_service_busy_total Requests refused because every concurrency slot was held.\n# TYPE resembl_service_busy_total counter\n")
+	fmt.Fprintf(&b, "resembl_service_busy_total %d\n", m.busy)
 	b.WriteString("# HELP resembl_service_requests_total Requests answered, by path and status.\n# TYPE resembl_service_requests_total counter\n")
 	requestKeys := make([][2]string, 0, len(m.requests))
 	for key := range m.requests {
@@ -184,13 +193,13 @@ func (s *Service) getCustody() Custody {
 	}
 	return nil
 }
-func writeError(w http.ResponseWriter, status int, message string) {
+func writeError(w http.ResponseWriter, status int, message string, reqID string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	// Encode writes to w; a failure means the client is gone. Log it
 	// rather than discarding silently, but the status is already sent.
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
-		log.Printf("writeError failed: %v", err)
+		log.Printf("[%s] writeError failed: %v", reqID, err)
 	}
 }
 
@@ -408,7 +417,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", reqID)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -417,7 +426,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/metrics" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed", reqID)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -438,18 +447,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if safe == "" {
 			safe = r.URL.Path
 		}
-		writeError(w, http.StatusNotFound, "unknown path: "+safe)
+		writeError(w, http.StatusNotFound, "unknown path: "+safe, reqID)
 		return
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", reqID)
 		return
 	}
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		media := strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
 		if !strings.EqualFold(media, "application/json") {
-			writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+			writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", reqID)
 			return
 		}
 	}
@@ -458,17 +467,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	allowed, err := s.Authority.Allow(ctx, r.Header.Get("Authorization"), s.Resource, "query")
 	if err != nil {
 		log.Printf("[%s] authority unavailable: %v", reqID, err)
-		writeError(w, http.StatusServiceUnavailable, "authority unavailable")
+		writeError(w, http.StatusServiceUnavailable, "authority unavailable", reqID)
 		return
 	}
 	if !allowed {
-		writeError(w, http.StatusForbidden, "forbidden")
+		writeError(w, http.StatusForbidden, "forbidden", reqID)
 		return
 	}
 	custody := s.getCustody()
 	if custody == nil {
 		log.Printf("[%s] custody unavailable", reqID)
-		writeError(w, http.StatusServiceUnavailable, "custody unavailable")
+		writeError(w, http.StatusServiceUnavailable, "custody unavailable", reqID)
 		return
 	}
 	dispatched := false
@@ -481,27 +490,30 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	default:
+		if s.metrics != nil {
+			s.metrics.recordBusy()
+		}
 		log.Printf("[%s] busy: concurrency slots exhausted", reqID)
-		writeError(w, http.StatusServiceUnavailable, "busy")
+		writeError(w, http.StatusServiceUnavailable, "busy", reqID)
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	if err != nil {
 		if ctx.Err() != nil {
 			log.Printf("[%s] request timed out", reqID)
-			writeError(w, http.StatusServiceUnavailable, "request timed out")
+			writeError(w, http.StatusServiceUnavailable, "request timed out", reqID)
 			return
 		}
 		if errors.Is(err, http.ErrBodyReadAfterClose) || strings.Contains(err.Error(), "request body too large") {
-			writeError(w, http.StatusRequestEntityTooLarge, "request too large")
+			writeError(w, http.StatusRequestEntityTooLarge, "request too large", reqID)
 			return
 		}
-		writeError(w, http.StatusBadRequest, "request body unreadable")
+		writeError(w, http.StatusBadRequest, "request body unreadable", reqID)
 		return
 	}
 	var body map[string]json.RawMessage
 	if json.Unmarshal(raw, &body) != nil || body == nil {
-		writeError(w, http.StatusBadRequest, "bad request body")
+		writeError(w, http.StatusBadRequest, "bad request body", reqID)
 		return
 	}
 	var result json.RawMessage
@@ -510,7 +522,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		release, err = custody.Claim()
 		if err != nil {
 			log.Printf("[%s] capacity unavailable: %v", reqID, err)
-			writeError(w, http.StatusServiceUnavailable, "capacity unavailable")
+			writeError(w, http.StatusServiceUnavailable, "capacity unavailable", reqID)
 			return
 		}
 	}
@@ -528,15 +540,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/find" {
 		var query string
 		if _, present := body["query"]; !present {
-			writeError(w, http.StatusBadRequest, "bad request: 'query' is required")
+			writeError(w, http.StatusBadRequest, "bad request: 'query' is required", reqID)
 			return
 		}
 		if json.Unmarshal(body["query"], &query) != nil {
-			writeError(w, http.StatusBadRequest, "bad request: query must be a string")
+			writeError(w, http.StatusBadRequest, "bad request: query must be a string", reqID)
 			return
 		}
 		if strings.TrimSpace(query) == "" {
-			writeError(w, http.StatusBadRequest, "bad request: query must not be empty")
+			writeError(w, http.StatusBadRequest, "bad request: query must not be empty", reqID)
 			return
 		}
 		dispatched = true
@@ -544,20 +556,20 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		batch, ok := s.Engine.(BatchEngine)
 		if !ok {
-			writeError(w, http.StatusNotImplemented, "batch unavailable")
+			writeError(w, http.StatusNotImplemented, "batch unavailable", reqID)
 			return
 		}
 		var queries []json.RawMessage
 		if _, present := body["queries"]; !present {
-			writeError(w, http.StatusBadRequest, "bad request: 'queries' is required")
+			writeError(w, http.StatusBadRequest, "bad request: 'queries' is required", reqID)
 			return
 		}
 		if json.Unmarshal(body["queries"], &queries) != nil || queries == nil || len(queries) > 1000 {
 			if queries != nil && len(queries) > 1000 {
-				writeError(w, http.StatusBadRequest, "queries must hold at most 1000 entries")
+				writeError(w, http.StatusBadRequest, "queries must hold at most 1000 entries", reqID)
 				return
 			}
-			writeError(w, http.StatusBadRequest, "bad request: queries must be a list")
+			writeError(w, http.StatusBadRequest, "bad request: queries must be a list", reqID)
 			return
 		}
 		dispatched = true
@@ -576,21 +588,21 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					msg = "engine rejected request"
 				}
 				log.Printf("[%s] engine rejected request: status=%d", reqID, engErr.Status)
-				writeError(w, engErr.Status, msg)
+				writeError(w, engErr.Status, msg, reqID)
 				return
 			}
 			log.Printf("[%s] engine unavailable: %v", reqID, err)
-			writeError(w, http.StatusServiceUnavailable, "engine unavailable")
+			writeError(w, http.StatusServiceUnavailable, "engine unavailable", reqID)
 			return
 		}
 		log.Printf("[%s] engine unavailable: %v", reqID, err)
-		writeError(w, http.StatusServiceUnavailable, "engine unavailable")
+		writeError(w, http.StatusServiceUnavailable, "engine unavailable", reqID)
 		return
 	}
 	completed = true
 	if !json.Valid(result) {
 		log.Printf("[%s] invalid engine response", reqID)
-		writeError(w, http.StatusBadGateway, "invalid engine response")
+		writeError(w, http.StatusBadGateway, "invalid engine response", reqID)
 		return
 	}
 	// Release now, while the status can still be changed: a failed release
@@ -600,7 +612,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		release = nil
 		if err != nil {
 			log.Printf("[%s] capacity release failed: %v", reqID, err)
-			writeError(w, http.StatusServiceUnavailable, "capacity release failed")
+			writeError(w, http.StatusServiceUnavailable, "capacity release failed", reqID)
 			return
 		}
 	}
