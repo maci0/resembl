@@ -69,7 +69,7 @@ def _value(fdp: atheris.FuzzedDataProvider) -> float:
     """Return one fuzzer-chosen parameter value from the edge set or raw."""
     if fdp.ConsumeBool():
         return _EDGE_VALUES[fdp.ConsumeIntInRange(0, len(_EDGE_VALUES) - 1)]
-    return fdp.ConsumeFloatingPoint()
+    return fdp.ConsumeFloat()
 
 
 def test_one_input(data):
