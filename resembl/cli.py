@@ -74,7 +74,6 @@ from .core import (
     db_clean,
     db_merge,
     db_reindex,
-    db_stats,
     db_verify,
     db_verify_backup,
     snippet_add,
@@ -98,6 +97,7 @@ from .core import (
     snippet_version_list,
 )
 from .database import db_create, get_engine
+from .diagnostics import db_stats
 from .find_client import _read_bounded_response as _read_bounded_server_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .paths import (

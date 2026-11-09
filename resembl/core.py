@@ -792,6 +792,12 @@ def _duckdb_sql_literal(value: object) -> str:
     correctness and injection boundary of the DuckDB multi-VALUES fast
     path: snippet code and names are arbitrary user text, so every value
     must pass through here before being interpolated into SQL.
+
+    The wrapper stays in ``core`` rather than moving into ``lsh`` because it
+    only serves the snippet INSERT (``_insert_snippet_rows``); ``lsh``'s
+    bucket INSERT quotes its own columns inline via ``sql_text_literal``.
+    Keeping the ``None``/``bytes`` handling next to the snippet column list
+    avoids a second, divergent literal helper in ``lsh``.
     """
     if value is None:
         return "NULL"
