@@ -14,7 +14,7 @@ from typing import NamedTuple
 
 import tomli_w
 
-from .models import _retry_sleep, monotonic_now
+from .clock import _retry_sleep, monotonic_now
 from .paths import config_dir_get, config_path_get
 from .scoring import MAX_NUM_PERM
 

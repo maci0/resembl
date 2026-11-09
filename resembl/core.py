@@ -38,6 +38,13 @@ from .cache import (
     lsh_index_purge,
     lsh_pickle_cache_remove,
 )
+from .clock import (
+    _retry_sleep,
+    avg_time_per_item,
+    monotonic_now,
+    timestamp_normalize,
+    timestamp_now,
+)
 from .lsh import (
     banding_params,
     fingerprint_ngram_clear,
@@ -59,12 +66,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
-    _retry_sleep,
-    avg_time_per_item,
-    monotonic_now,
     name_normalize,
-    timestamp_normalize,
-    timestamp_now,
 )
 from .paths import config_path_get, db_url_mask, runtime_manifest_path_get
 from .scoring import (

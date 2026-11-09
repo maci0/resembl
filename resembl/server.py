@@ -39,6 +39,7 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from .cache import lsh_index_build
+from .clock import monotonic_now
 from .config import ResemblConfig
 from .core import (
     IndexBuildError,
@@ -47,7 +48,7 @@ from .core import (
     snippet_matches_payload,
 )
 from .lsh import band_buckets
-from .models import FINGERPRINT_VERSION, monotonic_now
+from .models import FINGERPRINT_VERSION
 from .paths import (
     cache_dir_get,
     db_url_mask,

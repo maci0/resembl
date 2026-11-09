@@ -20,6 +20,7 @@ from collections.abc import Callable
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, func, select, text
 
+from .clock import _retry_sleep
 from .lsh import (
     ResemblLSH,
     band_buckets,
@@ -32,7 +33,7 @@ from .lsh import (
     lsh_meta_matches,
     lsh_meta_set,
 )
-from .models import FINGERPRINT_VERSION, Snippet, _retry_sleep
+from .models import FINGERPRINT_VERSION, Snippet
 from .paths import cache_dir_get
 
 # Default permutation count when (re)building the index: shared with scoring.

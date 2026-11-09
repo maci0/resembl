@@ -48,6 +48,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
 
+from .clock import avg_time_per_item, monotonic_now, parse_instant
 from .config import (
     DEFAULTS,
     FORMATS,
@@ -97,7 +98,6 @@ from .core import (
 from .database import db_create, get_engine
 from .find_client import _read_bounded_response as _read_bounded_server_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
-from .models import avg_time_per_item, monotonic_now, parse_instant
 from .paths import (
     _ASCII_LOWER_TABLE,
     LOG_LEVEL_ENV_VAR,
