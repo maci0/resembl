@@ -1308,11 +1308,14 @@ def app_callback(
             f"got '{_display(state.format)}'."
         )
         raise typer.Exit(code=2)
-    if state.format == "json":
+    if state.format == "json" and output_format != "text":
         # `--format json` (or a config default of json) is structured
         # output too: its failures carry the same stderr envelope `-o json`
         # uses, so a script parsing stdout as JSON can parse stderr the
-        # same way. Checked after the format is validated.
+        # same way. Checked after the format is validated. An explicit
+        # `-o text` wins over both, exactly as it wins over `--json` in
+        # find_client: the caller asked for text errors alongside a JSON
+        # data document.
         _output_choice.set("json")
     try:
         state.tz = _zone_get(tz_name)

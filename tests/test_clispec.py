@@ -109,6 +109,14 @@ class TestOutputMode(BaseCLITest):
         with self.assertRaises(json.JSONDecodeError):
             json.loads(result.stdout)
 
+    def test_text_output_wins_over_format_json_on_failure(self) -> None:
+        """Explicit ``-o text`` wins over ``--format json`` for the error envelope."""
+        result = self.run_command("--format json -o text show deadbeef")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("No snippet found", result.stderr)
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(result.stderr.strip().splitlines()[-1])
+
     def test_json_failure_is_the_stderr_envelope(self) -> None:
         result = self.run_command("-o json show deadbeef")
         self.assertEqual(result.returncode, 1, result.stderr)
