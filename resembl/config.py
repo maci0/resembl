@@ -253,7 +253,20 @@ def _config_file_lock() -> Iterator[None]:
         try:
             import fcntl
 
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            # Bounded wait: an unbounded flock in a CLI update wedges the
+            # process forever if a crashed holder left the file open or a
+            # peer holds it indefinitely.  Poll with a deadline matching
+            # the sibling msvcrt poll cadence (0.05s) so both platforms
+            # fail with a timeout instead of hanging.
+            deadline = time.monotonic() + 30.0
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("timed out waiting for config file lock") from None
+                    time.sleep(0.05)
         except ImportError:
             try:
                 import msvcrt
@@ -268,13 +281,17 @@ def _config_file_lock() -> Iterator[None]:
                     os.lseek(fd, 0, os.SEEK_SET)
                 # LK_LOCK retries ~10 times then raises OSError, while
                 # flock waits indefinitely; a config update that loses to a
-                # slow holder must wait, not crash, so poll LK_NBLCK.
+                # slow holder must wait a bounded time, not crash or hang,
+                # so poll LK_NBLCK with the same 30s deadline as flock.
+                deadline = time.monotonic() + 30.0
                 while True:
                     try:
                         # typeshed provides these attributes for Windows only.
                         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
                         break
                     except OSError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("timed out waiting for config file lock") from None
                         time.sleep(0.05)
             except ImportError:
                 # A platform with neither locking API (some non-CPython
@@ -325,8 +342,8 @@ def save_config(config: dict | ResemblConfig) -> None:
         if dir_fd is not None:
             try:
                 os.fsync(dir_fd)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Could not fsync config directory %s: %s", cfg_dir, e)
             finally:
                 os.close(dir_fd)
     except OSError:

@@ -299,6 +299,37 @@ class TestConfig(unittest.TestCase):
                     stored = tomllib.load(f)
         self.assertIn(stored.get("top_n"), range(10, 10 + writers))
 
+    def test_config_file_lock_times_out_instead_of_hanging(self):
+        """A held config lock must time out, not hang forever.
+
+        Regression: ``_config_file_lock`` used an unbounded ``flock``; a
+        crashed holder or a wedged peer would hang a CLI update forever.
+        The lock now polls with a 30s deadline and raises ``TimeoutError``.
+        """
+        from resembl.config import _config_file_lock
+
+        if sys.platform == "win32":
+            self.skipTest("msvcrt region locks do not serialize same-process fds")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": temp_dir}):
+                import fcntl
+
+                lock_path = config_path_get() + ".lock"
+                os.makedirs(temp_dir, exist_ok=True)
+                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    # Fake a clock that jumps past the 30s deadline on the
+                    # second poll so the test does not wait 30s.
+                    seq = iter([0.0, 31.0])
+                    with patch("time.monotonic", side_effect=lambda: next(seq, 31.0)):
+                        with self.assertRaises(TimeoutError):
+                            with _config_file_lock():
+                                pass
+                finally:
+                    os.close(fd)
+
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""
         with tempfile.TemporaryDirectory() as temp_dir:

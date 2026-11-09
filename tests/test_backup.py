@@ -586,6 +586,24 @@ class TestDbBackup(FileDBTest):
         self.assertTrue(replaced["verified"])
         self.assertTrue(db_verify_backup(self.session, replaced["backup"])["ok"])
 
+    def test_unreadable_backup_dir_logs_warning_on_reuse_and_prune(self):
+        """An unreadable backup dir must not silently skip reuse/prune.
+
+        Regression: ``_db_backup_reuse`` and ``_db_backup_prune`` returned
+        ``None``/``0`` on ``os.listdir`` failure with no log, so an operator
+        could not tell whether iteration was skipped or there were no
+        backups.  The failure is now logged at WARNING.
+        """
+        from resembl.core import _db_backup_prune, _db_backup_reuse
+
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        os.makedirs(backup_dir)
+        with mock.patch("os.listdir", side_effect=PermissionError("denied")):
+            with self.assertLogs("resembl.core", level="WARNING") as logs:
+                self.assertIsNone(_db_backup_reuse(backup_dir, "abc"))
+                self.assertEqual(_db_backup_prune(backup_dir, 7), 0)
+        self.assertTrue(any("Could not list backup directory" in m for m in logs.output))
+
 
 class TestDbVerifyBackup(FileDBTest):
     """db_verify_backup fails a backup whose contents disagree with its manifest."""

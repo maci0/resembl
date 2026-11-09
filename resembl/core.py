@@ -365,7 +365,8 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
     """
     try:
         names = os.listdir(backup_dir)
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not list backup directory %s for reuse check: %s", backup_dir, e)
         return None
 
     candidates = _db_backup_candidates(backup_dir, names)
@@ -2831,7 +2832,8 @@ def _db_backup_prune(backup_dir: str, keep: int, *, preserve: str | None = None)
     """
     try:
         names = os.listdir(backup_dir)
-    except OSError:
+    except OSError as e:
+        logger.warning("Could not list backup directory %s for pruning: %s", backup_dir, e)
         return 0
 
     candidates = _db_backup_candidates(backup_dir, names)
