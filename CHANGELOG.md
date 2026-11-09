@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-09
+
 ### Added
 
 - `resembl restore BACKUP [--dest PATH] [--force]` copies a verified backup over the live database (single-file copy, stale `-wal`/`-shm` removal, atomic rename, post-restore `verify` through a fresh engine on the restored file) and refuses unverifiable backups instead of overwriting the live store with a corrupt copy. `make backup-restore-drill BACKUP_DIR=...` proves the full restore path on a throwaway live path. `resembl backup` now reports `shared_volume: true` and the CLI exits 1 when the backup directory shares a volume with the live database, unless `--force` accepts the risk; see `docs/restore.md`.
@@ -1308,7 +1310,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/maci0/resembl/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/maci0/resembl/compare/v3.12.0...v4.0.0
 [3.12.0]: https://github.com/maci0/resembl/compare/v3.11.0...v3.12.0
 [3.11.0]: https://github.com/maci0/resembl/compare/v3.10.2...v3.11.0

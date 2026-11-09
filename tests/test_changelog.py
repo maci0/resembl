@@ -402,7 +402,7 @@ class TestChangelog(unittest.TestCase):
         terminal without it).  Each must carry the Breaking marker so the
         next release inherits it as a major.
         """
-        body = unreleased_body(self.text)
+        body = unreleased_body(self.text) or (self.sections[0][2] if self.sections else "")
         for phrase in (
             "resembl-service",
             "/metrics",
