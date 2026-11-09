@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl restore BACKUP [--dest PATH] [--force]` copies a verified backup over the live database (single-file copy, stale `-wal`/`-shm` removal, atomic rename, post-restore `verify` through a fresh engine on the restored file) and refuses unverifiable backups instead of overwriting the live store with a corrupt copy. `make backup-restore-drill BACKUP_DIR=...` proves the full restore path on a throwaway live path. `resembl backup` now reports `shared_volume: true` and the CLI exits 1 when the backup directory shares a volume with the live database, unless `--force` accepts the risk; see `docs/restore.md`.
+
 ### Fixed
 
 - `resembl serve` now fails startup when `config.toml` exists but is malformed or unreadable instead of binding with built-in defaults: `load_config` keeps reporting and defaulting for interactive commands, but a warm server answers every `find` from the config, so a silently discarded tuned threshold would serve a different result set than the operator configured.

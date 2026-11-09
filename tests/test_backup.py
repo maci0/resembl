@@ -21,7 +21,7 @@ from unittest import mock
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from resembl.core import db_backup, db_verify_backup, snippet_add, snippet_name_add
+from resembl.core import db_backup, db_restore, db_verify_backup, snippet_add, snippet_name_add
 from tests.test_collections_merge import BaseDBTest
 
 
@@ -721,6 +721,54 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertNotEqual(second["backup"], first["backup"])
         self.assertTrue(second["verified"])
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
+
+
+class TestDbRestore(FileDBTest):
+    """db_restore copies a verified backup over the live path and proves it."""
+
+    def test_restore_overwrites_live_and_verifies(self):
+        """Restore puts the backup's snippets back at the live path."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        backup = db_backup(self.session, backup_dir)["backup"]
+        snippet_add(self.session, "extra", "xor ebx, ebx\nret")
+        dest = os.path.join(self._tmpdir.name, "live2.db")
+        result = db_restore(self.session, backup, dest)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["num_snippets"], 1)
+        # Read the restored file through a fresh engine.
+        engine = create_engine(f"sqlite:///{dest}")
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as restored:
+            from resembl.core import snippet_list
+
+            names = sorted(name for s in snippet_list(restored) for name in s.name_list)
+        self.assertEqual(names, ["foo"])
+        engine.dispose()
+
+    def test_restore_refuses_unverified_backup(self):
+        """A corrupt backup is never copied over the live path."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        backup = db_backup(self.session, backup_dir)["backup"]
+        with open(backup, "r+b") as f:
+            f.truncate(8)
+        dest = os.path.join(self._tmpdir.name, "live2.db")
+        with self.assertRaises(ValueError):
+            db_restore(self.session, backup, dest)
+        self.assertFalse(os.path.exists(dest))
+
+    def test_backup_reports_shared_volume(self):
+        """A backup beside the live DB reports shared_volume (same st_dev)."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        live_dir = os.path.dirname(os.path.abspath(self.db_path))
+        backup_real = os.path.realpath(backup_dir)
+        if os.stat(live_dir).st_dev == os.stat(backup_real).st_dev:
+            self.assertTrue(result["shared_volume"])
+        else:
+            self.assertFalse(result["shared_volume"])
 
 
 if __name__ == "__main__":

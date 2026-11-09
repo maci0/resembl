@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
@@ -66,7 +67,7 @@ from .models import (
     timestamp_normalize,
     timestamp_now,
 )
-from .paths import config_path_get, db_url_mask
+from .paths import config_path_get, db_url_get, db_url_mask
 from .scoring import (
     NUM_PERMUTATIONS,
     cfg_extract,
@@ -2454,6 +2455,139 @@ def db_backup_for_delete(
     return result
 
 
+def db_restore(session: Session, backup_path: str, dest_path: str | None = None) -> dict:
+    """Restore *backup_path* to the live database path and prove it.
+
+    The backup is verified first via :func:`db_verify_backup`; an
+    unverifiable copy is never copied over the live database. The copy
+    is a single file (``db_verify_backup`` refuses ``-wal``/``-shm``
+    sidecars for exactly this reason), published atomically via a
+    same-directory temp file, fsynced, and renamed over the
+    destination. Stale ``-wal``/``-shm`` sidecars beside the destination
+    are removed and the destination directory is fsynced.
+
+    The caller must have stopped every process using the live
+    database (``serve``, other CLI sessions); this function closes the
+    given *session* and disposes the engine before the copy and
+    rebuilds it afterwards, but it cannot stop other processes.
+    *dest_path* defaults to the SQLite file named by
+    :func:`db_url_get`; non-SQLite and in-memory URLs raise
+    ``ValueError``.
+
+    Returns ``{"restored": dest, "num_snippets": n, "verified": bool}``
+    plus ``"verify_issues"`` when the post-restore ``db_verify`` has
+    issues (exit-non-zero is the caller's decision in JSON output).
+    """
+    check = db_verify_backup(session, backup_path)
+    if not check["ok"]:
+        raise ValueError(
+            f"backup did not verify: {backup_path!r} {'; '.join(check['issues'])}".strip()
+        )
+    if dest_path is None:
+        url = db_url_get()
+        if not url.startswith("sqlite:///") or url == "sqlite:///:memory:":
+            raise ValueError(
+                f"db_restore supports SQLite file URLs only (got {db_url_mask(url)!r}); "
+                "use the backend's own restore tooling"
+            )
+        dest_path = url[len("sqlite:///") :]
+        if dest_path.startswith("/"):
+            # sqlite:////abs/path strips to /abs/path already; sqlite:///rel
+            # strips to rel. Absolute path spelling is sqlite:////...
+            pass
+    dest_abs = os.path.abspath(dest_path)
+    backup_abs = os.path.abspath(backup_path)
+    if os.path.realpath(dest_abs) == os.path.realpath(backup_abs):
+        raise ValueError("restore destination is the backup itself; refusing to overwrite it")
+    # A destination that is a directory cannot be restored over.
+    if os.path.isdir(dest_abs):
+        raise ValueError(f"restore destination is a directory: {dest_abs}")
+    # Close the live session/engine so the file is not held open while
+    # its directory entry is replaced.
+    try:
+        session.close()
+    except Exception:
+        pass
+    try:
+        bind = session.get_bind()
+        if hasattr(bind, "dispose"):
+            bind.dispose()
+    except Exception:
+        pass
+    dest_dir = os.path.dirname(dest_abs) or "."
+    os.makedirs(dest_dir, exist_ok=True)
+    tmp = os.path.join(dest_dir, f".{os.path.basename(dest_abs)}.restore.{os.getpid()}.tmp")
+    try:
+        shutil.copyfile(backup_abs, tmp)
+        _sync_path(tmp)
+        os.replace(tmp, dest_abs)
+        _sync_dir(dest_dir)
+    except OSError:
+        _remove_quietly(tmp)
+        raise
+    for sidecar in ("-wal", "-shm"):
+        sidecar_path = dest_abs + sidecar
+        if os.path.exists(sidecar_path):
+            _remove_quietly(sidecar_path)
+    _sync_dir(dest_dir)
+    # Re-open and prove the restored database through the normal path.
+    # The verify runs against the restored file directly (a fresh engine
+    # on dest_abs) rather than the module-level engine, which is bound to
+    # RESEMBL_DATABASE_URL and may name a different file: counting the
+    # wrong database would report a successful restore of an empty store.
+    from sqlmodel import Session as _Session  # pylint: disable=import-outside-toplevel
+    from sqlmodel import create_engine as _create_engine  # pylint: disable=import-outside-toplevel
+
+    restored_engine = _create_engine(f"sqlite:///{dest_abs}")
+    try:
+        new_session = _Session(restored_engine)
+        try:
+            verify_result = db_verify(new_session)
+        finally:
+            new_session.close()
+    finally:
+        restored_engine.dispose()
+    result: dict = {
+        "restored": dest_abs,
+        "num_snippets": verify_result["num_snippets"],
+        "verified": not verify_result["issues"],
+    }
+    if verify_result["issues"]:
+        result["verify_issues"] = verify_result["issues"]
+    return result
+
+
+def _live_db_path(session: Session) -> str | None:
+    """Return the on-disk SQLite file for *session*, or None for non-file.
+
+    The path comes from the session bind's URL, not the environment:
+    a test/engine pointing at a temporary file gets that file's path,
+    and an in-memory or server backend gets ``None`` (no file to
+    journal, no volume to compare).
+    """
+    bind = session.get_bind()
+    url = getattr(bind, "url", None)
+    database = getattr(url, "database", None) if url is not None else None
+    if not database or database == ":memory:":
+        return None
+    return os.path.abspath(database)
+
+
+def _same_volume(path_a: str, path_b: str) -> bool:
+    """Whether *path_a* and *path_b* live on the same mounted volume.
+
+    Compared via ``st_dev`` of the containing directories (the files
+    themselves may not exist yet).  Any ``OSError`` fails open to
+    ``False`` so a platform that cannot stat never blocks a backup.
+    """
+    try:
+        dir_a = os.path.dirname(os.path.abspath(path_a)) or "."
+        dir_b = os.path.dirname(os.path.abspath(path_b)) or "."
+        return os.stat(dir_a).st_dev == os.stat(dir_b).st_dev
+    except OSError:
+        return False
+
+
 def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     """Write a consistent, restorable copy of the database into *backup_dir*.
 
@@ -2500,6 +2634,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     retried run — a double-scheduled cron job, a script re-run, a caller
     that lost the first response — cannot consume a second retention
     slot or delete an older restorable copy.
+
+    The result carries ``shared_volume: True`` when *backup_dir* and the
+    live database file share a mounted volume (``st_dev``) — instance
+    loss takes both, so the backup protects only against file deletion.
+    This is a warning in the result, not an error: the caller decides
+    whether to fail loud (the CLI does, the library does not).
     """
     if keep < 1:
         raise ValueError("keep must be at least 1")
@@ -2517,6 +2657,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
 
     os.makedirs(backup_dir, exist_ok=True)
     backup_dir = os.path.realpath(backup_dir)
+    # Same-volume journal: instance loss takes the live file and any
+    # backup on the same mounted volume together. Record whether the
+    # pair shares a volume so the caller can fail loud instead of
+    # reporting a backup that protects only against a deleted file.
+    live_path = _live_db_path(session)
+    shared_volume = bool(live_path and _same_volume(live_path, os.path.join(backup_dir, "x")))
     # Idempotency: a backup of unchanged content already retained is not
     # written again.  The check runs before the copy, which is also the
     # expensive part — a duplicate run costs one checksum scan.
@@ -2576,6 +2722,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
                 "num_removed": 0,
                 "manifest_written": True,
                 "verified": True,
+                "shared_volume": shared_volume,
             }
         logger.warning(
             "Reused backup %s failed verification (%s); writing a fresh backup.",
@@ -2773,6 +2920,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             "num_removed": removed,
             "manifest_written": False,
             "verified": False,
+            "shared_volume": shared_volume,
         }
 
     # Re-verify the published backup before reporting success: a copy
@@ -2801,6 +2949,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
             "manifest_written": False,
             "verified": False,
             "verify_issues": check["issues"],
+            "shared_volume": shared_volume,
         }
 
     removed = _db_backup_prune(backup_dir, keep, preserve=backup_name)
@@ -2812,6 +2961,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         "num_removed": removed,
         "manifest_written": True,
         "verified": True,
+        "shared_volume": shared_volume,
     }
 
 

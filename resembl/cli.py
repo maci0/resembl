@@ -71,6 +71,7 @@ from .core import (
     db_clean,
     db_merge,
     db_reindex,
+    db_restore,
     db_stats,
     db_verify,
     db_verify_backup,
@@ -2370,6 +2371,17 @@ def backup(
             else "[red]Error:[/red] Backup failed verification; treat it as unrestorable."
         )
         raise typer.Exit(code=1)
+    if result.get("shared_volume"):
+        err_console.print(
+            "[red]Error:[/red] Backup directory is on the same volume as the live "
+            "database; instance loss takes both. Point the backup at different "
+            "storage (docs/restore.md) or re-run with --force to accept the risk."
+            if not force
+            else "[yellow]Warning:[/yellow] Backup directory shares a volume with the "
+            "live database; instance loss takes both."
+        )
+        if not force:
+            raise typer.Exit(code=1)
 
 
 @app.command("verify-backup")
@@ -2389,6 +2401,45 @@ def verify_backup_cmd(
         rows.extend(("Issue", _display(issue)) for issue in result["issues"])
         _echo_kv_table("Backup Verification", rows)
     if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def restore(
+    backup_path: str = typer.Argument(help="Path to a backup file to restore."),
+    dest: str | None = typer.Option(
+        None,
+        "--dest",
+        help="Destination database path (default: the live SQLite file).",
+    ),
+    force: bool = typer.Option(False, "--force", help="Skip confirmation prompts."),
+) -> None:
+    """Restore a verified backup over the live database."""
+    if not os.path.isfile(backup_path):
+        err_console.print(f"[red]Error:[/red] File not found: {_display(backup_path)}")
+        raise typer.Exit(code=1)
+    _confirm(f"Restore backup '{backup_path}' over the live database?", force)
+    try:
+        result = db_restore(state.session, backup_path, dest)
+    except (ValueError, OSError) as e:
+        err_console.print(f"[red]Error:[/red] Restore failed: {_display(str(e))}")
+        raise typer.Exit(code=1) from e
+    # db_restore closed the old session/engine and rebuilt them; rebind
+    # state.session so the atexit closer does not touch a dead session.
+    global _active_session
+    state.session = Session(get_engine())
+    _active_session = state.session
+    if state.format in ("json", "csv"):
+        _echo_format(result)
+    else:
+        rows = [
+            ("Restored", _display(result["restored"])),
+            ("Snippets", str(result["num_snippets"])),
+            ("Verified", "[green]yes[/green]" if result.get("verified") else "[red]no[/red]"),
+        ]
+        rows.extend(("Issue", _display(i)) for i in result.get("verify_issues", []))
+        _echo_kv_table("Restore Complete", rows)
+    if not result.get("verified"):
         raise typer.Exit(code=1)
 
 
