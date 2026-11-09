@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `6921c20` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force), with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `7392356` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `fb78133` non-loopback `/metrics` gate, `de205f7` runtime-manifest fail-fast, `cf2a276` terminal/error-detail sanitization, `2d7bc3f` handler-rejection counter, `5662563` config/clock/seed fail-fast, `c6a76b3` Go 429, `e2d4500` ASCII-only protocol-token folding), with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
@@ -13,8 +13,7 @@ the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 `backup` / `verify-backup` commands.
 
 The `serve` controls below (the loopback `Host` check, the non-loopback
-bind refusal without `--allow-unauthenticated` or a non-blank
-`RESEMBL_SERVE_ALLOW_UNAUTHENTICATED`, the Go service's
+bind refusal without `--allow-unauthenticated` or a qualifying `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` value (not blank and not `0`/`false`/`no`/`off`, case-insensitive, `resembl/paths.py` `serve_allow_unauthenticated_get`), the Go service's
 `-token-file` requirement for a non-loopback `-listen`, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, the `0600`
 config file on save, the standalone client's 1-65535 port-range check and
@@ -92,7 +91,7 @@ relies on, not configuration options.
 - **`resembl serve` stays on loopback.** It binds `127.0.0.1` by default and
   answers every request that reaches the port. Passing `--host` with a
   non-loopback address is refused unless `--allow-unauthenticated` or a
-  non-blank `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` is given; with either it binds and publishes an unauthenticated read of
+  a `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` value that is not blank and not `0`/`false`/`no`/`off` (case-insensitive) is given; with either it binds and publishes an unauthenticated read of
   the whole snippet corpus to that network, printing a warning that does
   not stop the bind. Do not put it behind a reverse proxy that does not
   authenticate. The Go `resembl-service` likewise requires `-token-file`
