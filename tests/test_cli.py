@@ -678,6 +678,20 @@ class TestCLIImport(BaseCLITest):
             self.assertEqual(data["num_imported"], 2)
             self.assertNotIn("skipped", data)
 
+    def test_import_long_s_extension_is_not_asm(self):
+        """ASCII-only fold: A + long s + M must not pass as .asm."""
+        import json
+
+        with tempfile.TemporaryDirectory() as import_dir:
+            with open(os.path.join(import_dir, "real.asm"), "w", encoding="utf-8") as f:
+                f.write("MOV AX, 1; RET")
+            with open(os.path.join(import_dir, "fake.A\u017fM"), "w", encoding="utf-8") as f:
+                f.write("MOV BX, 2; RET")
+            result = self.run_command(f"--format json import --force --jobs 0 {import_dir}")
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["num_imported"], 1)
+
     def test_import_directory_without_snippets_fails_loudly(self):
         """A directory holding no .asm/.txt files is a wrong path, not a 0-snippet import."""
         with tempfile.TemporaryDirectory() as import_dir:

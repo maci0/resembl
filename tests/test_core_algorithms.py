@@ -178,6 +178,12 @@ class TestCfgExtract(unittest.TestCase):
         self.assertEqual(cfg["block_sizes"], [])
         self.assertEqual(cfg["adj"], {})
 
+    def test_long_s_mnemonic_is_not_js(self):
+        """ASCII-only fold: j + long s must not read as JS branch."""
+        cfg = cfg_extract("j\u017f foo\nmov eax,1\nfoo: ret")
+        self.assertEqual(cfg["num_blocks"], 2)
+        self.assertEqual(cfg["num_edges"], 1)
+
     def test_linear_code(self):
         """Linear code with no branches should be a single block."""
         code = "MOV EAX, 1\nMOV EBX, 2\nADD EAX, EBX"

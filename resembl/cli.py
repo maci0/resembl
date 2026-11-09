@@ -99,6 +99,7 @@ from .find_client import _read_bounded_response as _read_bounded_server_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .models import avg_time_per_item, monotonic_now, parse_instant
 from .paths import (
+    _ASCII_LOWER_TABLE,
     LOG_LEVEL_ENV_VAR,
     cache_dir_get,
     console_utf8_reconfigure,
@@ -1538,7 +1539,10 @@ def import_cmd(
             file_paths.extend(
                 os.path.join(root, fname)
                 for fname in files
-                if fname.casefold().endswith((".asm", ".txt"))
+                # ASCII-fold only: ``casefold`` maps the long s (U+017F) to
+                # s, so ``FOO.A<long-s>M`` would pass as ``.asm`` and be imported
+                # under an extension no other tool recognizes.
+                if fname.translate(_ASCII_LOWER_TABLE).endswith((".asm", ".txt"))
             )
         file_paths.sort()
     else:

@@ -43,6 +43,9 @@ from pygments.token import Comment, Name, Number, Punctuation, Text
 #: Number of permutation functions for MinHash (higher = more accurate, slower).
 NUM_PERMUTATIONS = 128
 
+#: ASCII-only upper table for NASM mnemonics (``str.upper`` maps U+017F->S, U+0131->I).
+_ASCII_UPPER_TABLE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
 #: Seed of the MinHash permutation stream (``numpy.random.RandomState``).
 #: Every stored fingerprint and band key depends on it, so changing it makes
 #: them incomparable with new ones; ``serve`` reports it in the fingerprint
@@ -802,7 +805,10 @@ def cfg_extract(code: str) -> dict:
         current_block.append(stripped)
 
         words = stripped.split()
-        mnemonic = words[0].upper() if words else ""
+        # ASCII-fold only: ``str.upper`` maps the long s (U+017F) to S, so
+        # U+017F in mnemonic would read as the JS mnemonic and split a block it never
+        # terminated.  NASM mnemonics are ASCII.
+        mnemonic = words[0].translate(_ASCII_UPPER_TABLE) if words else ""
         if mnemonic in BRANCH_INSTRUCTIONS:
             blocks.append(current_block)
             current_block = []
@@ -824,7 +830,7 @@ def cfg_extract(code: str) -> dict:
     for i, block in enumerate(blocks):
         last_line = block[-1]
         words = last_line.split()
-        mnemonic = words[0].upper() if words else ""
+        mnemonic = words[0].translate(_ASCII_UPPER_TABLE) if words else ""
 
         if mnemonic in {"RET", "RETN", "RETF"}:
             pass

@@ -592,3 +592,10 @@ class TestServeAndLogEnv(unittest.TestCase):
         """The name is upper-cased for the caller to validate."""
         with patch.dict(os.environ, {"RESEMBL_LOG_LEVEL": "debug"}):
             self.assertEqual(log_level_get(), "DEBUG")
+
+    def test_log_level_dotless_i_is_not_info(self):
+        """ASCII-only fold: dotless \u0131 must not validate as INFO."""
+        with patch.dict(os.environ, {"RESEMBL_LOG_LEVEL": "\u0131nfo"}):
+            level = log_level_get()
+            self.assertEqual(level, "\u0131NFO")
+            self.assertNotIn(level, ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"))

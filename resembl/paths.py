@@ -64,6 +64,14 @@ SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR = "RESEMBL_SERVE_ALLOW_UNAUTHENTICATED"
 #: ``-v``/``-q`` flag wins over the variable when both are set.
 LOG_LEVEL_ENV_VAR = "RESEMBL_LOG_LEVEL"
 
+#: Translation table folding ASCII a-z to A-Z only, for protocol tokens
+#: whose case folding must not map non-ASCII letters into ASCII (U+0131→I,
+#: U+017F→S under ``str.upper``).
+_ASCII_UPPER_TABLE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+#: Translation table folding ASCII A-Z to a-z only, for the same reason.
+_ASCII_LOWER_TABLE = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
 
 def db_url_get() -> str:
     """Return the database URL configured in the environment.
@@ -178,7 +186,11 @@ def log_level_get() -> str | None:
     value = os.environ.get(LOG_LEVEL_ENV_VAR)
     if value is None or not value.strip():
         return None
-    return value.strip().upper()
+    # ASCII-only fold: ``str.upper`` maps the dotless U+0131 to I and
+    # the long s (U+017F) to S, so U+0131nfo would validate as INFO.  A
+    # protocol token must fold ASCII a-z only, leaving non-ASCII intact
+    # so the caller's membership check rejects it.
+    return value.strip().translate(_ASCII_UPPER_TABLE)
 
 
 def server_port_path(db_url: str, cache_dir: str) -> str:
