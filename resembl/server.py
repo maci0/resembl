@@ -2000,8 +2000,17 @@ class _FindServer(
     one thread per connection, so without a bound a stalled-client flood
     accumulated threads (and their sessions) without limit.  Excess
     connections wait in the listen backlog instead.
+
+    ``daemon_threads`` is True so a wedged keep-alive handler never keeps
+    the process alive past ``shutdown``; ``block_on_close`` is False so
+    ``server_close`` never joins a handler thread that is still reading a
+    stalled body.  Without these, a client that opens a connection and
+    holds it idle keeps one thread (plus its socket and session) for the
+    full handler timeout, and ``server_close`` waits for it.
     """
 
+    daemon_threads = True
+    block_on_close = False
     engine: Any
     runtime_generation: str
 

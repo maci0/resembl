@@ -208,7 +208,7 @@ func TestCancelledBeforeDispatchReleasesInMemorySlot(t *testing.T) {
 	}
 }
 
-func TestBatchOnEngineWithoutBatchIsNotImplemented(t *testing.T) {
+func TestBatchOnPinnedEngineUsesPinnedPath(t *testing.T) {
 	pin := strings.Repeat("a", 64)
 	engine, err := NewPinnedSQLiteEngine("http://127.0.0.1:1", pin, pin, "generation")
 	if err != nil {
@@ -224,7 +224,7 @@ func TestBatchOnEngineWithoutBatchIsNotImplemented(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/v1/find-batch", strings.NewReader(`{"queries":["ret"]}`))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusNotImplemented {
-		t.Fatalf("status %d, want 501", recorder.Code)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503 (engine unreachable)", recorder.Code)
 	}
 }
