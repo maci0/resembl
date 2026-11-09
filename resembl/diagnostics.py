@@ -243,8 +243,12 @@ def db_calculate_average_similarity(session: Session, sample_size: int = 100) ->
     for i in range(num_snippets - 1):
         # Per-pair value equals ``minhash_jaccard``: equal-count / num_perm,
         # each division rounded to float64 exactly as Python's int/int `/`.
-        row_jaccards = (values[i + 1 :] == values[i]).sum(axis=1) / num_perm
-        total_similarity += float(row_jaccards.sum())
+        # ``.sum(axis=1)`` accumulates in int64 (exact for num_perm <= 4096)
+        # before the single float64 division, so no float32 intermediate
+        # biases the total.
+        row_counts = (values[i + 1 :] == values[i]).sum(axis=1)
+        row_jaccards = row_counts / num_perm
+        total_similarity += float(row_jaccards.sum(dtype=np.float64))
 
     return total_similarity / (num_snippets * (num_snippets - 1) // 2)
 

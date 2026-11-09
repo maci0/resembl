@@ -20,6 +20,7 @@ what makes a recorded run replay byte-for-byte.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from datetime import UTC, datetime
@@ -147,8 +148,13 @@ def avg_time_per_item(time_elapsed: float, item_count: int) -> float:
 
     *time_elapsed* is in seconds; *item_count* is a 1-based count, so 0
     (nothing processed) yields 0.0 rather than dividing by zero.
+    A negative count is a caller bug and also yields 0.0; a non-finite
+    elapsed time is rejected rather than propagated, since NaN/Inf in the
+    elapsed reading would silently poison every downstream total.
     """
-    return time_elapsed / item_count if item_count > 0 else 0.0
+    if item_count <= 0 or not math.isfinite(time_elapsed):
+        return 0.0
+    return float(time_elapsed) / item_count
 
 
 def timestamp_normalize(value: str | None) -> str | None:

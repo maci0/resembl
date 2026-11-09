@@ -936,10 +936,16 @@ def cfg_similarity(cfg1: dict, cfg2: dict) -> float:
         hist2[s] = hist2.get(s, 0) + 1
 
     dot = sum(count * hist2[size] for size, count in hist1.items() if size in hist2)
-    mag1 = math.sqrt(sum(a * a for a in hist1.values()))
-    mag2 = math.sqrt(sum(b * b for b in hist2.values()))
+    # Integer exact subtotal (counts are Python ints); float conversion
+    # happens once in sqrt.  ``a * a`` on ints never overflows the way a
+    # fixed-width int would, and for num_blocks in the millions the float
+    # conversion is exact well past 2**53 counts.
+    sq1 = sum(a * a for a in hist1.values())
+    sq2 = sum(b * b for b in hist2.values())
+    mag1 = math.sqrt(sq1)
+    mag2 = math.sqrt(sq2)
 
-    if mag1 == 0 or mag2 == 0:
+    if sq1 == 0 or sq2 == 0:
         cosine_sim = 0.0
     else:
         # Clamp: float rounding can push the ratio a hair past 1.0
@@ -1178,7 +1184,13 @@ def minhash_jaccard_batch(
         values = np.frombuffer(b"".join([p[8:] for p in chunk]), dtype=">u4").reshape(
             len(chunk), num_perm
         )
-        results.extend((values == query_values[None, :]).mean(axis=1).tolist())
+        # Count in int64 (exact for num_perm <= 4096) and divide in float64,
+        # matching the scalar ``int/int`` division bit-for-bit.  ``.mean()``
+        # on bool uses a float64 pairwise sum in most numpy builds, but the
+        # explicit count makes the exactness structural rather than
+        # build-dependent.
+        eq_counts = (values == query_values[None, :]).sum(axis=1, dtype=np.int64)
+        results.extend((eq_counts / num_perm).tolist())
     return results
 
 
