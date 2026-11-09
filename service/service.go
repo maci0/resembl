@@ -653,6 +653,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "bad request: 'query' is required", reqID)
 			return
 		}
+		// A JSON null unmarshals into a Go string as "" without error,
+		// which would answer "must not be empty" instead of the Python
+		// server's "query must be a string" for the same body.
+		if string(body["query"]) == "null" {
+			writeError(w, http.StatusBadRequest, "bad request: query must be a string", reqID)
+			return
+		}
 		if json.Unmarshal(body["query"], &query) != nil {
 			writeError(w, http.StatusBadRequest, "bad request: query must be a string", reqID)
 			return

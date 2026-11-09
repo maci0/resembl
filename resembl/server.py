@@ -844,6 +844,8 @@ def _texts_field(body: dict, name: str) -> list[str]:
     each entry is fingerprinted, so the list length is the request's work.
     """
     texts = body.get(name)
+    if name not in body:
+        raise BadRequestError(f"bad request: '{name}' is required")
     if not isinstance(texts, list):
         raise BadRequestError(f"{name} must be a list of strings")
     if len(texts) > MAX_BATCH_QUERIES:
@@ -963,6 +965,8 @@ def _score_payload(body: dict, params: ResemblConfig) -> dict:
     as ``/find`` validates them.  Raises :class:`BadRequestError`.
     """
     source = body.get("source")
+    if "source" not in body:
+        raise BadRequestError("bad request: 'source' is required")
     if not isinstance(source, str) or not source.strip():
         raise BadRequestError("source must be a non-blank string")
     if _has_lone_surrogate(source):
@@ -1002,6 +1006,11 @@ def _band_keys_payload(body: dict, params: ResemblConfig) -> dict:
     texts = _texts_field(body, "texts")
     if not all(text.strip() for text in texts):
         raise BadRequestError("texts must not hold a blank entry")
+    # ``bands``/``rows`` are required: a missing field names the omission
+    # instead of the ``_as_int`` type error ("got None") it fell through to.
+    for name in ("bands", "rows"):
+        if name not in body:
+            raise BadRequestError(f"bad request: '{name}' is required")
     bands = _as_int(body.get("bands"), "bands")
     rows = _as_int(body.get("rows"), "rows")
     if bands < 1 or rows < 1:

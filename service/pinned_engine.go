@@ -95,15 +95,32 @@ func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage
 	pin, _ := json.Marshal(e.index)
 	artifact, _ := json.Marshal(e.artifact)
 	generation, _ := json.Marshal(e.generation)
+	// Carry the find parameters (top_n, threshold, normalize, ...) into
+	// every fanned-out single: a batch that names them must not silently
+	// search with the engine defaults instead.
+	params := make(map[string]json.RawMessage, len(request))
+	for key, value := range request {
+		if key != "queries" {
+			params[key] = value
+		}
+	}
 	results := make([]json.RawMessage, 0, len(queries))
 	for _, q := range queries {
-		single, _ := json.Marshal(map[string]json.RawMessage{
-			"query":           q,
-			"index_sha256":    pin,
-			"artifact_sha256": artifact,
-			"generation":      generation,
-		})
-		res, err := e.local.find(ctx, "/find-pinned", single)
+		single := make(map[string]json.RawMessage, len(params)+4)
+		for key, value := range params {
+			single[key] = value
+		}
+		// The per-query value and the proof overwrite any request field
+		// naming them: a batch entry cannot smuggle its own pin.
+		single["query"] = q
+		single["index_sha256"] = pin
+		single["artifact_sha256"] = artifact
+		single["generation"] = generation
+		singleBytes, marshalErr := json.Marshal(single)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		res, err := e.local.find(ctx, "/find-pinned", singleBytes)
 		if err != nil {
 			return nil, err
 		}
