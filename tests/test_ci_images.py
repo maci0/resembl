@@ -235,6 +235,43 @@ class CiImagePinTests(unittest.TestCase):
             f"service.yml Go {pinned.group(1)} does not match go.mod {version}",
         )
 
+    def test_every_workflow_declares_top_level_permissions(self) -> None:
+        """Every workflow declares a top-level `permissions:` block.
+
+        Without one, a workflow inherits the repository default token
+        permissions (which may be broader than `contents: read`) instead
+        of the least privilege the job needs. A job-level block cannot
+        narrow a workflow that declares none; the top level is the
+        ceiling for every job in the file.
+        """
+        for workflow in _WORKFLOWS:
+            text = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                self.assertRegex(
+                    text,
+                    r"(?m)^permissions:\s*\n",
+                    f"{workflow.name}: no top-level permissions: block",
+                )
+
+    def test_service_smoke_step_is_pipefail_safe(self) -> None:
+        """The service image smoke step must not pipe `-h` into grep.
+
+        `resembl-service -h` exits 1 (Go's flag package), so a
+        `docker run ... -h 2>&1 | grep -q` pipeline fails under any
+        shell with `pipefail` even when the usage line is present,
+        while the default GitHub shell (no pipefail) masks a docker
+        failure whose output happens to match. Capturing the output
+        first and grepping the capture works under both.
+        """
+        text = (_ROOT / ".github" / "workflows" / "service.yml").read_text(encoding="utf-8")
+        self.assertNotIn(
+            "docker run --rm resembl-service:ci -h 2>&1 | grep",
+            text,
+            "service smoke step pipes the exit-1 -h output into grep",
+        )
+        self.assertIn("|| true", text)
+        self.assertIn("Usage of resembl-service:", text)
+
 
 if __name__ == "__main__":
     unittest.main()
