@@ -358,8 +358,8 @@ Linux or Windows are one name.
 :   SQLAlchemy database URL. Defaults to `sqlite:///assembly.db`.
     Set to a PostgreSQL URL (e.g., `postgresql+pg8000://user:pass@host/db`)
     for team use.  The `pg8000` and `pymysql` drivers are installed with the
-    package; a `duckdb:///` URL needs the extra: `uv pip install
-    "resembl[duckdb]"`.
+    package; a `duckdb:///` URL needs the extra: `uv sync --extra duckdb`
+    (or `pip install "resembl[duckdb]"` outside a uv checkout).
 
 **DATABASE_URL**
 :   Same as `RESEMBL_DATABASE_URL`, read only when that one is unset, so a

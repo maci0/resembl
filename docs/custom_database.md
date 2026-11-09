@@ -17,7 +17,7 @@ upserts, DDL) is selected automatically; the sampled average similarity in
 | SQLite      | `sqlite:///assembly.db` (default)                           | WAL mode, band-major builds: the reference backend. |
 | PostgreSQL  | `postgresql+pg8000://user:pass@host:5432/db`                | `ON CONFLICT DO NOTHING`; integration-tested in CI.  Any PG driver works (`psycopg2`, `pg8000`, …). |
 | MySQL/MariaDB | `mysql+pymysql://user:pass@host:3306/db`                   | `INSERT IGNORE` / `ON DUPLICATE KEY UPDATE`.  Bucket keys are stored as indexable hex strings (a raw `BLOB` cannot be a primary key on MySQL).  Integration-tested in CI. |
-| DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | Needs the `duckdb` extra: `uv pip install "resembl[duckdb]"`.  `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas.  Bulk paths use multi-row `VALUES` (its `executemany` path is several times slower, measured ~7–13x depending on the table); verified live at 100k snippets. |
+| DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | Needs the `duckdb` extra: `uv sync --extra duckdb` (or `pip install "resembl[duckdb]"` outside a uv checkout).  `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas.  Bulk paths use multi-row `VALUES` (its `executemany` path is several times slower, measured ~7–13x depending on the table); verified live at 100k snippets. |
 
 The `pg8000` and `pymysql` drivers ship with the package; only DuckDB needs the
 extra. The development lock pins DuckDB 2.0.0. By default, DuckDB 2.0 creates

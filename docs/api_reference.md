@@ -228,6 +228,8 @@ readable timestamp is stamped with the import moment instead.
 ### `SnippetVersion`
 SQLModel with fields: `id` (integer PK, set by the caller; no database-side
 autoincrement, which DuckDB does not support), `snippet_checksum`, `code`, `minhash`, `created_at`.
+No production code writes a version row yet; the table is a scaffold for the
+version-history command (see the `version` story in [user_stories.md](user_stories.md)), which therefore always reports an empty history.
 
 ## Configuration
 
