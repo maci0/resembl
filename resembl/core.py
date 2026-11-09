@@ -2517,6 +2517,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     reused = _db_backup_reuse(backup_dir, content_hash)
 
     def _drop_reused() -> None:
+        assert reused is not None
         for _stale in (
             reused,
             os.path.join(backup_dir, _db_backup_manifest_name(reused)),
