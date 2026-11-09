@@ -19,6 +19,33 @@ func (f authFunc) Allow(c context.Context, a, r, v string) (bool, error) { retur
 type testCustody struct{}
 
 func (testCustody) Claim() (func() error, error) { return func() error { return nil }, nil }
+
+func TestBusyAnswers429WithRetryAfter(t *testing.T) {
+	s, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), okEngine{}, "index", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetCustody(testCustody{}); err != nil {
+		t.Fatal(err)
+	}
+	// Exhaust the single slot, then a second concurrent request is refused
+	// as overloaded (429 + Retry-After), not as an unavailable service.
+	s.slots <- struct{}{}
+	defer func() { <-s.slots }()
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("POST", "/v1/find", strings.NewReader(`{"query":"ret"}`)))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("busy gave %d, want 429", w.Code)
+	}
+	if got := w.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After %q, want 1", got)
+	}
+	var env map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil || env["error"] != "busy" {
+		t.Fatalf("busy envelope differs: %s", w.Body.String())
+	}
+}
+
 func TestBoundaryAndLocalAdapter(t *testing.T) {
 	calls := 0
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +142,13 @@ func TestUncertainTimeoutQuarantinesCapacity(t *testing.T) {
 	if err = s.SetCustody(testCustody{}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	// First request times out mid-dispatch and quarantines the slot (503);
+	// the second is refused as overloaded (429) while the slot is held.
+	for i, want := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, httptest.NewRequest("POST", "/v1/find", strings.NewReader(`{"query":"ret"}`)))
-		if w.Code != 503 {
-			t.Fatalf("request %d: %d", i, w.Code)
+		if w.Code != want {
+			t.Fatalf("request %d: got %d, want %d", i, w.Code, want)
 		}
 	}
 	if len(s.slots) != 1 {

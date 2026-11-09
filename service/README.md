@@ -10,7 +10,7 @@ The candidate also forwards `/v1/find-batch` with the existing engine batch sema
 
 Run `go test -race ./...` here. To exercise the real local engine, start a disposable `resembl serve` and set `RESEMBL_TEST_ENGINE_URL` to its loopback URL for `go test -run TestActualWarmEngine`.
 
-The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm engine. That endpoint takes a canonical SHA-256 over the actual SQLite snippet, LSH and metadata rows while holding a SQLite writer fence, checks the supplied digest, and performs the query under the same fence. It rejects a stale index rather than rebuilding it under the proof, and limits the identity scan to one million rows and 64 MiB of encoded data. It does not support non-SQLite databases or batch requests. The pinned protocol also requires a trusted runtime-manifest digest and the warm process generation from `/runtime-generation`. Before and after the query, the backend checks its executable and every currently loaded module file against the owner-provided manifest. The VM command requires all three pins and remains deny-all. This is file integrity under an immutable, trusted supervisor and filesystem, not remote or hardware attestation: the owner must qualify manifest construction before startup, dependencies loaded later, native libraries and binary identity. It is not a production activation.
+The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm engine. That endpoint takes a canonical SHA-256 over the actual SQLite snippet, LSH and metadata rows while holding a SQLite writer fence, checks the supplied digest, and performs the query under the same fence. It rejects a stale index rather than rebuilding it under the proof, and limits the identity scan to one million rows and 64 MiB of encoded data. It does not support non-SQLite databases; batch requests are fanned out one pinned call per query. The pinned protocol also requires a trusted runtime-manifest digest and the warm process generation from `/runtime-generation`. Before and after the query, the backend checks its executable and every currently loaded module file against the owner-provided manifest. The VM command requires all three pins and remains deny-all. This is file integrity under an immutable, trusted supervisor and filesystem, not remote or hardware attestation: the owner must qualify manifest construction before startup, dependencies loaded later, native libraries and binary identity. It is not a production activation.
 
 ## `resembl-service` flags
 
@@ -29,7 +29,7 @@ The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm 
 | `-concurrency` | `4` | Concurrent queries and custody slots, 1 to 64. |
 | `-timeout` | `30s` | Per-request timeout. |
 
-`/v1/find-batch` answers `501` on this binary, because the pinned protocol has no batch form.
+`/v1/find-batch` fans each query through the pinned `/find-pinned` path (one upstream call per query, preserving the snapshot proof per result); it answers `501` only when the configured engine is not a `BatchEngine`.
 
 Run the checks with `make service-check` from the repository root (needs Go 1.26 or newer).
 

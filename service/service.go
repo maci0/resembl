@@ -493,8 +493,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.metrics != nil {
 			s.metrics.recordBusy()
 		}
+		// Overload is a transient-capacity signal, not a dead service, so
+		// answer 429 and tell the caller when to retry instead of the
+		// 503 the unavailable-engine paths use; nothing was dispatched
+		// for this request, so a retry against a later slot is safe.
 		log.Printf("[%s] busy: concurrency slots exhausted", reqID)
-		writeError(w, http.StatusServiceUnavailable, "busy", reqID)
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, "busy", reqID)
 		return
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
