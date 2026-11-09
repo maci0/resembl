@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time  # noqa: F401  (compatibility: `resembl.models.time.sleep` patch target)
 import unicodedata
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING
