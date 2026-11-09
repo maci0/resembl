@@ -394,7 +394,7 @@ def _db_backup_reuse(backup_dir: str, content_hash: str) -> str | None:
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 manifest = json.load(f)
-        except (OSError, ValueError, RecursionError):
+        except OSError, ValueError, RecursionError:
             # RecursionError is not a ValueError: a deeply nested
             # manifest from a hostile backup directory recurses once
             # per level in the decoder and must skip the candidate,
@@ -716,7 +716,7 @@ def _string_list_or_none(raw: str | None) -> list[str] | None:
         return None
     try:
         value = json.loads(raw)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         # ``RecursionError`` is not a ``ValueError``: a deeply nested
         # document (``[[[...]]]``) from a hostile merge source recurses
         # once per level in the decoder and must skip the row, not abort
@@ -2186,7 +2186,7 @@ def _export_manifest_read(export_dir: str) -> set[str]:
     try:
         with open(os.path.join(export_dir, _EXPORT_MANIFEST_NAME), encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, ValueError, RecursionError):
+    except OSError, ValueError, RecursionError:
         # RecursionError is not a ValueError: a deeply nested manifest
         # from a hostile export directory recurses once per level in
         # the decoder and must disable pruning, not abort the export —
@@ -3088,7 +3088,7 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         try:
             with open(manifest_path, encoding="utf-8") as f:
                 data = json.load(f)
-        except (OSError, ValueError, RecursionError):
+        except OSError, ValueError, RecursionError:
             # RecursionError is not a ValueError: a deeply nested
             # manifest from a hostile backup directory recurses once
             # per level in the decoder and must skip the candidate,
@@ -3358,7 +3358,7 @@ def snippet_version_list(
             SnippetVersion.created_at,
         )
         .where(SnippetVersion.snippet_checksum == checksum)
-        .order_by(SnippetVersion.created_at.desc(), SnippetVersion.id.desc())  # type: ignore[attr-defined]
+        .order_by(SnippetVersion.created_at.desc(), SnippetVersion.id.desc())  # type: ignore[attr-defined, union-attr]
     )
     if limit is not None:
         if limit <= 0:

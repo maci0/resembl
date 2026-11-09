@@ -177,7 +177,7 @@ class SnippetVersion(SQLModel, table=True):
         stmt = (
             select(cls)
             .where(cls.snippet_checksum == checksum)
-            .order_by(cls.created_at.desc(), cls.id.desc())  # type: ignore[attr-defined]
+            .order_by(cls.created_at.desc(), cls.id.desc())  # type: ignore[attr-defined, union-attr]
         )
         if limit is not None:
             stmt = stmt.limit(limit)

@@ -1495,7 +1495,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         self._body_read = True
         try:
             body = json.loads((self.rfile.read(length) or b"{}").decode("utf-8"))
-        except (ValueError, KeyError, RecursionError, UnicodeDecodeError, OSError):
+        except ValueError, KeyError, RecursionError, UnicodeDecodeError, OSError:
             # UnicodeDecodeError is a ValueError subclass, listed for
             # clarity; OSError from a truncated stream / client hangup is
             # a malformed body, not a 500: the handler treats None as 400.
@@ -2361,7 +2361,7 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     try:
         with open(port_file, encoding="utf-8") as f:
             existing_port = int(f.read().strip())
-    except (OSError, ValueError):
+    except OSError, ValueError:
         existing_port = None  # no port file, or malformed
     if existing_port is not None:
         try:

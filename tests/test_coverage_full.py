@@ -310,9 +310,7 @@ class TestSnippetExport(BaseDBTest):
             victim = os.path.join(tmpdir, "victim.txt")
             with open(victim, "w", encoding="utf-8") as f:
                 f.write("secret")
-            planted = os.path.join(
-                tmpdir, f"func_a.asm.{os.getpid()}-{threading.get_ident()}.tmp"
-            )
+            planted = os.path.join(tmpdir, f"func_a.asm.{os.getpid()}-{threading.get_ident()}.tmp")
             os.symlink(victim, planted)
             result = snippet_export(self.session, tmpdir)
             self.assertEqual(result["num_exported"], 1)
