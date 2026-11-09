@@ -312,21 +312,27 @@ def _db_content_hash(session: Session) -> str:
 
 
 def _db_backup_candidates(backup_dir: str, names: list[str]) -> list[str]:
-    """Backup files in *backup_dir*, oldest first by mtime.
+    """Backup files in *backup_dir*, oldest first by embedded timestamp.
 
-    Order by modification time, not by name: a backup directory that
-    holds a hand-supplied or clock-skewed ``assembly-*.db`` whose name
-    sorts newest would otherwise hide the genuinely newest restore
-    point or prune it first.  mtime is the only chronological signal
-    that survives a renamed or retimestamped copy; the 6-digit
-    microsecond suffix is a tie-breaker only within the same second.
+    Order by the timestamp embedded in the name (``assembly-YYYYMMDDTHHMMSS-ffffff.db``),
+    not by filesystem mtime: mtime is wall-clock state written by the OS
+    when the file is created, so two pinned replays (``RESEMBL_NOW``)
+    produce the same names but different mtimes, and prune/reuse would
+    pick a different "newest" on each replay.  The embedded timestamp
+    comes from the same logical clock as the manifest's ``created_at``
+    (``timestamp_now``, which honors ``RESEMBL_NOW``), so a pinned replay
+    orders identically.  A renamed copy that loses its embedded timestamp
+    sorts oldest (empty key) rather than by mtime, so it is pruned first
+    instead of hiding the genuinely newest restore point.
     """
 
-    def _mtime(name: str) -> tuple[float, str]:
-        try:
-            return (os.path.getmtime(os.path.join(backup_dir, name)), name)
-        except OSError:
-            return (0.0, name)
+    def _stamp(name: str) -> tuple[str, str]:
+        stem = name.removeprefix("assembly-").removesuffix(".db")
+        # ``stem`` is ``YYYYMMDDTHHMMSS-ffffff`` for names this module
+        # writes; anything else (hand-supplied, legacy) sorts oldest.
+        if len(stem) == 22 and stem[8] == "T" and stem[15] == "-":
+            return (stem, name)
+        return ("", name)
 
     return sorted(
         (
@@ -336,7 +342,7 @@ def _db_backup_candidates(backup_dir: str, names: list[str]) -> list[str]:
             and name.endswith(".db")
             and os.path.isfile(os.path.join(backup_dir, name))
         ),
-        key=_mtime,
+        key=_stamp,
     )
 
 

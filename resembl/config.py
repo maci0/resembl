@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 import tomli_w
 
+from .models import _retry_sleep, monotonic_now
 from .paths import config_dir_get, config_path_get
 from .scoring import MAX_NUM_PERM
 
@@ -245,8 +246,6 @@ def _config_file_lock() -> Iterator[None]:
     so a crashed process cannot leave a stale lock behind; platforms with
     neither locking API fall back to the historical unlocked behavior.
     """
-    import time
-
     os.makedirs(config_dir_get(), exist_ok=True)
     fd = os.open(config_path_get() + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
@@ -257,16 +256,24 @@ def _config_file_lock() -> Iterator[None]:
             # process forever if a crashed holder left the file open or a
             # peer holds it indefinitely.  Poll with a deadline matching
             # the sibling msvcrt poll cadence (0.05s) so both platforms
-            # fail with a timeout instead of hanging.
-            deadline = time.monotonic() + 30.0
+            # fail with a timeout instead of hanging.  The clock is
+            # ``monotonic_now`` (pinned to 0 under ``RESEMBL_NOW``) and
+            # the wait is ``_retry_sleep`` (no-op under a pin), matching
+            # every other duration/retry path: a pinned replay must not
+            # read wall time or sleep on this lock, or two seeded runs
+            # diverge on timeout vs success.  Under a pin the deadline
+            # never advances, so a contended pin holder retries once
+            # and then times out deterministically on the next poll;
+            # unpinned, the 30s wall budget is unchanged.
+            deadline = monotonic_now() + 30.0
             while True:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except OSError:
-                    if time.monotonic() >= deadline:
+                    if monotonic_now() >= deadline:
                         raise TimeoutError("timed out waiting for config file lock") from None
-                    time.sleep(0.05)
+                    _retry_sleep(0.05)
         except ImportError:
             try:
                 import msvcrt
@@ -282,17 +289,18 @@ def _config_file_lock() -> Iterator[None]:
                 # LK_LOCK retries ~10 times then raises OSError, while
                 # flock waits indefinitely; a config update that loses to a
                 # slow holder must wait a bounded time, not crash or hang,
-                # so poll LK_NBLCK with the same 30s deadline as flock.
-                deadline = time.monotonic() + 30.0
+                # so poll LK_NBLCK with the same 30s deadline as flock,
+                # on the same pinned clock as above.
+                deadline = monotonic_now() + 30.0
                 while True:
                     try:
                         # typeshed provides these attributes for Windows only.
                         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
                         break
                     except OSError:
-                        if time.monotonic() >= deadline:
+                        if monotonic_now() >= deadline:
                             raise TimeoutError("timed out waiting for config file lock") from None
-                        time.sleep(0.05)
+                        _retry_sleep(0.05)
             except ImportError:
                 # A platform with neither locking API (some non-CPython
                 # builds) runs unlocked rather than refusing every config
