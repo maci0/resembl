@@ -2798,7 +2798,14 @@ def version_cmd(
     resolved = _resolve_checksum(checksum)
     if not resolved:
         raise typer.Exit(code=1)
-    versions = snippet_version_list(state.session, resolved)
+    # Table renders at most a screen; cap the fetch so a long history
+    # does not materialize whole just to show its first rows. JSON
+    # keeps the full history (machine consumers may page it).
+    versions = snippet_version_list(
+        state.session,
+        resolved,
+        limit=50 if state.format == "table" else None,
+    )
 
     if state.format != "table":
         _echo_format(versions)
