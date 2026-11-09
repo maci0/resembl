@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	service "github.com/maci0/resembl/service"
@@ -27,7 +26,14 @@ func main() {
 	// instead of killing the process mid-request: ListenAndServe returns
 	// http.ErrServerClosed on Shutdown, and in-flight custody slots and
 	// engine calls complete rather than being orphaned.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// Portability note: syscall.SIGINT/syscall.SIGTERM are not defined
+	// on every GOOS the project claims to support (notably Windows,
+	// where only SIGINT/os.Interrupt via Ctrl+C is available and SIGTERM
+	// does not exist as a deliverable signal). The sibling files
+	// shutdown_unix.go / shutdown_windows.go supply shutdownSIGTERM
+	// under build constraints, falling back to os.Interrupt when the
+	// platform has no SIGTERM; NotifyContext then works unchanged.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, shutdownSIGTERM)
 	defer stop()
 	go func() {
 		<-ctx.Done()

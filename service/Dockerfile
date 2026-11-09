@@ -1,7 +1,13 @@
 # Build from the repository root (the COPY paths are relative to it):
-#   docker build -f service/Dockerfile --build-arg VERSION=<tag> .
+#   docker build --platform linux/amd64 -f service/Dockerfile --build-arg VERSION=<tag> .
 # Passing service/ as the build context instead fails, because the COPY
 # instructions below name service/... paths.
+# Multi-arch: `docker buildx build --platform linux/arm64` builds an arm64
+# image because the RUN below pins GOARCH to TARGETARCH (BuildKit's
+# predefined per-stage architecture), so the binary always matches the
+# image. Without that pin a `docker buildx build --platform linux/arm64`
+# on an amd64 builder would silently produce an amd64 binary in an arm64
+# image that fails with "exec format error" on the target.
 # SOURCE_DATE_EPOCH pins the image's created timestamp and the binary's
 # embedded build time; TZ=UTC and LC_ALL=C keep the build from depending
 # on the host's timezone or locale (reproducible-builds.org).
@@ -18,7 +24,16 @@ COPY service/cmd ./cmd
 COPY service/internal ./internal
 ARG SOURCE_DATE_EPOCH=0
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} TZ=UTC LC_ALL=C GOFLAGS=-mod=readonly GOTOOLCHAIN=local GOPROXY=off
-RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service && mkdir -p /tmp/lic-out/licenses && cp /tmp/licenses-src/LICENSE /tmp/licenses-src/NOTICE /tmp/lic-out/licenses/ && touch -d "@${SOURCE_DATE_EPOCH}" /resembl-service /tmp/lic-out/licenses/LICENSE /tmp/lic-out/licenses/NOTICE /tmp/lic-out/licenses
+# TARGETARCH is BuildKit's predefined arg for the stage's architecture
+# (linux/amd64 -> amd64, linux/arm64 -> arm64). Pinning it makes the
+# Dockerfile build the correct arch for `docker buildx build --platform`
+# instead of relying on the builder host's native arch: the prior
+# unpinned build silently embedded an amd64 binary in an arm64 image,
+# producing "exec format error" on the target while looking green at
+# build time. If TARGETARCH is unset (a plain `docker build` on an old
+# BuildKit), fall back to the builder's own GOARCH.
+ARG TARGETARCH
+RUN TARGETARCH="${TARGETARCH:-$(go env GOARCH)}" && CGO_ENABLED=0 GOOS=linux GOARCH="$TARGETARCH" go build -trimpath -buildvcs=false -ldflags='-s -w' -o /resembl-service ./cmd/resembl-service && mkdir -p /tmp/lic-out/licenses && cp /tmp/licenses-src/LICENSE /tmp/licenses-src/NOTICE /tmp/lic-out/licenses/ && touch -t $(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y%m%d%H%M.%S) /resembl-service /tmp/lic-out/licenses/LICENSE /tmp/lic-out/licenses/NOTICE /tmp/lic-out/licenses
 FROM scratch
 COPY --from=build /resembl-service /resembl-service
 # GPL-3.0-only: the license text must accompany the binary in the image,

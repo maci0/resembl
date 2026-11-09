@@ -39,8 +39,14 @@ Build from the repository root (the Dockerfile's COPY paths are relative
 to it, so passing `service/` as the build context fails):
 
 ```sh
-docker build -f service/Dockerfile --build-arg VERSION=<tag> .
+docker build --platform linux/amd64 -f service/Dockerfile --build-arg VERSION=<tag> .
+# For arm64 (e.g. Apple Silicon, Raspberry Pi):
+docker build --platform linux/arm64 -f service/Dockerfile --build-arg VERSION=<tag> .
 ```
+
+The build pins `GOARCH` to the target architecture (`TARGETARCH`), so
+the `--platform` selects the binary architecture correctly; omitting
+`--platform` builds for the builder's native architecture.
 
 Runs non-root (`USER 65532:65532`), exposes `8080`, and has no shell or
 HTTP client in the `scratch` runtime, so `HEALTHCHECK NONE` is deliberate:
