@@ -125,7 +125,7 @@ def _build_document(fdp: atheris.FuzzedDataProvider) -> str:
 
 def _check_snippet_names(stored: str) -> Any:
     """Assert the three readers hold their contracts for one stored value."""
-    snippet = Snippet(checksum="fuzz-checksum", code="ret", names=stored, tags="[]")
+    snippet = Snippet(checksum="fuzz-checksum", code="ret", names=stored, minhash=b"", tags="[]")
     try:
         names = snippet.name_list
     except (ValueError, RecursionError, TypeError):

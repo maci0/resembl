@@ -86,7 +86,7 @@ def _build_blob(fdp: atheris.FuzzedDataProvider) -> bytes:
         return MINHASH_MAGIC + struct.pack(">I", num_perm) + fdp.ConsumeBytes(4 * num_perm)
     # A valid fingerprint whose count was rewritten: the header
     # count disagrees with the number the caller passes below.
-    num_perm = _CONTROL and (len(_CONTROL) - 8) // 4
+    num_perm = (_CONTROL and (len(_CONTROL) - 8) // 4) or 128
     return MINHASH_MAGIC + struct.pack(">I", num_perm + fdp.ConsumeIntInRange(-4, 4)) + _CONTROL[8:]
 
 
