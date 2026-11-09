@@ -109,6 +109,27 @@ class TestDbBackup(FileDBTest):
         mode = stat.S_IMODE(os.stat(result["backup"]).st_mode)
         self.assertEqual(mode, 0o600)
 
+    def test_backup_without_fchmod_succeeds(self):
+        """Simulated Windows (no os.fchmod) must not abort the backup.
+
+        ``os.fchmod`` is POSIX-only; an unguarded call raised AttributeError
+        on the claimed windows-2025 CI leg.  Deleting the attribute
+        reproduces that platform, and the backup must still publish.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        real_fchmod = getattr(os, "fchmod", None)
+        if hasattr(os, "fchmod"):
+            delattr(os, "fchmod")
+        try:
+            result = db_backup(self.session, backup_dir)
+        finally:
+            if real_fchmod is not None:
+                os.fchmod = real_fchmod
+        self.assertTrue(os.path.isfile(result["backup"]))
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check["issues"])
+
     def test_backup_includes_config_sidecar_and_verifies_it(self):
         """db_backup copies config.toml beside the backup; verify checks it.
 

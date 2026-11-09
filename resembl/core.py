@@ -143,6 +143,27 @@ DB_BACKUP_CONFIG_NAME = "config.toml"
 DB_BACKUP_RUNTIME_NAME = "runtime-manifest.json"
 
 
+def _fchmod_quiet(fd: int, mode: int) -> None:
+    """Set mode on *fd* where the platform supports it, else ignore.
+
+    ``os.fchmod`` is POSIX-only (``os.chmod`` is the portable spelling,
+    but it takes a path — the fd form closes a TOCTOU window where a
+    planter swaps the temp path between open and chmod).  On Windows the
+    attribute does not exist, so an unguarded call raises ``AttributeError``
+    and aborts ``db_backup``, ``snippet_export`` and the manifest write on
+    a claimed platform (``windows-2025`` in CI).  Swallow the missing
+    attribute and any ``OSError``: a best-effort 0600 that fails to apply
+    is a warning, never a backup failure.
+    """
+    fchmod = getattr(os, "fchmod", None)
+    if fchmod is None:
+        return
+    try:
+        fchmod(fd, mode)
+    except OSError as e:
+        logger.warning("Could not set permissions on fd %s: %s", fd, e)
+
+
 def _fsync_quiet(path: str) -> None:
     """Flush *path* to disk, ignoring filesystems that refuse it.
 
@@ -248,7 +269,7 @@ def _write_sidecar(backup_dir: str, name: str, data: bytes) -> str:
     # name let a local planter symlink the temp at a victim file.
     fd, tmp = tempfile.mkstemp(dir=backup_dir, prefix=f".{name}.", suffix=".tmp")
     try:
-        os.fchmod(fd, 0o600)
+        _fchmod_quiet(fd, 0o600)
         with open(fd, "wb") as f:
             f.write(data)
         _fsync_quiet(tmp)
@@ -2192,7 +2213,7 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
         dir=export_dir, prefix=f".{_EXPORT_MANIFEST_NAME}.", suffix=".tmp"
     )
     try:
-        os.fchmod(fd, 0o600)
+        _fchmod_quiet(fd, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(sorted(written), f)
             f.write("\n")
@@ -2784,11 +2805,9 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     manifest_path = os.path.join(backup_dir, manifest_name)
     # mkstemp (O_EXCL, random suffix): predictable pid name let a planter
     # symlink the temp at a victim file, truncating it on write.
-    fd, tmp_manifest = tempfile.mkstemp(
-        dir=backup_dir, prefix=f".{manifest_name}.", suffix=".tmp"
-    )
+    fd, tmp_manifest = tempfile.mkstemp(dir=backup_dir, prefix=f".{manifest_name}.", suffix=".tmp")
     try:
-        os.fchmod(fd, 0o600)
+        _fchmod_quiet(fd, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(manifest, f)
             f.write("\n")
