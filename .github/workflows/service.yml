@@ -31,6 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The build clock is the commit time of HEAD (see `dist` in the
+          # Makefile and the Build step below), so one commit of history is
+          # enough; the default is left explicit so a later depth change
+          # does not silently move SOURCE_DATE_EPOCH.
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -55,7 +60,11 @@ jobs:
         # defaults (unknown/dev). GitHub injects SOURCE_DATE_EPOCH=0
         # into every step's environment, which the Dockerfile would
         # otherwise inherit as its reproducible-but-wrong epoch.
-        run: docker build -f service/Dockerfile -t resembl-service:ci . --build-arg SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" --build-arg REVISION="${{ github.sha }}" --build-arg VERSION="${{ github.ref_name }}"
+        # VERSION is the tag name on a tag build, or "dev" otherwise:
+        # github.ref_name alone is the branch name on push and pull
+        # requests, which is not a version and would label the image
+        # org.opencontainers.image.version with e.g. "feature/x".
+        run: docker build -f service/Dockerfile -t resembl-service:ci . --build-arg SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" --build-arg REVISION="${{ github.sha }}" --build-arg VERSION="${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}"
       - name: Smoke-test the service image
         # A successful build does not prove the entrypoint runs: a broken
         # COPY path or a missing binary would only fail on an operator's
