@@ -3334,7 +3334,7 @@ def snippet_version_list(
             SnippetVersion.created_at,
         )
         .where(SnippetVersion.snippet_checksum == checksum)
-        .order_by(SnippetVersion.created_at.desc())  # type: ignore[attr-defined]
+        .order_by(SnippetVersion.created_at.desc(), SnippetVersion.id.desc())  # type: ignore[attr-defined]
     )
     if limit is not None:
         if limit <= 0:
