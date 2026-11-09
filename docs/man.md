@@ -369,6 +369,18 @@ Linux or Windows are one name.
     run can still be replayed by setting this variable to the logged value.
     An unparseable value aborts the command.
 
+**RESEMBL_SERVE_ALLOW_UNAUTHENTICATED**
+:   Non-blank value authorizes a non-loopback `serve --host` bind
+    without `--allow-unauthenticated`, for deployments configured
+    through the environment. A blank value counts as unset. The
+    flag and this variable are an OR: either opts in.
+
+**RESEMBL_LOG_LEVEL**
+:   Log level for every command: `DEBUG`, `INFO`, `WARNING`,
+    `ERROR` or `CRITICAL` (case-insensitive). A blank value counts
+    as unset. An explicit `-v`/`-q` flag wins over the variable.
+    An invalid value aborts the command.
+
 **RESEMBL_NOW**
 :   ISO 8601 instant to stamp `created_at` with, instead of the wall clock.
     Every row written during the run, every timestamp printed back by
@@ -404,6 +416,8 @@ jaccard_weight = 0.5
 is used instead, so a bad value cannot silently produce a degenerate index
 or an empty result set. `config.toml` holds tuning only; database
 credentials belong in `RESEMBL_DATABASE_URL`, never in this file.
+`config.toml.example` in the repository root carries every key with its
+range and default, for copying into the config directory.
 
 ## EXAMPLES
 

@@ -1,0 +1,31 @@
+# Example resembl configuration — copy to the config directory and edit.
+#
+# Location (see `resembl config path`):
+#   ~/.config/resembl/config.toml          (or $XDG_CONFIG_HOME/resembl/)
+#   Override the directory with RESEMBL_CONFIG_DIR.
+#
+# Management: prefer `resembl config set <key> <value>` over hand-editing;
+# a hand-edited value outside the range below is reported and ignored.
+#
+# Tuning only: database credentials belong in RESEMBL_DATABASE_URL,
+# never in this file.
+#
+# Uncomment a line to override its default.
+
+# Minimum LSH Jaccard similarity.  Range: 0.0 <= v < 0.99.  Default: 0.5
+# lsh_threshold = 0.5
+
+# MinHash permutation count.  Range: 2 <= v <= 4096.  Default: 128
+# num_permutations = 128
+
+# Default number of results returned by `find`.  Range: v >= 1.  Default: 5
+# top_n = 5
+
+# Token n-gram size for shingling.  Range: v >= 1.  Default: 3
+# ngram_size = 3
+
+# Weight of Jaccard in the hybrid score.  Range: 0.0 <= v <= 1.0.  Default: 0.4
+# jaccard_weight = 0.4
+
+# Default output format.  One of: table, json, csv.  Default: table
+# format = "table"

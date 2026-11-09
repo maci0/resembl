@@ -24,6 +24,8 @@ from resembl.paths import (
     config_dir_get,
     config_path_get,
     db_url_get,
+    log_level_get,
+    serve_allow_unauthenticated_get,
 )
 from resembl.scoring import MAX_NUM_PERM
 
@@ -556,3 +558,37 @@ class TestConfigDirPlatformSpelling(unittest.TestCase):
             self.assertEqual(result, expected)
             if os.sep == "\\":
                 self.assertNotIn("/", result)
+
+
+class TestServeAndLogEnv(unittest.TestCase):
+    """RESEMBL_SERVE_ALLOW_UNAUTHENTICATED and RESEMBL_LOG_LEVEL."""
+
+    def test_serve_allow_unset_is_false(self):
+        """Unset means no opt-in."""
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(serve_allow_unauthenticated_get())
+
+    def test_serve_allow_blank_counts_as_unset(self):
+        """A blank value counts as unset, like every other override."""
+        with patch.dict(os.environ, {"RESEMBL_SERVE_ALLOW_UNAUTHENTICATED": "  "}):
+            self.assertFalse(serve_allow_unauthenticated_get())
+
+    def test_serve_allow_nonblank_opts_in(self):
+        """Any non-blank value opts in."""
+        with patch.dict(os.environ, {"RESEMBL_SERVE_ALLOW_UNAUTHENTICATED": "1"}):
+            self.assertTrue(serve_allow_unauthenticated_get())
+
+    def test_log_level_unset_is_none(self):
+        """Unset means no override."""
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(log_level_get())
+
+    def test_log_level_blank_counts_as_unset(self):
+        """Blank counts as unset."""
+        with patch.dict(os.environ, {"RESEMBL_LOG_LEVEL": ""}):
+            self.assertIsNone(log_level_get())
+
+    def test_log_level_is_uppercased(self):
+        """The name is upper-cased for the caller to validate."""
+        with patch.dict(os.environ, {"RESEMBL_LOG_LEVEL": "debug"}):
+            self.assertEqual(log_level_get(), "DEBUG")

@@ -98,11 +98,14 @@ from .database import db_create, get_engine
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .models import avg_time_per_item, monotonic_now, parse_instant
 from .paths import (
+    LOG_LEVEL_ENV_VAR,
     cache_dir_get,
     console_utf8_reconfigure,
     db_url_get,
     db_url_mask,
+    log_level_get,
     port_file_cleanup,
+    serve_allow_unauthenticated_get,
     server_port_path,
 )
 from .scoring import MAX_NUM_PERM
@@ -935,7 +938,7 @@ def serve(
             return False
 
     if not _is_loopback_bind(host):
-        if not allow_unauthenticated:
+        if not allow_unauthenticated and not serve_allow_unauthenticated_get():
             err_console.print(
                 "[red]Error:[/red] refusing to bind non-loopback "
                 f"{_display(host)} without --allow-unauthenticated: the "
@@ -1276,6 +1279,15 @@ def app_callback(
         )
 
     log_level = logging.INFO
+    env_level = log_level_get()
+    if env_level is not None:
+        if env_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            err_console.print(
+                f"[red]Error:[/red] {LOG_LEVEL_ENV_VAR} must be one of DEBUG, INFO, "
+                f"WARNING, ERROR, CRITICAL, got '{env_level}'."
+            )
+            raise typer.Exit(code=2)
+        log_level = getattr(logging, env_level)
     if quiet:
         log_level = logging.WARNING
     elif verbose:

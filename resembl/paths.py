@@ -48,6 +48,22 @@ DEFAULT_CACHE_DIR = "~/.cache/resembl"
 #: Config directory used when the environment names none.
 DEFAULT_CONFIG_DIR = "~/.config/resembl"
 
+#: Environment variable that authorizes a non-loopback ``serve`` bind
+#: without the ``--allow-unauthenticated`` flag, for deployments that
+#: configure the process through the environment (systemd, containers).
+#: A non-blank value counts as "allow"; the flag wins when both are set
+#: (either one opts in -- the check is an OR, never a veto).  Blank
+#: counts as unset, matching every other ``RESEMBL_*`` override.
+SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR = "RESEMBL_SERVE_ALLOW_UNAUTHENTICATED"
+
+#: Environment variable that sets the log level for every command,
+#: for deployments that configure the process through the environment
+#: instead of ``-v``/``-q``.  Accepted values are the standard level
+#: names (``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, ``CRITICAL``),
+#: case-insensitive; a blank value counts as unset.  An explicit
+#: ``-v``/``-q`` flag wins over the variable when both are set.
+LOG_LEVEL_ENV_VAR = "RESEMBL_LOG_LEVEL"
+
 
 def db_url_get() -> str:
     """Return the database URL configured in the environment.
@@ -138,6 +154,31 @@ def config_dir_get() -> str:
 def config_path_get() -> str:
     """Return the path to the config file."""
     return os.path.join(config_dir_get(), "config.toml")
+
+
+def serve_allow_unauthenticated_get() -> bool:
+    """Return True when ``RESEMBL_SERVE_ALLOW_UNAUTHENTICATED`` opts in.
+
+    Read at call time, like :func:`db_url_get`: a deployment that
+    exports the variable after import still gets the value it set.
+    A blank value counts as unset, matching every other override.
+    """
+    value = os.environ.get(SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR)
+    return value is not None and bool(value.strip())
+
+
+def log_level_get() -> str | None:
+    """Return the log level named by ``RESEMBL_LOG_LEVEL``, or None.
+
+    Read at call time, like :func:`db_url_get`.  The returned name is
+    upper-cased; validity is checked by the caller against the
+    standard level names, so an invalid value fails fast at startup
+    instead of silently running at the default level.
+    """
+    value = os.environ.get(LOG_LEVEL_ENV_VAR)
+    if value is None or not value.strip():
+        return None
+    return value.strip().upper()
 
 
 def server_port_path(db_url: str, cache_dir: str) -> str:

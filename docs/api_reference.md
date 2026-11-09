@@ -286,6 +286,8 @@ as unset for every one. The full manual-page reference is in
 | `RESEMBL_ENGINE_URL` | `http://127.0.0.1:8081` | Loopback engine URL the Lambda bootstrap dials (Go service only) |
 | `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
 | `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |
+| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | — | Non-blank value authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
+| `RESEMBL_LOG_LEVEL` | `INFO` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`); `-v`/`-q` win when set; invalid aborts the command |
 
 Database URLs may carry credentials (`postgresql+pg8000://user:pass@host/db`);
 they are masked (`***`) in every display path via `db_url_mask` but hashed
