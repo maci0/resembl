@@ -1,9 +1,8 @@
 # Agent rules: resembl
 
 Scope: commands, conventions and invariants for changing this repository.
-`CONTRIBUTING.md` is the human-facing narrative guide and holds the same
-commands in prose; when the two disagree, the commands here are the ones that
-are exercised, and both must be updated together.
+`CONTRIBUTING.md` is the human-facing narrative guide; when the two
+disagree, the commands here are the ones that are exercised.
 
 ## Environment
 

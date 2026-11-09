@@ -1,5 +1,8 @@
 # Contributing to resembl
 
+Complements `AGENTS.md` (agent rules); when the two disagree, the commands
+in `AGENTS.md` are the ones exercised.
+
 ## Part 1: How We Work
 Bug reports, feature proposals, documentation fixes and code changes are all welcome. This guide covers setup, the quality gates, and how a change gets reviewed and released.
 
