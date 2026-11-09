@@ -782,6 +782,19 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertTrue(second["verified"])
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
 
+    def test_read_bounded_file_refuses_oversize(self):
+        from resembl.core import _MAX_SIDECAR_BYTES, _read_bounded_file
+
+        small = os.path.join(self._tmpdir.name, "small.bin")
+        with open(small, "wb") as f:
+            f.write(b"hello")
+        self.assertEqual(_read_bounded_file(small), b"hello")
+        big = os.path.join(self._tmpdir.name, "big.bin")
+        with open(big, "wb") as f:
+            f.write(b"x" * (_MAX_SIDECAR_BYTES + 1))
+        with self.assertRaises(ValueError):
+            _read_bounded_file(big)
+
 
 if __name__ == "__main__":
     unittest.main()

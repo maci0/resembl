@@ -163,7 +163,10 @@ def _fsync_quiet(path: str) -> None:
     except OSError as e:
         logger.warning("fsync failed for %s: %s", path, e)
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
 
 def _backup_stem(backup_path: str) -> str:
@@ -216,6 +219,29 @@ def _db_backup_runtime_name(backup_path: str) -> str:
     return f"{_backup_stem(backup_path)}.{DB_BACKUP_RUNTIME_NAME}"
 
 
+#: Hard ceiling on a sidecar / manifest read: ``verify_runtime`` refuses a
+#: manifest over 2 MiB, and a config is a few KiB.  Reading any of them
+#: unbounded (``f.read()``) loads the whole file before any check, so a
+#: planted multi-GiB file beside a backup pins gigabytes on the backup or
+#: verify path.  Mirrors ``resembl.runtime_attestation``'s 2 MiB cap.
+_MAX_SIDECAR_BYTES = 2 * 1024 * 1024
+
+
+def _read_bounded_file(path: str, limit: int = _MAX_SIDECAR_BYTES) -> bytes:
+    """Read *path* refusing a body over *limit* bytes.
+
+    ``open(...).read()`` buffers the whole file before any size check.
+    Read one byte past the limit so an oversize file is detected without
+    allocating unboundedly, raising :class:`ValueError` (a caller that
+    cannot bound the source fails closed instead of loading it).
+    """
+    with open(path, "rb") as f:
+        data = f.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"{path!r} exceeds {limit} bytes")
+    return data
+
+
 def _db_backup_runtime_read() -> tuple[bytes | None, str | None]:
     """Return ``(raw_bytes, sha256)`` for the live runtime manifest.
 
@@ -229,8 +255,7 @@ def _db_backup_runtime_read() -> tuple[bytes | None, str | None]:
     if not manifest_path:
         return None, None
     try:
-        with open(manifest_path, "rb") as f:
-            data = f.read()
+        data = _read_bounded_file(manifest_path)
     except FileNotFoundError:
         return None, None
     return data, hashlib.sha256(data).hexdigest()
@@ -269,8 +294,7 @@ def _db_backup_config_read() -> tuple[bytes | None, str | None]:
     the caller can decide whether to fail loud.
     """
     try:
-        with open(config_path_get(), "rb") as f:
-            data = f.read()
+        data = _read_bounded_file(config_path_get())
     except FileNotFoundError:
         return None, None
     return data, hashlib.sha256(data).hexdigest()
@@ -2784,9 +2808,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     manifest_path = os.path.join(backup_dir, manifest_name)
     # mkstemp (O_EXCL, random suffix): predictable pid name let a planter
     # symlink the temp at a victim file, truncating it on write.
-    fd, tmp_manifest = tempfile.mkstemp(
-        dir=backup_dir, prefix=f".{manifest_name}.", suffix=".tmp"
-    )
+    fd, tmp_manifest = tempfile.mkstemp(dir=backup_dir, prefix=f".{manifest_name}.", suffix=".tmp")
     try:
         os.fchmod(fd, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
@@ -3108,11 +3130,10 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         else:
             sidecar_path = os.path.join(manifest_dir, sidecar_name)
             try:
-                with open(sidecar_path, "rb") as f:
-                    sidecar_data = f.read()
+                sidecar_data = _read_bounded_file(sidecar_path)
                 if hashlib.sha256(sidecar_data).hexdigest() != manifest_config_hash:
                     issues.append("config mismatch: backup config differs from manifest")
-            except OSError:
+            except OSError, ValueError:
                 issues.append("config mismatch: backup config sidecar missing")
     # Runtime-manifest sidecar cross-check: when the manifest records a
     # runtime hash, the sidecar must exist and hash to it, exactly like
@@ -3133,11 +3154,10 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
         else:
             runtime_sidecar_path = os.path.join(manifest_dir, runtime_sidecar_name)
             try:
-                with open(runtime_sidecar_path, "rb") as f:
-                    runtime_sidecar_data = f.read()
+                runtime_sidecar_data = _read_bounded_file(runtime_sidecar_path)
                 if hashlib.sha256(runtime_sidecar_data).hexdigest() != manifest_runtime_hash:
                     issues.append("runtime mismatch: backup runtime manifest differs from manifest")
-            except OSError:
+            except OSError, ValueError:
                 issues.append("runtime mismatch: backup runtime manifest sidecar missing")
     # A missing manifest alone does not fail verification: the file may
     # predate manifests, and its contents are what matter.  A missing table,
