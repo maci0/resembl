@@ -21,7 +21,7 @@ annotated in Consequences below.
 | Threshold tuning  | Fixed Hamming radius  | Configurable threshold  |
 | Scalability       | O(n) linear scan      | O(1) amortized via LSH  |
 | Token ordering    | Lost (bag-of-words)   | Preserved via n-gram shingling |
-| Library maturity  | Custom implementation | `datasketch` (maintained, tested) |
+| Library maturity  | Custom implementation | `datasketch` at decision time (maintained, tested); vendored bit-compatibly since (ADR 005) |
 
 MinHash with n-gram shingling preserves local token ordering, which is critical for assembly code where instruction sequences carry structural meaning. LSH provides sub-linear query time as the database grows.
 
