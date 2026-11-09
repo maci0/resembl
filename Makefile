@@ -368,8 +368,17 @@ dist-verify:  ## Build dist/ twice and fail unless the two builds are byte-ident
 # It lands in build/ rather than dist/ because `dist` starts by removing that
 # directory, and an inventory a release is assessed with should not be deleted
 # by the next `make dist`.  Both are gitignored build output.
+#
+# `uv export` stamps a random `serialNumber` UUID and the wall-clock
+# `metadata.timestamp` on every run, so two runs of the same lockfile differ
+# in those two fields.  Normalizing them to a deterministic value — the
+# commit-time SOURCE_DATE_EPOCH and a UUID derived from the lockfile digest —
+# makes the inventory reproducible like the sdist/wheel: same commit, same
+# bytes, so a maintainer can diff two releases' SBOMs for a real dependency
+# change instead of a fresh UUID on every run.
 sbom:  ## Write build/sbom.cdx.json, the CycloneDX 1.5 inventory of the runtime dependencies
 	@mkdir -p build
 	uv export --locked --preview-features sbom-export --format cyclonedx1.5 \
 		--no-dev --quiet --output-file build/sbom.cdx.json
+	@SOURCE_DATE_EPOCH="$(SOURCE_DATE_EPOCH)" uv run --locked python -c "import json, uuid, hashlib; from datetime import datetime, timezone; p='build/sbom.cdx.json'; d=json.load(open(p)); e=int(__import__('os').environ.get('SOURCE_DATE_EPOCH','0')); d['metadata']['timestamp']=datetime.fromtimestamp(e, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'); d['serialNumber']='urn:uuid:'+str(uuid.UUID(hex=hashlib.sha256(open('uv.lock','rb').read()).hexdigest()[:32])); json.dump(d, open(p,'w'), indent=2); open(p,'a').write('\n')"
 	@echo "wrote build/sbom.cdx.json"
