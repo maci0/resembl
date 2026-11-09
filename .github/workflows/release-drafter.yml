@@ -21,6 +21,12 @@ permissions:
   contents: write
   pull-requests: write
 
+# Every `run:` step gets `set -euo pipefail`, so a failed command in a
+# pipeline fails the step instead of passing silently (see service.yml).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   update_release_draft:
     # The drafter writes the draft release and posts the changelog preview as

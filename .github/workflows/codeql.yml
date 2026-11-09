@@ -13,6 +13,17 @@ concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
 
+# Every `run:` step gets `set -euo pipefail`, so a failed command in a
+# pipeline fails the step instead of passing silently (see service.yml).
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
 jobs:
   analyze:
     name: Analyze
@@ -20,11 +31,6 @@ jobs:
     # under a green run. Bump deliberately, like a digest pin.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
     strategy:
       fail-fast: false
       matrix:
