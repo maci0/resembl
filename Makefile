@@ -215,19 +215,29 @@ backup-drill:  ## Prove the newest backup restores (docs/restore.md)
 		echo "make backup-drill needs BACKUP_DIR=<off-host-dir> (docs/restore.md)."; \
 		exit 1; \
 	fi
-	@set -e; \
-	if ! ls "$(BACKUP_DIR)"/assembly-*.db >/dev/null 2>&1; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
-	for candidate in $$(ls -t "$(BACKUP_DIR)"/assembly-*.db 2>/dev/null); do \
+	@uv run --locked python -c "import sys, os; sys.exit(0 if __import__('pathlib').Path(sys.argv[1]).is_dir() else 1)" "$(BACKUP_DIR)" || (echo "backup-drill: BACKUP_DIR is not a directory: $(BACKUP_DIR)"; exit 1); \
+	set -e; \
+	found=0; \
+	for candidate in "$(BACKUP_DIR)"/assembly-*.db; do [ -e "$$candidate" ] && found=1 && break; done; \
+	if [ "$$found" -eq 0 ]; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
+	candidates_file=$$(mktemp); \
+	uv run --locked python -c "import sys, os; from resembl.core import _db_backup_candidates; d=sys.argv[1]; names=[n for n in os.listdir(d) if n.startswith('assembly-') and n.endswith('.db')]; c=_db_backup_candidates(d, names); print(chr(10).join(os.path.join(d, n) for n in reversed(c)))" "$(BACKUP_DIR)" > "$$candidates_file"; \
+	while IFS= read -r candidate; do \
+		[ -n "$$candidate" ] || continue; \
 		scratch=$$(mktemp -d); \
-		cp "$$candidate" "$$scratch/restored.db"; \
-		if uv run --locked python -m resembl verify-backup "$$scratch/restored.db" >/dev/null 2>&1; then \
+		basename_candidate=$$(basename "$$candidate"); \
+		cp "$$candidate" "$$scratch/$$basename_candidate"; \
+		stem=$$(basename "$$candidate" .db); \
+		for sidecar in .json .config.toml .runtime-manifest.json; do src="$${candidate%.*}$$sidecar"; if [ -e "$$src" ]; then cp "$$src" "$$scratch/$$stem$$sidecar"; fi; done; \
+		if uv run --locked python -m resembl verify-backup "$$scratch/$$basename_candidate"; then \
 			printf '%s\t%s\t%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(basename "$$candidate")" "verify-backup ok (drill)" >> "$(BACKUP_DIR)/.restore-drill.log"; \
 			echo "backup-drill: $$candidate restored and verified in $$scratch"; \
-			rm -rf "$$scratch"; exit 0; \
+			rm -rf "$$scratch"; rm -f "$$candidates_file"; exit 0; \
 		fi; \
 		echo "backup-drill: $$candidate failed verify-backup (trying next older backup)"; \
 		rm -rf "$$scratch"; \
-	done; \
+	done < "$$candidates_file"; \
+	rm -f "$$candidates_file"; \
 	echo "backup-drill: no assembly-*.db in $(BACKUP_DIR) passed verify-backup"; exit 1
 
 # The experimental Go query service in service/ has its own module and its own

@@ -40,11 +40,16 @@ at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>` —
 it copies the newest verified backup to a scratch path, `verify-backup`
 proves it there, and records (date, backup filename, verify result) in
 `<off-host-dir>/.restore-drill.log` beside the backup directory.  The drill
-walks newest-first and proves the newest backup that *passes* verify-backup,
+walks newest-first by the timestamp embedded in the filename (the same
+order `db_backup` retains and prunes by, `_db_backup_candidates`), and
+proves the newest backup that *passes* verify-backup,
 so a corrupt newest copy cannot block the drill forever while an older
 good copy sits unproven.  `db_backup` re-verifies a reused retained
 backup and refuses a copy with a `-wal`/`-shm` sidecar, but only the drill
-proves the restore procedure itself.
+proves the restore procedure itself.  The drill copies NLP backup,
+manifest, and sidecars under their original names so `verify-backup`
+cross-checks the manifest and config hash rather than reporting "no
+readable manifest".
 
 `make backup-drill` covers SQLite `assembly-*.db` copies only.  For DuckDB,
 PostgreSQL, or MySQL there is no `resembl backup` to drill: stop every
