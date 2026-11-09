@@ -2170,6 +2170,7 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(sorted(written), f)
+            f.write("\n")
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, os.path.join(export_dir, _EXPORT_MANIFEST_NAME))
@@ -2742,6 +2743,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         fd = os.open(tmp_manifest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(manifest, f)
+            f.write("\n")
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_manifest, manifest_path)
@@ -3085,9 +3087,7 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
                 with open(runtime_sidecar_path, "rb") as f:
                     runtime_sidecar_data = f.read()
                 if hashlib.sha256(runtime_sidecar_data).hexdigest() != manifest_runtime_hash:
-                    issues.append(
-                        "runtime mismatch: backup runtime manifest differs from manifest"
-                    )
+                    issues.append("runtime mismatch: backup runtime manifest differs from manifest")
             except OSError:
                 issues.append("runtime mismatch: backup runtime manifest sidecar missing")
     # A missing manifest alone does not fail verification: the file may
