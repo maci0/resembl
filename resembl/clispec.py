@@ -307,8 +307,9 @@ _RESEMBL_ERRORS: list[dict[str, Any]] = [
         "exit_code": 1,
         "retryable": False,
         "description": (
-            "export, export-yara, import, rm, reindex, clean, and backup need a terminal"
-            " to confirm. Pass --force to proceed without a prompt."
+            "export, export-yara, import, rm, reindex, clean, backup, merge, and "
+            "collection delete need a terminal to confirm. Pass --force to proceed "
+            "without a prompt."
         ),
     },
 ]
