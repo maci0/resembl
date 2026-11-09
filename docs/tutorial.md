@@ -107,7 +107,7 @@ re-imported) without carrying retired snippets along.
 resembl normalizes registers from multiple architectures:
 
 - **x86/x64:** `eax`, `rbx`, `r15d` → `REG`
-- **ARM:** `r0`, `x19`, `w0`, `lr` → `REG`
+- **ARM/ARM64:** `r0`, `x19`, `w0`, `sp`/`lr`, `s1`, `d0`, `fa7` → `REG`
 - **MIPS:** `$t0`, `$ra`, `$f1` → `REG`
 - **RISC-V:** `a0`, `s1`, `t3`, `fa7` → `REG`
 

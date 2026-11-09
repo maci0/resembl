@@ -55,7 +55,7 @@ The four scoring helpers below (`shingle_weight`, `score_hybrid`,
 from their module (`from resembl.scoring import score_hybrid`).
 
 ### `code_tokenize(code_snippet: str, normalize: bool = True) → list[str]`
-Tokenize assembly code using the Pygments NASM lexer. When `normalize=True`, registers become `REG`, immediates become `IMM`, labels become `LABEL`, and memory sizes become `MEM_SIZE`. Supports x86, ARM, MIPS, and RISC-V register sets.
+Tokenize assembly code using the Pygments NASM lexer. When `normalize=True`, registers become `REG`, immediates become `IMM`, labels become `LABEL`, and memory sizes become `MEM_SIZE`. Supports x86 registers, 32-bit ARM and ARM64 (`r0`–`r15`, `x0`–`x30`/`w0`–`w30`, `sp`/`lr`/`ip`, `s0`–`s31`/`d0`–`d31`, FP `fa0`–`fa7`), MIPS (`$t0`–`$t9`, `$a0`–`$a3`, `$s0`–`$s7`, `$ra`, …), and RISC-V (`x1`–`x31`, `a0`–`a7`, `t0`–`t6`, `s0`/`s1`/`s2`–`s11`, `f0`–`f31`).
 
 ### `code_create_minhash(code_snippet: str, normalize: bool = True, ngram_size: int = 3, num_perm: int = 128) → MinHash`
 Create a MinHash fingerprint for a code snippet using weighted n-gram shingling. Rare instruction shingles get 3× insertion weight, common instruction shingles get 1×.
@@ -67,14 +67,14 @@ Batch version of `code_create_minhash` for multiple snippets.
 Return the SHA256 hex digest of the normalized snippet.
 
 ### `string_normalize(code_snippet: str) → str`
-Normalize an assembly snippet to a canonical string (strips comments, collapses whitespace).
+Normalize an assembly snippet to a canonical string (strips comments, collapses whitespace runs to a single separator).
 
 ## Snippet Operations
 
-### `snippet_add(session, name: str, code: str, ngram_size: int = 3) → Snippet | None`
+### `snippet_add(session, name: str, code: str, ngram_size: int = 3, num_perm: int = 128) → Snippet | None`
 Add a snippet or alias. Stores the MinHash fingerprint in a compact packed format and keeps the database-backed LSH index in sync. Returns `None` for empty (blank) code.
 
-### `snippet_prepare(name: str, code: str, ngram_size: int = 3) → tuple | None`
+### `snippet_prepare(name: str, code: str, ngram_size: int = 3, num_perm: int = 128) → tuple | None`
 Pure function computing `(checksum, name, code, minhash_bytes)` for a snippet: safe to run in worker processes for parallel bulk import.
 
 ### `snippet_add_batch(session, prepared_items: list[tuple], ...) → dict`
@@ -158,8 +158,8 @@ Extract a simplified control-flow graph from assembly code. Returns `{num_blocks
 ### `cfg_similarity(cfg1: dict, cfg2: dict) → float`
 Compute structural similarity between two CFGs (0.0–1.0) using block/edge ratios and cosine similarity on block-size histograms.
 
-### `snippet_version_list(session, checksum: str) → list[dict]`
-Return version history for a snippet (metadata columns only; no code or fingerprint is loaded).
+### `snippet_version_list(session, checksum: str, *, limit: int | None = None) → list[dict]`
+Return version history for a snippet (metadata columns only; no code or fingerprint is loaded). `limit` caps the returned history; `None` (the default) is unbounded, `0` or less returns an empty list.
 
 ### `snippet_search_by_name(session, pattern: str, limit: int = 50) → list[Snippet]`
 Case-insensitive substring search over snippet names (NFC-normalized, `casefold` comparison). Names live in a JSON column so no index can answer the search; it scans `(checksum, names)` in checksum order and verifies each decoded name in Python. *limit* caps the result after verification.

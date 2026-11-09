@@ -15,9 +15,9 @@ A value is never colored for decoration: the score is the one number in
 a judgment, not because the row needs a hue.
 
 The role palettes below are the shared Relumea brand values (LIGHT mirrors
-the web word tokens; TERMINAL balances black and white grounds), the same
-ones ``status_colors.py`` previously carried separately; they live here
-now so the CLI's presentation concerns sit in one module.
+the web word tokens; TERMINAL balances black and white grounds); they live
+here now so the CLI's presentation concerns sit in one module, with
+``resembl.status_colors`` kept as a compatibility shim over them.
 """
 
 from __future__ import annotations
