@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 from sqlalchemy import event, func
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from resembl.cache import lsh_index_build
@@ -136,6 +136,30 @@ class TestSnippetWrites(BaseDBTest):
         self.assertEqual(second["added"], 0)
         self.assertEqual(second["aliased"], 0)
         self.assertEqual(_state(self.session), after_first)
+
+    def test_add_batch_persistent_integrity_error_does_not_recurse_forever(self):
+        """A non-concurrent IntegrityError surfaces after one retry, not a hang.
+
+        The insert block retries once for the concurrent-duplicate race
+        (the same bound ``db_merge`` uses).  Without the bound a persistent
+        constraint failure -- not the race the retry exists for -- recursed
+        until ``RecursionError``, re-reading the dedup state on every pass.
+        """
+        import resembl.core as core
+
+        prepared = [snippet_prepare("proc", "MOV EAX, 1", 3)]
+
+        def _boom(session, rows, batch_size=500):  # pylint: disable=unused-argument
+            raise IntegrityError("INSERT INTO snippet", {}, Exception("persistent"))
+
+        original = core._insert_snippet_rows
+        core._insert_snippet_rows = _boom  # type: ignore[method-assign]
+        try:
+            with self.assertRaises(IntegrityError):
+                snippet_add_batch(self.session, prepared)
+        finally:
+            core._insert_snippet_rows = original  # type: ignore[method-assign]
+        self.assertEqual(_state(self.session), {"snippets": [], "collections": []})
 
     def test_name_add_twice_is_a_noop(self):
         snippet = snippet_add(self.session, "proc", "MOV EAX, 1")

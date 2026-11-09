@@ -831,6 +831,8 @@ def snippet_add_batch(
     batch_size: int = 500,
     ngram_size: int = 3,
     num_perm: int = NUM_PERMUTATIONS,
+    *,
+    _add_batch_retry_seen: bool = False,
 ) -> dict:
     """Insert many prepared snippets in one pass.
 
@@ -933,8 +935,23 @@ def snippet_add_batch(
             # or a retry racing the original).  The rows now exist, so
             # converge by re-running the dedup pass — the same strategy the
             # index-sync block below already uses for the same race.
+            # Bounded to one retry: a persistent IntegrityError (a constraint
+            # other than the concurrent-duplicate race) would otherwise
+            # recurse forever, and each retry re-reads and re-inserts the
+            # same batch.  Like ``db_merge``, the second collision surfaces
+            # as an error instead of spinning; ``snippet_add`` already
+            # re-raises when the row still does not exist.
             session.rollback()
-            return snippet_add_batch(session, prepared_items, batch_size, ngram_size, num_perm)
+            if _add_batch_retry_seen:
+                raise
+            return snippet_add_batch(
+                session,
+                prepared_items,
+                batch_size,
+                ngram_size,
+                num_perm,
+                _add_batch_retry_seen=True,
+            )
     if new_snippets or aliased:
         # The index rows join the snippet rows' transaction: a commit that
         # publishes a snippet must publish the buckets that make it findable.
@@ -950,9 +967,19 @@ def snippet_add_batch(
             session.commit()
         except IntegrityError:
             # Concurrent batch committed the same checksums first; converge
-            # by re-running the dedup pass on the now-current rows.
+            # by re-running the dedup pass on the now-current rows.  Same
+            # one-retry bound as the insert block above.
             session.rollback()
-            return snippet_add_batch(session, prepared_items, batch_size, ngram_size, num_perm)
+            if _add_batch_retry_seen:
+                raise
+            return snippet_add_batch(
+                session,
+                prepared_items,
+                batch_size,
+                ngram_size,
+                num_perm,
+                _add_batch_retry_seen=True,
+            )
         if index_threshold is not None:
             lsh_pickle_cache_remove(index_threshold)
         if new_snippets:
