@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `e85b123`, with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `18d825b` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force), with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)

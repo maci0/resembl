@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`e85b123`, with the loopback-client fix (the opener built by
+`18d825b` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `6214501` payload copy, `4102604` datasketch cap, `18d825b` dockerignore/dist), with the loopback-client fix (the opener built by
 `build_opener(ProxyHandler({}))` now opened via `OpenerDirector.open`
 instead of being passed as `urlopen`'s context — `599923a`,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py`
@@ -28,7 +28,7 @@ now re-verifies before reporting success, `lsh_meta_get` fails instead of
 rebuilding on a transient lock, the CSV guard covers Unicode leading
 characters, the YARA escape covers code points above U+00FF, and the Go
 adapter surfaces engine error detail in the operator log only. Those land in
-R17, B2, B9, and Mitigations below. A 2026-11-09 pass re-checked the post-4.0.0
+R17, B2, B9, and Mitigations below. The last `e85b123..18d825b` pass corrects the stale `_sync_path`/`_sync_dir` names to `_fsync_quiet` (`d982e94` mkstemp), the config-lock line to `8e078ed` bounded wait, B7 to the `91c7aa1` SHA-256 cache partition, the env table to add `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED`/`RESEMBL_LOG_LEVEL` (`5303616`), and the dockerignore row to `18d825b`. A 2026-11-09 pass re-checked the post-4.0.0
 surface: `db_merge` now masks credentials in its source-URL error path
 (`0afeba7`, `db_merge` in `resembl/core.py`) which corrects R6 and SECURITY.md
 below; `serve` now answers `413` for oversized bodies (`2cd23c9`,
@@ -369,6 +369,8 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
 | `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. Parsed as decimal: an unparseable value fails fast (`ValueError` in `sample_rng`, `resembl/diagnostics.py`, `9aeab2b` base-10 `int`; in `_retry_sleep`, `resembl/models.py`, `ed0705b`; and at startup in the Go `New`/`newRequestID`, `service/service.go`, `9aeab2b` base-10 `ParseInt`), so hex/octal spellings are rejected, not silently reinterpreted. |
 | `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. An unparseable value fails fast on every read path (`timestamp_now`/`monotonic_now`/`_retry_sleep` in `resembl/models.py`, `ed0705b`); the Go service validates it at startup in `New` via `isISO8601Instant` (`service/service.go`, `ed0705b`) and `parse_instant` treats ISO `-00:00` as not-an-instant (`9d6f2f0`). |
+| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | `resembl/paths.py:57`, `resembl/cli.py:941` | Non-blank value opts in to a non-loopback `serve --host` bind without `--allow-unauthenticated` (`5303616`); blank counts as unset; either opts in. Same trust as the flag. |
+| `RESEMBL_LOG_LEVEL` | `resembl/paths.py:65`, `resembl/cli.py:1282` | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` (case-insensitive); `-v`/`-q` win; invalid aborts the command (`5303616`). A hostile value can only raise verbosity or abort, not change data. |
 | `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). `serve` fails startup on a malformed/unreadable file (`_find_defaults_load` in `resembl/server.py` via `_read_config_dict` in `resembl/config.py`, `ConfigError`); interactive commands keep the report-and-default behavior of `load_config`. |
 
 The config file holds six fields (`resembl/config.py:114`):
@@ -432,7 +434,7 @@ first (`db_backup_for_delete` in `resembl/core.py`, `a4dba24`)
 unless `--no-backup` is given, so a merge that corrupts the corpus
 is restorable; the backup does not authenticate the source.
 
-**B7, secrets to code.** The database URL may embed a password. It is masked for display (`resembl/paths.py:63`, used at `resembl/find_client.py:124`) but used unmasked to derive the port-file name (`resembl/paths.py:118`) and to open the connection. The in-process result cache keys on the engine URL rendered with the password hidden (`6273fa0`, `_find_one` in `resembl/server.py`, `render_as_string(hide_password=True)`), so credentials do not persist in the cache keys.
+**B7, secrets to code.** The database URL may embed a password. It is masked for display (`resembl/paths.py:63`, used at `resembl/find_client.py:124`) but used unmasked to derive the port-file name (`resembl/paths.py:118`) and to open the connection. The in-process result cache keys on the engine URL rendered with the password hidden (`6273fa0`, `_find_one` in `resembl/server.py`, `render_as_string(hide_password=True)`), so credentials do not persist in the cache keys. Since `91c7aa1` the cache partition id itself is the SHA-256 digest of the full unmasked URL (`_db_cache_id` in `resembl/server.py`, `hide_password=False` inside the digest), so two password-bearing URLs that differ only in credentials no longer share partitions and no plaintext credential persists beyond the digest input.
 
 **B9, Go service to pinned engine.** The Go service (`service/service.go:175`)
 is the only boundary that authenticates a caller: it calls
@@ -749,7 +751,7 @@ workflow does not re-run either.
 | Slow-request WARNING at default level | `_SLOW_REQUEST_SECONDS` in `resembl/server.py:923`, `resembl/server.py:1790` | A warm server that has stopped being warm leaves no other default-level trace |
 | Double-serve check | `serve` in `resembl/server.py:2007` | Two servers advertising one database |
 | Atomic file publication | `resembl/server.py:2125`, `resembl/config.py:245`, `resembl/core.py:2279` | Partial-file reads by a concurrent client |
-| Durable file publication (fsync) | `resembl/core.py:126` (`_sync_path`), `resembl/core.py:147` (`_sync_dir`) | An OS crash after rename leaving a zero-length or renamed-away backup/export at its published name; `_sync_path` fsyncs the file before publish and `_sync_dir` fsyncs its directory entry after rename, failures ignored on filesystems that refuse them |
+| Durable file publication (fsync) | `resembl/core.py:146` (`_fsync_quiet`) | An OS crash after rename leaving a zero-length or renamed-away backup/export at its published name; `_fsync_quiet` fsyncs the file and its directory entry, failures ignored on filesystems that refuse them. Temp files since `d982e94` use `mkstemp` (O_EXCL, random suffix) instead of predictable pid names, so a planter cannot pre-create or symlink the temp path. |
 | Cache directory created `0o700` | `serve` in `resembl/server.py:2116` | Another local user reading or writing the port file, for a directory the server itself creates |
 | Port file created `0o600` | `resembl/server.py:2125` | The same, for the file inside it. Neither checks a directory that already existed |
 | Fingerprint magic check | `minhash_unpack` in `resembl/scoring.py:1014` | Deserialization of attacker-controlled bytes from a hostile database or merge source |
@@ -757,12 +759,12 @@ workflow does not re-run either.
 | Backup filename percent-encoded before SQLite URI | `resembl/core.py:2129` | A `?`/`#` in a backup filename injecting SQLite URI params (e.g. `?mode=rwc`) and escaping the read-only mode |
 | Go container runs unprivileged | `service/Dockerfile` (`FROM scratch`, `USER 65532:65532`) | A compromised service process holding root in the image |
 | Service image ships license text | `service/Dockerfile` (`COPY LICENSE NOTICE /licenses/`, `7ea24f8`) | The GPL-3.0-only grant in an OCI label alone did not accompany the binary with its license text |
-| Docker build context exclusions | `.dockerignore` (root; `service/.dockerignore` mirrors it) | Local databases, benchmark data, and build output shipped in the service image context (`docker build -f service/Dockerfile .` uses the repository root as context, so Docker reads the root file) |
+| Docker build context exclusions | `.dockerignore` (root; `service/.dockerignore` mirrors it; `18d825b` adds `benchmarks/`, `*.db-wal`/`-shm`, `*.sqlite3-wal`/`-shm` nested forms) | Local databases, benchmark data, and build output shipped in the service image context (`docker build -f service/Dockerfile .` uses the repository root as context, so Docker reads the root file) |
 | YARA string escaping | `resembl/core.py:989` | A snippet name breaking out of a generated rule string |
 | Config value coercion and range check | `resembl/config.py:157`, `resembl/config.py:74` | A hand-edited config putting a raw TOML type or an out-of-range value into a numeric field |
 | `LIKE` metacharacter escaping | `resembl/cli.py:726`, `resembl/models.py:180` | A checksum prefix like `%` resolving to an arbitrary snippet |
 | Password masking | `resembl/paths.py:63` | Credentials in a printed URL |
-| Config file lock | `resembl/config.py:185` | Lost updates between concurrent CLI processes |
+| Config file lock | `resembl/config.py:235` (`_config_file_lock`, `8e078ed` bounded 5s wait, `TimeoutError` on timeout) | Lost updates between concurrent CLI processes; unbounded wait now fails closed instead of hanging a save |
 | Dependency CVE floor | `pyproject.toml:34` | The Pygments ReDoS advisory |
 | CI static analysis and dependency review | `.github/workflows/codeql.yml:29` (`language: [ 'python', 'go' ]`), `.github/workflows/dependency-review.yml:50` (`fail-on-severity: moderate`) | Python and Go SAST and dependency review of `main` and of pull requests; the Go tree in `service/` also gets `gofmt`/`go vet`/`go test -race` via `.github/workflows/service.yml` (`make service-check`). None of the SAST or dependency review runs on a release tag (R11) |
 | Release SBOM | `.github/workflows/sbom.yml:9` | An inventory of the runtime graph attached to the build, on `main` and on `v*` tags |
