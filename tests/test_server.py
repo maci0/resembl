@@ -2637,6 +2637,74 @@ class TestResultCacheCoherence(unittest.TestCase):
         after = _find_one(second, body, query)
         self.assertIsNot(after, cached, "a write from another connection must invalidate the entry")
 
+    def test_db_cache_id_distinguishes_passwords(self):
+        """Two databases differing only by password never share cache entries.
+
+        A masked URL (``user:***@host/db``) collapses ``secret1`` and
+        ``secret2`` onto one key, so with matching version counters one
+        tenant's payload could be served to the other.
+        """
+        from unittest.mock import MagicMock
+
+        from resembl.server import _db_cache_id
+
+        engine_a = MagicMock()
+        engine_b = MagicMock()
+        engine_a.url.render_as_string.side_effect = lambda hide_password=True: (
+            "postgresql+pg8000://user:***@dbhost/db"
+            if hide_password
+            else "postgresql+pg8000://user:secret1@dbhost/db"
+        )
+        engine_b.url.render_as_string.side_effect = lambda hide_password=True: (
+            "postgresql+pg8000://user:***@dbhost/db"
+            if hide_password
+            else "postgresql+pg8000://user:secret2@dbhost/db"
+        )
+        self.assertNotEqual(_db_cache_id(engine_a), _db_cache_id(engine_b))
+
+    def test_batch_session_mid_batch_write_is_not_served_as_current(self):
+        """A writer committing between two finds of one batch is visible to the second.
+
+        ``/find-batch`` runs up to 1000 queries on one session, whose read
+        snapshot outlives the batch.  Filing the second payload under the
+        advanced counter while it was computed from the pre-write snapshot
+        would serve stale results as current.
+        """
+        from resembl.server import _RESULT_CACHE, _find_one
+
+        _RESULT_CACHE.clear()
+        self.addCleanup(_RESULT_CACHE.clear)
+        query = "push ebx\nmov eax, 5\npop ebx\nret"
+        body = {"top_n": 5}
+        params = ResemblConfig()
+
+        batch_session = Session(self._engine)
+        self.addCleanup(batch_session.close)
+
+        first = _find_one(batch_session, body, query, params)
+        self.assertGreater(first["lsh_candidates"], 0)
+
+        # Writer commits while the batch session's snapshot is still open.
+        # ``snippet_add`` keeps the LSH index in sync, so the new snippet
+        # (close to the query's shape) becomes a candidate.
+        from resembl.core import snippet_add
+
+        writer = Session(self._engine)
+        self.addCleanup(writer.close)
+        snippet_add(writer, "mid_batch", "push ebx\nmov eax, 250\npop ebx\nret")
+
+        second = _find_one(batch_session, body, query, params)
+        # The second find must reflect the write, not file the old snapshot
+        # under the new version (which the next request would serve).
+        self.assertGreater(second["lsh_candidates"], first["lsh_candidates"])
+
+        # The entry filed is the current one: a fresh request hits it and
+        # agrees with what the batch just computed.
+        fresh = Session(self._engine)
+        self.addCleanup(fresh.close)
+        third = _find_one(fresh, body, query, params)
+        self.assertEqual(third["lsh_candidates"], second["lsh_candidates"])
+
 
 class TestCLIServerEndToEnd(unittest.TestCase):
     """The real CLI `serve` + `find` wiring, via subprocesses."""

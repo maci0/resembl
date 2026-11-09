@@ -88,13 +88,13 @@ def _seeded_uuid_hex() -> str:
 #: ``PRAGMA data_version`` increments on every commit, so a cached result is
 #: returned only while the database is unchanged — repeated queries (triage
 #: workflows re-checking the same hashes) answer in ~0.1 ms instead of
-#: ~1.4 ms, never stale.  The key ends with the serving engine's URL: one
-#: process may run several servers for different databases (tests,
-#: embedded callers), and the version counter is per-database — without that
-#: final component a hit computed for database A could be served to database
-#: B whenever both counters happened to carry the same value.  It starts with
-#: :func:`_query_cache_key`, not the query itself, so the entry-count bound
-#: is also a memory bound.
+#: ~1.4 ms, never stale.  The key ends with a digest of the serving engine's
+#: full URL (see :func:`_db_cache_id`): one process may run several servers
+#: for different databases (tests, embedded callers), and the version counter
+#: is per-database — without that final component a hit computed for database
+#: A could be served to database B whenever both counters happened to carry
+#: the same value.  It starts with :func:`_query_cache_key`, not the query
+#: itself, so the entry-count bound is also a memory bound.
 #:
 #: The version is just the integer counter: the file-fingerprint pair was
 #: removed because a replaced file restarts the counter at the same value —
@@ -537,6 +537,21 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     )
 
 
+def _db_cache_id(engine: Engine) -> str:
+    """Return the result-cache key component identifying *engine*'s database.
+
+    A masked URL collapses distinct databases that differ only in the
+    password (``postgresql+pg8000://user:secret1@host/db`` vs
+    ``...:secret2@host/db``) onto one key, so a payload computed for one
+    tenant's corpus could be served to another whenever their version
+    counters matched.  Hash the unmasked URL instead: credentials never
+    appear verbatim in the key, yet different passwords keep distinct keys.
+    """
+    return hashlib.sha256(
+        engine.url.render_as_string(hide_password=False).encode("utf-8", errors="surrogatepass")
+    ).hexdigest()
+
+
 def _find_one(
     session: Session,
     body: dict,
@@ -550,9 +565,7 @@ def _find_one(
     """
     params = params if params is not None else _DEFAULT_FIND_PARAMS
     request = _parse_find_request(body, params)
-    # The masked URL identifies the served database without retaining
-    # credentials in the long-lived cache keys.
-    db_id = _session_engine(session).url.render_as_string(hide_password=True)
+    db_id = _db_cache_id(_session_engine(session))
     key = (
         _query_cache_key(query),
         request.top_n,
@@ -583,6 +596,16 @@ def _find_one(
         cached = _result_cache_get(key, version)
         if cached is not None:
             return cached
+        # A long-lived session (a ``/find-batch`` handles up to 1000 queries
+        # on one session) holds its read snapshot for the whole batch: a
+        # writer that commits mid-batch advances the probe's counter but
+        # stays invisible to this session's reads.  Filing under the
+        # post-compute counter would then serve pre-write results as
+        # current.  Start a fresh snapshot so the find reads the same
+        # database state the filed version describes — the find already
+        # commits (cold-start build), so ending its transaction first is
+        # the only way the re-sampled version and the payload agree.
+        session.rollback()
         payload = _find_uncached(session, query, request)
         # A write committed during the find advances the version; filing
         # the payload under the older one would serve pre-write results
@@ -2054,7 +2077,7 @@ class _FindServer(
         # until the LRU happened to evict past them.
         engine = getattr(self, "engine", None)
         if engine is not None:
-            _result_cache_release(engine.url.render_as_string(hide_password=True))
+            _result_cache_release(_db_cache_id(engine))
             # The result cache's per-database version probe holds a second
             # connection to this same database; releasing it with the engine
             # it was created for keeps the handle from outliving the
