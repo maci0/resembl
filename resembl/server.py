@@ -2507,6 +2507,8 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     httpd.is_non_loopback = not httpd.allowed_hosts
+    tmp_port_path: str | None = None
+    tmp_port_path_open = False
     try:
         # 0o700 at creation: the cache dir holds the advertisement, and both
         # clients trust its contents to name the port they send their query
@@ -2529,11 +2531,22 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         fd, tmp_port_path = tempfile.mkstemp(
             dir=os.path.dirname(port_file), prefix=".server-", suffix=".tmp"
         )
-        with open(fd, "w", encoding="utf-8") as f:
-            f.write(str(httpd.server_address[1]))
-            f.flush()
-            os.fsync(f.fileno())
+        tmp_port_path_open = True
+        fd_open = True
+        try:
+            with open(fd, "w", encoding="utf-8") as f:
+                fd_open = False
+                f.write(str(httpd.server_address[1]))
+                f.flush()
+                os.fsync(f.fileno())
+        finally:
+            if fd_open:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
         os.replace(tmp_port_path, port_file)
+        tmp_port_path_open = False
         # fsync the directory so the rename itself survives an OS crash;
         # without it the port file can vanish while the server keeps
         # listening, orphaning it for every find client.  Windows cannot
@@ -2556,6 +2569,9 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # above): ``server_close`` disposes the engine.  The temp is
         # removed only here — after a successful replace it no longer
         # exists, and deleting it then would unlink the live port file.
+        if not tmp_port_path_open or tmp_port_path is None:
+            httpd.server_close()
+            raise
         try:
             os.remove(tmp_port_path)
         except OSError:
