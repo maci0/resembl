@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `7392356` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `fb78133` non-loopback `/metrics` gate, `de205f7` runtime-manifest fail-fast, `cf2a276` terminal/error-detail sanitization, `2d7bc3f` handler-rejection counter, `5662563` config/clock/seed fail-fast, `c6a76b3` Go 429, `e2d4500` ASCII-only protocol-token folding), with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `bebc0fd` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `fb78133` non-loopback `/metrics` gate, `de205f7` runtime-manifest fail-fast, `cf2a276` terminal/error-detail sanitization, `2d7bc3f` handler-rejection counter, `5662563` config/clock/seed fail-fast, `c6a76b3` Go 429, `e2d4500` ASCII-only protocol-token folding), with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
@@ -31,7 +31,7 @@ to opt out), the single-file backup publication (`3d77755`, `db_backup` in
 printable-only; `26e95cf`, byte-counted in `ef333e8`), the fail-fast
 `RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths (base-10
 only), the
-warm-server refusal log line before the in-process fallback, and the Go
+warm-server refusal log line before the in-process fallback, the `pool_pre_ping`/`pool_timeout` pooled-connection health check (`7ff2128`, `create_db_engine` in `resembl/database.py`), the terminal output sanitization (`cf2a276`, `_display` in `resembl/cli.py`), and the Go
 service's graceful drain on SIGINT/SIGTERM) are documented in `CHANGELOG.md`.
 
 ## Reporting a vulnerability

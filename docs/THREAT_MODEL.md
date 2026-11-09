@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`7392356` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `6214501` payload copy, `4102604` datasketch cap, `18d825b` dockerignore/dist, `fb78133` non-loopback `/metrics` gate, `de205f7` runtime-manifest fail-fast, `cf2a276` terminal/error-detail sanitization, `2d7bc3f` handler-rejection counter, `5662563` config/clock/seed fail-fast, `c6a76b3` Go 429, `e2d4500` ASCII-only protocol-token folding), with the loopback-client fix (the opener built by
+`bebc0fd` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force, `6214501` payload copy, `4102604` datasketch cap, `18d825b` dockerignore/dist, `fb78133` non-loopback `/metrics` gate, `de205f7` runtime-manifest fail-fast, `cf2a276` terminal/error-detail sanitization, `2d7bc3f` handler-rejection counter, `5662563` config/clock/seed fail-fast, `c6a76b3` Go 429, `e2d4500` ASCII-only protocol-token folding), with the loopback-client fix (the opener built by
 `build_opener(ProxyHandler({}))` now opened via `OpenerDirector.open`
 instead of being passed as `urlopen`'s context — `599923a`,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py`
@@ -34,7 +34,7 @@ surface: `db_merge` now masks credentials in its source-URL error path
 below; `serve` now answers `413` for oversized bodies (`2cd23c9`,
 `resembl/server.py` `_read_body`); `snippet_version_list`
 (`ec7a77d`, `resembl/core.py`), the LSH-metadata streaming in
-`resembl/models.py`, and the similarity sample in `resembl/diagnostics.py`
+`resembl/lsh.py`, and the similarity sample in `resembl/diagnostics.py`
 now stream / select only needed columns (`ec7a77d`); and `cfg_similarity`
 (`8f9e69c`, `resembl/scoring.py`) rejects non-integer counts. The
 `file:line` audit this pass found two out-of-range references
@@ -120,10 +120,10 @@ backup (`db_backup_for_delete` in `resembl/core.py`), which a failed
 backup aborts before deletion (`8dcee74`, `resembl/cli.py` `rm` /
 `clean` / `collection_delete_cmd`); an unparseable `RESEMBL_NOW` or
 `RESEMBL_SEED` now fails fast on the read/retry paths too, not only on
-stamping writes (`ed0705b`, `resembl/models.py` `_retry_sleep`,
+stamping writes (`ed0705b`, `resembl/clock.py` `_retry_sleep`,
 `service/service.go` `New` and `isISO8601Instant`); `parse_instant`
 treats ISO `-00:00` as not-an-instant (`9d6f2f0`,
-`resembl/models.py`); the CLI warm-server client logs a refusal that
+`resembl/clock.py`); the CLI warm-server client logs a refusal that
 arrives as a `200 {"error": ...}` envelope before falling back
 (`1f06887`, `resembl/cli.py` `_server_request`); the Go
 `resembl-service` drains in-flight queries on SIGINT/SIGTERM
@@ -218,9 +218,9 @@ and B7 below — the earlier masked-URL wording (`6273fa0`,
 ordering is now by the embedded timestamp, not filesystem mtime
 (`79cdd8a`, `_db_backup_candidates` in `resembl/core.py`), and the
 config-file lock uses the pinned logical clock (`monotonic_now` /
-`_retry_sleep` in `resembl/models.py`), which corrects R17 below;
+`_retry_sleep` in `resembl/clock.py`), which corrects R17 below;
 `RESEMBL_NOW` without an offset is now UTC, never host local zone
-(`5d2aaa3`, `parse_instant` / `timestamp_now` in `resembl/models.py`);
+(`5d2aaa3`, `parse_instant` / `timestamp_now` in `resembl/clock.py`);
 `snippet_add_batch` bounds its `IntegrityError` retry to one attempt
 (`4bef595`, `snippet_add_batch` in `resembl/core.py`); the CSV formula
 guard now strips a wider invisible set (U+2060, U+00AD, U+180E, U+061C,
@@ -415,8 +415,8 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `RESEMBL_ENGINE_URL` (Lambda only) | `service/cmd/resembl-lambda/main.go:17` | Trusted verbatim once surrounding whitespace is trimmed, and a blank value counts as unset (`6963a53`, `strings.TrimSpace`); selects the loopback engine the adapter dials. `NewLocalEngine` refuses a non-loopback host. |
 | `RESEMBL_CONFIG_DIR` | `resembl/paths.py:97` | Trusted verbatim; selects the config file. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
-| `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. Parsed as decimal: an unparseable value fails fast (`ValueError` in `sample_rng`, `resembl/diagnostics.py`, `9aeab2b` base-10 `int`; in `_retry_sleep`, `resembl/models.py`, `ed0705b`; and at startup in the Go `New`/`newRequestID`, `service/service.go`, `9aeab2b` base-10 `ParseInt`), so hex/octal spellings are rejected, not silently reinterpreted. |
-| `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. An unparseable value fails fast on every read path (`timestamp_now`/`monotonic_now`/`_retry_sleep` in `resembl/models.py`, `ed0705b`); the Go service validates it at startup in `New` via `isISO8601Instant` (`service/service.go`, `ed0705b`) and `parse_instant` treats ISO `-00:00` as not-an-instant (`9d6f2f0`). A value without an offset is UTC, never host local zone (`5d2aaa3`, `timestamp_now` in `resembl/models.py`). |
+| `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. Parsed as decimal: an unparseable value fails fast (`ValueError` in `sample_rng`, `resembl/diagnostics.py`, `9aeab2b` base-10 `int`; in `_retry_sleep`, `resembl/clock.py`, `ed0705b`; and at startup in the Go `New`/`newRequestID`, `service/service.go`, `9aeab2b` base-10 `ParseInt`), so hex/octal spellings are rejected, not silently reinterpreted. |
+| `RESEMBL_NOW` | `resembl/clock.py:31`, `resembl/clock.py:80` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. An unparseable value fails fast on every read path (`timestamp_now`/`monotonic_now`/`_retry_sleep` in `resembl/clock.py`, `ed0705b`); the Go service validates it at startup in `New` via `isISO8601Instant` (`service/service.go`, `ed0705b`) and `parse_instant` treats ISO `-00:00` as not-an-instant (`9d6f2f0`). A value without an offset is UTC, never host local zone (`5d2aaa3`, `timestamp_now` in `resembl/clock.py`). |
 | `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | `resembl/paths.py` (`SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR` / `serve_allow_unauthenticated_get`, `5303616`), `resembl/cli.py:941` | Trusted verbatim; any non-blank value except `0`/`false`/`no`/`off` (case-insensitive) authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` (an OR with the flag, never a veto). A hostile or stray environment therefore opens the R1 exposure without the operator's explicit flag. |
 | `RESEMBL_LOG_LEVEL` | `resembl/paths.py` (`LOG_LEVEL_ENV_VAR` / `log_level_get`, `5303616`), `app_callback` in `resembl/cli.py` (`resembl/cli.py:1282`) | Trusted verbatim; one of `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` (case-insensitive) for every command. An explicit `-v`/`-q` wins; an invalid value aborts the command with exit 2. A stray `DEBUG` turns on the per-request record that R4 notes is otherwise absent. |
 | `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). `serve` and every CLI command fail startup on a malformed/unreadable file (`_find_defaults_load` in `resembl/server.py` via `_read_config_dict` in `resembl/config.py`, `ConfigError`, and the CLI callback's `_read_config_dict` gate); library `load_config` keeps the report-and-default behavior. `config.toml.example` in the repository root documents every key with its range and default (`5303616`). |
@@ -463,7 +463,7 @@ Backup manifests are untrusted input here: their `config` and
 are never validated beyond being non-empty. `RESEMBL_SEED` and
 `RESEMBL_NOW` are the sharp two: neither is a path, and both change results
 without changing what the operator can see (`resembl/diagnostics.py:61`,
-`resembl/models.py:48`); both now fail fast when unparseable (`ed0705b`).
+`resembl/clock.py:80`); both now fail fast when unparseable (`ed0705b`).
 
 **B4, application to database.** The ORM parameterizes every query, so
 untrusted text is not concatenated into SQL. Three places build a `LIKE`
@@ -471,7 +471,7 @@ pattern from caller input: the checksum-prefix resolver escapes the wildcard
 characters (`resembl/cli.py:726`), the model's JSON-name containment lookup
 escapes them (`resembl/models.py:180`), while the name search does not
 (`resembl/core.py:1612`). The result set is capped by `limit`, so the
-unescaped wildcards widen the match set rather than the returned page.
+unescaped wildcards widen the match set rather than the returned page. The engine pool pings pooled connections on checkout and bounds checkout wait (`pool_pre_ping=True`, `pool_timeout=30` except on SQLite in-memory, `7ff2128`, `create_db_engine` in `resembl/database.py`), so a server-side-closed connection is discarded instead of failing the first statement, and an exhausted pool times out instead of blocking indefinitely.
 
 **B5, cache directory to process.** The port file is read as an integer and used to open an HTTP connection (`resembl/find_client.py:121`, `resembl/cli.py:429`). Its contents are authenticated by nothing. The file names a port only: both clients dial `127.0.0.1` (`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port reaches a listener the forger must already be running on the loopback interface. The standalone client narrows this by refusing a port outside 1-65535 before dialing (`6406aee`, `_main` in `resembl/find_client.py`), so a forged port that cannot be bound at all is rejected; the in-process `find` client guards the narrower ephemeral range 1024-65535 (`cdabd39`, `_server_request` in `resembl/cli.py`), so a forged port naming a privileged service is rejected there; a forged port inside the admitted range still reaches an attacker listener on both.
 
@@ -670,7 +670,7 @@ which changes match results silently rather than failing.
 
 *Tampering.* `RESEMBL_SEED` (`resembl/diagnostics.py:61`) changes the generator
 every MinHash sample in the process draws from, and so the fingerprints that
-process produces, and `RESEMBL_NOW` (`resembl/models.py:48`) changes every
+process produces, and `RESEMBL_NOW` (`resembl/clock.py:80`) changes every
 recorded creation time. Neither is a path, so neither is visible in the
 resolved-path listing a reader would check, and neither reports itself in the
 output.
@@ -780,7 +780,7 @@ workflow does not re-run either.
 | MinHash pack-time range rejection | A 1-perm or over-cap fingerprint packed into a blob its own reader rejects as implausible, leaving producer and consumer disagreeing about what is storable | `minhash_pack` in `resembl/scoring.py` (`1f210e7`) raises `ValueError` outside 2..4096; `MinHash.__init__` in `resembl/minhash.py` (`9aeab2b`) rejects `num_perm >= 2**32` and out-of-range `hashvalues` |
 | Request correlation id | A Go-service request and the engine's handling of it cannot be joined in the operator log | `service/service.go` (`26e95cf`) mints it and `LocalEngine` (`service/http_engine.go`) forwards it as `X-Request-Id`; the Python server adopts a bounded printable caller-supplied id and echoes it (`_correlation_id` in `resembl/server.py`) |
 | `RESEMBL_SEED` parsed as decimal | A hex/octal spelling silently changing the sampled fingerprints | `sample_rng` in `resembl/diagnostics.py` (`9aeab2b`, base-10 `int`) and `New`/`newRequestID` in `service/service.go` (base-10 `ParseInt`) |
-| Unparseable `RESEMBL_NOW`/`RESEMBL_SEED` fails fast | A typo silently pinning the clock on read/retry paths, or silently falling back to OS randomness | `resembl/models.py` `_retry_sleep` (`ed0705b`) raises `ValueError` like `timestamp_now`/`monotonic_now`; `service/service.go` `New` validates both at startup (`ed0705b`, `isISO8601Instant`); `parse_instant` treats `-00:00` as not-an-instant (`9d6f2f0`); both parse `RESEMBL_SEED` as base-10 only (`9aeab2b`), so `0x…`/`0o…` spellings are rejected |
+| Unparseable `RESEMBL_NOW`/`RESEMBL_SEED` fails fast | A typo silently pinning the clock on read/retry paths, or silently falling back to OS randomness | `resembl/clock.py` `_retry_sleep` (`ed0705b`) raises `ValueError` like `timestamp_now`/`monotonic_now`; `service/service.go` `New` validates both at startup (`ed0705b`, `isISO8601Instant`); `parse_instant` treats `-00:00` as not-an-instant (`9d6f2f0`); both parse `RESEMBL_SEED` as base-10 only (`9aeab2b`), so `0x…`/`0o…` spellings are rejected |
 | Warm-server refusal logged before fallback | A server that only ever answered with `200 {"error": ...}` failing silently in the operator log | `resembl/cli.py` `_server_request` (`1f06887`) logs the envelope at WARNING before returning `None` for the in-process fallback |
 | Go service drains on shutdown | A SIGTERM/SIGINT mid-request orphaning custody slots and engine calls | `service/cmd/resembl-service/main.go` (`1f06887`) `signal.NotifyContext` + `http.Server.Shutdown` with a 30s bound; `ListenAndServe` returns `http.ErrServerClosed` on drain |
 | Go engine idle connections retired on shutdown | Pooled engine sockets held until process exit, accumulating when servers are built/discarded in-process | `service/cmd/resembl-service/main.go` (`9aacafb`) `engine.CloseIdleConnections()` after drain and on construction failure |
@@ -806,6 +806,8 @@ workflow does not re-run either.
 | Loopback bind 127.0.0.0/8 | `_is_loopback_bind` in `resembl/cli.py` (`709d31b`) | A loopback bind (127.0.0.2, 127.1.2.3, …) misclassified as non-loopback and demanding `--allow-unauthenticated`, diverging from the server's own Host allow-list |
 | Thread timeout, 30s | `resembl/server.py:1104` | Connections parked open by an idle client |
 | Engine pool, 32 + 64 | `resembl/server.py:2027` | Pool exhaustion; the overflow is what a client that outruns requests consumes first |
+| Pooled-connection health check and checkout bound | `create_db_engine` in `resembl/database.py` (`7ff2128`, `pool_pre_ping=True`, `pool_timeout=30` except on SQLite in-memory) | A PostgreSQL/MySQL connection closed by the server or NAT gateway behind the pool surfacing as a spurious first-statement error, and an exhausted pool blocking indefinitely instead of timing out |
+| Terminal output sanitization | `_display` / `_strip_controls` in `resembl/cli.py`, `markup=False` (`cf2a276`; `e4bb771` markup/ANSI) | A stored snippet name or error text injecting terminal controls, ANSI escapes, or rich markup (e.g. `[bold]`) into the operator's terminal; `db_verify_backup` in `resembl/core.py` returns only stable `cannot open/read backup` issues instead of driver text, so a hostile backup path does not leak through the verify result |
 | Slow-request WARNING at default level | `_SLOW_REQUEST_SECONDS` in `resembl/server.py:923`, `resembl/server.py:1790` | A warm server that has stopped being warm leaves no other default-level trace |
 | Double-serve check | `serve` in `resembl/server.py:2007` | Two servers advertising one database |
 | Atomic file publication | `resembl/server.py:2125`, `resembl/config.py:245`, `resembl/core.py:2279` | Partial-file reads by a concurrent client |
