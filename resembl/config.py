@@ -14,7 +14,7 @@ from typing import NamedTuple
 
 import tomli_w
 
-from .clock import _retry_sleep, monotonic_now
+from .clock import CLOCK_ENV_VAR, _retry_sleep, monotonic_now
 from .paths import config_dir_get, config_path_get
 from .scoring import MAX_NUM_PERM
 
@@ -261,11 +261,15 @@ def _config_file_lock() -> Iterator[None]:
             # the wait is ``_retry_sleep`` (no-op under a pin), matching
             # every other duration/retry path: a pinned replay must not
             # read wall time or sleep on this lock, or two seeded runs
-            # diverge on timeout vs success.  Under a pin the deadline
-            # never advances, so a contended pin holder retries once
-            # and then times out deterministically on the next poll;
-            # unpinned, the 30s wall budget is unchanged.
-            deadline = monotonic_now() + 30.0
+            # diverge on timeout vs success.  Under a pin the monotonic
+            # reading never advances, so a started+30 deadline would
+            # never fire and a contended pinned holder would spin
+            # forever; under a pin the deadline is the start itself, so
+            # the first contention times out deterministically.
+            # Unpinned, the 30s wall budget is unchanged.
+            deadline = monotonic_now() + (
+                0.0 if os.environ.get(CLOCK_ENV_VAR, "").strip() else 30.0
+            )
             while True:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -290,8 +294,11 @@ def _config_file_lock() -> Iterator[None]:
                 # flock waits indefinitely; a config update that loses to a
                 # slow holder must wait a bounded time, not crash or hang,
                 # so poll LK_NBLCK with the same 30s deadline as flock,
-                # on the same pinned clock as above.
-                deadline = monotonic_now() + 30.0
+                # on the same pinned clock as above (immediate timeout
+                # under a pin, for the same reason).
+                deadline = monotonic_now() + (
+                    0.0 if os.environ.get(CLOCK_ENV_VAR, "").strip() else 30.0
+                )
                 while True:
                     try:
                         # typeshed provides these attributes for Windows only.

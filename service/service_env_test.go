@@ -28,13 +28,33 @@ func TestNewAcceptsValidNow(t *testing.T) {
 func TestNewAcceptsValidNowForms(t *testing.T) {
 	for _, v := range []string{
 		"2024-06-01T12:00:00+0000",
+		"2024-06-01T12:00:00+000000",
 		"2024-06-01T12:00:00+00",
+		"2024-06-01T12:00:00+23:59",
+		"2024-06-01T12:00:00+00:00:00",
+		"2024-06-01T12:00:00+02:00:30",
 		"2024-06-01T12:00:00Z",
 		"2024-06-01T12:00:00.123456789+00:00",
 	} {
 		t.Setenv("RESEMBL_NOW", v)
 		if _, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), okEngine{}, "index", 1, time.Second); err != nil {
 			t.Fatalf("RESEMBL_NOW=%q rejected: %v", v, err)
+		}
+	}
+}
+
+func TestNewRejectsOutOfRangeOffsetNow(t *testing.T) {
+	for _, v := range []string{
+		"2024-06-01T12:00:00+24:00",
+		"2024-06-01T12:00:00+24",
+		"2024-06-01T12:00:00+2400",
+		"2024-06-01T12:00:00+23:60",
+		"2024-06-01T12:00:00+2360",
+		"2024-06-01T12:00:00+00:00:60",
+	} {
+		t.Setenv("RESEMBL_NOW", v)
+		if _, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), okEngine{}, "index", 1, time.Second); err == nil {
+			t.Fatalf("RESEMBL_NOW=%q accepted, want rejection", v)
 		}
 	}
 }

@@ -212,6 +212,96 @@ var (
 
 func m_started_fixed() time.Time { return time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC) }
 
+// normalizeOffset validates the offset on candidate and rewrites it to
+// the +HH:MM form Go's RFC3339 parser requires, returning the rewritten
+// candidate and whether the offset was valid. A naive candidate (no
+// trailing offset) is returned unchanged and valid; the caller falls
+// back to naive layouts for it. Python's fromisoformat also accepts
+// hour-only (+00), colon-less (+0000, +000000) and offset-with-seconds
+// (+HH:MM:SS, +HHMMSS, with optional fractional offset) spellings,
+// which Go's RFC3339 layout does not, so they are normalized here
+// before parsing. The instant value is never used (validateNow only
+// gates RESEMBL_NOW), so dropping offset seconds after range-checking
+// them changes no observable behaviour. Out-of-range offsets
+// (hour > 23, minute > 59, second > 59) are rejected: Go's time.Parse
+// accepts +24:00 and +23:60, which the Python parse_instant this
+// mirrors rejects, so a pin would validate in one process and fail
+// fast in the other.
+func normalizeOffset(candidate string) (string, bool) {
+	sign := byte(0)
+	offsetStart := -1
+	for i := 11; i < len(candidate); i++ {
+		if candidate[i] == '+' || candidate[i] == '-' {
+			sign = candidate[i]
+			offsetStart = i
+			break
+		}
+	}
+	if offsetStart < 0 {
+		return candidate, true
+	}
+	offset := candidate[offsetStart+1:]
+	digits := ""
+	if strings.Contains(offset, ":") {
+		parts := strings.Split(offset, ":")
+		if len(parts) < 2 || len(parts) > 3 {
+			return candidate, false
+		}
+		for _, part := range parts {
+			if part == "" {
+				return candidate, false
+			}
+		}
+		hourStr, minuteStr := parts[0], parts[1]
+		if len(hourStr) != 2 || len(minuteStr) != 2 {
+			return candidate, false
+		}
+		digits = hourStr + minuteStr
+		if len(parts) == 3 {
+			secondStr := parts[2]
+			if dot := strings.IndexByte(secondStr, '.'); dot >= 0 {
+				secondStr = secondStr[:dot]
+			}
+			if len(secondStr) != 2 {
+				return candidate, false
+			}
+			digits += secondStr
+		}
+	} else {
+		rest := offset
+		if dot := strings.IndexByte(rest, '.'); dot >= 0 {
+			rest = rest[:dot]
+		}
+		digits = rest
+		switch len(digits) {
+		case 2, 4, 6:
+		default:
+			return candidate, false
+		}
+	}
+	for i := 0; i < len(digits); i++ {
+		if digits[i] < '0' || digits[i] > '9' {
+			return candidate, false
+		}
+	}
+	hour := int(digits[0]-'0')*10 + int(digits[1]-'0')
+	minute := 0
+	if len(digits) >= 4 {
+		minute = int(digits[2]-'0')*10 + int(digits[3]-'0')
+	}
+	second := 0
+	if len(digits) == 6 {
+		second = int(digits[4]-'0')*10 + int(digits[5]-'0')
+	}
+	if hour > 23 || minute > 59 || second > 59 {
+		return candidate, false
+	}
+	if len(digits) == 2 {
+		digits += "00"
+	}
+	return candidate[:offsetStart] + string(sign) + digits[:2] + ":" + digits[2:4], true
+}
+
 // isISO8601Instant mirrors resembl.models.parse_instant: the extended
 // YYYY-MM-DDTHH:MM:SS shape (T/t/space separator) with optional fractional
 // seconds and offset, trailing Z/z treated as +00:00. Date-only and
@@ -230,29 +320,27 @@ func isISO8601Instant(s string) bool {
 	if len(candidate) > 10 && candidate[10] == 't' {
 		candidate = candidate[:10] + "T" + candidate[11:]
 	}
-	// -00:00 (in any spelling) is ISO 8601's "unknown local offset", not
-	// UTC: Go's RFC3339 parse maps it to UTC, so accepting it would
-	// fabricate a UTC instant the value never stated, while the Python
-	// parse_instant this mirrors rejects it. Leave it not-an-instant.
-	for _, suffix := range []string{"-00:00", "-0000", "-00", "-00:00:00"} {
-		if strings.HasSuffix(candidate, suffix) {
-			return false
-		}
-	}
+	source := candidate
 	// Go's RFC3339 requires a colon in the offset; Python's fromisoformat
 	// accepts the colon-less (+0000) and hour-only (+00) spellings, so
 	// normalize them to +00:00 before parsing to keep the two validators
 	// in agreement on RESEMBL_NOW.
-	if len(candidate) >= 5 {
-		switch candidate[len(candidate)-5:] {
-		case "+0000", "-0000":
-			candidate = candidate[:len(candidate)-5] + candidate[len(candidate)-5:len(candidate)-4] + "00:00"
-		}
+	candidate, valid := normalizeOffset(candidate)
+	if !valid {
+		return false
 	}
-	if len(candidate) >= 3 {
-		tail := candidate[len(candidate)-3:]
-		if (tail[0] == '+' || tail[0] == '-') && tail[1] >= '0' && tail[1] <= '9' && tail[2] >= '0' && tail[2] <= '9' {
-			candidate += ":00"
+	// -00:00 (in any spelling) is ISO 8601's "unknown local offset", not
+	// UTC: Go's RFC3339 parse maps it to UTC, so accepting it would
+	// fabricate a UTC instant the value never stated, while the Python
+	// parse_instant this mirrors rejects it. Leave it not-an-instant.
+	// The exact unknown-offset spellings are rejected on the source
+	// (before normalization collapses offset-with-seconds onto -00:00):
+	// Python rejects exactly -00:00 / -000000 / -00:00:00 but accepts
+	// -00:00:00.123 as a known small offset, so a fractional offset
+	// must not be rejected by the exact-spelling check.
+	for _, suffix := range []string{"-00:00", "-0000", "-00", "-00:00:00", "-000000"} {
+		if strings.HasSuffix(source, suffix) {
+			return false
 		}
 	}
 	// Go requires T separator for RFC3339; normalize space before parsing.

@@ -332,6 +332,41 @@ class TestConfig(unittest.TestCase):
                 finally:
                     os.close(fd)
 
+    def test_config_file_lock_times_out_under_pin(self):
+        """A contended lock under ``RESEMBL_NOW`` must time out, not spin.
+
+        The pinned monotonic clock never advances, so a started+30
+        deadline would never fire and a contended pinned holder would
+        busy-spin forever (``_retry_sleep`` is a no-op under a pin).
+        Under a pin the deadline is the start itself, so the first
+        contention raises ``TimeoutError`` deterministically.
+        """
+        from resembl.config import _config_file_lock
+
+        if sys.platform == "win32":
+            self.skipTest("msvcrt region locks do not serialize same-process fds")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(
+                os.environ,
+                {
+                    "RESEMBL_CONFIG_DIR": temp_dir,
+                    "RESEMBL_NOW": "2024-06-01T12:00:00+00:00",
+                },
+            ):
+                import fcntl
+
+                lock_path = config_path_get() + ".lock"
+                os.makedirs(temp_dir, exist_ok=True)
+                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    with self.assertRaises(TimeoutError):
+                        with _config_file_lock():
+                            pass
+                finally:
+                    os.close(fd)
+
     def test_config_dir_respects_env(self):
         """config_dir_get should respect RESEMBL_CONFIG_DIR at call time."""
         with tempfile.TemporaryDirectory() as temp_dir:
