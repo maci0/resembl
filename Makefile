@@ -235,7 +235,7 @@ backup-drill:  ## Prove the newest backup restores (docs/restore.md)
 # Python-only contributor needs no Go toolchain.
 # The Docker build honors SOURCE_DATE_EPOCH (see service/Dockerfile), so the
 # commit-time epoch is passed through for a reproducible image.
-service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.26+)
+service-check:  ## Run gofmt, go vet, go test -race and both binary builds in service/ (needs Go 1.26+)
 	@if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then \
 		echo "make service-check needs Go 1.26+ (go and gofmt on PATH; see service/go.mod)."; \
 		echo "Install Go from https://go.dev/dl/ and re-run 'make service-check'."; \
@@ -245,6 +245,15 @@ service-check:  ## Run gofmt, go vet and go test -race in service/ (needs Go 1.2
 	if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 	cd service && GOFLAGS=-mod=readonly GOTOOLCHAIN=local go vet ./...
 	cd service && GOFLAGS=-mod=readonly GOTOOLCHAIN=local go test -race -count=1 ./...
+	@# Build the deployment artifacts the README documents so a broken
+	@# link/layout fails here instead of on an operator's host. `go vet`
+	@# compiles the Lambda main only for the host GOOS; the artifact is
+	@# GOOS=linux. Both binaries go to a scratch dir so nothing lands in
+	@# the tree; the service binary leaves no trace once built.
+	@mkdir -p .scratch/service-check && \
+	cd service && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -o ../.scratch/service-check/resembl-service ./cmd/resembl-service && \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -o ../.scratch/service-check/bootstrap ./cmd/resembl-lambda && \
+	rm -rf ../.scratch/service-check
 
 # Go fuzz targets (service/fuzz_service_test.go, service/internal/lambdaproxy).
 # `go test -fuzz` is the native tool; the Python `fuzz` target below is the
