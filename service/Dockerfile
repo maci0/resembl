@@ -26,7 +26,7 @@ COPY --from=build /resembl-service /resembl-service
 COPY LICENSE NOTICE /licenses/
 ARG VERSION=dev
 ARG REVISION=unknown
-LABEL org.opencontainers.image.title="resembl-service" org.opencontainers.image.description="Experimental Go query service for one pinned Resembl index" org.opencontainers.image.source="https://github.com/maci0/resembl" org.opencontainers.image.licenses="GPL-3.0-only" org.opencontainers.image.version="${VERSION}" org.opencontainers.image.revision="${REVISION}"
+LABEL org.opencontainers.image.title="resembl-service" org.opencontainers.image.description="Experimental Go query service for one pinned Resembl index" org.opencontainers.image.source="https://github.com/maci0/resembl" org.opencontainers.image.url="https://github.com/maci0/resembl" org.opencontainers.image.licenses="GPL-3.0-only" org.opencontainers.image.version="${VERSION}" org.opencontainers.image.revision="${REVISION}"
 EXPOSE 8080
 # The service exposes GET /healthz (HTTP 204, no dependency I/O) for
 # orchestrator probes; use a Kubernetes httpGet probe against /healthz

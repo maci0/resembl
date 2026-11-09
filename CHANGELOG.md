@@ -15,6 +15,7 @@ project follows [Semantic Versioning](https://semver.org/).
 - The clispec schema now declares `clean` in its `confirmation_required` error and adds its `--force` confirmation bypass: the CLI already required a terminal (or `--force`) for `clean`, but the schema document omitted it. The schema also now states that `merge` and `collection delete` proceed without a confirmation prompt, matching their established unattended behavior.
 - The Go service's custody claim no longer fails when the platform cannot fsync a directory handle (Windows): the best-effort directory sync now matches the Python `_sync_dir` contract instead of returning the sync error and dropping the slot.
 - The `resembl-service` container image now carries the `LICENSE` and `NOTICE` text at `/licenses/`: the image previously shipped only the binary with the GPL-3.0-only grant in an OCI label, so the license text did not accompany the copy as GPL-3.0 requires. `service/.dockerignore` now mirrors the root `.dockerignore`'s cache, docs and test exclusions, so the two contexts cannot drift again.
+- The `resembl-service` image now also carries the `org.opencontainers.image.url` label (the repository URL) alongside `source`, so registries and scanners can resolve the project homepage from the image metadata alone.
 
 ### Added
 
