@@ -686,6 +686,19 @@ class TestCLIServeWarnings(BaseCLITest):
         result = self.run_serve("127.0.0.1")
         self.assertNotIn("unauthenticated", result.stdout)
 
+    def test_port_out_of_range_is_a_usage_error(self):
+        """An unbindable --port exits 2 with a clean message, not a traceback.
+
+        ``bind()`` raises OverflowError for a port outside 0-65535, which is
+        not an OSError: the command used to dump a rich traceback and exit 1.
+        """
+        for bad_port in ("-1", "99999"):
+            result = self.run_command(f"serve --port {bad_port}")
+            self.assertEqual(result.returncode, 2, (bad_port, result.stdout, result.stderr))
+            self.assertIn("--port must be between 0 and 65535", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertNotIn("Traceback", result.stdout)
+
 
 class TestCLITagEdgeCases(BaseCLITest):
     """Edge-case tests for tag commands."""

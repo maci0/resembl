@@ -902,6 +902,9 @@ def serve(
     The port is written to the cache directory and removed on exit.
     With ``--stateless`` no database is opened and no port file is written.
     """
+    if not 0 <= port <= 65535:
+        err_console.print(f"[red]Error:[/red] --port must be between 0 and 65535 (got {port}).")
+        raise typer.Exit(code=USAGE_ERROR)
     from .server import serve as serve_start
 
     # ``-v`` is also a global (callback-level) option, which click only
@@ -960,6 +963,13 @@ def serve(
         # IndexBuildError: the warm-up migration/index build failed.
         err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
+    except OverflowError:
+        # A port outside 0-65535 reaches the socket layer as OverflowError
+        # ("bind(): port must be 0-65535"), not OSError.  The range check
+        # above rejects it first; keep this as a safety net so a future
+        # caller that bypasses it still gets a clean usage error.
+        err_console.print(f"[red]Error:[/red] --port must be between 0 and 65535 (got {port}).")
+        raise typer.Exit(code=USAGE_ERROR)
     except OSError as e:
         # e.g. --port already in use by another process.
         err_console.print(
