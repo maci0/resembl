@@ -2554,13 +2554,18 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # pattern as resembl.core._fsync_quiet).
         try:
             dir_fd = os.open(os.path.dirname(port_file), os.O_RDONLY)
-        except OSError:
+        except OSError as e:
+            logger.warning(
+                "Could not open directory %s for port-file sync: %s",
+                os.path.dirname(port_file),
+                e,
+            )
             dir_fd = None
         if dir_fd is not None:
             try:
                 os.fsync(dir_fd)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.warning("Could not sync port-file directory: %s", e)
             finally:
                 os.close(dir_fd)
     except BaseException:
