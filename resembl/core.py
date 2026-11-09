@@ -3024,6 +3024,7 @@ def db_verify_backup(
     deterministically.  Legacy manifests without ``created_at`` are
     skipped rather than failed.
     """
+    del session
     import sqlite3
     from urllib.parse import quote
 

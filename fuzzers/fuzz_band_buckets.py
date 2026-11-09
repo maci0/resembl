@@ -104,12 +104,12 @@ def _check_band_buckets(blob: bytes, fdp: atheris.FuzzedDataProvider) -> None:
     assert len(keys) == b_value, f"band count {len(keys)} disagrees with b {b_value}"
     for key in keys:
         assert isinstance(key, str), f"non-string key: {key!r}"
-        assert key == key.lower() and all(ch in "0123456789abcdef" for ch in key), (
-            f"non-hex key: {key!r}"
-        )
-        assert len(key) == 8 * r_value, (
-            f"key length {len(key)} disagrees with r {r_value}: a slice overran the blob"
-        )
+        assert key == key.lower() and all(
+            ch in "0123456789abcdef" for ch in key
+        ), f"non-hex key: {key!r}"
+        assert (
+            len(key) == 8 * r_value
+        ), f"key length {len(key)} disagrees with r {r_value}: a slice overran the blob"
     # Fixed point: the same blob and split yield the same keys.
     assert band_buckets(blob, num_perm, b_value, r_value) == keys, "banding is not a fixed point"
 

@@ -2,6 +2,7 @@
 
 # pylint: disable=consider-using-with  # a test keeps a temp file, a temp
 # directory or a child process open for the whole test body on purpose
+# pylint: disable=use-implicit-booleaness-not-comparison  # exact comparison with [] is tested
 
 import os
 

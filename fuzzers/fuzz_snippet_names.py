@@ -49,7 +49,7 @@ from typing import Any
 import atheris
 
 with atheris.instrument_imports():
-    from sqlmodel import Session, SQLModel, create_engine
+    from sqlmodel import Session, SQLModel
 
     from resembl.core import snippet_search_by_name
     from resembl.database import create_db_engine
@@ -128,7 +128,7 @@ def _check_snippet_names(stored: str) -> Any:
     snippet = Snippet(checksum="fuzz-checksum", code="ret", names=stored, minhash=b"", tags="[]")
     try:
         names = snippet.name_list
-    except (ValueError, RecursionError, TypeError):
+    except ValueError, RecursionError, TypeError:
         # The reader raises rather than answering: the callers of the
         # property have no guard for this, so that is the crash the
         # fuzzer reports.
@@ -174,9 +174,9 @@ def test_one_input(data):
             hits = snippet_search_by_name(session, probe, limit=5)
             assert isinstance(hits, list), f"name search returned non-list: {hits!r}"
             # A second read of the same row through the search agrees.
-            assert snippet_search_by_name(session, probe, limit=5) == hits, (
-                "name search is not a fixed point"
-            )
+            assert (
+                snippet_search_by_name(session, probe, limit=5) == hits
+            ), "name search is not a fixed point"
         engine.dispose()
 
 

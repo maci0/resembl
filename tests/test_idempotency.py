@@ -8,6 +8,7 @@ silently duplicating rows on the next retry.
 """
 
 # pylint: disable=consider-using-with  # a test keeps a temp file, a temp
+# pylint: disable=protected-access  # tests monkeypatch core internals
 # directory or a child process open for the whole test body on purpose
 
 import os

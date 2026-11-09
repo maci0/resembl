@@ -493,7 +493,8 @@ def _csv_safe(value: object) -> object:
         # out of the lstrip set leaves the same evasion open through a
         # different code point.
         next_stripped = stripped.strip().lstrip(
-            "\ufeff\u200b\u200c\u200d\u2060\u00ad\u180e\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+            "\ufeff\u200b\u200c\u200d\u2060\u00ad\u180e\u061c\u202a"
+            "\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
         )
         if next_stripped == stripped:
             break

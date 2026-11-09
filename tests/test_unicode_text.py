@@ -462,7 +462,7 @@ class TestSurrogateAndLengthUnits(unittest.TestCase):
         """WORD JOINER / SOFT HYPHEN / bidi isolates are stripped like U+200B."""
         from resembl.cli import _csv_safe
 
-        for ch in (" ", "­", "؜", "⁦"):  # noqa: RUF001
+        for ch in ("\u2028", "\u00ad", "\u061c", "\u2066"):
             self.assertEqual(_csv_safe(ch + "=1+1"), "'" + ch + "=1+1", repr(ch))
 
 
