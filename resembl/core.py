@@ -66,7 +66,7 @@ from .models import (
     timestamp_normalize,
     timestamp_now,
 )
-from .paths import config_path_get, db_url_mask
+from .paths import config_path_get, db_url_mask, runtime_manifest_path_get
 from .scoring import (
     NUM_PERMUTATIONS,
     cfg_extract,
@@ -242,20 +242,19 @@ def _db_backup_runtime_name(backup_path: str) -> str:
 def _db_backup_runtime_read() -> tuple[bytes | None, str | None]:
     """Return ``(raw_bytes, sha256)`` for the live runtime manifest.
 
-    ``(None, None)`` when ``RESEMBL_RUNTIME_MANIFEST`` is unset or names no
-    file: no pinned runtime is in use, so it is recorded as absent rather
-    than failing the backup.  An unreadable path raises ``OSError`` so the
-    caller fails loud rather than reporting a complete backup that drops
-    pinned state.
+    ``(None, None)`` only when ``RESEMBL_RUNTIME_MANIFEST`` is unset (or
+    blank, which counts as unset like every other ``RESEMBL_*`` override):
+    no pinned runtime is in use, so it is recorded as absent rather than
+    failing the backup.  A set-but-missing path raises ``FileNotFoundError``
+    so the caller fails loud rather than reporting a complete backup that
+    drops pinned state while the operator believes it was captured; any
+    other unreadable path likewise raises ``OSError``.
     """
-    manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "").strip()
-    if not manifest_path:
+    manifest_path = runtime_manifest_path_get()
+    if manifest_path is None:
         return None, None
-    try:
-        with open(manifest_path, "rb") as f:
-            data = f.read()
-    except FileNotFoundError:
-        return None, None
+    with open(manifest_path, "rb") as f:
+        data = f.read()
     return data, hashlib.sha256(data).hexdigest()
 
 

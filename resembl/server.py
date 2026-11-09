@@ -48,7 +48,13 @@ from .core import (
 )
 from .lsh import band_buckets
 from .models import FINGERPRINT_VERSION, monotonic_now
-from .paths import cache_dir_get, db_url_mask, port_file_cleanup, server_port_path
+from .paths import (
+    cache_dir_get,
+    db_url_mask,
+    port_file_cleanup,
+    runtime_manifest_path_get,
+    server_port_path,
+)
 from .scoring import (
     MINHASH_SEED,
     code_tokenize,
@@ -1739,7 +1745,7 @@ class _FindHandler(BaseHTTPRequestHandler):
 
         artifact = body.get("artifact_sha256")
         generation = body.get("generation")
-        manifest_path = os.environ.get("RESEMBL_RUNTIME_MANIFEST", "").strip()
+        manifest_path = runtime_manifest_path_get()
         if (
             not isinstance(artifact, str)
             or not manifest_path
@@ -2279,6 +2285,21 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     ``/band-keys``, ``/scheme``, ``/health`` and ``/metrics`` answer, and the
     find paths answer ``501``.  Replicas of such a server share no state.
     """
+    # Fail fast on a set-but-unusable runtime manifest, before any other
+    # startup work: the operator configured /find-pinned, so a server that
+    # binds and then answers 503 for every pinned request would read as
+    # healthy while refusing the attested path.  Unset stays the
+    # documented "refuses that endpoint" run.  Checked here, not only at
+    # request time, so the misconfiguration surfaces at startup.
+    manifest_path = runtime_manifest_path_get()
+    if manifest_path is not None:
+        try:
+            with open(manifest_path, "rb") as f:
+                f.read(1)
+        except OSError as e:
+            raise ValueError(
+                f"RESEMBL_RUNTIME_MANIFEST={manifest_path!r} is not readable: {e}"
+            ) from e
     if db_url is None:
         return _stateless_serve(host, port)
     from .database import create_db_engine

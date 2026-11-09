@@ -64,6 +64,11 @@ SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR = "RESEMBL_SERVE_ALLOW_UNAUTHENTICATED"
 #: ``-v``/``-q`` flag wins over the variable when both are set.
 LOG_LEVEL_ENV_VAR = "RESEMBL_LOG_LEVEL"
 
+#: Environment variable naming the runtime manifest ``serve`` checks for
+#: ``/find-pinned`` and ``backup`` copies beside each backup.  Blank counts
+#: as unset, matching every other ``RESEMBL_*`` override.
+RUNTIME_MANIFEST_ENV_VAR = "RESEMBL_RUNTIME_MANIFEST"
+
 #: Translation table folding ASCII a-z to A-Z only, for protocol tokens
 #: whose case folding must not map non-ASCII letters into ASCII (U+0131→I,
 #: U+017F→S under ``str.upper``).
@@ -173,6 +178,21 @@ def serve_allow_unauthenticated_get() -> bool:
     """
     value = os.environ.get(SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR)
     return value is not None and bool(value.strip())
+
+
+def runtime_manifest_path_get() -> str | None:
+    """Return the path named by ``RESEMBL_RUNTIME_MANIFEST``, or None when unset.
+
+    Read at call time, like :func:`db_url_get`.  Blank counts as unset,
+    matching every other ``RESEMBL_*`` override.  The path is returned
+    verbatim (surrounding whitespace stripped); existence and readability
+    are the caller's check, since ``backup`` and ``serve`` fail startup
+    differently on a missing file.
+    """
+    value = os.environ.get(RUNTIME_MANIFEST_ENV_VAR)
+    if value is None or not value.strip():
+        return None
+    return value.strip()
 
 
 def log_level_get() -> str | None:
