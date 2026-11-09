@@ -80,10 +80,11 @@ dev = [
     "packaging>=26.0",
     # Test oracle only: resembl.minhash vendors a bit-compatible MinHash, and
     # these tests cross-check fingerprints and banding against the real
-    # library.  Never import it from package code.  Floor at 2: the oracle
-    # tests pin datasketch's `scheme="legacy"` family explicitly, a 2.0-only
-    # keyword, so resolving 1.x fails the suite at collection.
-    "datasketch>=2",
+    # library.  Never import it from package code.  Floor at 2 and cap below
+    # 3: the oracle tests pin datasketch's `scheme="legacy"` family
+    # explicitly, a 2.0-only keyword, so resolving 1.x fails the suite at
+    # collection and a future 3.x could drop the legacy scheme silently.
+    "datasketch>=2,<3",
 ]
 duckdb = [
     # Compiled DuckDB driver plus its SQLAlchemy dialect.  Needed only for a

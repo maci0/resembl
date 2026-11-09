@@ -174,8 +174,8 @@ Non-obvious, and cheap to break without noticing:
 
 - `resembl/minhash.py` is a vendored, bit-compatible MinHash. `datasketch` is a
   test oracle only: never import it from package code. The oracle tests pin
-  `scheme="legacy"`, a 2.0-only keyword, so the `datasketch>=2` floor in
-  `pyproject.toml` must not be lowered. The vendored pieces and
+  `scheme="legacy"`, a 2.0-only keyword, so the `datasketch>=2,<3` floor in
+  `pyproject.toml` must not be lowered or uncapped. The vendored pieces and
   `resembl/lsh.py`'s band slicing derive from MIT-licensed datasketch, so
   `NOTICE` carries that grant and is listed in `license-files`; any new
   vendored or derived third-party code adds its notice to `NOTICE` in the same
