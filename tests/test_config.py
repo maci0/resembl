@@ -381,6 +381,51 @@ class TestConfig(unittest.TestCase):
             with patch.dict(os.environ, {"XDG_CONFIG_HOME": xdg, "RESEMBL_CONFIG_DIR": ""}):
                 self.assertEqual(config_dir_get(), os.path.join(xdg, "resembl"))
 
+    def test_config_file_lock_times_out_under_pinned_clock(self):
+        """Held config lock still times out with ``RESEMBL_NOW`` set.
+
+        Regression: ``monotonic_now`` pins to 0 under the pin, so a
+        ``+30s`` deadline never fires and a contended pinned holder spins
+        forever instead of raising ``TimeoutError``.  The worker is a
+        daemon thread joined with a timeout so a regression fails here
+        instead of hanging the suite.
+        """
+        from resembl.config import _config_file_lock
+
+        if sys.platform == "win32":
+            self.skipTest("msvcrt region locks do not serialize same-process fds")
+
+        import fcntl
+        import threading
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = {
+                "RESEMBL_CONFIG_DIR": temp_dir,
+                "RESEMBL_NOW": "2024-06-01T12:00:00+00:00",
+            }
+            with patch.dict(os.environ, env):
+                lock_path = config_path_get() + ".lock"
+                os.makedirs(temp_dir, exist_ok=True)
+                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    outcome: list[str] = []
+
+                    def attempt() -> None:
+                        try:
+                            with _config_file_lock():
+                                outcome.append("acquired")
+                        except TimeoutError:
+                            outcome.append("timeout")
+
+                    worker = threading.Thread(target=attempt, daemon=True)
+                    worker.start()
+                    worker.join(timeout=5)
+                    self.assertFalse(worker.is_alive(), "pinned lock never timed out")
+                    self.assertEqual(outcome, ["timeout"])
+                finally:
+                    os.close(fd)
+
     def test_config_dir_override_beats_xdg(self):
         """RESEMBL_CONFIG_DIR takes precedence over $XDG_CONFIG_HOME."""
         with tempfile.TemporaryDirectory() as override, tempfile.TemporaryDirectory() as xdg:
