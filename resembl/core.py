@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import re
-import threading
+import tempfile
 import unicodedata
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta
@@ -257,9 +257,11 @@ def _write_sidecar(backup_dir: str, name: str, data: bytes) -> str:
     fsync.  Returns the sidecar path.
     """
     sidecar_path = os.path.join(backup_dir, name)
-    tmp = os.path.join(backup_dir, f"{name}.{os.getpid()}.tmp")
+    # mkstemp (O_EXCL, random suffix): a predictable ``{name}.{pid}.tmp``
+    # name let a local planter symlink the temp at a victim file.
+    fd, tmp = tempfile.mkstemp(dir=backup_dir, prefix=f".{name}.", suffix=".tmp")
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with open(fd, "wb") as f:
             f.write(data)
         _sync_path(tmp)
@@ -2164,11 +2166,13 @@ def _export_manifest_write(export_dir: str, written: set[str]) -> bool:
     manifest disables stale-file pruning on the next run, which the caller
     reports instead of silently accepting a non-convergent directory.
     """
-    tmp_path = os.path.join(
-        export_dir, f"{_EXPORT_MANIFEST_NAME}.{os.getpid()}-{threading.get_ident()}.tmp"
+    # mkstemp (O_EXCL, random suffix): predictable name let a planter
+    # symlink the temp at a victim file, truncating it on write.
+    fd, tmp_path = tempfile.mkstemp(
+        dir=export_dir, prefix=f".{_EXPORT_MANIFEST_NAME}.", suffix=".tmp"
     )
     try:
-        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(sorted(written), f)
             f.write("\n")
@@ -2257,12 +2261,13 @@ def snippet_export(session: Session, export_dir: str) -> dict:
         # (same pattern as ``db_backup``): ``open(file_path, "w")`` truncates
         # the live export first, so a crash mid-export leaves a truncated
         # file that looks like a complete export artifact.
-        # The temp name is unique per caller (pid + thread id) so concurrent
-        # duplicate exports in one process do not truncate each other's
-        # temp and publish a corrupt file.
-        tmp_path = f"{file_path}.{os.getpid()}-{threading.get_ident()}.tmp"
+        # mkstemp (O_EXCL, random suffix): predictable pid/thread name
+        # let a planter symlink the temp at a victim file.
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=abs_export_dir, prefix=".resembl-export-", suffix=".tmp"
+        )
         try:
-            with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8", newline="\n") as f:
                 f.write(snippet.code)
                 f.flush()
                 os.fsync(f.fileno())
@@ -2739,9 +2744,13 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     }
     manifest_name = _db_backup_manifest_name(backup_name)
     manifest_path = os.path.join(backup_dir, manifest_name)
-    tmp_manifest = os.path.join(backup_dir, f"{manifest_name}.{os.getpid()}.tmp")
+    # mkstemp (O_EXCL, random suffix): predictable pid name let a planter
+    # symlink the temp at a victim file, truncating it on write.
+    fd, tmp_manifest = tempfile.mkstemp(
+        dir=backup_dir, prefix=f".{manifest_name}.", suffix=".tmp"
+    )
     try:
-        fd = os.open(tmp_manifest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with open(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(manifest, f)
             f.write("\n")

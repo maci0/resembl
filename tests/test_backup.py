@@ -44,6 +44,33 @@ class FileDBTest(BaseDBTest):
 class TestDbBackup(FileDBTest):
     """db_backup writes a restorable copy and records its manifest."""
 
+    def test_backup_does_not_follow_symlink_at_predictable_temp_name(self):
+        """A planted symlink at the old ``{stem}.{pid}.tmp`` name is not followed.
+
+        ``db_backup`` used to build its manifest temp as
+        ``{manifest}.{pid}.tmp`` and ``os.open(..., O_TRUNC)`` follows a
+        symlink planted there, truncating the victim.  ``mkstemp``
+        (O_EXCL, random suffix) must ignore the planted name.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        os.makedirs(backup_dir)
+        victim = os.path.join(self._tmpdir.name, "victim.txt")
+        with open(victim, "w", encoding="utf-8") as f:
+            f.write("secret")
+        # The old predictable manifest temp name is unknown until the
+        # backup stem exists, so plant the victim at every plausible
+        # pid-suffixed name the same directory could use.
+        for pid in (os.getpid(),):
+            for stem in ("assembly", "backup"):
+                planted = os.path.join(backup_dir, f"{stem}.json.{pid}.tmp")
+                if not os.path.exists(planted):
+                    os.symlink(victim, planted)
+        result = db_backup(self.session, backup_dir)
+        self.assertTrue(os.path.isfile(result["backup"]))
+        with open(victim, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "secret")
+
     def test_backup_is_restorable_and_verifies(self):
         """A backup opens as a database and holds the source's snippets."""
         snippet_add(self.session, "foo", "mov eax, 1\nret")

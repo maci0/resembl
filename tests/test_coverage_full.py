@@ -301,6 +301,24 @@ class TestSnippetExport(BaseDBTest):
             result = snippet_export(self.session, tmpdir)
             self.assertEqual(result["num_exported"], 0)
 
+    def test_export_does_not_follow_symlink_at_predictable_temp_name(self):
+        """A planted symlink at the old predictable temp name is not followed."""
+        import threading
+
+        snippet_add(self.session, "func_a", "NOP\nRET")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            victim = os.path.join(tmpdir, "victim.txt")
+            with open(victim, "w", encoding="utf-8") as f:
+                f.write("secret")
+            planted = os.path.join(
+                tmpdir, f"func_a.asm.{os.getpid()}-{threading.get_ident()}.tmp"
+            )
+            os.symlink(victim, planted)
+            result = snippet_export(self.session, tmpdir)
+            self.assertEqual(result["num_exported"], 1)
+            with open(victim, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "secret")
+
     def test_export_traversal_names_stay_inside_directory(self):
         """Hostile snippet names must not write outside the export dir."""
         with (

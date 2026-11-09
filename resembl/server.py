@@ -2289,7 +2289,6 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     httpd.runtime_generation = _seeded_uuid_hex()
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
-    tmp_port_path = f"{port_file}.{os.getpid()}.tmp"
     try:
         # 0o700 at creation: the cache dir holds the advertisement, and both
         # clients trust its contents to name the port they send their query
@@ -2297,6 +2296,8 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # account on a shared host.  An existing directory keeps whatever
         # permissions the user gave it.
         os.makedirs(os.path.dirname(port_file), mode=0o700, exist_ok=True)
+        # mkstemp (O_EXCL, random suffix): a predictable pid temp name let a
+        # local planter symlink it at a victim file, truncating it on write.
         # Publish via write-temp-then-rename: ``open(port_file, "w")``
         # truncates in place, so a find client racing this write could read
         # an empty or half-written port number and wrongly conclude no
@@ -2305,7 +2306,11 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
         # a same-directory temp keeps the rename on one filesystem.  The
         # temp is created 0o600 rather than with the process umask, so the
         # advertised port is not world-readable even before the rename.
-        fd = os.open(tmp_port_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        import tempfile
+
+        fd, tmp_port_path = tempfile.mkstemp(
+            dir=os.path.dirname(port_file), prefix=".server-", suffix=".tmp"
+        )
         with open(fd, "w", encoding="utf-8") as f:
             f.write(str(httpd.server_address[1]))
             f.flush()
