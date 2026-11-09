@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `429f11d`, with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `e85b123`, with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
@@ -144,26 +144,35 @@ relies on, not configuration options.
   verify aborts the merge with exit 1.
 - **The Lambda engine address is trusted verbatim.** The Lambda bootstrap (`service/cmd/resembl-lambda/main.go`) reads `RESEMBL_ENGINE_URL` once surrounding whitespace is trimmed, treating a blank value as unset (default `http://127.0.0.1:8081`), and hands it to the loopback-only engine adapter. Keep that environment private to the deployment; a hostile value points the adapter at an attacker-chosen loopback listener once an authorizer is supplied (THREAT_MODEL.md R18). Today the bootstrap is deny-all, so no query is dispatched.
 - **Backup directories are trusted.** `resembl backup` writes a full copy of
-  the SQLite corpus plus a per-backup manifest and a `<backup-stem>.config.toml`
-  config sidecar into a caller-chosen
-  directory, pruning to the newest `--keep` (default 7), folds the
-  published copy to a single-file restore point, and re-verifies
-  the published file before reporting success (removing it on failure;
-  exits 1 when the manifest could not be written or the published copy
-  fails verification). The published copy is folded to single-file
-  (`journal_mode=DELETE` with `wal_checkpoint(TRUNCATE)`, `3d77755`,
-  `db_backup` in `resembl/core.py`) so it restores without `-wal`/`-shm`
-  sidecars. A retained backup is
+  the SQLite corpus plus a per-backup manifest, a `<backup-stem>.config.toml`
+  config sidecar, and a `<backup-stem>.runtime-manifest.json` runtime
+  sidecar (copied verbatim from `RESEMBL_RUNTIME_MANIFEST` when set) into
+  a caller-chosen directory, pruning to the newest `--keep` (default 7)
+  by modification time, folds the published copy to a single-file restore
+  point, and re-verifies the published file before reporting success
+  (removing it on failure; exits 1 when the manifest could not be written
+  or the published copy fails verification). The published copy is folded
+  to single-file (`journal_mode=DELETE` with `wal_checkpoint(TRUNCATE)`,
+  `3d77755`, `db_backup` in `resembl/core.py`) so it restores without
+  `-wal`/`-shm` sidecars. A retained backup is
   re-verified before reuse and replaced by a fresh self-verified copy
   when it no longer verifies. `verify-backup`
   checks tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm`
   sidecar beside the backup, compares the snippet
-  count and content hash against the manifest, and cross-checks the
-  config sidecar against its recorded `config_sha256`, but the manifest is
-  unauthenticated: a tampered backup with an edited manifest (and sidecar)
-  passes. Keep the backup directory private (backup, manifest, and sidecar
-  are mode `0600`) and treat any backup whose manifest you did not write
-  as untrusted (THREAT_MODEL.md R17).
+  count and content hash (which includes the `minhash` payload) against
+  the manifest, and cross-checks the config and runtime sidecars against
+  their recorded `config_sha256` / `runtime_sha256`, but the manifest is
+  unauthenticated: a tampered backup with an edited manifest (and
+  sidecars) passes. The manifest's `config` and `runtime_manifest`
+  values are plain basenames only, so a forged manifest cannot make
+  `verify-backup` read/hash a file outside the backup directory
+  (`4678fd1`). Keep the backup directory private (backup, manifest, and
+  sidecars are mode `0600`) and treat any backup whose manifest you did
+  not write as untrusted (THREAT_MODEL.md R17). Schedule the off-host
+  copy with `make backup BACKUP_DIR=<off-host-dir>` and prove the newest
+  restores with `make backup-drill BACKUP_DIR=<off-host-dir>`
+  (`Makefile`, `docs/restore.md`); both fail loudly when `BACKUP_DIR` is
+  unset.
 - **Destructive commands take a verified pre-delete backup.** `resembl rm`,
   `resembl clean`, and `resembl collection delete` write a verified backup
   first (`db_backup_for_delete` in `resembl/core.py`, default to
@@ -179,5 +188,13 @@ relies on, not configuration options.
   falling back to OS randomness, on read and retry paths as well as on
   stamping writes; the Go service validates both at startup and refuses
   to start. `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
-  rejects `2**32` permutations (`9aeab2b`, `1f210e7`).
+  rejects `2**32` permutations (`9aeab2b`, `1f210e7`). A malformed or
+  unreadable `config.toml` now fails `serve` startup instead of the
+  server silently binding with built-in defaults (`_find_defaults_load`
+  in `resembl/server.py` via `_read_config_dict` in `resembl/config.py`,
+  `ConfigError`); interactive commands keep the report-and-default
+  behavior of `load_config`. `pinned_snapshot.index_digest` raises
+  `ValueError` on a stored non-finite `REAL` instead of leaking a
+  `json.dumps` encoder message (`_snapshot_value` in
+  `resembl/pinned_snapshot.py`).
 - Go service and Lambda adapter: see docs/THREAT_MODEL.md B9 and R13-R18. Experimental, deny-all by default, with the Go `resembl-service` draining in-flight queries on SIGINT/SIGTERM (30s bound) and retiring pooled engine connections on shutdown (`CloseIdleConnections`) instead of being killed mid-request, so a stopped service no longer orphans custody slots and engine calls (the Lambda bootstrap has no token path at all), single shared bearer token where a token is supplied, no per-caller audit, rotation by restart, engine must stay on loopback (`RESEMBL_ENGINE_URL` is trusted verbatim by the Lambda bootstrap), runtime manifest must be write-protected, custody slots need operator repair after uncertain outcome.

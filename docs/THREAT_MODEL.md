@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-09, against the code at version 4.0.0
 (`pyproject.toml:3`) plus the post-4.0.0 commits on `main` through
-`429f11d`, with the loopback-client fix (the opener built by
+`e85b123`, with the loopback-client fix (the opener built by
 `build_opener(ProxyHandler({}))` now opened via `OpenerDirector.open`
 instead of being passed as `urlopen`'s context — `599923a`,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py`
@@ -173,8 +173,33 @@ engine connections on shutdown via `CloseIdleConnections`
 and `NOTICE` at `/licenses/` (`7ea24f8`, `service/Dockerfile`,
 `service/.dockerignore`); and the CSV formula
 guard now strips interleaved BOM/whitespace before the prefix
-check (`e6314c0`, `_csv_safe` in `resembl/cli.py`). Those land in
-R4, R6, R17, B1, B2, B6, B9, the env table, Assets, and Mitigations
+check (`e6314c0`, `_csv_safe` in `resembl/cli.py`); the backup
+manifest `config`/`runtime_manifest` fields are now plain-basename
+only, so a forged manifest cannot make `verify-backup` read/hash a
+file outside the backup directory (`4678fd1`, `db_verify_backup` in
+`resembl/core.py`); `db_backup` now also copies the live runtime
+manifest (`RESEMBL_RUNTIME_MANIFEST`) verbatim to a
+`<backup-stem>.runtime-manifest.json` sidecar (mode `0600`, SHA-256
+as `runtime_sha256`, cross-checked by `verify-backup`, `_write_sidecar`
+and `_db_backup_runtime_read` in `resembl/core.py`), selects and prunes
+retained backups by modification time rather than filename
+(`_db_backup_candidates` in `resembl/core.py`), and includes the
+`minhash` payload in the content hash so a reindex does not make a
+stale backup look current; `pinned_snapshot.index_digest` now raises
+`ValueError` on a non-finite `REAL` value instead of leaking a
+`json.dumps` encoder message, and serializes a `bool` as its integer
+form (`_snapshot_value` in `resembl/pinned_snapshot.py`); `serve` now
+fails startup on a malformed/unreadable `config.toml` instead of
+binding with built-in defaults (`_find_defaults_load` in
+`resembl/server.py` calls `_read_config_dict` in
+`resembl/config.py`, which raises `ConfigError`); `make backup` /
+`make backup-drill BACKUP_DIR=<off-host-dir>` schedule the operator
+backup and prove the newest restores (`Makefile`, `docs/restore.md`);
+the Lambda error path omits an empty string body for `HEAD` instead
+of shipping an empty base64 body (`service/internal/lambdaproxy/proxy.go`);
+`service/custody.go` `syncDir` is best-effort on Windows; and the
+Go image pins `GOPROXY=off` (`service/Dockerfile`). Those land in
+R4, R6, R14, R17, B1, B2, B6, B9, the env table, Assets, and Mitigations
 below.
 
 Scope: what can be attacked in resembl, and what stands in the way. Point
@@ -211,10 +236,10 @@ Ranked by exploitability against the shipped defaults, then by impact.
 | R11 | A release tag is not statically analyzed or dependency-reviewed when it is cut; only the SBOM runs on the tag | B8 | A tagged release ships whatever the tag's tree contains, with no pre-release SAST or CVE gate on the tag itself | SAST on push and pull request to `main` plus a weekly cron, Python and Go (`.github/workflows/codeql.yml:4`), dependency review on pull requests to `main` only (`.github/workflows/dependency-review.yml:11`), SBOM on `main` and on `v*` (`.github/workflows/sbom.yml:9`); `service.yml` runs `gofmt`/`go vet`/`go test -race` on `service/` push/PR |
 | R12 | The vulnerability reporting channel the documentation names is not enabled on the repository | Outside the process | A reporter following `SECURITY.md` finds no private channel and is pushed toward a public issue | none; the one working route is a public issue, which the same document forbids for an unfixed vulnerability |
 | R13 | The Go service's only shipped credential is a single shared bearer token, with no per-caller identity, no audit trail, and no rotation without a restart | B9 | Any holder can query the whole index; a leaked token cannot be revoked short of restart, and there is no trail of who used it | `TokenAuthority` (`service/token_authority.go:54`) with a constant-time digest compare; credential read once at startup (`service/token_authority.go:15`); `service/README.md` documents that rotation requires restart. The binary default is deny-all (`service/service.go:36`). A per-request correlation id (`26e95cf`, `service/service.go` `newRequestID`) is minted and forwarded to the engine as `X-Request-Id`, but it identifies a request, not a caller — all holders still share the one token |
-| R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`_handle_find_pinned` in `resembl/server.py:1529`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
+| R14 | `POST /find-pinned` is unauthenticated, so any local caller can trigger a bounded 1M-row / 64 MiB index hash while holding a SQLite writer fence | B1, B9 | A caller that reaches the endpoint can stall writers for the scan duration; the fence is held from identity through the query (`_handle_find_pinned` in `resembl/server.py:1529`) | Bounds in `resembl/pinned_snapshot.py:9` (`MAX_SNAPSHOT_ROWS=1_000_000`, `MAX_SNAPSHOT_BYTES=64MiB`); a stored non-finite `REAL` now raises `ValueError` from `_snapshot_value` in `resembl/pinned_snapshot.py` (clean refusal, not a `json.dumps` encoder message) and a `bool` serializes as its integer form; `service/README.md` requires the warm engine to stay isolated on loopback behind the Go service. No authentication on the Python route itself |
 | R15 | `/metrics` and `/health` are unauthenticated on both Python and Go servers and disclose request counts, cache hit rate, latency, and uptime. The Python `GET /health` additionally reports database reachability and probe latency; the Go `GET /healthz` is liveness only | B1, B9 | Process internals (traffic volume, hit rate, latency) readable by any local caller; aids timing attacks against R1/R13 | None beyond the loopback default on Python (`resembl/cli.py:767`); Python `GET /metrics` (`_handle_metrics` in `resembl/server.py:1467`) exposes `resembl_server_up`, `resembl_server_uptime_seconds`, `resembl_server_requests_total` by path and status, `resembl_server_request_duration_seconds` latency and `resembl_server_result_cache_total` hit/miss, and `GET /health` (`_handle_health` in `resembl/server.py:1413`) returns database status plus `latency_ms`; Go `GET /metrics` (`service/service.go:212`) exposes `resembl_service_up`, `resembl_service_uptime_seconds`, `resembl_service_requests_total` by path and status, and `resembl_service_request_duration_seconds` histogram, and `GET /healthz` (`service/service.go:203`) is liveness only, no dependency I/O |
 | R16 | The Go service's custody slots are held after an uncertain backend outcome and never auto-released, so a client that times out can permanently consume capacity | B9 | A hostile or flaky client can exhaust the 1..64 concurrency slots (`service/service.go:123`) and deny service to legitimate callers until an operator repairs slots | Slots channel with `busy` 503 on overflow (`service/service.go:261`); `FileCustody` (`service/custody.go:24`) leaves the slot occupied across restarts by design; an operator must verify the engine stopped before repairing |
-| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `db_backup` now folds the published copy to a single-file restore point (`PRAGMA journal_mode=DELETE` and `wal_checkpoint(TRUNCATE)`, `3d77755`, `db_backup` in `resembl/core.py`), so it verifies on its own; `verify-backup` opens the backup read-only (capping the `integrity_check` read at three rows, `eed3273`, `db_verify_backup` in `resembl/core.py`), checks expected tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm` sidecar beside the backup (`e95b19d`, `db_verify_backup` in `resembl/core.py`), and compares the live snippet count and corpus `content_hash` against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256`, the `<backup-stem>.config.toml` sidecar must also exist and hash to it (`8616290`, `db_verify_backup` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged triple still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, re-verifies a retained backup before reusing it and writes a fresh self-verified copy instead of reporting success for a corrupt one (`0e258ed`, `db_backup` in `resembl/core.py`), writes backup, manifest, and config sidecar mode `0600`, and the CLI exits 1 when the manifest could not be written or the published copy fails verification (`resembl/cli.py`, `backup` command; `a4dba24`) — but that does not authenticate a manifest, so a forged pair still passes `verify-backup`. `rm`, `clean`, and `collection delete` now take that verified backup first via `db_backup_for_delete` (`8dcee74`, `db_backup_for_delete` in `resembl/core.py`, `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`), and `merge` now takes the same pre-merge backup (`a4dba24`, `resembl/cli.py` `merge`, `--force` / `--backup-dir` / `--no-backup`) before rewriting names/tags/collections in place; a failed backup aborts the deletion or merge with exit 1 rather than proceeding unverified |
+| R17 | A tampered backup file or manifest is accepted as a restore candidate with only a count and content-hash comparison against a manifest anyone who can write the directory can forge | B2, B6 | A corrupted or hostile backup restores a wrong corpus | `db_backup` now folds the published copy to a single-file restore point (`PRAGMA journal_mode=DELETE` and `wal_checkpoint(TRUNCATE)`, `3d77755`, `db_backup` in `resembl/core.py`), so it verifies on its own; `verify-backup` opens the backup read-only (capping the `integrity_check` read at three rows, `eed3273`, `db_verify_backup` in `resembl/core.py`), checks expected tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm` sidecar beside the backup (`e95b19d`, `db_verify_backup` in `resembl/core.py`), and compares the live snippet count and corpus `content_hash` (now including the `minhash` payload) against the per-backup manifest (`db_verify_backup` in `resembl/core.py`); a missing manifest is an issue, not a failure, and a count/hash mismatch is a hard failure. When the manifest records a `config_sha256` or `runtime_sha256`, the `<backup-stem>.config.toml` and `<backup-stem>.runtime-manifest.json` sidecars must also exist and hash to them (`8616290` for config; runtime sidecar per `docs/restore.md`, `_db_backup_runtime_read` in `resembl/core.py`), the manifest's `config`/`runtime_manifest` values are plain basenames only (`4678fd1`, `db_verify_backup` in `resembl/core.py`, closing the traversal/hash-oracle), and retained backups are selected/pruned by mtime not filename (`_db_backup_candidates` in `resembl/core.py`), but the manifest itself is unauthenticated, so a forged set still passes `verify-backup`. New backups are stronger: `db_backup` (`resembl/core.py`) re-verifies the published file and removes it on failure, re-verifies a retained backup before reusing it and writes a fresh self-verified copy instead of reporting success for a corrupt one (`0e258ed`, `db_backup` in `resembl/core.py`), writes backup, manifest, and both sidecars mode `0600` (`_write_sidecar` in `resembl/core.py`), and the CLI exits 1 when the manifest could not be written or the published copy fails verification (`resembl/cli.py`, `backup` command; `a4dba24`). `rm`, `clean`, and `collection delete` now take that verified backup first via `db_backup_for_delete` (`8dcee74`, `db_backup_for_delete` in `resembl/core.py`, `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`), and `merge` now takes the same pre-merge backup (`a4dba24`, `resembl/cli.py` `merge`, `--force` / `--backup-dir` / `--no-backup`) before rewriting names/tags/collections in place; a failed backup aborts the deletion or merge with exit 1 rather than proceeding unverified. `make backup` / `make backup-drill BACKUP_DIR=<off-host-dir>` (`Makefile`, `docs/restore.md`) schedule the off-host copy and prove the newest restores, failing loudly when `BACKUP_DIR` is unset |
 | R18 | The Lambda bootstrap reads `RESEMBL_ENGINE_URL` verbatim once surrounding whitespace is trimmed, so an operator-supplied engine address reaches the loopback-only engine adapter unchecked beyond its loopback refusal | B9 | A misconfigured or hostile environment points the adapter at an attacker-chosen loopback listener; with `DenyAll` no query is dispatched today, so the exposure is liveness plus any future authorizer inheriting the address | `NewLocalEngine` loopback refusal (`service/http_engine.go:29`); the bootstrap trims the value and treats a blank one as unset, defaulting to `http://127.0.0.1:8081` (`6963a53`, `service/cmd/resembl-lambda/main.go`, `strings.TrimSpace`); the bootstrap is deny-all with no token path (`service/cmd/resembl-lambda/main.go`) |
 
 ## Attack surface
@@ -283,18 +308,32 @@ tool's own process:
   `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`), on non-SQLite
   backends the `ValueError` from `db_backup` refuses the deletion.
 - `backup <dir>` writes a consistent SQLite copy of the corpus plus a
-  per-backup manifest (`<backup-stem>.json`, mode `0600`) and a config
+  per-backup manifest (`<backup-stem>.json`, mode `0600`), a config
   sidecar (`<backup-stem>.config.toml`, mode `0600`, copied verbatim
-  from the live `config.toml`) into a caller-chosen directory, pruning
-  to the newest `--keep` (default 7)
+  from the live `config.toml`), and a runtime-manifest sidecar
+  (`<backup-stem>.runtime-manifest.json`, mode `0600`, copied verbatim
+  from `RESEMBL_RUNTIME_MANIFEST` when set, `_db_backup_runtime_read`
+  in `resembl/core.py`) into a caller-chosen directory, pruning to
+  the newest `--keep` (default 7) by modification time
+  (`_db_backup_candidates` in `resembl/core.py`)
   (`resembl/cli.py`, `db_backup` in `resembl/core.py`); the copy is
   folded to `journal_mode=DELETE` with a `wal_checkpoint(TRUNCATE)`
   before publishing (`3d77755`) so it is a single-file restore point;
   `verify-backup <path>` opens a backup read-only, checks the expected tables, and
   compares the live snippet count and content hash against that
-  manifest, cross-checking the config sidecar when the manifest records
-  its hash (`resembl/cli.py`, `db_verify_backup` in
+  manifest, cross-checking the config and runtime sidecars when the
+  manifest records their hashes
+  (`resembl/cli.py`, `db_verify_backup` in
   `resembl/core.py`).
+- `make backup BACKUP_DIR=<off-host-dir>` and
+  `make backup-drill BACKUP_DIR=<off-host-dir>` are operator scheduled
+  entry points (`Makefile`, `docs/restore.md`): `backup` runs
+  `resembl backup "$(BACKUP_DIR)" --keep ... --force` and fails loudly
+  when `BACKUP_DIR` is unset; `backup-drill` copies the newest
+  `assembly-*.db` to a scratch path, runs `verify-backup` there, and
+  appends `(date, filename, result)` to
+  `$(BACKUP_DIR)/.restore-drill.log`. Both fail when `BACKUP_DIR` is
+  unset or no backup exists.
 
 `list` (`resembl/cli.py:1198`) prints every snippet in the corpus to stdout
 unless `--range` narrows it, and `verify` (`resembl/cli.py:1361`) counts
@@ -330,7 +369,7 @@ path (`resembl/find_client.py:101`) and POSTs it to the loopback server.
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` | `resembl/paths.py:100`, `resembl/paths.py:84` | Trusted when the override above is unset. |
 | `RESEMBL_SEED` | `resembl/diagnostics.py:35`, `resembl/diagnostics.py:61` | Trusted verbatim; seeds the one generator every MinHash sample in a run draws from, so it changes the fingerprints that run produces. Parsed as decimal: an unparseable value fails fast (`ValueError` in `sample_rng`, `resembl/diagnostics.py`, `9aeab2b` base-10 `int`; in `_retry_sleep`, `resembl/models.py`, `ed0705b`; and at startup in the Go `New`/`newRequestID`, `service/service.go`, `9aeab2b` base-10 `ParseInt`), so hex/octal spellings are rejected, not silently reinterpreted. |
 | `RESEMBL_NOW` | `resembl/models.py:37`, `resembl/models.py:48` | Trusted verbatim; replaces the created-at clock for every row and for backup filenames/manifests. An unparseable value fails fast on every read path (`timestamp_now`/`monotonic_now`/`_retry_sleep` in `resembl/models.py`, `ed0705b`); the Go service validates it at startup in `New` via `isISO8601Instant` (`service/service.go`, `ed0705b`) and `parse_instant` treats ISO `-00:00` as not-an-instant (`9d6f2f0`). |
-| `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). |
+| `~/.config/resembl/config.toml` | `resembl/paths.py:106` | Parsed as TOML (`resembl/config.py:270`), then every value coerced to its field's type and range-checked (`resembl/config.py:157`, `resembl/config.py:74`). Written mode `0600` (`save_config` in `resembl/config.py`, `6273fa0`). `serve` fails startup on a malformed/unreadable file (`_find_defaults_load` in `resembl/server.py` via `_read_config_dict` in `resembl/config.py`, `ConfigError`); interactive commands keep the report-and-default behavior of `load_config`. |
 
 The config file holds six fields (`resembl/config.py:114`):
 `lsh_threshold`, `num_permutations`, `top_n`, `ngram_size`, `jaccard_weight`,
@@ -366,6 +405,9 @@ server accepts is treated as untrusted: body size
 **B2, files and arguments to library code.** Snippet text is untrusted
 input. It is lexed and fingerprinted (`resembl/scoring.py:954`), and on
 export it is embedded in generated YARA rules (`resembl/core.py:1028`).
+Backup manifests are untrusted input here: their `config` and
+`runtime_manifest` fields are plain basenames only, enforced in
+`db_verify_backup` (`resembl/core.py`, `4678fd1`).
 
 **B3, environment to runtime.** The variables above that name paths are read at call time and
 are never validated beyond being non-empty. `RESEMBL_SEED` and
@@ -456,7 +498,7 @@ network fetch at import.
 | Go service bearer token | Single shared credential gating the whole pinned index; rotation requires restart, so a leak persists until then | `-token-file`, read once into memory (`service/token_authority.go:15`) |
 | Custody slots | Persistent capacity claims; a held slot after an uncertain outcome is a denial of service until an operator repairs it | Custody directory, mode 0700 (`service/custody.go:24`) |
 | Runtime manifest | The trust anchor for `/find-pinned`; if writable by an attacker, it can attest tampered loaded code | `RESEMBL_RUNTIME_MANIFEST` path (`_handle_find_pinned` in `resembl/server.py:1529`) |
-| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17). The pre-delete backups taken by `rm`/`clean`/`collection delete` and the pre-merge backup taken by `merge` (`a4dba24`, default `.resembl-pre-delete-backups`, `db_backup_for_delete` in `resembl/core.py`, `resembl/cli.py` `merge`) are the same asset with the same forgeability; `--no-backup` removes the restore point entirely | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup, per-backup manifest `<backup-stem>.json`, and `<backup-stem>.config.toml` config sidecar, all mode `0600` |
+| Database backups | A full, restorable copy of the corpus; a tampered backup restores a wrong corpus (R17). The pre-delete backups taken by `rm`/`clean`/`collection delete` and the pre-merge backup taken by `merge` (`a4dba24`, default `.resembl-pre-delete-backups`, `db_backup_for_delete` in `resembl/core.py`, `resembl/cli.py` `merge`) are the same asset with the same forgeability; `--no-backup` removes the restore point entirely | caller-chosen backup directory (`db_backup` in `resembl/core.py`), backup, per-backup manifest `<backup-stem>.json`, `<backup-stem>.config.toml` config sidecar, and `<backup-stem>.runtime-manifest.json` runtime sidecar, all mode `0600` (sidecars via `_write_sidecar` in `resembl/core.py`) |
 
 ## Threats per boundary
 
@@ -524,21 +566,35 @@ content-hash manifest. `verify-backup`
 (`db_verify_backup` in `resembl/core.py`) opens the file read-only, checks
 expected tables, runs `PRAGMA integrity_check`, fails on a `-wal`/`-shm`
 sidecar beside the backup (`e95b19d`), and compares the live
-count and `content_hash` against the manifest: a tampered backup whose
-manifest is edited to match passes (R17). Newer backups also carry a
-`<backup-stem>.config.toml` sidecar, copied verbatim from the live
-`config.toml` and hashed as `config_sha256` in the manifest; when the
-manifest records that hash, `db_verify_backup` requires the sidecar to
-exist and hash to it, and a missing or mismatched sidecar is a hard
-failure (`8616290`). Backup, manifest, and sidecar are written mode
-`0600` (`db_backup` in `resembl/core.py`) but the manifest is otherwise
-unauthenticated, so anyone who can write the backup directory can forge
-all three. `db_backup` re-verifies the just-published file and deletes
-it on failure, so a backup that `backup` reported as success has
-verified at write time; it also re-verifies a retained backup before
-reusing it and writes a fresh self-verified copy instead of reporting
+count and `content_hash` (which now includes the `minhash` payload, so
+a reindex makes a stale backup stale) against the manifest: a tampered
+backup whose manifest is edited to match passes (R17). Newer backups
+also carry a `<backup-stem>.config.toml` sidecar, copied verbatim from
+the live `config.toml` and hashed as `config_sha256` in the manifest,
+and a `<backup-stem>.runtime-manifest.json` runtime sidecar, copied
+verbatim from `RESEMBL_RUNTIME_MANIFEST` when set and hashed as
+`runtime_sha256` (`_db_backup_runtime_read` in `resembl/core.py`);
+when the manifest records either hash, `db_verify_backup` requires
+the sidecar to exist and hash to it, and a missing or mismatched
+sidecar is a hard failure (`8616290` for config, runtime sidecar per
+`docs/restore.md`). Backup, manifest, and sidecars are written mode
+`0600` (`_write_sidecar` in `resembl/core.py`) but the manifest is
+otherwise unauthenticated, so anyone who can write the backup
+directory can forge all of them. The manifest's `config` and
+`runtime_manifest` values are plain basenames only: `db_verify_backup`
+rejects a value whose `os.path.basename` differs (`4678fd1`), so a
+forged manifest cannot make `verify-backup` read/hash a file outside
+the backup directory (the prior path traversal / hash oracle is
+closed). `db_backup` selects and prunes retained backups by
+modification time (`_db_backup_candidates` in `resembl/core.py`),
+not filename order, so a hand-supplied `assembly-*.db` with a late
+name cannot make pruning delete the genuinely newest restore point.
+`db_backup` re-verifies the just-published file and deletes it on
+failure, so a backup that `backup` reported as success has verified
+at write time; it also re-verifies a retained backup before reusing
+it and writes a fresh self-verified copy instead of reporting
 success for a corrupt one (`0e258ed`). That does not make a later
-`verify-backup` of a hand-supplied triple trustworthy.
+`verify-backup` of a hand-supplied set trustworthy.
 
 *Denial of service.* `import` has no cap on file count or file size: the
 walk materialises every matching path into a list (`resembl/cli.py:1010`),
@@ -658,7 +714,7 @@ workflow does not re-run either.
 | Result-cache key hides the database password | `_find_one` in `resembl/server.py` (`6273fa0`) | Credentials retained in the long-lived cache keys |
 | Per-key compute lock | `resembl/server.py:121` | A burst of identical queries multiplying one find across connections |
 | Content-Type check, 415 | `_content_type_ok` in `resembl/server.py:1292` | B1 request shape |
-| Backup published only after verification | A truncated or page-flipped copy must not be handed to a restore drill as the newest restore point | `db_backup` in `resembl/core.py` re-verifies with `db_verify_backup` and removes the file and manifest on failure; a retained backup is re-verified before reuse and replaced by a fresh self-verified copy when it no longer verifies (`0e258ed`, `db_backup` in `resembl/core.py`); `backup` CLI in `resembl/cli.py` exits 1 when `manifest_written` is false or `verified` is false (`a4dba24`) |
+| Backup published only after verification | A truncated or page-flipped copy must not be handed to a restore drill as the newest restore point | `db_backup` in `resembl/core.py` re-verifies with `db_verify_backup` and removes the file and manifest on failure; a retained backup is re-verified before reuse and replaced by a fresh self-verified copy when it no longer verifies (`0e258ed`, `db_backup` in `resembl/core.py`); `backup` CLI in `resembl/cli.py` exits 1 when `manifest_written` is false or `verified` is false (`a4dba24`); retained backups are selected and pruned by mtime (`_db_backup_candidates` in `resembl/core.py`), so a late-named hand-supplied file cannot hide or evict the genuinely newest restore point; the content hash includes the `minhash` payload, so a reindex makes a stale backup compare stale |
 | Verify-backup WAL sidecar refusal | A backup that verifies with its `-wal` beside it but restores empty alone | `db_verify_backup` in `resembl/core.py` fails when a `-wal`/`-shm` sidecar is present (`e95b19d`) |
 | Verified pre-delete / pre-merge backup before destructive commands | A `rm`/`clean`/`collection delete`/`merge` with no restore point; a silent corruption or sourceless deletion or hostile merge cannot be undone | `db_backup_for_delete` in `resembl/core.py` (`8dcee74`): takes `db_backup` and raises unless `verified` and `manifest_written` are both true; `resembl/cli.py` `rm`/`clean`/`collection_delete_cmd`/`merge` catch `(ValueError, OSError)` and exit 1 before deleting or merging, with `--no-backup` as the explicit opt-out (`merge` gains `--force` / `--backup-dir` / `--no-backup`, `a4dba24`) |
 | Backup published as a single-file restore point | A backup that verifies only with its `-wal` beside it but restores empty alone | `db_backup` in `resembl/core.py` (`3d77755`) runs `PRAGMA journal_mode=DELETE` and `wal_checkpoint(TRUNCATE)` on the published copy |
@@ -718,7 +774,11 @@ workflow does not re-run either.
 | TokenAuthority constant-time compare | service/token_authority.go:54 | B9 credential verification |
 | Custody slots channel | service/service.go:261 | B9 concurrency bound, busy 503 on overflow |
 | Loopback engine enforcement | service/http_engine.go:29 | B9 engine must be loopback |
-| Pinned index digest and writer fence | `_handle_find_pinned` in `resembl/server.py:1529`, `resembl/pinned_snapshot.py:9` | B9 index identity and writer fence; bounded scan |
+| Pinned index digest and writer fence | `_handle_find_pinned` in `resembl/server.py:1529`, `resembl/pinned_snapshot.py:9` (`_snapshot_value` raises `ValueError` on a non-finite `REAL`, serializes `bool` as integer) | B9 index identity and writer fence; bounded scan; a corrupt stored value is a clean refusal, not a `json.dumps` leak |
+| `serve` fails startup on malformed config | `_find_defaults_load` in `resembl/server.py` via `_read_config_dict` in `resembl/config.py` (`ConfigError`) | A malformed `config.toml` silently discarding tuned thresholds so every served find answers a different result set than the operator configured |
+| Backup manifest sidecar traversal guard | `db_verify_backup` in `resembl/core.py` (`4678fd1`) | A forged manifest `config`/`runtime_manifest` value making `verify-backup` read/hash an arbitrary file outside the backup directory |
+| Backup runtime sidecar cross-check | `db_verify_backup` in `resembl/core.py`, `_db_backup_runtime_read` / `_write_sidecar` in `resembl/core.py` | A backup that promised a runtime manifest must not verify without it; a host loss that took the manifest otherwise leaves `/find-pinned` unrestorable |
+| Scheduled backup and restore drill | `make backup` / `make backup-drill` in `Makefile`, `docs/restore.md` | A silent gap where no backup job ran and restore was never exercised; both fail loudly when `BACKUP_DIR` is unset |
 | Runtime manifest verification | resembl/runtime_attestation.py:20 | B9 file integrity of loaded code under a trusted supervisor |
 | Release provenance | `.github/workflows/build.yml:102` (the `attest` job) | An artifact published under this project's name that this repository did not build |
 
