@@ -1464,7 +1464,11 @@ class _FindHandler(BaseHTTPRequestHandler):
             self._method_not_allowed()
             return
         if self.route not in _POST_PATHS:
-            self._respond(404, {"error": f"unknown path: {self.route}"})
+            # self.route is request-controlled (path split on '?'): strip
+            # control chars so a crafted path cannot inject headers or a
+            # second JSON line via CR/LF in the error message.
+            safe_route = (self.route or "").translate(_LOG_CONTROL_CHARS)
+            self._respond(404, {"error": f"unknown path: {safe_route}"})
             return
         if self._stateless_refused():
             return
