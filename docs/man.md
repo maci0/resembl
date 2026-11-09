@@ -225,13 +225,15 @@ Global options go before the subcommand: `resembl --format json find ...`.
     runtime SHA-256) beside it.  SQLite only; other backends use
     their own backup tooling.  Backup and manifest files are mode `0600`.
     Exits 1 when the backup file is complete but its manifest could not
-    be written or the published copy fails verification — such a backup
+    be written, the published copy fails verification, or the backup
+    directory shares a volume with the live database (`shared_volume:
+    true` in JSON output; `--force` accepts the risk) — such a backup
     is unverified, not safe.  RPO is the time
     since the last verified backup;
     RTO is the time to copy the file back to `assembly.db` and run
     `verify` (the index is rebuilt by the next `find` if it is stale).
-    The full restore procedure, including removing stale `-wal`/`-shm`
-    sidecars before copying, is in `docs/restore.md`.
+    The full restore procedure is `resembl restore` (see below); the
+    step-by-step runbook is in `docs/restore.md`.
 
 **verify-backup** *PATH* [**--max-age-days** *N*]
 :   Check that a backup file opens, holds every table, and matches its
@@ -241,6 +243,14 @@ Global options go before the subcommand: `resembl --format json find ...`.
     copy silently ages past the RPO target does not pass on contents
     alone.  Run this after a restore to prove the copy is good —
     a backup never restored is a hypothesis, not a backup.
+
+**restore** *PATH* [**--dest** *PATH*] [--force]
+:   Restore a verified backup over the live database: verifies the copy
+    first, then atomically copies it over the live SQLite file, removes
+    stale `-wal`/`-shm` sidecars, and proves the restored database with
+    `verify`.  Exits 1 when the backup fails verification instead of
+    overwriting the live store with a corrupt copy.  `make backup-restore-drill`
+    proves this path on a throwaway live database; see `docs/restore.md`.
 
 **merge** *PATH* [--force] [--no-backup] [--backup-dir *DIR*]
 :   Merge snippets from another resembl database into the current one,

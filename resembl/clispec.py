@@ -152,6 +152,12 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "read_only",
     ),
     _command(
+        "restore",
+        "Restore a verified backup over the live database.",
+        "non_idempotent",
+        confirmation="--force",
+    ),
+    _command(
         "merge",
         "Copy snippets from another resembl database into this one. It asks"
         " for confirmation on a terminal, and refuses without one unless"

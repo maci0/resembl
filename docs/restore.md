@@ -39,7 +39,9 @@ A backup that has never been restored is a hypothesis: run a restore drill
 at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>` —
 it copies the newest verified backup to a scratch path, `verify-backup`
 proves it there, and records (date, backup filename, verify result) in
-`<off-host-dir>/.restore-drill.log` beside the backup directory.  The drill
+`<off-host-dir>/.restore-drill.log` beside the backup directory.
+`make backup-restore-drill BACKUP_DIR=<off-host-dir>` proves the full
+`resembl restore` path on a throwaway live path.  The drill
 walks newest-first by the timestamp embedded in the filename (the same
 order `db_backup` retains and prunes by, `_db_backup_candidates`), and
 proves the newest backup that *passes* verify-backup,
@@ -94,15 +96,11 @@ DB=<live-db-path>   # e.g. /srv/resembl/assembly.db
 # 2. Pick the newest backup that verifies:
 resembl verify-backup backups/assembly-<stamp>.db
 
-# 3. Remove any stale WAL sidecars from the live file — a leftover
-#    <live>-wal would replay old pages over the restored file.
-rm -f "$DB-wal" "$DB-shm"
-
-# 4. Copy the backup to the live path, remove any WAL sidecars the copy
-#    cannot have brought with it, and prove the restored database:
-cp backups/assembly-<stamp>.db "$DB"
-rm -f "$DB-wal" "$DB-shm"
-resembl verify
+# 3. Restore it (verifies first, atomic single-file copy, removes stale
+#    -wal/-shm, then proves the restored database with `verify`):
+resembl restore backups/assembly-<stamp>.db --force
+# ...or to a non-default path:
+resembl restore backups/assembly-<stamp>.db --dest "$DB" --force
 # Record the drill (date, backup filename, verify result) so the next
 # operator knows restore was last proven; without that record the backup
 # is a hypothesis. Re-run this restore at least quarterly and after any
@@ -164,7 +162,9 @@ Before any destructive operation in the next section, run the backup and
 `verify-backup` on the result — a backup that has never been verified is
 not a pre-delete snapshot. `resembl backup` exits 1 when the published
 copy fails verification or its manifest could not be written
-(`manifest_written: false` / `verified: false` in JSON output); treat
+(`manifest_written: false` / `verified: false` in JSON output), or when
+the backup directory shares a volume with the live database
+(`shared_volume: true` — see Failure-domain notes below); treat
 any non-zero exit, or `verified: false`, as "no backup was taken" and
 do not proceed:
 

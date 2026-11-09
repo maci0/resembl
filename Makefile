@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test test-one bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom backup backup-drill
+.PHONY: help install format lint types hygiene test test-one bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom backup backup-drill backup-restore-drill
 
 PYTEST_ARGS ?=
 
@@ -239,6 +239,24 @@ backup-drill:  ## Prove the newest backup restores (docs/restore.md)
 	done < "$$candidates_file"; \
 	rm -f "$$candidates_file"; \
 	echo "backup-drill: no assembly-*.db in $(BACKUP_DIR) passed verify-backup"; exit 1
+
+# Full restore drill: copies the newest verified backup over a throwaway
+# live path via `resembl restore --dest`, so the restore procedure itself
+# (single-file copy, WAL sidecar removal, post-restore verify) is proven,
+# not just that the backup opens.
+backup-restore-drill:  ## Prove the full restore path on a throwaway database (docs/restore.md)
+	@if [ -z "$(BACKUP_DIR)" ]; then \
+		echo "make backup-restore-drill needs BACKUP_DIR=<off-host-dir> (docs/restore.md)."; \
+		exit 1; \
+	fi
+	@set -e; \
+	newest=$$(ls -t "$(BACKUP_DIR)"/assembly-*.db 2>/dev/null | head -n 1); \
+	if [ -z "$$newest" ]; then echo "backup-restore-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
+	scratch=$$(mktemp -d); trap 'rm -rf "$$scratch"' EXIT; \
+	RESEMBL_DATABASE_URL="sqlite:///$$scratch/live.db" uv run --locked python -m resembl restore "$$newest" --dest "$$scratch/live.db" --force; \
+	RESEMBL_DATABASE_URL="sqlite:///$$scratch/live.db" uv run --locked python -m resembl verify; \
+	printf '%s\t%s\t%s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$(basename "$$newest")" "restore ok (restore-drill)" >> "$(BACKUP_DIR)/.restore-drill.log"; \
+	echo "backup-restore-drill: $$newest restored to a throwaway live path and verified"
 
 # The experimental Go query service in service/ has its own module and its own
 # CI job (.github/workflows/service.yml).  It is not part of `check` so a

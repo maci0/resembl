@@ -8,6 +8,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `resembl restore BACKUP [--dest PATH] [--force]` copies a verified backup over the live database (single-file copy, stale `-wal`/`-shm` removal, atomic rename, post-restore `verify` through a fresh engine on the restored file) and refuses unverifiable backups instead of overwriting the live store with a corrupt copy. `make backup-restore-drill BACKUP_DIR=...` proves the full restore path on a throwaway live path. `resembl backup` now reports `shared_volume: true` and the CLI exits 1 when the backup directory shares a volume with the live database, unless `--force` accepts the risk; see `docs/restore.md`.
 - The wheel and sdist now ship the `resembl/py.typed` marker (via `MANIFEST.in`), so type checkers treat `resembl` as typed on install.
 
 ### Fixed
