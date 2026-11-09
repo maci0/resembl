@@ -39,7 +39,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install format lint types hygiene test bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom backup backup-drill
+.PHONY: help install format lint types hygiene test test-one bench coverage db-test service-check service-fuzz fuzz check dist dist-verify sbom backup backup-drill
 
 PYTEST_ARGS ?=
 
@@ -143,6 +143,21 @@ hygiene:  ## Check the file hygiene the pre-commit hooks enforce (trailing white
 
 test:  ## Run the test suite (pass args through: make test PYTEST_ARGS="-k cache")
 	uv run --locked pytest -q $(PYTEST_ARGS)
+
+# One-file-or-one-test shortcut: `make test-one TEST=tests/test_cli.py` or
+# `make test-one TEST=tests/test_cli.py::TestCLIConfig::test_config_unset`.
+# Without TEST it names the missing variable instead of running the full
+# suite by accident.  Extra pytest flags pass through as PYTEST_ARGS, so
+# `make test-one TEST=tests/test_cli.py PYTEST_ARGS="-k config_set"` works.
+TEST ?=
+test-one:  ## Run one test file or one test (make test-one TEST=tests/test_cli.py)
+	@if [ -z "$(TEST)" ]; then \
+		echo "make test-one needs TEST=<file-or-nodeid> (e.g. TEST=tests/test_cli.py or"; \
+		echo "TEST=tests/test_cli.py::TestCLIConfig::test_config_unset). See 'make test'"; \
+		echo "for the full suite or PYTEST_ARGS for arbitrary selection."; \
+		exit 1; \
+	fi
+	uv run --locked pytest -q $(TEST) $(PYTEST_ARGS)
 
 # The microbenchmarks in tests/test_bench.py run disabled by default
 # (pyproject.toml addopts --benchmark-disable), so a plain `make test`

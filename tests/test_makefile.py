@@ -158,3 +158,36 @@ class MakefileShellTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("make backup-drill needs BACKUP_DIR", result.stdout + result.stderr)
+
+    def test_test_one_names_missing_test(self) -> None:
+        """Without TEST, test-one names the missing variable instead of running the suite."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [make, "test-one"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("make test-one needs TEST=", result.stdout + result.stderr)
+
+    def test_test_one_dry_run_shows_single_target(self) -> None:
+        """test-one with TEST invokes pytest on that target only."""
+        make = shutil.which("make")
+        if make is None:
+            self.skipTest("make is required")
+        root = Path(__file__).resolve().parent.parent
+        result = subprocess.run(
+            [make, "-n", "test-one", "TEST=tests/test_cli.py"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tests/test_cli.py", result.stdout)
+        self.assertIn("pytest", result.stdout)
