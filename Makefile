@@ -261,8 +261,8 @@ service-check:  ## Run gofmt, go vet, go test -race and both binary builds in se
 	@# GOOS=linux. Both binaries go to a scratch dir so nothing lands in
 	@# the tree; the service binary leaves no trace once built.
 	@mkdir -p .scratch/service-check && \
-	cd service && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -o ../.scratch/service-check/resembl-service ./cmd/resembl-service && \
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -o ../.scratch/service-check/bootstrap ./cmd/resembl-lambda && \
+	cd service && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.scratch/service-check/resembl-service ./cmd/resembl-service && \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly GOTOOLCHAIN=local go build -trimpath -buildvcs=false -ldflags='-s -w' -o ../.scratch/service-check/bootstrap ./cmd/resembl-lambda && \
 	rm -rf ../.scratch/service-check
 
 # Go fuzz targets (service/fuzz_service_test.go, service/internal/lambdaproxy).

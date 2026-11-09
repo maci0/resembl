@@ -218,6 +218,18 @@ class CiImagePinTests(unittest.TestCase):
         for relative in ("Makefile", "CONTRIBUTING.md", "service/README.md"):
             text = (_ROOT / relative).read_text(encoding="utf-8")
             self.assertIn(f"Go {version}", text, f"{relative} does not name Go {version}")
+        # The patch must agree too: go-version-file names only the minor,
+        # so setup-go would resolve the latest patch at run time and the
+        # CI binary would differ from the digest-pinned image binary.
+        workflow = (_ROOT / ".github" / "workflows" / "service.yml").read_text(encoding="utf-8")
+        self.assertNotIn("go-version-file: service", workflow)
+        pinned = re.search(r"go-version:\s*'(\d+\.\d+\.\d+)'", workflow)
+        self.assertIsNotNone(pinned, "service.yml does not pin an exact Go patch")
+        assert pinned is not None
+        self.assertTrue(
+            pinned.group(1).startswith(version + "."),
+            f"service.yml Go {pinned.group(1)} does not match go.mod {version}",
+        )
 
 
 if __name__ == "__main__":

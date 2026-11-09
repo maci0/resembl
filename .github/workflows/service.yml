@@ -34,7 +34,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: service/go.mod
+          # Exact patch matching service/Dockerfile's digest-pinned
+          # golang:1.26-alpine (go1.26.10), not go-version-file: the file
+          # names only go 1.26, so setup-go resolves the latest 1.26.x at
+          # run time and the CI binary would differ byte-wise from the
+          # image binary two runs of the same commit apart. Bump with the
+          # Dockerfile digest; tests/test_ci_images.py holds them together.
+          go-version: '1.26.10'
           cache-dependency-path: service/go.sum
       - name: Check formatting, vet and test
         run: make service-check
