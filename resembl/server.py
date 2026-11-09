@@ -489,8 +489,17 @@ def _parse_find_request(body: dict, params: ResemblConfig) -> _FindRequest:
     # Same degenerate-fingerprint guard as the CLI's find validation: an
     # ``ngram_size`` below 1 does not crash, it silently makes every snippet
     # match every other one (all shingles collapse to the empty token tuple).
+    # The upper bound matches the config layer: shingle construction
+    # allocates one slice per window position, so an unbounded value turns
+    # a large query into quadratic memory. The cap is enforced here as
+    # well as in ``config.VALUE_BOUNDS`` so a programmatically built
+    # ``ResemblConfig`` cannot reach the allocation unchecked.
+    from .config import MAX_NGRAM_SIZE
+
     if ngram_size < 1:
         raise BadRequestError("ngram_size must be at least 1")
+    if ngram_size > MAX_NGRAM_SIZE:
+        raise BadRequestError(f"ngram_size must be at most {MAX_NGRAM_SIZE}")
     # The response is bounded too, not just the work: a top_n large enough to
     # name the whole corpus turns one unauthenticated request into a complete
     # export of the snippet table.
@@ -1544,12 +1553,24 @@ class _FindHandler(BaseHTTPRequestHandler):
         if not getattr(self.server, "is_non_loopback", False):
             return False
         if self.route in ("/score", "/band-keys", "/scheme", "/metrics"):
+            logger.warning(
+                "[%s] %s %s refused on non-loopback bind",
+                self.request_id,
+                (self.command or "").translate(_LOG_CONTROL_CHARS),
+                (self.route or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(403, {"error": "endpoint not exposed on non-loopback bind"})
             return True
         return False
 
     def do_POST(self) -> None:  # pylint: disable=invalid-name; http.server API
         if not self._host_allowed():
+            logger.warning(
+                "[%s] %s %s refused: host not allowed",
+                self.request_id,
+                (self.command or "").translate(_LOG_CONTROL_CHARS),
+                (self.route or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(403, {"error": "host not allowed"})
             return
         if self.route in _GET_PATHS:
@@ -1617,6 +1638,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         of the answer a ``GET`` would have produced and no body bytes.
         """
         if not self._host_allowed():
+            logger.warning(
+                "[%s] %s %s refused: host not allowed",
+                self.request_id,
+                (self.command or "").translate(_LOG_CONTROL_CHARS),
+                (self.route or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(403, {"error": "host not allowed"}, send_body=send_body)
             return
         if self.route not in _ALL_PATHS:
@@ -1638,6 +1665,12 @@ class _FindHandler(BaseHTTPRequestHandler):
         # The endpoints a supervisor, a scraper and a client read; every other
         # path keeps the verb answer, so a stray GET cannot look like a find.
         if not self._host_allowed():
+            logger.warning(
+                "[%s] %s %s refused: host not allowed",
+                self.request_id,
+                (self.command or "").translate(_LOG_CONTROL_CHARS),
+                (self.route or "").translate(_LOG_CONTROL_CHARS),
+            )
             self._respond(403, {"error": "host not allowed"})
             return
         if self._non_loopback_refused():

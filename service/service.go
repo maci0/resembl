@@ -556,6 +556,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !allowed {
+			log.Printf("[%s] %s %s forbidden", reqID, safeLogPath(r.Method), safeLogPath(r.URL.Path))
 			writeError(w, http.StatusForbidden, "forbidden", reqID)
 			return
 		}
@@ -607,6 +608,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
+		log.Printf("[%s] %s %s forbidden", reqID, safeLogPath(r.Method), safeLogPath(r.URL.Path))
 		writeError(w, http.StatusForbidden, "forbidden", reqID)
 		return
 	}

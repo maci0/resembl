@@ -477,6 +477,7 @@ class TestConfigValueRanges(unittest.TestCase):
         ("top_n", 0),
         ("top_n", -3),
         ("ngram_size", 0),
+        ("ngram_size", 1000000),
         ("jaccard_weight", 1.5),
         ("jaccard_weight", -0.5),
     ]

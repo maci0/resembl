@@ -52,6 +52,7 @@ from .clock import CLOCK_ENV_VAR, avg_time_per_item, monotonic_now, parse_instan
 from .config import (
     DEFAULTS,
     FORMATS,
+    MAX_NGRAM_SIZE,
     ConfigError,
     ResemblConfig,
     _read_config_dict,
@@ -1102,6 +1103,11 @@ def _validate_find_params(
         raise typer.Exit(code=USAGE_ERROR)
     if ngram_size < 1:
         err_console.print(f"[red]Error:[/red] ngram_size must be at least 1 (got {ngram_size}).")
+        raise typer.Exit(code=USAGE_ERROR)
+    if ngram_size > MAX_NGRAM_SIZE:
+        err_console.print(
+            f"[red]Error:[/red] ngram_size must be at most {MAX_NGRAM_SIZE} (got {ngram_size})."
+        )
         raise typer.Exit(code=USAGE_ERROR)
     # A --top-n override bypasses ``config validate_value``, which is where
     # top_n is otherwise kept at 1 or above.  A zero or negative top_n

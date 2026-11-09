@@ -42,6 +42,13 @@ class Range(NamedTuple):
 #: the index build), not here.
 THRESHOLD_MAX = 0.99
 
+#: ``ngram_size`` is accepted at most this bound: shingle construction
+#: allocates one slice per window position, so an unbounded value turns a
+#: large snippet into quadratic memory. Real configurations use 2-5, and
+#: the largest exercised value is 7; 32 is generous headroom that keeps
+#: the allocation linear.
+MAX_NGRAM_SIZE = 32
+
 #: Range each numeric setting has to stay inside, checked after the value has
 #: been coerced to its field's type.  These are the ranges the rest of the
 #: code actually works in, so a value outside one is a misconfiguration the
@@ -54,20 +61,22 @@ THRESHOLD_MAX = 0.99
 #:     cap the server applies to request parameters and stored blobs.
 #: ``ngram_size``
 #:     Below 1 every shingle collapses to the empty token tuple, so every
-#:     snippet matches every other one without any error being raised.
+#:     snippet matches every other one without any error being raised, and
+#:     above the cap the shingle allocation turns quadratic. Real
+#:     configurations use 2-5; :data:`MAX_NGRAM_SIZE` is generous headroom.
 #: ``jaccard_weight``
 #:     A 0-1 balance between the LSH and Jaccard scores, per ``score_hybrid``;
 #:     both ends are usable (1.0 is a pure Jaccard ranking).
 #: ``top_n``
 #:     At least one result; 0 (or a negative value) truncates every ranking to
 #:     nothing, which reads as "no matches" rather than as a bad setting.
-#: No upper bound is imposed on ``top_n`` or ``ngram_size``: a large value only
-#: returns more rows or builds coarser shingles, neither of which is a fault.
+#: No upper bound is imposed on ``top_n``: a large value only returns more
+#: rows, which is not a fault.
 VALUE_BOUNDS: dict[str, Range] = {
     "lsh_threshold": Range(0.0, THRESHOLD_MAX),
     "num_permutations": Range(2.0, float(MAX_NUM_PERM), high_inclusive=True),
     "top_n": Range(1.0),
-    "ngram_size": Range(1.0),
+    "ngram_size": Range(1.0, float(MAX_NGRAM_SIZE), high_inclusive=True),
     "jaccard_weight": Range(0.0, 1.0, high_inclusive=True),
 }
 
