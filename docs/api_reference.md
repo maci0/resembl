@@ -143,7 +143,10 @@ hash, pruned to the newest `keep` backups. It also copies the live
 (`null` when no config file existed). It also copies the
 `RESEMBL_RUNTIME_MANIFEST` file (when set) verbatim to a
 `<backup-stem>.runtime-manifest.json` sidecar and records its SHA-256
-as `runtime_sha256`. Re-running it on unchanged
+as `runtime_sha256`. When `RESEMBL_RUNTIME_MANIFEST` is set but the named
+file is missing or unreadable, `db_backup` raises `ValueError` and the CLI
+exits `1`, so a scheduled backup never succeeds without the manifest
+sidecar it should carry. Re-running it on unchanged
 content returns the existing backup without writing or pruning, so a
 retried call cannot drain the retention window. `db_verify_backup`
 checks a backup opens, holds every table, and matches its manifest,
@@ -282,7 +285,7 @@ as unset for every one. The full manual-page reference is in
 | `DATABASE_URL` | — | Fallback for `RESEMBL_DATABASE_URL` only |
 | `RESEMBL_CONFIG_DIR` | `~/.config/resembl` | Config directory; falls back to `$XDG_CONFIG_HOME/resembl` |
 | `RESEMBL_CACHE_DIR` | `~/.cache/resembl` | Cache directory (port file); falls back to `$XDG_CACHE_HOME/resembl` |
-| `RESEMBL_RUNTIME_MANIFEST` | — | Path to the runtime manifest `serve` checks for `/find-pinned`; unset refuses that endpoint |
+| `RESEMBL_RUNTIME_MANIFEST` | — | Path to the runtime manifest `serve` checks for `/find-pinned`; unset refuses that endpoint, set-but-unreadable fails `serve` startup and `backup` |
 | `RESEMBL_ENGINE_URL` | `http://127.0.0.1:8081` | Loopback engine URL the Lambda bootstrap dials (Go service only) |
 | `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
 | `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |

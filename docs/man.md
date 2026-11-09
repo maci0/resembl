@@ -173,9 +173,12 @@ Global options go before the subcommand: `resembl --format json find ...`.
     `127.0.0.1`, `localhost` or `::1`, so a page that rebinds its hostname
     onto 127.0.0.1 cannot reach the endpoints.  A non-loopback `--host`
     is refused unless `--allow-unauthenticated` is given (with the flag,
-    it warns that the server is unauthenticated and proceeds).
+    it warns that the server is unauthenticated and proceeds). On a
+    non-loopback bind those four computed endpoints answer `403`; loopback
+    binds answer normally.
     `--stateless` opens no database and writes no port file: the server
-    answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, and
+    answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` on a
+    loopback bind, and
     `501` to the find paths, so replicas behind a load balancer share no
     state.
     The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, `GET
@@ -241,7 +244,9 @@ Global options go before the subcommand: `resembl --format json find ...`.
     deduplicating by checksum.  *PATH* is a database file or a full
     `DATABASE_URL` (any backend with its driver installed, e.g.
     `duckdb:///file.db`).  The verified pre-merge backup is taken first
-    (SQLite only); pass `--no-backup` to skip it.
+    (SQLite only); pass `--no-backup` to skip it. On a terminal it asks
+    for confirmation unless `--force` is given; off a terminal it
+    requires `--force`.
 
 ### Naming & Tags
 
@@ -270,7 +275,7 @@ Linux or Windows are one name.
     untouched and reported as such, so a re-run exits 0.
 
 **collection delete** *NAME* [--force] [--no-backup] [--backup-dir *DIR*]
-:   Delete a collection (snippets are kept). The verified pre-delete backup is taken first; pass `--no-backup` to skip it.
+:   Delete a collection (snippets are kept). The verified pre-delete backup is taken first; pass `--no-backup` to skip it. On a terminal it asks for confirmation unless `--force` is given; off a terminal it requires `--force`.
 
 **collection list**
 :   List all collections.
@@ -337,7 +342,10 @@ Linux or Windows are one name.
 :   Path to a JSON object mapping absolute file paths to SHA-256 digests,
     read by `serve` for the experimental `/find-pinned` endpoint, which
     refuses without it. The manifest must list the interpreter and every
-    loaded module file. See the HTTP API reference.
+    loaded module file. When set, `serve` fails startup if the named file
+    is missing or unreadable, and `backup` exits `1` in the same case;
+    unset leaves the endpoint refusing requests. See the HTTP API
+    reference.
 
 **RESEMBL_ENGINE_URL**
 :   Loopback engine URL the Lambda bootstrap dials. Defaults to

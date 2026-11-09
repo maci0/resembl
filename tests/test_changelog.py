@@ -390,6 +390,42 @@ class TestChangelog(unittest.TestCase):
             self.assertNotIn(bullet, seen, f"duplicate [Unreleased] bullet: {bullet[:80]!r}")
             seen.add(bullet)
 
+    def test_unreleased_notes_cover_shipped_behavior_breaks(self):
+        """Shipped behavior changes in this tree are noted as breaking.
+
+        Regression guard for three audited breaks that shipped without a
+        note: the Go metrics authorization (403 without the query
+        credential) and the Python non-loopback gate for the computed
+        endpoints and metrics, the fail-fast on a set-but-unreadable
+        runtime manifest in serve and backup, and merge and collection
+        delete honoring --force (prompting on a terminal, refusing off a
+        terminal without it).  Each must carry the Breaking marker so the
+        next release inherits it as a major.
+        """
+        body = unreleased_body(self.text)
+        for phrase in (
+            "resembl-service",
+            "/metrics",
+            "403",
+            "non-loopback",
+            "RESEMBL_RUNTIME_MANIFEST",
+            "merge",
+            "collection delete",
+            "--force",
+        ):
+            self.assertIn(phrase, body, f"[Unreleased] is missing the note naming {phrase!r}")
+        for bullet, _category in parse_bullets(body):
+            if (
+                "403" in bullet
+                or ("RESEMBL_RUNTIME_MANIFEST" in bullet and "now fail fast" in bullet)
+                or "now honor `--force` as a real confirmation bypass" in bullet
+            ):
+                self.assertIn(
+                    "**Breaking:**",
+                    bullet,
+                    f"behavior-change bullet is not marked breaking: {bullet[:80]!r}",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

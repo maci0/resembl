@@ -10,7 +10,13 @@ service. It binds `127.0.0.1` by default. A non-loopback `--host` is refused
 unless `--allow-unauthenticated` is given, in which case it prints a warning
 and proceeds. Any process that can reach the port can read the whole snippet
 corpus. Do not expose the port; only use `--allow-unauthenticated` behind a
-network gate that provides authentication.
+network gate that provides authentication. On a non-loopback bind the
+computed endpoints `POST /score`, `POST /band-keys`, `POST /scheme` and
+`GET /metrics` answer `403` with `{"error": "endpoint not exposed on
+non-loopback bind"}`: a non-loopback bind is reachable by any host that can
+route to the port and the server has no authentication, so only `/health`
+and the `/find` family (which keeps its existing operator gate) answer
+there. Loopback binds answer normally.
 
 A loopback bind additionally checks the request's `Host` header and answers
 `403` to anything but `127.0.0.1`, `localhost` or `::1` (with or without the
@@ -54,9 +60,11 @@ post to `http://127.0.0.1:<port>/find` with any HTTP client (for example
 
 `resembl serve --stateless` opens no database: no migration, no LSH index
 build, no port file, and `resembl find` never discovers it. It answers
-`/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, which read no
+`/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` on a loopback
+bind, which read no
 database; `/find`, `/find-batch`, `/find-pinned` and `GET /runtime-generation`
-answer `501`. The fingerprint defaults still come from `config.toml`. Replicas
+answer `501`. On a non-loopback bind `--stateless` still refuses the four
+computed endpoints with `403` (see "HTTP API" above). The fingerprint defaults still come from `config.toml`. Replicas
 share no state, so a load balancer can spread `/score` and `/band-keys` over
 any number of them, and `/health` reports only that the process answers.
 

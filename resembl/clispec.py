@@ -153,10 +153,11 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     ),
     _command(
         "merge",
-        "Copy snippets from another resembl database into this one. It proceeds"
-        " without a confirmation prompt (the --force flag is accepted for"
-        " symmetry but no prompt is shown).",
+        "Copy snippets from another resembl database into this one. It asks"
+        " for confirmation on a terminal, and refuses without one unless"
+        " --force is passed.",
         "idempotent",
+        confirmation="--force",
     ),
     _command("name add", "Attach one more name to a snippet.", "idempotent"),
     _command("name remove", "Detach one name from a snippet.", "idempotent"),
@@ -166,10 +167,10 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     _command(
         "collection delete",
         "Delete a collection. A second run reports the collection as missing"
-        " and leaves the database unchanged. It proceeds without a confirmation"
-        " prompt (the --force flag is accepted for symmetry but no prompt is"
-        " shown).",
+        " and leaves the database unchanged. It asks for confirmation on a"
+        " terminal, and refuses without one unless --force is passed.",
         "idempotent",
+        confirmation="--force",
     ),
     _command(
         "collection list",
