@@ -68,7 +68,7 @@ from .models import (
     SnippetVersion,
     name_normalize,
 )
-from .paths import config_path_get, db_url_mask, runtime_manifest_path_get
+from .paths import ascii_fold_lower, config_path_get, db_url_mask, runtime_manifest_path_get
 from .scoring import (
     NUM_PERMUTATIONS,
     cfg_extract,
@@ -1495,7 +1495,17 @@ def snippet_export_yara(session: Session, output_file: str) -> dict:
                 rule_name = _RULE_NAME_INVALID_CHARS.sub("_", primary_name)
                 # A name may be empty (e.g. added with an empty alias) — index
                 # would crash; prefix instead, as for names starting with a digit.
-                if not rule_name or (not rule_name[0].isalpha() and rule_name[0] != "_"):
+                # ASCII-only: a YARA identifier must start with an ASCII
+                # letter or underscore, and ``rule_name`` is already
+                # ASCII-only after the substitution above — a non-ASCII
+                # first letter arrives here as "_" in any case, so the
+                # isalpha that follows only ever reads ASCII anyway. Keep
+                # the ASCII gate explicit so a future substitution that
+                # stops collapsing non-ASCII cannot admit one through.
+                first = rule_name[:1]
+                if not rule_name or (
+                    not ("a" <= first <= "z" or "A" <= first <= "Z") and first != "_"
+                ):
                     rule_name = "r_" + rule_name
                 rule_name = f"resembl_{rule_name}_{snippet.checksum[:8]}"
 
@@ -2046,7 +2056,9 @@ _WINDOWS_RESERVED_STEMS = frozenset(
     + [f"COM{i}" for i in range(1, 10)]
     + [f"LPT{i}" for i in range(1, 10)]
 )
-_WINDOWS_RESERVED_STEMS_CASEFOLDED = frozenset(stem.casefold() for stem in _WINDOWS_RESERVED_STEMS)
+_WINDOWS_RESERVED_STEMS_CASEFOLDED = frozenset(
+    ascii_fold_lower(stem) for stem in _WINDOWS_RESERVED_STEMS
+)
 
 #: Maximum encoded length of an exported filename stem, in bytes.  Name
 #: limits are per-*byte* on POSIX filesystems (ext4: 255), and the ``.asm``
@@ -2150,7 +2162,10 @@ def _export_safe_filename(name: str) -> str:
     cleaned = cleaned.rstrip(" .")
     if not cleaned:
         return ""
-    if cleaned.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_STEMS_CASEFOLDED:
+    # ASCII-only fold: the reserved stems are ASCII, and ``casefold`` maps
+    # the long s to s, so a spelling with the long s would need to match
+    # here — reserved device names are ASCII protocol tokens, not names.
+    if ascii_fold_lower(cleaned.split(".", 1)[0]) in _WINDOWS_RESERVED_STEMS_CASEFOLDED:
         cleaned = f"_{cleaned}"
     return cleaned
 
@@ -2287,13 +2302,16 @@ def snippet_export(session: Session, export_dir: str) -> dict:
 
         # Avoid silently overwriting when several snippets share a name
         # (compared case-insensitively — see used_paths above).
-        used_key = file_path.casefold()
+        # ASCII-only fold for the same reason as the reserved-stem check:
+        # a filesystem compares bytes, and ``casefold`` would glue two
+        # names a filesystem keeps distinct.
+        used_key = ascii_fold_lower(file_path)
         if used_key in used_paths:
             # 12 hex chars (48 bits) keeps the disambiguator collision-free
             # even with hundreds of thousands of same-named snippets (the
             # previous 8 chars collided at ~30 pairs per 500k).
             file_path = os.path.join(abs_export_dir, f"{safe_name}-{snippet.checksum[:12]}.asm")
-            used_key = file_path.casefold()
+            used_key = ascii_fold_lower(file_path)
         used_paths.add(used_key)
         written.add(os.path.basename(file_path))
 

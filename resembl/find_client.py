@@ -25,6 +25,7 @@ import urllib.request
 from typing import NoReturn
 
 from .paths import (
+    ascii_fold_lower,
     cache_dir_get,
     config_path_get,
     console_utf8_reconfigure,
@@ -119,7 +120,7 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     default = _CFG_DEFAULTS[key]
     value = cfg.get(key, default)
     if isinstance(value, bool) or (
-        isinstance(value, str) and value.strip().casefold() in ("true", "false")
+        isinstance(value, str) and ascii_fold_lower(value.strip()) in ("true", "false")
     ):
         print(
             f"error: ignoring config value {key} = {value!r} (not a number)",

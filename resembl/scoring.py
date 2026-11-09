@@ -46,6 +46,10 @@ NUM_PERMUTATIONS = 128
 #: ASCII-only upper table for NASM mnemonics (``str.upper`` maps U+017F->S, U+0131->I).
 _ASCII_UPPER_TABLE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
+#: ASCII-only lower table, for the same reason: ``casefold`` maps
+#: U+212A -> k and U+017F -> s, into the register set.
+_ASCII_LOWER_TABLE = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
 #: Seed of the MinHash permutation stream (``numpy.random.RandomState``).
 #: Every stored fingerprint and band key depends on it, so changing it makes
 #: them incomparable with new ones; ``serve`` reports it in the fingerprint
@@ -631,12 +635,11 @@ def _lexed_pass(
                 continue
             # Pygments already classifies registers; the string check covers
             # register spellings the lexer misses.  Registers are ASCII; the
-            # fold is casefold, not ``lower``: a non-ASCII spelling that
-            # ``lower`` would map *into* the set (KELVIN SIGN U+212A -> "k",
-            # LONG S U+017F -> "s") must not match, and ``casefold`` keeps
-            # the fold total for the ASCII set.  Computed once and reused
-            # instead of per-branch.
-            lower = value.casefold()
+            # fold is ASCII-only, not ``casefold``: ``casefold`` maps a
+            # non-ASCII spelling *into* the set (KELVIN SIGN U+212A -> "k",
+            # LONG S U+017F -> "s"), so U+212A would read as the k register.
+            # Computed once and reused instead of per-branch.
+            lower = value.translate(_ASCII_LOWER_TABLE)
             if lower in ALL_REGISTERS:
                 append("REG")
                 continue
@@ -651,12 +654,15 @@ def _lexed_pass(
                 continue
 
         # Shared tail for both modes: normalization only rewrites the token
-        # classes above; everything else passes through upper-cased.  A
-        # leading ``isupper()`` would only decide between ``value`` and
-        # ``value.upper()`` — the same string, since ``upper`` is the
-        # identity on an all-uppercase value — so the extra scan was wasted.
+        # classes above; everything else passes through upper-cased.  The
+        # fold is ASCII-only, not ``str.upper``: ``upper`` maps the long s
+        # (U+017F) to S and the dotless i (U+0131) to I, so a token spelled
+        # with either would read as an ASCII mnemonic it is not. A leading
+        # ``isupper()`` would only decide between ``value`` and the folded
+        # spelling — the same string, since the fold is the identity on an
+        # all-uppercase value — so the extra scan was wasted.
         if not (flags & _TT_PUNCT) and value.strip():
-            append(value.upper())
+            append(value.translate(_ASCII_UPPER_TABLE))
 
     normalized = "".join(normalized_parts).strip() if want_normalized else ""
     return output_tokens, normalized

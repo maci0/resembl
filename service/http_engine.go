@@ -65,8 +65,13 @@ func newLocalEngine(endpoint string, timeout time.Duration) (*LocalEngine, error
 		return nil, errors.New("invalid engine endpoint")
 	}
 	ip := net.ParseIP(u.Hostname())
-	if u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return nil, errors.New("engine must be loopback")
+	// ASCII-only fold: "LOCALHOST" is the same name, but a Unicode spelling
+	// that folds into ASCII (long s) must not pass as the loopback name
+	// — the same rule the Python side applies to its host comparisons.
+	if !isASCII(u.Hostname()) || (u.Hostname() != "localhost" && !strings.EqualFold(u.Hostname(), "localhost")) {
+		if ip == nil || !ip.IsLoopback() {
+			return nil, errors.New("engine must be loopback")
+		}
 	}
 	// Bounded transport: the default http.Transport pools up to 100 idle
 	// connections per host with no idle timeout, so a long-lived service

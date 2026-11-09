@@ -103,6 +103,7 @@ from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .paths import (
     _ASCII_LOWER_TABLE,
     LOG_LEVEL_ENV_VAR,
+    ascii_fold_lower,
     cache_dir_get,
     console_utf8_reconfigure,
     db_url_get,
@@ -404,7 +405,12 @@ def _zone_get(name: str | None) -> tzinfo | None:
     """
     if name is None:
         return None
-    if name.startswith(("+", "-", "UTC+", "UTC-")) or not name[:1].isalpha():
+    # ASCII-only: ``isalpha`` is True for a Greek or CJK first letter, but
+    # an IANA name starts with an ASCII letter (zone files are ASCII); a
+    # non-ASCII initial is a fixed-offset-shaped or unknown name either way.
+    if name.startswith(("+", "-", "UTC+", "UTC-")) or not (
+        name[:1].isascii() and name[:1].isalpha()
+    ):
         raise ValueError(
             f"{name!r} is a fixed offset, not a zone name; pass an IANA zone such as "
             "'Europe/Warsaw', whose offset follows daylight saving."
@@ -931,7 +937,9 @@ def serve(
         the warning.  ``ipaddress`` is the authority, matching
         ``resembl.server._loopback_allowed_hosts``.
         """
-        if h.casefold() == "localhost":
+        # ASCII-only fold, matching server.py: a non-ASCII spelling that
+        # folds into ASCII is not the loopback name.
+        if ascii_fold_lower(h) == "localhost":
             return True
         try:
             import ipaddress
@@ -1787,7 +1795,11 @@ def list_cmd(
     start, end = 0, None
     if range_str:
         parts = range_str.split("-")
-        if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        # ASCII-only digits: ``isdigit`` is True for a fullwidth digit,
+        # and ``int`` accepts it, so a fullwidth range would list 12-34 —
+        # the range syntax names ASCII digits, and saying so is the
+        # difference between the error and the silent acceptance.
+        if len(parts) != 2 or not all(part.isascii() and part.isdigit() for part in parts):
             err_console.print(
                 "[red]Error:[/red] Invalid --range: use start-end (e.g., 10-30), "
                 f"got '{_display(range_str)}'."

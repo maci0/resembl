@@ -35,6 +35,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, select, text
 
 from .models import FINGERPRINT_VERSION, LSH_BUCKET_KEY_MAX, AppMeta
+from .paths import _ASCII_LOWER_TABLE
 from .scoring import MINHASH_MAGIC, minhash_num_perm, minhash_pack
 
 if TYPE_CHECKING:
@@ -347,7 +348,10 @@ def lsh_meta_get(session: Session) -> tuple[float, int] | None:
     try:
         row = session.execute(text(_META_SELECT)).one_or_none()
     except OperationalError as exc:
-        message = str(exc).casefold()
+        # ASCII-only fold: DB driver messages are ASCII; folding the
+        # message the way a Unicode reader would (long s -> s) could
+        # match "no such table" on a message that does not say it.
+        message = str(exc).translate(_ASCII_LOWER_TABLE)
         if "no such table" in message or "does not exist" in message or "doesn't exist" in message:
             return None
         logger.error(

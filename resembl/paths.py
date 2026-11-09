@@ -78,6 +78,27 @@ _ASCII_UPPER_TABLE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMN
 _ASCII_LOWER_TABLE = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
+def ascii_fold_lower(text: str) -> str:
+    """Fold ASCII A-Z to a-z, leaving every non-ASCII character alone.
+
+    Protocol tokens (host names, media types, log levels) compare
+    case-insensitively, and ``str.casefold``/``str.lower`` map some non-ASCII
+    spellings into ASCII (long s U+017F -> s, Kelvin sign U+212A -> k,
+    sharp s U+00DF -> ss under casefold). A Host spelling of localhost
+    with the long s in place of the last s would then pass as
+    ``localhost`` here while a byte-wise peer refuses it, and a
+    Content-Type spelled with the long s would pass as JSON. Folding
+    ASCII only keeps the non-ASCII spelling non-ASCII, so the membership
+    check rejects it instead of silently accepting a different token.
+    """
+    return text.translate(_ASCII_LOWER_TABLE)
+
+
+def is_ascii(text: str) -> bool:
+    """Whether *text* is entirely ASCII, for protocol-token gates."""
+    return text.isascii()
+
+
 def db_url_get() -> str:
     """Return the database URL configured in the environment.
 
@@ -266,7 +287,10 @@ def port_file_cleanup(port_file: str, port: int) -> None:
 
 def _encoding_is_utf8(encoding: str) -> bool:
     """Whether *encoding* names UTF-8 under any of its usual spellings."""
-    return encoding.casefold().replace("-", "").replace("_", "") == "utf8"
+    # ASCII-only fold: an encoding name is a protocol token, and
+    # ``casefold`` maps the long s to s, so "utf�" spellings that fold
+    # into "utf8" must not read as UTF-8 here.
+    return ascii_fold_lower(encoding).replace("-", "").replace("_", "") == "utf8"
 
 
 def console_utf8_reconfigure() -> None:

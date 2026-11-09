@@ -41,6 +41,14 @@ def parse_instant(value: str) -> datetime | None:
     anything else is unparseable for our purposes and left verbatim.
     """
     text = value.strip()
+    # ASCII-only gate: the shape pins digit positions, and an instant's
+    # fields are ASCII digits. A multi-byte character in the first 19
+    # characters shifts every later code-point offset, and a digit spelled
+    # in another script (Arabic-Indic, fullwidth) must not pass the gate
+    # for ``fromisoformat`` to decide: the Go mirror indexes bytes, so
+    # agreeing on ASCII here is what keeps the two validators in step.
+    if not text.isascii():
+        return None
     if len(text) < 19 or text[4] != "-" or text[7] != "-" or text[10] not in ("T", "t", " "):
         return None
     if text[13] != ":" or text[16] != ":":

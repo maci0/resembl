@@ -50,6 +50,7 @@ from .core import (
 from .lsh import band_buckets
 from .models import FINGERPRINT_VERSION
 from .paths import (
+    ascii_fold_lower,
     cache_dir_get,
     db_url_mask,
     port_file_cleanup,
@@ -778,7 +779,11 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
     protecting them.  A loopback bind is only ever addressed by the names
     below, so the check costs nothing there and closes the rebinding path.
     """
-    is_loopback = host.casefold() == "localhost"
+    # ASCII-only fold: ``casefold`` maps the long s (U+017F) to s, so a
+    # bind spelled with the long s would read as loopback here while the socket
+    # layer that resolves it does not. The Go service applies the same
+    # ASCII-only rule to its loopback name check.
+    is_loopback = ascii_fold_lower(host) == "localhost"
     if not is_loopback:
         try:
             import ipaddress
@@ -1427,7 +1432,9 @@ class _FindHandler(BaseHTTPRequestHandler):
         the shared not-allowed answer keeps the envelope uniform whatever verb
         arrives; a non-``do_`` attribute still raises as usual.
         """
-        if name.startswith("do_") and name[3:].isupper():
+        # ASCII-only: ``isupper`` is True for a non-ASCII upper letter
+        # (``do_Ö``), and HTTP methods are ASCII protocol tokens.
+        if name.startswith("do_") and name[3:].isascii() and name[3:].isupper():
             return self._method_not_allowed
         raise AttributeError(name)
 
@@ -1502,7 +1509,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         either way); an explicit non-JSON media type is refused rather than
         silently parsed.
         """
-        declared = (self.headers.get("Content-Type") or "").split(";")[0].strip().casefold()
+        # ASCII-only fold (see ascii_fold_lower): a media type spelled
+        # with the long s must not pass as JSON here while the Go
+        # service's ASCII-only check refuses the same token.
+        declared = ascii_fold_lower((self.headers.get("Content-Type") or "").split(";")[0].strip())
         return declared in ("", "application/json")
 
     def _host_allowed(self) -> bool:
@@ -1519,7 +1529,7 @@ class _FindHandler(BaseHTTPRequestHandler):
         allowed = self.server.allowed_hosts  # type: ignore[attr-defined]
         if not allowed:
             return True
-        return (self.headers.get("Host") or "").strip().casefold() in allowed
+        return ascii_fold_lower((self.headers.get("Host") or "").strip()) in allowed
 
     def _non_loopback_refused(self) -> bool:
         """Whether this request hits an endpoint gated on non-loopback binds.

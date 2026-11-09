@@ -302,11 +302,36 @@ func normalizeOffset(candidate string) (string, bool) {
 	return candidate[:offsetStart] + string(sign) + digits[:2] + ":" + digits[2:4], true
 }
 
+// isASCII reports whether s is all ASCII, so the byte-indexed shape gate in
+// isISO8601Instant names the same characters Python's code-point gate
+// names: either form rejects a non-ASCII digit or letter before any
+// separator position is read.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 // isISO8601Instant mirrors resembl.models.parse_instant: the extended
 // YYYY-MM-DDTHH:MM:SS shape (T/t/space separator) with optional fractional
 // seconds and offset, trailing Z/z treated as +00:00. Date-only and
 // minute-precision forms are not instants and return false.
+//
+// The shape gate pins the digit positions to ASCII: an instant's fields are
+// ASCII digits, never a Unicode spelling of one. Byte-indexing alone cannot
+// say so — a multi-byte digit or letter in the first 19 bytes shifts every
+// later offset, and a single-byte-position check that only looks at the
+// separators lets e.g. "2024-0é-01T..." through the gate. Reject anything
+// non-ASCII up front; the parse below would fail on it anyway, and agreeing
+// with Python's code-point gate (which counts characters, not bytes) is the
+// point of the mirror.
 func isISO8601Instant(s string) bool {
+	if !isASCII(s) {
+		return false
+	}
 	if len(s) < 19 || s[4] != '-' || s[7] != '-' || (s[10] != 'T' && s[10] != 't' && s[10] != ' ') {
 		return false
 	}
@@ -562,7 +587,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		media := strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
-		if !strings.EqualFold(media, "application/json") {
+		// ASCII-only fold: EqualFold is the Unicode simple fold, so a
+		// non-ASCII spelling that folds into ASCII (long s U+017F -> s,
+		// Kelvin sign U+212A -> k) would pass as "application/json" here
+		// while the Python engine's casefold comparison admits the same
+		// spellings for a different reason — both must fold protocol
+		// tokens ASCII a-z only, like log_level_get does.
+		if !isASCII(media) || !strings.EqualFold(media, "application/json") {
 			writeError(w, http.StatusUnsupportedMediaType, "content type must be application/json", reqID)
 			return
 		}

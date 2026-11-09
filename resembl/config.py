@@ -15,7 +15,7 @@ from typing import NamedTuple
 import tomli_w
 
 from .clock import CLOCK_ENV_VAR, _retry_sleep, monotonic_now
-from .paths import config_dir_get, config_path_get
+from .paths import ascii_fold_lower, config_dir_get, config_path_get
 from .scoring import MAX_NUM_PERM
 
 #: Output formats every renderer switches on (``--format`` / config ``format``).
@@ -171,7 +171,10 @@ class ResemblConfig:
                 )
                 continue
             if isinstance(value, str):
-                text = value.strip().casefold()
+                # ASCII-only fold: ``casefold`` maps the long s to s, so a
+                # value spelled "true" with one must not read as True here
+                # while the thin client's check treats it as a string.
+                text = ascii_fold_lower(value.strip())
                 if text in ("true", "false"):
                     logger.warning(
                         "Ignoring %s: expected %s, got %r.",
