@@ -1,7 +1,7 @@
 # Security policy
 
 Last reviewed: 2026-11-09, against the tree at version 4.0.0
-(`pyproject.toml:3`) plus post-4.0.0 commits through `18d825b` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force), with the
+(`pyproject.toml:3`) plus post-4.0.0 commits through `6921c20` (including `5303616` env vars, `91c7aa1` cache partition, `d982e94` mkstemp, `8e078ed` config lock, `da86484` merge/collection force), with the
 loopback-client fix (the `build_opener(ProxyHandler({}))` opener opened
 via `OpenerDirector.open` instead of passed as `urlopen`'s context,
 `resembl/cli.py` `_server_request` and `resembl/find_client.py` `_main`)
@@ -13,7 +13,8 @@ the Lambda event adapter in `service/internal/lambdaproxy/`) and the
 `backup` / `verify-backup` commands.
 
 The `serve` controls below (the loopback `Host` check, the non-loopback
-bind refusal without `--allow-unauthenticated`, the Go service's
+bind refusal without `--allow-unauthenticated` or a non-blank
+`RESEMBL_SERVE_ALLOW_UNAUTHENTICATED`, the Go service's
 `-token-file` requirement for a non-loopback `-listen`, `serve -v` request
 logging, the `0700` cache directory, the `0600` port file, the `0600`
 config file on save, the standalone client's 1-65535 port-range check and
@@ -27,8 +28,8 @@ JSON `405` envelope for any unhandled verb, the verified pre-delete backup
 before `rm`/`clean`/`collection delete` and the verified pre-merge backup
 before `merge` (`db_backup_for_delete`, `resembl/core.py`, with `--no-backup`
 to opt out), the single-file backup publication (`3d77755`, `db_backup` in
-`resembl/core.py`), the end-to-end `X-Request-Id` adoption (bounded to 64 chars,
-printable-only; `26e95cf`), the fail-fast
+`resembl/core.py`), the end-to-end `X-Request-Id` adoption (bounded to 64 UTF-8 bytes,
+printable-only; `26e95cf`, byte-counted in `ef333e8`), the fail-fast
 `RESEMBL_NOW`/`RESEMBL_SEED` validation on read and startup paths (base-10
 only), the
 warm-server refusal log line before the in-process fallback, and the Go
@@ -77,7 +78,7 @@ non-loopback bind it is the same exposure as the bind itself. Run
 `resembl serve -v` if the served queries have to be attributable after the
 fact; nothing is recorded per request at the default log level except a
 slow-request warning (over 1s) and exception logs. A caller-supplied
-`X-Request-Id` is adopted end to end (bounded to 64 chars,
+`X-Request-Id` is adopted end to end (bounded to 64 UTF-8 bytes,
 printable-only), so a request carrying one can be pivoted from the Go
 service's log line to the engine's records, without adding a
 default-level per-request record.
@@ -90,8 +91,8 @@ relies on, not configuration options.
 
 - **`resembl serve` stays on loopback.** It binds `127.0.0.1` by default and
   answers every request that reaches the port. Passing `--host` with a
-  non-loopback address is refused unless `--allow-unauthenticated` is
-  given; with the flag it binds and publishes an unauthenticated read of
+  non-loopback address is refused unless `--allow-unauthenticated` or a
+  non-blank `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` is given; with either it binds and publishes an unauthenticated read of
   the whole snippet corpus to that network, printing a warning that does
   not stop the bind. Do not put it behind a reverse proxy that does not
   authenticate. The Go `resembl-service` likewise requires `-token-file`
@@ -148,7 +149,7 @@ relies on, not configuration options.
   config sidecar, and a `<backup-stem>.runtime-manifest.json` runtime
   sidecar (copied verbatim from `RESEMBL_RUNTIME_MANIFEST` when set) into
   a caller-chosen directory, pruning to the newest `--keep` (default 7)
-  by modification time, folds the published copy to a single-file restore
+  by the embedded filename timestamp, folds the published copy to a single-file restore
   point, and re-verifies the published file before reporting success
   (removing it on failure; exits 1 when the manifest could not be written
   or the published copy fails verification). The published copy is folded
@@ -187,7 +188,8 @@ relies on, not configuration options.
   `RESEMBL_SEED` now raises instead of silently pinning the clock or
   falling back to OS randomness, on read and retry paths as well as on
   stamping writes; the Go service validates both at startup and refuses
-  to start. `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
+  to start. `RESEMBL_NOW` without an offset is UTC, never host local zone
+  (`5d2aaa3`). `RESEMBL_SEED` is parsed as decimal only, and `MinHash`
   rejects `2**32` permutations (`9aeab2b`, `1f210e7`). A malformed or
   unreadable `config.toml` now fails `serve` startup instead of the
   server silently binding with built-in defaults (`_find_defaults_load`
