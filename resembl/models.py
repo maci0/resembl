@@ -31,7 +31,9 @@ if TYPE_CHECKING:
 
 
 #: Environment variable that pins :func:`timestamp_now` to a fixed instant,
-#: given as an ISO 8601 string.  The wall clock is otherwise the only source
+#: given as an ISO 8601 string. A value without an offset is read as UTC —
+#: never as the host's local zone — so a pinned replay means the same
+#: instant wherever it runs.  The wall clock is otherwise the only source
 #: of ``created_at`` values, and those values are written to the database,
 #: printed back by ``collection list`` and ``version``, and embedded in
 #: backup filenames and manifests, so two runs of the same inputs never
@@ -118,7 +120,9 @@ def timestamp_now() -> str:
     Read from ``CLOCK_ENV_VAR`` when that variable is set, so a test or a
     replay gets the same stamp every time; an unparseable value raises
     ``ValueError`` rather than silently falling back to the wall clock, which
-    would defeat the point of setting it.
+    would defeat the point of setting it.  A naive pin is read as UTC, not
+    the host's local zone, so the same pin means the same instant on every
+    machine.
     """
     override = os.environ.get(CLOCK_ENV_VAR)
     if override is None or not override.strip():

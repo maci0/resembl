@@ -359,6 +359,11 @@ class TestTimestampNow(unittest.TestCase):
         with patch.dict(os.environ, {CLOCK_ENV_VAR: "2024-06-01T12:00:00+02:00"}):
             self.assertEqual(timestamp_now(), "2024-06-01T10:00:00+00:00")
 
+    def test_naive_override_is_read_as_utc(self):
+        """A naive pin means UTC, never the host's local zone."""
+        with patch.dict(os.environ, {CLOCK_ENV_VAR: "2024-06-01T10:00:00"}):
+            self.assertEqual(timestamp_now(), "2024-06-01T10:00:00+00:00")
+
     def test_unparseable_override_fails_loud(self):
         """A bad override is not silently ignored: it would defeat the point."""
         with patch.dict(os.environ, {CLOCK_ENV_VAR: "not-a-date"}):
