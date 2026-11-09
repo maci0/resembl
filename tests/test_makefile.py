@@ -126,6 +126,13 @@ class MakefileShellTests(unittest.TestCase):
         self.assertIn("needs uv 0.12.13", result.stdout + result.stderr)
         self.assertIn("https://docs.astral.sh/uv/", result.stdout + result.stderr)
 
+    def test_dist_uses_uv_python_not_bare_python3(self) -> None:
+        """The wheel rewrite in `dist` runs on the locked interpreter."""
+        root = Path(__file__).resolve().parent.parent
+        text = (root / "Makefile").read_text(encoding="utf-8")
+        self.assertNotIn("python3 -c", text, "Makefile dist uses bare python3")
+        self.assertIn("uv run --locked python", text, "Makefile dist not using uv python")
+
     def test_backup_names_missing_backup_dir(self) -> None:
         """Without BACKUP_DIR, backup fails loud instead of backing up nowhere."""
         make = shutil.which("make")

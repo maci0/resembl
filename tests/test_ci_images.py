@@ -172,6 +172,40 @@ class CiImagePinTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-24.04", workflows)
         self.assertIn("os: [macos-15, windows-2025]", workflows)
 
+    def test_dockerignore_patterns_agree(self) -> None:
+        """Root and service .dockerignore files carry the same patterns.
+
+        service/Dockerfile is built from the root context, so the root
+        file is the one Docker reads. The service/ copy is kept in sync
+        by eye; a pattern present in one but not the other lets a local
+        database, WAL sidecar or benchmark cache drift back into the
+        context the other file excludes.
+        """
+
+        def patterns(path: Path) -> set[str]:
+            return {
+                line.strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            }
+
+        root = patterns(_ROOT / ".dockerignore")
+        service = patterns(_ROOT / "service" / ".dockerignore")
+        self.assertEqual(root, service)
+        for needed in (
+            "benchmarks",
+            "*.db-wal",
+            "**.db-wal",
+            "*.db-shm",
+            "**.db-shm",
+            "*.sqlite3-wal",
+            "**.sqlite3-wal",
+            "*.sqlite3-shm",
+            "**.sqlite3-shm",
+        ):
+            with self.subTest(pattern=needed):
+                self.assertIn(needed, root)
+
     def test_go_version_agrees_everywhere(self) -> None:
         """go.mod, Dockerfile, Makefile and docs name the same Go version."""
         mod = (_ROOT / "service" / "go.mod").read_text(encoding="utf-8")

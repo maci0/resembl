@@ -32,15 +32,26 @@ __pycache__
 docs
 tests
 fuzzers
+benchmarks
 # Local databases and benchmark data are sensitive corpus data and are
 # never COPY'd into the service image; keep them out of the context too.
 # `*.db` and `*.sqlite3` as written only match at the context root, so
 # the `**/` forms cover a database generated under a package or data
-# directory instead of next to the Dockerfile's call site.
+# directory instead of next to the Dockerfile's call site. The -wal/-shm
+# sidecars carry the same corpus data as the database they belong to, so
+# they get the same nested forms.
 *.db
 **.db
+*.db-wal
+**.db-wal
+*.db-shm
+**.db-shm
 *.sqlite3
 **.sqlite3
+*.sqlite3-wal
+**.sqlite3-wal
+*.sqlite3-shm
+**.sqlite3-shm
 data
 scale_data
 # Go test and fuzz files are never compiled into the service binary;
