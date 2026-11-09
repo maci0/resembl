@@ -413,5 +413,58 @@ class TestTagNormalizationForms(BaseDBTest):
         self.assertEqual(removed.tag_list, [])
 
 
+class TestSurrogateAndLengthUnits(unittest.TestCase):
+    """Lone surrogates and byte-vs-code-point limits share one rule everywhere."""
+
+    def test_server_rejects_a_json_escaped_lone_surrogate_query(self):
+        """``json.loads`` makes ``\\udcff`` a lone surrogate; the CLI refuses it."""
+        from resembl.server import _query_field_error
+
+        self.assertEqual(
+            _query_field_error("bad\udcff mov eax, 1"), "query input is not valid UTF-8"
+        )
+        self.assertIsNone(_query_field_error("mov eax, 1"))
+
+    def test_server_rejects_surrogates_in_score_candidates(self):
+        from resembl.config import ResemblConfig
+        from resembl.server import _score_payload
+
+        with self.assertRaises(Exception) as cm:
+            _score_payload({"source": "ret", "candidates": ["bad\udcff"]}, ResemblConfig())
+        self.assertIn("not valid UTF-8", str(cm.exception))
+
+    def test_server_rejects_surrogates_in_score_source(self):
+        from resembl.config import ResemblConfig
+        from resembl.server import _score_payload
+
+        with self.assertRaises(Exception) as cm:
+            _score_payload({"source": "bad\udcff", "candidates": []}, ResemblConfig())
+        self.assertIn("not valid UTF-8", str(cm.exception))
+
+    def test_request_id_cap_counts_bytes_not_code_points(self):
+        """64 ``é`` chars are 128 bytes; the Go service refuses that id, so must the Python one."""
+        from resembl.server import _FindHandler
+
+        handler = object.__new__(_FindHandler)
+        handler.request_id = "minted"
+        handler.headers = {"X-Request-Id": "é" * 64}
+
+        class _Headers(dict):
+            def get(self, key):  # pylint: disable=missing-function-docstring
+                return dict.get(self, key)
+
+        handler.headers = _Headers({"X-Request-Id": "é" * 64})
+        self.assertEqual(handler._correlation_id(), "minted")
+        handler.headers = _Headers({"X-Request-Id": "é" * 32})
+        self.assertEqual(handler._correlation_id(), "é" * 32)
+
+    def test_csv_safe_sees_other_invisible_prefixes(self):
+        """WORD JOINER / SOFT HYPHEN / bidi isolates are stripped like U+200B."""
+        from resembl.cli import _csv_safe
+
+        for ch in (" ", "­", "؜", "⁦"):  # noqa: RUF001
+            self.assertEqual(_csv_safe(ch + "=1+1"), "'" + ch + "=1+1", repr(ch))
+
+
 if __name__ == "__main__":
     unittest.main()

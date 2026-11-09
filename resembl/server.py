@@ -796,6 +796,21 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
 _LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), 0x7F])
 
 
+def _has_lone_surrogate(text: str) -> bool:
+    """Whether *text* carries a lone surrogate half (U+D800-U+DFFF).
+
+    ``json.loads`` decodes a ``\\udcff`` escape into a lone surrogate that
+    no byte on the wire ever spelled: it is not valid UTF-8 text, but
+    ``normalize_unicode`` passes it through and every fingerprint hashes it
+    with ``surrogatepass``, so a query the CLI refuses as "not valid UTF-8"
+    would be searched here instead.  The CLI (``resembl find``, ``find-batch``'s
+    predecessor paths, and the thin client) rejects the same value, so the
+    server must too — otherwise the same bytes mean two different things on
+    two paths to the same corpus.
+    """
+    return any(0xD800 <= ord(ch) <= 0xDFFF for ch in text)
+
+
 def _query_field_error(query: object) -> str | None:
     """Return why *query* is unusable as a find, or None when it is fine.
 
@@ -808,6 +823,8 @@ def _query_field_error(query: object) -> str | None:
     """
     if not isinstance(query, str):
         return "query must be a string"
+    if _has_lone_surrogate(query):
+        return "query input is not valid UTF-8"
     if not query.strip():
         return "query must not be empty"
     return None
@@ -826,6 +843,8 @@ def _texts_field(body: dict, name: str) -> list[str]:
         raise BadRequestError(f"{name} must hold at most {MAX_BATCH_QUERIES} entries")
     if not all(isinstance(text, str) for text in texts):
         raise BadRequestError(f"{name} must hold only strings")
+    if any(_has_lone_surrogate(text) for text in texts):
+        raise BadRequestError(f"{name} input is not valid UTF-8")
     return texts
 
 
@@ -939,6 +958,8 @@ def _score_payload(body: dict, params: ResemblConfig) -> dict:
     source = body.get("source")
     if not isinstance(source, str) or not source.strip():
         raise BadRequestError("source must be a non-blank string")
+    if _has_lone_surrogate(source):
+        raise BadRequestError("source input is not valid UTF-8")
     candidates = _texts_field(body, "candidates")
     floor = body.get("jaccard_floor")
     if floor is None:
@@ -1213,10 +1234,14 @@ class _FindHandler(BaseHTTPRequestHandler):
     path: str = ""
     command: str = ""
 
-    #: Longest caller-supplied correlation id adopted verbatim.  An id
-    #: longer than this is dropped for a server-minted one: the id is
+    #: Longest caller-supplied correlation id adopted verbatim, in bytes.
+    #: An id longer than this is dropped for a server-minted one: the id is
     #: echoed on every response and written into every log record, so an
-    #: unbounded header would let one client inflate both.
+    #: unbounded header would let one client inflate both.  Measured in
+    #: UTF-8 bytes, not code points: ``len()`` on a ``str`` counts code
+    #: points, so 64 ``é`` characters (128 bytes) stayed under the cap here
+    #: while the Go service, whose ``len()`` counts bytes, refused the same
+    #: id — one request, two answers for one correlation id.
     _MAX_REQUEST_ID_CHARS = 64
 
     def _correlation_id(self) -> str:
@@ -1245,7 +1270,11 @@ class _FindHandler(BaseHTTPRequestHandler):
                 supplied = None
         if supplied is not None:
             supplied = supplied.strip()
-            if supplied and len(supplied) <= self._MAX_REQUEST_ID_CHARS:
+            if (
+                supplied
+                and len(supplied.encode("utf-8", errors="surrogatepass"))
+                <= self._MAX_REQUEST_ID_CHARS
+            ):
                 if all(0x20 <= ord(ch) != 0x7F for ch in supplied):
                     return supplied
         return self.request_id

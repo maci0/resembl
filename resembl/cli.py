@@ -473,7 +473,17 @@ def _csv_safe(value: object) -> object:
         return "'" + value
     stripped = value
     while True:
-        next_stripped = stripped.strip().lstrip("\ufeff\u200b\u200c\u200d")
+        # Stripped invisible set: the BOM and the zero-width space/joiner
+        # pair is not the whole class.  U+2060 (WORD JOINER), U+00AD (SOFT
+        # HYPHEN, rendered invisible at a non-break), U+180E (MONGOLIAN VOWEL
+        # SEPARATOR, formerly a space) and the other format characters a
+        # spreadsheet skips when it lands on a formula trigger all sit in
+        # front of "=1+1" exactly like U+200B does, so leaving one of them
+        # out of the lstrip set leaves the same evasion open through a
+        # different code point.
+        next_stripped = stripped.strip().lstrip(
+            "\ufeff\u200b\u200c\u200d\u2060\u00ad\u180e\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+        )
         if next_stripped == stripped:
             break
         stripped = next_stripped
@@ -2156,6 +2166,9 @@ def find_batch(
     except UnicodeDecodeError:
         err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
         raise typer.Exit(code=USAGE_ERROR) from None
+    if any(0xD800 <= ord(ch) <= 0xDFFF for line in queries for ch in line):
+        err_console.print("[red]Error:[/red] query input is not valid UTF-8.")
+        raise typer.Exit(code=USAGE_ERROR)
     if not queries:
         err_console.print("[red]Error:[/red] No queries found in the file.")
         raise typer.Exit(code=USAGE_ERROR)
