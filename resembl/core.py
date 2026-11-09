@@ -2549,13 +2549,12 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     content_hash = _db_content_hash(session)
     reused = _db_backup_reuse(backup_dir, content_hash)
 
-    def _drop_reused() -> None:
-        assert reused is not None
+    def _drop_reused(reused_path: str) -> None:
         for _stale in (
-            reused,
-            os.path.join(backup_dir, _db_backup_manifest_name(reused)),
-            os.path.join(backup_dir, _db_backup_config_name(reused)),
-            os.path.join(backup_dir, _db_backup_runtime_name(reused)),
+            reused_path,
+            os.path.join(backup_dir, _db_backup_manifest_name(reused_path)),
+            os.path.join(backup_dir, _db_backup_config_name(reused_path)),
+            os.path.join(backup_dir, _db_backup_runtime_name(reused_path)),
         ):
             _remove_quietly(_stale)
 
@@ -2565,7 +2564,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
     if reused is not None and any(
         os.path.exists(reused + _sidecar) for _sidecar in ("-wal", "-shm")
     ):
-        _drop_reused()
+        _drop_reused(reused)
         reused = None
     if reused is not None and not db_verify_backup(session, reused)["ok"]:
         # A retained backup whose manifest still matches the live content
@@ -2575,7 +2574,7 @@ def db_backup(session: Session, backup_dir: str, *, keep: int = 7) -> dict:
         # restores — the exact failure db_backup's fresh path refuses by
         # deleting an unverifiable copy.  Drop the trio and fall through
         # to write a fresh, self-verified backup.
-        _drop_reused()
+        _drop_reused(reused)
         reused = None
     if reused is not None:
         # A reused backup was verified when it was written, but its file can

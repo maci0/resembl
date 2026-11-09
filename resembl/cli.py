@@ -95,6 +95,7 @@ from .core import (
     snippet_version_list,
 )
 from .database import db_create, get_engine
+from .find_client import _read_bounded_response as _read_bounded_server_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .models import avg_time_per_item, monotonic_now, parse_instant
 from .paths import (
@@ -664,23 +665,9 @@ def _session_db_url(session: Session) -> str:
 #: Hard ceiling on a warm-server response the CLI will buffer.  Mirrors
 #: ``resembl.find_client._MAX_RESPONSE_BYTES``: a port-file swap or a
 #: compromised loopback server must not pin unbounded memory via
-#: ``response.read()`` with no size.
+#: ``response.read()`` with no size.  Kept as the name callers use; the
+#: reader is shared so the two copies cannot drift.
 _MAX_SERVER_RESPONSE_BYTES = 16 * 1024 * 1024
-
-
-def _read_bounded_server_response(response: object) -> bytes:
-    """Read up to the ceiling from *response*, refusing an oversize body."""
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = response.read(65536)  # type: ignore[attr-defined]
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_SERVER_RESPONSE_BYTES:
-            raise ValueError("server response exceeds size limit")
-        chunks.append(chunk)
-    return b"".join(chunks)
 
 
 def _server_request(path: str, body: dict, timeout: float) -> dict | None:
