@@ -1979,6 +1979,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        # The service is served over plain HTTP on loopback and its only
+        # public ingress is the operator's own reverse proxy, which owns
+        # TLS: advertising HSTS here would pin an HTTP-only deployment to
+        # a scheme it cannot serve.
         # Keep cached copies of snippet-derived responses out of browser and
         # intermediary caches.
         self.send_header("Cache-Control", "no-store")

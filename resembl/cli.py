@@ -548,7 +548,7 @@ def _echo_format(data: object) -> None:
             rows = [{k: ", ".join(v) if isinstance(v, list) else v for k, v in data.items()}]
             fieldnames = list(rows[0])
         else:
-            console.print(json.dumps(data, indent=2))
+            console.print(json.dumps(data, indent=2), markup=False)
             return
         writer = csv.DictWriter(
             sys.stdout, fieldnames=fieldnames, lineterminator=_CSV_LINETERMINATOR
@@ -1181,7 +1181,7 @@ def _apply_snippet_field_mutation(
         if state.format in ("json", "csv"):
             _fail(failure_message)
         elif not state.quiet:
-            err_console.print(f"[red]Error:[/red] {failure_message}")
+            err_console.print(f"[red]Error:[/red] {_display(failure_message)}")
         raise typer.Exit(code=1)
     values = get_values(snippet)
     if state.format in ("json", "csv"):
@@ -2574,7 +2574,7 @@ def collection_create_cmd(
         col = collection_create(state.session, name, description)
     except ValueError as e:
         logger.error("Could not create collection %r: %s", name, e)
-        err_console.print("[red]Error:[/red] " + str(e))
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
         raise typer.Exit(code=1) from e
     except SQLAlchemyError as e:
         # Driver text carries the SQL statement and its bind parameters, which

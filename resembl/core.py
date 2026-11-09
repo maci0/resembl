@@ -2987,8 +2987,8 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
             "?mode=ro",
             uri=True,
         )
-    except sqlite3.Error as e:
-        return {"ok": False, "num_snippets": 0, "issues": [f"cannot open backup: {e}"]}
+    except sqlite3.Error:
+        return {"ok": False, "num_snippets": 0, "issues": ["cannot open backup"]}
     try:
         tables = {
             row[0]
@@ -3042,8 +3042,8 @@ def db_verify_backup(session: Session, backup_path: str) -> dict:  # pylint: dis
                 break
         if integrity_rows != ["ok"]:
             issues.append(f"integrity_check failed: {'; '.join(integrity_rows)}")
-    except sqlite3.Error as e:
-        return {"ok": False, "num_snippets": 0, "issues": [f"cannot read backup: {e}"]}
+    except sqlite3.Error:
+        return {"ok": False, "num_snippets": 0, "issues": ["cannot read backup"]}
     finally:
         connection.close()
 

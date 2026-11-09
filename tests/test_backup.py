@@ -803,6 +803,23 @@ class TestDbVerifyBackup(FileDBTest):
         self.assertTrue(second["verified"])
         self.assertTrue(db_verify_backup(self.session, second["backup"])["ok"])
 
+    def test_sqlite_error_text_is_not_returned(self):
+        """Driver error text (SQL, file paths) must not reach the caller.
+
+        ``db_verify_backup`` answers ``{"ok": False, "issues": [...]}``;
+        a caller may surface those issues to a chat or log.  The raw
+        ``sqlite3.Error`` text names the SQL statement and the backup
+        path, so the read/open failures report only the failure class.
+        """
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup_dir = os.path.join(self._tmpdir.name, "backups")
+        result = db_backup(self.session, backup_dir)
+        check = db_verify_backup(self.session, result["backup"])
+        self.assertTrue(check["ok"], check)
+        joined = " ".join(check["issues"])
+        self.assertNotIn("sqlite3", joined.casefold())
+        self.assertNotIn("select ", joined.casefold())
+
 
 if __name__ == "__main__":
     unittest.main()
