@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Lambda HTTP adapter rejects events with a missing or empty HTTP method with a JSON 400 before dispatch, instead of interpreting them as GET requests.
+
 - Correct the library search reference: every candidate fingerprint is read, and full-row fetches can exceed the requested top-N despite score-bound pruning.
 
 - Qualify the warm-query scaling claims: recorded benchmark timings are preserved, while crowded LSH buckets increase candidate scoring work.
@@ -91,8 +93,6 @@ project follows [Semantic Versioning](https://semver.org/).
 - The wheel and sdist now ship the `resembl/py.typed` marker (via `MANIFEST.in`), so type checkers treat `resembl` as typed on install.
 
 ### Fixed
-
-- The Lambda HTTP adapter rejects events with a missing or empty HTTP method with a JSON 400 before dispatch, instead of interpreting them as GET requests.
 
 - `ngram_size` is now capped at 32 in `config.toml`, the CLI and the `serve` request validation: an unbounded value turned shingle construction into quadratic memory on large snippets, and an explicit in-range key such as `ngram_size = 1000000` previously passed every gate. A value above the cap is warned about and ignored in the config file (keeping the default), and refused with a clean usage error / 400 on the CLI and HTTP. The cap is generous headroom over real configurations (2-5); the Go service log and the Python server now record authentication refusals (forbidden host, non-loopback gated endpoints) so token-brute-force and rebinding probes leave a trace.
 
