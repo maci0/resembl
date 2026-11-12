@@ -38,9 +38,9 @@ DEFAULT_DB_URL = "sqlite:///assembly.db"
 DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
 
 #: Matches the credentials component of ``scheme://user:password@host/...``.
-#: The password run stops at the first character a URL may not carry bare;
-#: percent-encoded passwords round-trip untouched.
-_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]*:)([^@/\s]+)(@)")
+#: Match SQLAlchemy's user-info syntax, including literal password whitespace
+#: and slashes; percent-encoded passwords are hidden the same way.
+_DB_URL_CREDENTIALS = re.compile(r"(://[^:/]*:)([^@]*)(@)")
 
 #: Cache directory used when the environment names none.
 DEFAULT_CACHE_DIR = "~/.cache/resembl"

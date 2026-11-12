@@ -9,6 +9,7 @@ project follows [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Database URL passwords are masked in messages and logs even when the URL has an empty username, so password-only credentials are not printed by client failures or merge progress.
+- Database URL masking also covers literal slashes and whitespace accepted by SQLAlchemy's user-info parser, instead of exposing those passwords in client failure messages.
 
 - A server bound to a custom loopback IP such as `127.0.0.2` now accepts that exact IP in the Host header, with or without its port. Only that literal is added to the existing allowlist; IPv6 bind literals use brackets.
 

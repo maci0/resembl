@@ -669,6 +669,32 @@ class TestServerMode(_ServeTestCase):
         self.assertNotIn("test-password", message)
         self.assertIn("postgresql://:***@host/db", message)
 
+    def test_thin_client_masks_literal_password_characters(self):
+        """All user-info password characters accepted by the URL parser are hidden."""
+        from contextlib import redirect_stderr
+
+        from sqlalchemy.engine import make_url
+
+        from resembl.find_client import _main
+
+        for user, password in (
+            ("user", "sample/slash"),
+            ("user", "sample space"),
+            ("user", "sample?question"),
+            ("user", "sample#fragment"),
+            ("test user", "sample-password"),
+        ):
+            with self.subTest(user=user, password=password):
+                url = f"postgresql://{user}:{password}@host/db"
+                self.assertEqual(make_url(url).password, password)
+                stderr = io.StringIO()
+                with patch.dict(os.environ, {"RESEMBL_DATABASE_URL": url}), redirect_stderr(stderr):
+                    rc = _main(["--query", "ret", "--json"])
+                self.assertEqual(rc, 1)
+                message = json.loads(stderr.getvalue())["error"]["message"]
+                self.assertNotIn(password, message)
+                self.assertIn(f"postgresql://{user}:***@host/db", message)
+
     def test_thin_client_unreachable_server_connection_refused(self):
         """Connection-refused reaches the clean 'unreachable' exit path."""
         import contextlib
