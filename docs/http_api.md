@@ -88,7 +88,9 @@ resembl serve --stateless --host 0.0.0.0 --port 8080 --allow-unauthenticated
 
 The `POST` endpoints are read-only. `Content-Length` accepts ASCII decimal
 digits with optional surrounding HTTP whitespace; signs and separators are
-rejected with `400`. The path is matched with any query
+rejected with `400`. A body shorter than its declared length is rejected with
+`400` and `{"error":"bad request body"}` before dispatch, even when the received
+prefix is valid JSON. The path is matched with any query
 string removed, so `/find?x=1` is `/find` (parameters are read from the
 body). `PUT`, `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405`
 on any known path (with an `Allow` header naming the verb that path

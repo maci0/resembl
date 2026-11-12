@@ -531,6 +531,26 @@ class TestServerMode(_ServeTestCase):
                 finally:
                     connection.close()
 
+    def test_truncated_framed_body_is_rejected(self):
+        """A complete JSON prefix is not the complete declared HTTP body."""
+        import http.client
+        import socket
+
+        port = self._start_server()
+        body = b'{"query":"ret"}'
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        self.addCleanup(connection.close)
+        connection.request(
+            "POST",
+            "/find",
+            body,
+            {"Content-Type": "application/json", "Content-Length": str(len(body) + 1)},
+        )
+        connection.sock.shutdown(socket.SHUT_WR)
+        response = connection.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(response.read()), {"error": "bad request body"})
+
     def test_thin_client_queries_server(self):
         """resembl.find_client._main returns the matches via the server."""
         from resembl.find_client import _main

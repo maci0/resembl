@@ -8,7 +8,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `resembl serve` rejects a body shorter than its declared Content-Length with 400, even when the received prefix is valid JSON, instead of running an incomplete request.
+
 - Python and Go servers reject request IDs containing C1 controls or Unicode line separators and strip those characters from logged paths, preventing supplied values from splitting a log record.
+
 - `resembl serve` refuses Content-Length values containing signs or separators rather than interpreting them as Python integers. Invalid lengths also close connections after an early route refusal.
 
 - The Go service releases durable execution capacity after completed engine validation rejections (400 and 413), preventing malformed parameters from exhausting all slots. Other engine errors and transport failures still retain capacity.

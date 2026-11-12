@@ -1509,7 +1509,10 @@ class _FindHandler(BaseHTTPRequestHandler):
             return None
         self._body_read = True
         try:
-            body = json.loads((self.rfile.read(length) or b"{}").decode("utf-8"))
+            raw = self.rfile.read(length)
+            if len(raw) != length:
+                return None
+            body = json.loads((raw or b"{}").decode("utf-8"))
         except ValueError, KeyError, RecursionError, UnicodeDecodeError, OSError:
             # UnicodeDecodeError is a ValueError subclass, listed for
             # clarity; OSError from a truncated stream / client hangup is
