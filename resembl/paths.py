@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import tempfile
+from urllib.parse import parse_qsl, quote_plus
 
 #: Database URL used when the environment names none.
 DEFAULT_DB_URL = "sqlite:///assembly.db"
@@ -40,7 +41,7 @@ DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
 #: Matches the credentials component of ``scheme://user:password@host/...``.
 #: Match SQLAlchemy's user-info syntax, including literal password whitespace
 #: and slashes; percent-encoded passwords are hidden the same way.
-_DB_URL_CREDENTIALS = re.compile(r"(://[^:/]*:)([^@]*)(@)")
+_DB_URL_CREDENTIALS = re.compile(r"^\s*[\w+]+://[^:/]*(?::([^@]*))?@")
 
 #: Cache directory used when the environment names none.
 DEFAULT_CACHE_DIR = "~/.cache/resembl"
@@ -116,14 +117,23 @@ def db_url_get() -> str:
 
 
 def db_url_mask(url: str) -> str:
-    """Return *url* with any embedded password replaced by ``***``.
+    """Return *url* with its password and every query value replaced by ``***``.
 
     Display helper for messages that echo a database URL (connection
     failures, merge progress): URLs like
     ``postgresql+pg8000://user:pass@host/db`` must not print the password.
-    An empty username is allowed. URLs without credentials are returned unchanged.
+    Query keys remain visible, decoded and URL-encoded through the standard
+    library. An empty username is allowed; non-query URL text is preserved.
     """
-    return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
+    credentials = _DB_URL_CREDENTIALS.search(url)
+    query_at = url.find("?", credentials.end() if credentials is not None else 0)
+    prefix = url if query_at == -1 else url[:query_at]
+    if credentials is not None and credentials[1] is not None:
+        prefix = prefix[: credentials.start(1)] + "***" + prefix[credentials.end(1) :]
+    if query_at == -1:
+        return prefix
+    fields = parse_qsl(url[query_at + 1 :], keep_blank_values=True)
+    return prefix + "?" + "&".join(f"{quote_plus(key)}=***" for key, _value in fields)
 
 
 def _expand_home(path: str) -> str:

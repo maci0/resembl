@@ -558,14 +558,15 @@ class TestDbUrlMask(unittest.TestCase):
             "sqlite:////absolute/path/db.sqlite",
             "duckdb:///file.db",
             "postgresql+pg8000://db.example.com/resembl",
+            "postgresql+pg8000://user@host:5432/db",
         ):
             self.assertEqual(db_url_mask(url), url)
 
-    def test_masks_first_password_only_and_keeps_path(self):
+    def test_masks_password_and_query_values_and_keeps_path(self):
         from resembl.paths import db_url_mask
 
         masked = db_url_mask("mysql://bob:hunter2@host:3306/db?charset=utf8")
-        self.assertEqual(masked, "mysql://bob:***@host:3306/db?charset=utf8")
+        self.assertEqual(masked, "mysql://bob:***@host:3306/db?charset=***")
 
 
 if __name__ == "__main__":

@@ -495,6 +495,12 @@ is restorable; the backup does not authenticate the source.
 
 **B7, secrets to code.** The database URL may embed a password. It is masked for display, including an empty username or literal password slashes/whitespace accepted by SQLAlchemy (`resembl/paths.py:63`, used at `resembl/find_client.py:124`) but used unmasked to derive the port-file name (`resembl/paths.py:118`) and to open the connection. The in-process result cache keys on a SHA-256 digest of the full, unmasked engine URL (`91c7aa1`, `_db_cache_id` in `resembl/server.py`, `hide_password=False` inside the digest, used by `_find_one` and `_result_cache_release`), not on a masked rendering: a masked URL (`user:***@host/db`, `6273fa0`, `render_as_string(hide_password=True)`) collapses databases differing only in password onto one key, so a payload computed for one could be served to the other whenever their version counters matched; the digest keeps distinct passwords on distinct entries without retaining credentials verbatim in the long-lived key.
 
+Every query value in a displayed database URL is also redacted, including
+ordinary connection options. Query key names remain visible and are decoded
+with the standard library, so an encoded `password` key is still recognizable
+without exposing its value. Scheme, host, path and non-query user-info text
+remain unchanged apart from the password mask.
+
 **B9, Go service to pinned engine.** The Go service (`service/service.go:175`)
 is the only boundary that authenticates a caller: it calls
 `Authorizer.Allow` (`service/service.go:244`) before dispatch and fails closed

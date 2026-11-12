@@ -695,6 +695,28 @@ class TestServerMode(_ServeTestCase):
                 self.assertNotIn(password, message)
                 self.assertIn(f"postgresql://{user}:***@host/db", message)
 
+    def test_thin_client_masks_every_query_value(self):
+        """Query keys remain useful diagnostics while every value stays private."""
+        from contextlib import redirect_stderr
+        from urllib.parse import unquote_plus
+
+        from resembl.find_client import _main
+
+        for key in ("password", "passwd", "%70assword", "sslpassword", "application_name"):
+            with self.subTest(key=key):
+                url = f"postgresql://user:sample-password@host:6543/db?{key}=sample-value&empty="
+                stderr = io.StringIO()
+                with patch.dict(os.environ, {"RESEMBL_DATABASE_URL": url}), redirect_stderr(stderr):
+                    rc = _main(["--query", "ret", "--json"])
+                self.assertEqual(rc, 1)
+                message = json.loads(stderr.getvalue())["error"]["message"]
+                self.assertNotIn("sample-value", message)
+                self.assertNotIn("sample-password", message)
+                self.assertIn(
+                    f"postgresql://user:***@host:6543/db?{unquote_plus(key)}=***&empty=***",
+                    message,
+                )
+
     def test_thin_client_unreachable_server_connection_refused(self):
         """Connection-refused reaches the clean 'unreachable' exit path."""
         import contextlib
