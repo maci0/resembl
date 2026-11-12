@@ -143,7 +143,9 @@ func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRe
 		// headers with a Content-Length for the body it did not write,
 		// and net/http does the same on a direct server. The Lambda
 		// adapter must not leak the handler's JSON body here.
-		out.Headers["Content-Length"] = fmt.Sprint(len(w.body.Bytes()))
+		if w.header.Get("Content-Length") == "" {
+			out.Headers["Content-Length"] = fmt.Sprint(w.body.Len())
+		}
 		out.Body = ""
 	}
 	return out, nil

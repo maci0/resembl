@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Lambda adapter preserves a handler's explicit `Content-Length` on HEAD responses instead of replacing it with zero when the handler correctly omits the body.
+
 - Malformed requests on a reused HTTP connection no longer inherit the previous request's correlation ID or route in metrics. Failures before the target is parsed get a fresh ID and count under `other`.
 
 - Very large integer settings no longer crash configuration loading or the thin client during a float conversion. Bounded settings warn and keep their defaults; `top_n` keeps its documented unbounded positive integer range.
