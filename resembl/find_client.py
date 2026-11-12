@@ -442,6 +442,8 @@ def _main(argv: list[str] | None = None) -> int:
         return _fail(str(detail or exc.reason), 1, json_on=json_on)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return _fail(f"server unreachable: {exc}", 1, json_on=json_on)
+    if not isinstance(payload, dict):
+        return _fail("server returned a malformed find response", 1, json_on=json_on)
     if "error" in payload:
         return _fail(str(payload["error"]), 1, json_on=json_on)
     if "lsh_candidates" not in payload or "matches" not in payload:

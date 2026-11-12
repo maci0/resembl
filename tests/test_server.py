@@ -754,6 +754,39 @@ class TestServerMode(_ServeTestCase):
         self.assertIn("threshold 5.0 is not in", stderr.getvalue())
         self.assertNotIn("unreachable", stderr.getvalue())
 
+    def test_clients_refuse_non_object_responses(self):
+        """A JSON scalar or array is a malformed response, not a traceback."""
+        import contextlib
+        import io
+
+        from resembl import cli
+        from resembl.find_client import _main
+        from resembl.paths import cache_dir_get, server_port_path
+
+        self._start_server()
+        port_file = server_port_path(f"sqlite:///{self._db}", cache_dir_get())
+        for payload in (None, [], "result", 1, True):
+            for thin in (True, False):
+                with self.subTest(payload=payload, thin=thin):
+                    stderr = io.StringIO()
+                    opener = self._opener_with(
+                        lambda request, timeout=5, payload=payload: io.BytesIO(
+                            json.dumps(payload).encode()
+                        )
+                    )
+                    with (
+                        contextlib.redirect_stderr(stderr),
+                        patch("urllib.request.build_opener", return_value=opener),
+                        patch.object(cli.state, "session", self._session, create=True),
+                    ):
+                        if thin:
+                            self.assertEqual(_main(["--query", "ret", "--json"]), 1)
+                            error = json.loads(stderr.getvalue())["error"]
+                            self.assertIn("malformed find response", error["message"])
+                        else:
+                            self.assertIsNone(cli._server_request("/find", {"query": "ret"}, 5))
+                    self.assertTrue(os.path.exists(port_file))
+
     def test_thin_client_table_output(self):
         """Without --json, the client prints a ranked table and exits 0."""
         import contextlib

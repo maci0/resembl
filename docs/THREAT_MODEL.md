@@ -99,7 +99,10 @@ client guards the narrower ephemeral 1024-65535 range (`cdabd39`,
 query-text-capture abuse case below; both loopback clients now bypass
 `http_proxy` via `ProxyHandler({})` (`456e464`, `resembl/cli.py`,
 `resembl/find_client.py`) and bound the response body they read at 16 MiB
-(`709d31b`, `_MAX_RESPONSE_BYTES` / `_MAX_SERVER_RESPONSE_BYTES`); `serve`'s
+(`709d31b`, `_MAX_RESPONSE_BYTES` / `_MAX_SERVER_RESPONSE_BYTES`). Both clients
+reject non-object JSON responses before reading result fields: the thin client
+reports a malformed response and the CLI falls back without deleting the port
+file; `serve`'s
 loopback guard now uses the full `127.0.0.0/8` test via `ipaddress`
 (`709d31b`, `_is_loopback_bind` in `resembl/cli.py`); both servers strip
 control characters from logged request paths/methods (`709d31b`,

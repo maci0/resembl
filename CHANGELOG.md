@@ -12,6 +12,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - The Go service treats truncated or oversized engine error bodies as transport failures instead of completed rejections.
 - The Go service waits for graceful shutdown to finish draining queries before exiting, so a stop signal does not interrupt active requests and orphan their custody slots.
+- JSON scalars and arrays returned by a warm server no longer crash find clients. `resembl-find` reports a malformed response, and the CLI falls back to its local query without removing the server advertisement.
 
 ## [5.0.0] - 2026-11-09
 

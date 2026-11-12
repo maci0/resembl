@@ -755,6 +755,11 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
             # rewritten it.  Same rule as the server's own exit path.
             port_file_cleanup(port_file, port)
         return None
+    if not isinstance(payload, dict):
+        logger.warning(
+            "Server returned a non-object response; falling back to the in-process path."
+        )
+        return None
     if "error" in payload:
         # A 200 carrying an error envelope is a deliberate server refusal
         # (e.g. the index needs a rebuild), not a result.  Falling back to
