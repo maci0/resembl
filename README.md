@@ -322,11 +322,12 @@ reindex in a single process:
 | 100,000 | ~19 s       | ~0.47 s     | ~21 s (one-time)                  | ~6 s             |
 | 500,000 | ~2 min      | ~0.6 s      | ~1.8 min (one-time)               | ~53 s            |
 
-Key properties that keep these numbers flat as the database grows:
+Properties behind these measurements:
 
-- **Warm `find` latency is essentially constant** (~0.6 s including interpreter startup; the query
-  itself is ~1.4 ms in-process): queries hit a handful of indexed LSH bucket lookups (all in a
-  single round trip) plus a chunked candidate fetch, independent of size.  The banding parameters
+- **Warm `find` stayed nearly flat on these benchmark datasets** (~0.6 s including interpreter
+  startup; the query itself was ~1.4 ms in-process). Indexed LSH bucket lookups select candidates,
+  whose fingerprints are fetched and scored in chunks. Crowded buckets increase the candidate
+  count and query work; chunking does not make the query constant-time. The banding parameters
   are computed once and cached (the numpy banding search would otherwise run per query).
 - **Bulk import is linear and parallel** (~4,000–5,500 files/s with `--jobs`, ~5,560/s at 20k) with
   bounded memory.  The per-snippet preparation (lexing + fingerprint) runs at ~80 µs/snippet: the

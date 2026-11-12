@@ -109,7 +109,7 @@ By following this pattern, you can integrate `resembl`'s functionality into any 
 
 ## Scaling to Millions of Snippets and Beyond
 
-The architecture keeps the **query path constant-time** regardless of database size: a search is a handful of indexed LSH bucket lookups (all in a single round trip, with banding parameters cached) plus a chunked candidate fetch, so warm `find` latency stays under a second from 5k to 500k snippets (the query itself is ~1.4 ms in-process; the rest is interpreter startup).  The per-snippet import preparation (lexing + fingerprint) runs at ~80 µs/snippet, since MinHash permutations are cloned from a cached template instead of regenerated.  Measured timings per dataset and backend are maintained in the [README's Performance at Scale](../README.md#performance-at-scale) section.
+A search uses indexed LSH bucket lookups with cached banding parameters, then fetches and scores the candidates in chunks. Query work grows with the candidate count: a crowded bucket can admit many snippets, so this is not a constant-time guarantee. In the recorded benchmark datasets, warm `find` latency stayed under a second from 5k to 500k snippets (the query itself was ~1.4 ms in-process; the rest was interpreter startup). Per-snippet import preparation (lexing + fingerprint) measured ~80 µs/snippet, with MinHash permutations cloned from a cached template instead of regenerated. The recorded timings per dataset and backend are maintained in the [README's Performance at Scale](../README.md#performance-at-scale) section.
 
 What the code already supports:
 

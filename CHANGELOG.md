@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Qualify the warm-query scaling claims: recorded benchmark timings are preserved, while crowded LSH buckets increase candidate scoring work.
+
 - Correct the HTTP reference: an unsupported OPTIONS request includes a JSON error body; only HEAD suppresses it.
 
 - The Lambda adapter preserves a handler's explicit `Content-Length` on HEAD responses instead of replacing it with zero when the handler correctly omits the body.
