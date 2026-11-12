@@ -817,6 +817,14 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
 _LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), *range(0x7F, 0xA0), 0x2028, 0x2029])
 
 
+def _content_length_parse(value: str) -> int:
+    """Read an HTTP Content-Length containing only ASCII decimal digits."""
+    value = value.strip(" \t")
+    if not value or not value.isascii() or not value.isdecimal():
+        raise ValueError("invalid Content-Length")
+    return int(value)
+
+
 def _has_lone_surrogate(text: str) -> bool:
     """Whether *text* carries a lone surrogate half (U+D800-U+DFFF).
 
@@ -1361,10 +1369,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         is closed instead of reading until EOF.
         """
         try:
-            length = int(self.headers.get("Content-Length", 0))
+            length = _content_length_parse(self.headers.get("Content-Length", "0"))
         except ValueError:
             return False
-        if length < 0 or length > _MAX_BODY_BYTES:
+        if length > _MAX_BODY_BYTES:
             return False
         remaining = length
         while remaining:
@@ -1490,10 +1498,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         ``except`` alike, killing the thread without a response.
         """
         try:
-            length = int(self.headers.get("Content-Length", 0))
+            length = _content_length_parse(self.headers.get("Content-Length", "0"))
         except ValueError:
-            return None
-        if length < 0:
             return None
         if length > _MAX_BODY_BYTES:
             # Answered 413, as the Go service and lambdaproxy answer the

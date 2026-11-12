@@ -86,7 +86,9 @@ resembl serve --stateless --host 0.0.0.0 --port 8080 --allow-unauthenticated
 | `GET` | `/health` | Whether this process can still serve a find, or, under `--stateless`, answer at all. |
 | `GET` | `/metrics` | Request, latency and cache counters (Prometheus text format). |
 
-The `POST` endpoints are read-only. The path is matched with any query
+The `POST` endpoints are read-only. `Content-Length` accepts ASCII decimal
+digits with optional surrounding HTTP whitespace; signs and separators are
+rejected with `400`. The path is matched with any query
 string removed, so `/find?x=1` is `/find` (parameters are read from the
 body). `PUT`, `DELETE`, `PATCH`, `HEAD` and `OPTIONS` are answered `405`
 on any known path (with an `Allow` header naming the verb that path

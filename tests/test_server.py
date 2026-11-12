@@ -508,6 +508,29 @@ class TestServerMode(_ServeTestCase):
         leftovers = glob.glob(os.path.join(os.path.dirname(port_file), "*.tmp"))
         self.assertEqual(leftovers, [])
 
+    def test_content_length_requires_ascii_decimal_digits(self):
+        """HTTP framing does not accept Python integer signs or separators."""
+        import http.client
+
+        port = self._start_server()
+        body = b'{"query":"ret"}'
+        digits = str(len(body))
+        for length in (f"+{digits}", f"{digits[0]}_{digits[1:]}"):
+            with self.subTest(length=length):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                try:
+                    connection.request(
+                        "POST",
+                        "/find",
+                        body,
+                        {"Content-Type": "application/json", "Content-Length": length},
+                    )
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 400)
+                    self.assertEqual(json.loads(response.read()), {"error": "bad request body"})
+                finally:
+                    connection.close()
+
     def test_thin_client_queries_server(self):
         """resembl.find_client._main returns the matches via the server."""
         from resembl.find_client import _main
