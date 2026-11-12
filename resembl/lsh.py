@@ -311,8 +311,9 @@ def index_build_lock(session: Session) -> Iterator[None]:
     """Hold a process-local index-rebuild lock for *session*'s database.
 
     SQLite file databases share a lock by the main database's real path, even
-    across engines and path aliases. Private in-memory and non-SQLite databases
-    use the bind identity. This does not serialize separate processes.
+    across engines and path aliases. Filename-less SQLite databases share one
+    lock, including private in-memory databases. Non-SQLite databases use the
+    bind identity. This does not serialize separate processes.
 
     A rebuild is destructive by design: it drops ``lsh_bucket`` and repopulates
     it.  Two rebuilds running at once in the same process interleave their
@@ -327,6 +328,8 @@ def index_build_lock(session: Session) -> Iterator[None]:
     bind = session.get_bind()
     key: object = bind
     if bind.dialect.name == "sqlite":
+        # shortcut: one filename-less SQLite rebuild per process, split when stable IDs exist.
+        key = ("sqlite", None)
         for _sequence, name, filename in (
             session.connection().exec_driver_sql("PRAGMA database_list").all()
         ):

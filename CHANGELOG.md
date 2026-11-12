@@ -10,6 +10,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - Pinned batch queries enforce the same 8 MiB response cap as the local adapter while assembling results, including query labels and JSON overhead, preventing individually bounded replies from accumulating into an oversized batch.
 
+- Named shared-memory SQLite connections now share the process-local rebuild fence across engines, preventing concurrent clean from dropping an in-progress index. Filename-less SQLite databases use one fallback lock, including private scratch databases; separate file databases keep independent locks.
+
 - The Lambda HTTP adapter rejects events with a missing or empty HTTP method with a JSON 400 before dispatch, instead of interpreting them as GET requests.
 
 - Correct the library search reference: every candidate fingerprint is read, and full-row fetches can exceed the requested top-N despite score-bound pruning.

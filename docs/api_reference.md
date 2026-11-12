@@ -333,7 +333,8 @@ matches the requested parameters and `None` otherwise — legacy pickle cache
 files are deliberately never loaded (unpickling is arbitrary code execution).
 `index_build_lock` serializes rebuilds, reindex and clean within one process.
 SQLite file databases share the lock across engines by the real path of their
-main database; private in-memory and non-SQLite databases use bind identity.
+main database. Filename-less SQLite connections share one fallback lock, so
+private in-memory rebuilds serialize too. Non-SQLite databases use bind identity.
 It does not serialize separate processes.
 
 The packed fingerprint primitives below are defined in `resembl.scoring` and

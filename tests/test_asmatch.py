@@ -10,6 +10,7 @@ import threading
 import unittest
 
 from rapidfuzz import fuzz
+from sqlalchemy.pool import QueuePool
 from sqlmodel import Session, SQLModel, create_engine, select, text
 
 from resembl.core import (
@@ -477,6 +478,82 @@ class TestDBCoreFunctions(_IsolatedDBTest):
                             self.assertFalse(
                                 finished_while_locked,
                                 "clean dropped rows while another engine held the rebuild fence",
+                            )
+                    finally:
+                        cleaner.dispose()
+                        builder.dispose()
+
+    def test_shared_memory_clean_waits_without_blocking_an_independent_file(self):
+        """Filename-less shared databases need one fence; separate files keep theirs."""
+        scratch = os.path.join(os.path.dirname(__file__), "..", ".scratch")
+        os.makedirs(scratch, exist_ok=True)
+        for shared_memory in (True, False):
+            with self.subTest(shared_memory=shared_memory):
+                with tempfile.TemporaryDirectory(dir=scratch) as directory:
+                    if shared_memory:
+                        builder_url = (
+                            f"sqlite:///file:{os.path.basename(directory)}"
+                            "?mode=memory&cache=shared&uri=true"
+                        )
+                        cleaner_url = builder_url
+                    else:
+                        builder_url = f"sqlite:///{os.path.join(directory, 'builder.db')}"
+                        cleaner_url = f"sqlite:///{os.path.join(directory, 'cleaner.db')}"
+                    builder = create_engine(
+                        builder_url, poolclass=QueuePool, connect_args={"check_same_thread": False}
+                    )
+                    cleaner = create_engine(
+                        cleaner_url, poolclass=QueuePool, connect_args={"check_same_thread": False}
+                    )
+                    started, cleaned = threading.Event(), threading.Event()
+                    errors: list[BaseException] = []
+
+                    def run_clean(cleaning_engine, starting, failures, completed) -> None:
+                        """Clean through the other engine and signal its outcome."""
+                        try:
+                            with Session(cleaning_engine) as cleaning_session:
+                                starting.set()
+                                db_clean(cleaning_session)
+                        except BaseException as error:
+                            failures.append(error)
+                        finally:
+                            completed.set()
+
+                    try:
+                        for candidate in ((builder,) if shared_memory else (builder, cleaner)):
+                            SQLModel.metadata.create_all(candidate)
+                            with Session(candidate) as seed:
+                                snippet_add(seed, "fixture", "MOV EAX, 1\nRET")
+                                candidates, _matches = snippet_find_matches(seed, "MOV EAX, 1\nRET")
+                                self.assertGreater(candidates, 0)
+                        with Session(builder) as session:
+                            before = session.execute(
+                                text("SELECT COUNT(*) FROM lsh_bucket")
+                            ).scalar()
+                            self.assertGreater(before, 0)
+                            session.rollback()
+                            with index_build_lock(session):
+                                worker = threading.Thread(
+                                    target=run_clean,
+                                    args=(cleaner, started, errors, cleaned),
+                                    daemon=True,
+                                )
+                                worker.start()
+                                self.assertTrue(started.wait(timeout=5))
+                                finished_inside = cleaned.wait(timeout=2 if shared_memory else 30)
+                                protected = session.execute(
+                                    text("SELECT COUNT(*) FROM lsh_bucket")
+                                ).scalar()
+                                session.rollback()
+                            worker.join(timeout=30)
+                            self.assertFalse(worker.is_alive())
+                            self.assertEqual(errors, [])
+                            self.assertTrue(cleaned.is_set())
+                            self.assertEqual(finished_inside, not shared_memory)
+                            self.assertEqual(protected, before)
+                        with Session(cleaner) as session:
+                            self.assertEqual(
+                                session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).scalar(), 0
                             )
                     finally:
                         cleaner.dispose()
