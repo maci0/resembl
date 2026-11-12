@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const maxEngineResponseBytes = 8 << 20
+
 // LocalEngine talks to an already provisioned local warm engine. This adapter
 // is optional; other runtimes supply Engine without a process or socket.
 type LocalEngine struct {
@@ -150,8 +152,8 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 	// Read up to one byte past the cap so an oversized body is detected
 	// without allocating unboundedly, then discard any remainder so the
 	// connection can be reused.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
-	if err == nil && len(data) > 8<<20 {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxEngineResponseBytes+1))
+	if err == nil && len(data) > maxEngineResponseBytes {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		err = errors.New("invalid engine response")
 	}

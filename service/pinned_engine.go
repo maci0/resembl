@@ -104,7 +104,8 @@ func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage
 			params[key] = value
 		}
 	}
-	results := make([]map[string]json.RawMessage, 0, len(queries))
+	results := make([]json.RawMessage, 0, len(queries))
+	responseBytes := len(`{"results":[]}`)
 	for _, q := range queries {
 		single := make(map[string]json.RawMessage, len(params)+4)
 		for key, value := range params {
@@ -134,7 +135,19 @@ func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage
 			return nil, errors.New("invalid batch result")
 		}
 		entry["query"] = q
-		results = append(results, entry)
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return nil, err
+		}
+		entryBytes := len(encoded)
+		if len(results) > 0 {
+			entryBytes++
+		}
+		if responseBytes+entryBytes > maxEngineResponseBytes {
+			return nil, errors.New("invalid engine response")
+		}
+		responseBytes += entryBytes
+		results = append(results, encoded)
 	}
 	return json.Marshal(map[string]any{"results": results})
 }
