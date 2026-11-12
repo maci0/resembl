@@ -1386,6 +1386,50 @@ class TestServerMode(_ServeTestCase):
         self.assertEqual(status, 403)
         self.assertIn("error", payload)
 
+    def test_custom_loopback_bind_accepts_only_its_configured_ip(self):
+        """A bound loopback literal works without admitting sibling addresses."""
+        import errno
+        import http.client
+
+        from resembl.server import _loopback_allowed_hosts, serve
+
+        bind_host = "127.0.0.2"
+        try:
+            httpd = serve(None, host=bind_host, port=0)
+        except OSError as exc:
+            if exc.errno != errno.EADDRNOTAVAIL:
+                raise
+            # macOS needs an alias for extra loopback IPs; exercise the same
+            # Host policy over a reachable transport without privileged setup.
+            bind_host = "127.0.0.1"
+            httpd = serve(None, host=bind_host, port=0)
+            httpd.allowed_hosts = _loopback_allowed_hosts("127.0.0.2", httpd.server_address[1])
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
+        thread.start()
+        port = httpd.server_address[1]
+        try:
+            for host, expected in (
+                (f"127.0.0.2:{port}", 200),
+                ("127.0.0.2", 200),
+                (f"attacker.example:{port}", 403),
+                (f"127.0.0.3:{port}", 403),
+            ):
+                with self.subTest(host=host):
+                    conn = http.client.HTTPConnection(bind_host, port, timeout=5)
+                    try:
+                        conn.request("GET", "/health", headers={"Host": host})
+                        response = conn.getresponse()
+                        self.assertEqual(response.status, expected, response.read())
+                    finally:
+                        conn.close()
+        finally:
+            httpd.shutdown()
+            thread.join(timeout=5)
+            httpd.server_close()
+        self.assertFalse(thread.is_alive())
+
     def test_allowed_hosts_covers_only_loopback_binds(self):
         """The Host check is scoped to loopback binds, and covers their names."""
         from resembl.server import _loopback_allowed_hosts
@@ -1399,6 +1443,11 @@ class TestServerMode(_ServeTestCase):
         # advance, so it stays unrestricted rather than refusing real clients.
         self.assertEqual(_loopback_allowed_hosts("0.0.0.0", 8080), frozenset())
         self.assertEqual(_loopback_allowed_hosts("192.168.1.10", 8080), frozenset())
+        expanded = "0:0:0:0:0:0:0:1"
+        ipv6 = _loopback_allowed_hosts(expanded, 8080)
+        self.assertIn(f"[{expanded}]", ipv6)
+        self.assertIn(f"[{expanded}]:8080", ipv6)
+        self.assertNotIn(f"{expanded}:8080", ipv6)
 
     def test_find_rejects_non_string_query(self):
         """A non-string query answers 400, never a 500 with internal error text.

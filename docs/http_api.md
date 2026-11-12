@@ -19,8 +19,10 @@ and the `/find` family (which keeps its existing operator gate) answer
 there. Loopback binds answer normally.
 
 A loopback bind additionally checks the request's `Host` header and answers
-`403` to anything but `127.0.0.1`, `localhost` or `::1` (with or without the
-port). That closes DNS rebinding: a page that points its own hostname at
+`403` to anything but `127.0.0.1`, `localhost`, `::1` or the exact configured
+loopback bind IP (with or without the port; IPv6 literals are bracketed).
+No other loopback IP or hostname is added for a custom bind. That closes DNS
+rebinding: a page that points its own hostname at
 127.0.0.1 reaches the endpoint same-origin, with no CORS preflight and a
 readable response, and the `Host` header still carries the rebound name. A
 non-loopback bind accepts any `Host`, since it is reached by whatever name

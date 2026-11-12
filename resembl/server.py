@@ -778,8 +778,8 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
     Empty for any bind that is not loopback: a server on a routable interface
     is reached by whatever name resolves to it, which the server cannot know
     in advance, and a check would refuse legitimate clients instead of
-    protecting them.  A loopback bind is only ever addressed by the names
-    below, so the check costs nothing there and closes the rebinding path.
+    protecting them. A loopback bind admits its exact IP literal and the fixed
+    local names below, closing the rebinding path without admitting siblings.
     """
     # ASCII-only fold: ``casefold`` maps the long s (U+017F) to s, so a
     # bind spelled with the long s would read as loopback here while the socket
@@ -802,6 +802,9 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
         # the port.
         literal = f"[{name}]" if ":" in name else name
         allowed.update({f"{literal}:{port}", literal, f"{name}:{port}"})
+    if ascii_fold_lower(host) != "localhost":
+        literal = f"[{host}]" if ":" in host else host
+        allowed.update({literal, f"{literal}:{port}"})
     return frozenset(allowed)
 
 

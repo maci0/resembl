@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A server bound to a custom loopback IP such as `127.0.0.2` now accepts that exact IP in the Host header, with or without its port. Only that literal is added to the existing allowlist; IPv6 bind literals use brackets.
+
 - A write committed during a warm find no longer leaves the pre-write result cached as current. The next lookup sees the changed corpus instead of serving stale candidates until another write.
 
 - Server shutdown no longer raises a Unicode decoding error when its port file was replaced with non-UTF-8 contents. Cleanup leaves the replacement untouched.
