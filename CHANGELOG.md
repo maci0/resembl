@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Go service now refuses to dispatch when persisting a custody claim fails, retains the occupied slot for operator repair, and reports release persistence failures. Windows directory sync remains best effort; directory open and close errors propagate on every platform.
+
 - The Go service releases an in-process query slot after a completed engine response even when client cancellation races with completion. Later requests no longer remain stuck at 429; uncertain timed-out executions still retain capacity.
 
 - `resembl-find` strips terminal controls from displayed match names, checksums and error messages, matching the main CLI. JSON output preserves the original values with normal JSON escaping.

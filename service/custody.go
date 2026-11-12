@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 )
 
@@ -34,17 +35,18 @@ func NewFileCustody(directory string, capacity int) (*FileCustody, error) {
 	return &FileCustody{directory, capacity}, nil
 }
 
-// syncDir flushes directory entries to disk where the platform allows it.
-// Windows cannot fsync a directory handle (“os.Open(dir).Sync()“ fails),
-// so a failure there must not fail the claim; the same best-effort contract
-// as the Python “_sync_dir“ helper.
-func syncDir(dir string) {
+// syncDir flushes directory entries; Windows directory sync remains best effort.
+func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
-		return
+		return err
 	}
-	_ = d.Sync()
-	_ = d.Close()
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if runtime.GOOS == "windows" {
+		syncErr = nil
+	}
+	return errors.Join(syncErr, closeErr)
 }
 
 func (f *FileCustody) Claim() (func() error, error) {
@@ -56,7 +58,9 @@ func (f *FileCustody) Claim() (func() error, error) {
 			}
 			return nil, err
 		}
-		syncDir(f.directory)
+		if err := syncDir(f.directory); err != nil {
+			return nil, err
+		}
 		var once sync.Once
 		var releaseErr error
 		return func() error {
@@ -65,7 +69,7 @@ func (f *FileCustody) Claim() (func() error, error) {
 					releaseErr = err
 					return
 				}
-				syncDir(f.directory)
+				releaseErr = syncDir(f.directory)
 			})
 			return releaseErr
 		}, nil
