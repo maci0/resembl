@@ -83,7 +83,7 @@ func newServer(args []string) (*http.Server, *service.PinnedSQLiteEngine, error)
 	}
 	// Fail closed: without a token the service denies every query, which is
 	// safe but useless; on a routable interface it would also expose
-	// unauthenticated /healthz and /metrics. Require a token file for any
+	// unauthenticated /healthz. Require a token file for any
 	// non-loopback listen address so the operator must make the exposure
 	// deliberate.
 	if *tokenFile == "" && !isLoopbackListen(*address) {

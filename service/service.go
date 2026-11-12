@@ -508,12 +508,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	w = rec
-	// Inbound body lifecycle (resource review): handlers that answer before
-	// consuming the body (health/metrics/method refusals, authority and
-	// custody failures, busy slots) must drain and close it so the transport
-	// can reuse the connection. The stdlib does not do this for us; an
-	// unread body pins the connection until idle timeout. A single deferred
-	// drain (bounded) + close covers every exit path, including panic.
+	// Early answers can leave the body unread. Handler-owned bounded cleanup
+	// also covers direct calls outside net/http.Server and every exit path,
+	// including panic.
 	defer func() {
 		if r.Body != nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 8<<20))
