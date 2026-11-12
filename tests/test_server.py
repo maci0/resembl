@@ -513,6 +513,17 @@ class TestServerMode(_ServeTestCase):
         self.assertEqual(status, 200)
         self.assertIn("matches", payload)
 
+    def test_legacy_get_without_headers_keeps_its_json_refusal(self):
+        """The stdlib's headerless legacy request uses an empty mapping."""
+        import socket
+
+        port = self._start_server()
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+            connection.sendall(b"GET /health\r\n")
+            with connection.makefile("rb") as source:
+                payload = source.read()
+        self.assertEqual(json.loads(payload), {"error": "host not allowed"})
+
     def test_port_file_written(self):
         """serve writes a discoverable port file in the cache dir."""
         from resembl.paths import cache_dir_get, server_port_path

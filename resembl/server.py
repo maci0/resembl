@@ -1332,7 +1332,8 @@ class _FindHandler(BaseHTTPRequestHandler):
         """Parse headers, refusing ambiguous or unsupported framing before dispatch."""
         if not super().parse_request():
             return False
-        if (
+        # HTTP/0.9 supplies an empty mapping, with no framing fields to inspect.
+        if self.headers and (
             len(self.headers.get_all("Content-Length", [])) > 1
             or self.headers.get_all("Transfer-Encoding") is not None
         ):
