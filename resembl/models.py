@@ -134,7 +134,13 @@ class SnippetVersion(SQLModel, table=True):
     """
 
     __table_args__ = (
-        Index("ix_snippetversion_checksum_created", "snippet_checksum", "created_at"),
+        # MySQL requires a prefix length when indexing a TEXT column.
+        Index(
+            "ix_snippetversion_checksum_created",
+            "snippet_checksum",
+            "created_at",
+            mysql_length={"created_at": 32},
+        ),
     )
 
     id: int | None = Field(

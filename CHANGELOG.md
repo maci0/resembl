@@ -8,6 +8,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [5.2.0] - 2026-11-13
 
+### Fixed
+
+- MySQL can create the snippet history timestamp index by indexing a bounded TEXT prefix without limiting stored timestamps.
+
 ### Changed
 
 - Advance the minor release line for the coordinated engine release.

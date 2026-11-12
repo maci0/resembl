@@ -168,6 +168,20 @@ class TestSchemaPortability(unittest.TestCase):
         self.assertIn("VARCHAR(64)", bucket_ddl)
         self.assertNotIn("BLOB", bucket_ddl)
 
+    def test_mysql_version_index_bounds_the_text_prefix(self):
+        """MySQL can create the timestamp index without changing stored values."""
+        from sqlalchemy.dialects import mysql, postgresql, sqlite
+        from sqlalchemy.schema import CreateIndex
+
+        from resembl.models import SnippetVersion
+
+        index = next(iter(SnippetVersion.__table__.indexes))
+        ddl = str(CreateIndex(index).compile(dialect=mysql.dialect()))
+        self.assertIn("created_at(32)", ddl)
+        for dialect in (postgresql.dialect(), sqlite.dialect()):
+            ddl = str(CreateIndex(index).compile(dialect=dialect))
+            self.assertIn("snippet_checksum, created_at)", ddl)
+
     def test_mysql_long_columns_are_text(self):
         _, snippet_ddl, collection_ddl, version_ddl = self._ddl("mysql")
         self.assertIn("TEXT", snippet_ddl)
