@@ -86,6 +86,8 @@ _EDGE_VALUES: tuple[Any, ...] = (
     "false",
     10**30,
     -(10**30),
+    10**400,
+    -(10**400),
     1 << 62,
     [],
     {},
@@ -107,6 +109,8 @@ _KEYS = (
 #: TOML spellings of the edge values, including the non-finite
 #: floats and the date/time forms ``tomllib`` turns into objects.
 _TOML_VALUES = (
+    str(10**400),
+    str(-(10**400)),
     "0",
     "1",
     "-1",
@@ -296,7 +300,7 @@ def _test_cfg_number(fdp: atheris.FuzzedDataProvider) -> None:
     ):
         number = _cfg_number(body, key, cast)
         assert isinstance(number, cast), f"{key} coerced to {type(number)}"
-        assert math.isfinite(number), f"{key} accepted as non-finite"
+        assert isinstance(number, int) or math.isfinite(number), f"{key} accepted as non-finite"
         assert _within_bounds(key, number), f"{key} out of range: {number!r}"
     # A second coercion of the same body is a fixed point.
     assert _cfg_number(body, "top_n", int) == _cfg_number(body, "top_n", int)

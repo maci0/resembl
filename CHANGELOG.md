@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Very large integer settings no longer crash configuration loading or the thin client during a float conversion. Bounded settings warn and keep their defaults; `top_n` keeps its documented unbounded positive integer range.
+
 - The Python HTTP server rejects duplicate Content-Length and all Transfer-Encoding fields with 400 and a closed connection before reading a body or dispatching a route. Conflicting framing can no longer be ignored while a request runs.
 
 - Restore copies through an exclusively created private temporary file instead of a predictable PID filename, so a planted file link cannot redirect the copy and overwrite another file.

@@ -681,6 +681,31 @@ class TestServerMode(_ServeTestCase):
         self.assertEqual(captured["body"]["threshold"], 0.7)
         self.assertEqual(captured["body"]["ngram_size"], 2)
 
+    def test_thin_client_large_integer_settings_warn_instead_of_crashing(self):
+        """A real warm find uses defaults when bounded integer settings are too large."""
+        import contextlib
+        import io
+
+        from resembl.find_client import _cfg_number, _main
+
+        self._start_server()
+        large = 10**400
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "config.toml"), "w", encoding="utf-8") as output:
+                output.write(f"ngram_size = {large}\nnum_permutations = {large}\n")
+            with (
+                patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": directory}),
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+            ):
+                result = _main(["--query", "ret", "--json"])
+        self.assertEqual(result, 0)
+        self.assertIn("matches", json.loads(stdout.getvalue()))
+        self.assertIn("ignoring config value ngram_size", stderr.getvalue())
+        self.assertIn("ignoring config value num_permutations", stderr.getvalue())
+        self.assertEqual(_cfg_number({"top_n": large}, "top_n", int), large)
+
     def test_thin_client_no_server_running(self):
         """resembl-find without a port file exits 1 with guidance, no traceback."""
         import contextlib

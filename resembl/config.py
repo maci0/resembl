@@ -107,14 +107,14 @@ def validate_value(key: str, value: object) -> str | None:
     bounds = VALUE_BOUNDS.get(key)
     if bounds is None:
         return None
-    numeric = float(value)
-    if not math.isfinite(numeric):
+    # Integers are finite; converting them to float can overflow.
+    if isinstance(value, float) and not math.isfinite(value):
         return f"expected a finite {type(DEFAULTS[key]).__name__}"
-    if numeric < bounds.low:
+    if value < bounds.low:
         return f"expected a value of at least {bounds.low:g}"
-    if bounds.high_inclusive and numeric <= bounds.high:
+    if bounds.high_inclusive and value <= bounds.high:
         return None
-    if not bounds.high_inclusive and numeric < bounds.high:
+    if not bounds.high_inclusive and value < bounds.high:
         return None
     end = "at most" if bounds.high_inclusive else "below"
     return f"expected a value {end} {bounds.high:g}"

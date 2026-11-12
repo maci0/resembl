@@ -86,6 +86,21 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.top_n, 7)
         self.assertEqual(config.ngram_size, DEFAULTS["ngram_size"])
 
+    def test_load_large_integers_preserves_the_declared_ranges(self):
+        """Bounded settings warn and default; top_n retains its unbounded integer range."""
+        large = 10**400
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "config.toml"), "w", encoding="utf-8") as output:
+                output.write(f"ngram_size = {large}\nnum_permutations = {large}\ntop_n = {large}\n")
+            with (
+                patch.dict(os.environ, {"RESEMBL_CONFIG_DIR": directory}),
+                self.assertLogs("resembl.config", level="WARNING"),
+            ):
+                config = load_config()
+        self.assertEqual(config.ngram_size, DEFAULTS["ngram_size"])
+        self.assertEqual(config.num_permutations, DEFAULTS["num_permutations"])
+        self.assertEqual(config.top_n, large)
+
     def test_load_non_finite_values_are_rejected(self):
         """TOML's ``nan`` / ``inf`` spellings must not poison numeric fields.
 

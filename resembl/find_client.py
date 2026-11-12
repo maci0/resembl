@@ -181,7 +181,7 @@ def _cfg_number[Num: (int, float)](cfg: dict, key: str, cast: type[Num]) -> Num:
     return number
 
 
-def _within_bounds(key: str, number: float) -> bool:
+def _within_bounds(key: str, number: int | float) -> bool:
     """True when *number* lies inside the range ``resembl.config`` enforces for *key*.
 
     Bounds are literals mirroring ``config.VALUE_BOUNDS`` (this module must
@@ -191,7 +191,8 @@ def _within_bounds(key: str, number: float) -> bool:
     ``ngram_size`` at least 1.  ``test_bounds_mirror_config_value_bounds``
     fails if either side moves.
     """
-    if not math.isfinite(number):
+    # Integers are finite; converting them to float can overflow.
+    if isinstance(number, float) and not math.isfinite(number):
         return False
     if key == "lsh_threshold":
         return 0.0 <= number < 0.99

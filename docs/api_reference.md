@@ -254,7 +254,9 @@ The one configuration-value check: returns why *value* is unusable as a
 setting for *key* (wrong enum, outside `VALUE_BOUNDS`, non-finite), or `None`
 when it is fine. `resembl config set` refuses a value that returns a message;
 `ResemblConfig.update` warns and keeps the current value for one found in a
-hand-edited file.
+hand-edited file. Very large integers follow the same ranges without a
+floating-point overflow: bounded settings are refused, while `top_n` retains
+its lower bound of 1 and no upper bound.
 
 ## Paths
 

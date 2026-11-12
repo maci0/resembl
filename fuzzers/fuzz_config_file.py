@@ -64,6 +64,8 @@ _KEYS = (
 #: TOML spellings of the edge values, including the non-finite floats
 #: and the date/time forms ``tomllib`` turns into ``datetime`` objects.
 _TOML_VALUES = (
+    str(10**400),
+    str(-(10**400)),
     "0",
     "1",
     "-1",
