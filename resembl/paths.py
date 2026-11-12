@@ -268,8 +268,8 @@ def port_file_cleanup(port_file: str, port: int) -> None:
     content is still the known *port*.
     """
     try:
-        with open(port_file, encoding="utf-8") as f:
-            if f.read().strip() != str(port):
+        with open(port_file, "rb") as f:
+            if f.read().strip() != str(port).encode("ascii"):
                 return
         os.remove(port_file)
     except OSError as e:

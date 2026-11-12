@@ -2310,6 +2310,23 @@ class TestServerMode(_ServeTestCase):
         for fingerprint in fingerprints[1:]:
             self.assertTrue((fingerprint == reference).all())
 
+    def test_server_close_keeps_non_utf8_port_file(self):
+        """A corrupted advertisement must not break server shutdown."""
+        from resembl.paths import server_port_path
+        from resembl.server import serve
+
+        httpd = serve(f"sqlite:///{self._db}", port=0)
+        self.addCleanup(httpd.server_close)
+        port_file = server_port_path(f"sqlite:///{self._db}", self._cache_dir)
+        with open(port_file, "wb") as stream:
+            stream.write(b"\xff")
+        try:
+            httpd.server_close()
+            with open(port_file, "rb") as stream:
+                self.assertEqual(stream.read(), b"\xff")
+        finally:
+            os.remove(port_file)
+
     def test_port_file_cleanup_keeps_foreign_advertisement(self):
         """An exiting serve must not delete another server's port file.
 

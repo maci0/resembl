@@ -482,6 +482,10 @@ unescaped wildcards widen the match set rather than the returned page. The engin
 
 **B5, cache directory to process.** The port file is read as an integer and used to open an HTTP connection (`resembl/find_client.py:121`, `resembl/cli.py:429`). Its contents are authenticated by nothing. The file names a port only: both clients dial `127.0.0.1` (`resembl/find_client.py:152`, `resembl/cli.py:436`), so a forged port reaches a listener the forger must already be running on the loopback interface. The standalone client narrows this by refusing a port outside 1-65535 before dialing (`6406aee`, `_main` in `resembl/find_client.py`), so a forged port that cannot be bound at all is rejected; the in-process `find` client guards the narrower ephemeral range 1024-65535 (`cdabd39`, `_server_request` in `resembl/cli.py`), so a forged port naming a privileged service is rejected there; a forged port inside the admitted range still reaches an attacker listener on both.
 
+Shutdown cleanup compares the advertisement's raw bytes with its own ASCII
+port. Non-UTF-8 or foreign contents remain untouched and cannot raise a
+decoding error during shutdown.
+
 **B6, merge source to local corpus.** Rows from another database are
 inserted after structural checks, not after a trust decision about the source
 (`resembl/core.py:2036`). `merge` takes a verified pre-merge backup
