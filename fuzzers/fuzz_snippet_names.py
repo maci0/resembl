@@ -4,15 +4,9 @@
 
 The ``names`` column of a snippet row is a JSON-encoded string list that
 a hostile ``merge`` source or a hand-edited database file supplies
-verbatim, and three readers decode it with bare ``json.loads`` — no
-guard at all.  ``Snippet.name_list`` is the property every caller reads
-(``show``, ``name add``), ``Snippet.get_by_name`` verifies its LIKE
-candidates by decoding each one, and ``core.snippet_search_by_name``
-decodes every row it scans.  A malformed value (truncated JSON, not a
-list, a list with non-strings) raises ``json.JSONDecodeError`` out of
-each of them, and a deeply nested document raises ``RecursionError``
-which is not a ``ValueError`` — so one corrupt row turns a lookup, a
-search, or a listing that should have skipped it into a crashed command.
+verbatim. The shared string-list decoder used by ``Snippet.name_list``,
+``Snippet.get_by_name`` and ``core.snippet_search_by_name`` must refuse
+malformed values without rewriting them or crashing the caller.
 
 The harness drives the three real readers over one in-memory database
 with structure-aware inputs and asserts the invariants the callers
@@ -44,7 +38,6 @@ import json
 import os
 import sys
 import tempfile
-from typing import Any
 
 import atheris
 
@@ -123,16 +116,10 @@ def _build_document(fdp: atheris.FuzzedDataProvider) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def _check_snippet_names(stored: str) -> Any:
+def _check_snippet_names(stored: str) -> list[str]:
     """Assert the three readers hold their contracts for one stored value."""
     snippet = Snippet(checksum="fuzz-checksum", code="ret", names=stored, minhash=b"", tags="[]")
-    try:
-        names = snippet.name_list
-    except ValueError, RecursionError, TypeError:
-        # The reader raises rather than answering: the callers of the
-        # property have no guard for this, so that is the crash the
-        # fuzzer reports.
-        return None
+    names = snippet.name_list
     assert isinstance(names, list), f"name_list returned non-list: {names!r}"
     assert all(isinstance(item, str) for item in names), f"non-string name: {names!r}"
     # Persistence round trip: what the reader read must survive the
