@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Correct the library search reference: every candidate fingerprint is read, and full-row fetches can exceed the requested top-N despite score-bound pruning.
+
 - Qualify the warm-query scaling claims: recorded benchmark timings are preserved, while crowded LSH buckets increase candidate scoring work.
 
 - Correct the HTTP reference: an unsupported OPTIONS request includes a JSON error body; only HEAD suppresses it.

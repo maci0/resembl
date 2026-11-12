@@ -110,11 +110,11 @@ written atomically and `fsync`ed before publish; the directory entry is
 
 ### `snippet_find_matches(session, query_string: str, top_n: int = 3, threshold: float | None = None, ...) → tuple[int, list]`
 Find similar snippets. Returns the LSH candidate count and the top matches
-(snippet + hybrid score).  Candidates are scored with a vectorized numpy
-Jaccard pass, an early exit that skips Levenshtein for candidates that
-cannot beat the current top-N, and full rows are fetched only for
-survivors, so the data movement is proportional to the top-N, not the
-candidate count.
+(snippet + hybrid score). Every candidate's fingerprint is fetched and scored
+in chunked, vectorized numpy Jaccard passes. Score bounds can skip later batches
+of full rows and individual Levenshtein comparisons that cannot beat the current
+top-N. This reduces work when candidates can be pruned, but does not limit data
+movement to top-N: crowded or tied candidates can require many full rows.
 
 ### `snippet_compare(session, checksum1: str, checksum2: str) → dict | None`
 Compare two snippets. Returns Jaccard similarity, Levenshtein score, hybrid score, CFG similarity, and shared normalized token count, or `None` when either checksum is not in the database.
