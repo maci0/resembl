@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- SQLite engines over the same database file now share the process-local rebuild lock, including relative paths and symlinks. A concurrent clean through another engine can no longer erase rows during a rebuild and leave an incomplete index marked complete. Separate processes remain outside this lock.
+
 - Go service error logs apply the existing path filter to backend and adapter errors, so CR/LF and ASCII terminal controls cannot escape their log record.
 
 - Database URL passwords are masked in messages and logs even when the URL has an empty username, so password-only credentials are not printed by client failures or merge progress.

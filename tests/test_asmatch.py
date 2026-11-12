@@ -425,6 +425,63 @@ class TestDBCoreFunctions(_IsolatedDBTest):
         # The index really was wiped, once the rebuild slot was free.
         self.assertEqual(session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).one()[0], 0)
 
+    def test_db_clean_waits_across_engines_of_the_same_file(self):
+        """Two engines over one SQLite file must share the rebuild fence."""
+        for relative in (False, True):
+            with self.subTest(relative=relative):
+                with tempfile.TemporaryDirectory() as directory:
+                    url = f"sqlite:///{os.path.join(directory, 'shared.db')}"
+                    builder = create_engine(url)
+                    cleaner_path = os.path.join(directory, "shared.db")
+                    if relative:
+                        cleaner_path = os.path.relpath(cleaner_path)
+                    cleaner = create_engine(f"sqlite:///{cleaner_path}")
+                    cleaned = threading.Event()
+                    started = threading.Event()
+                    errors: list[BaseException] = []
+                    results: list[dict] = []
+
+                    def run_clean(engine, starting, output, failures, completed) -> None:
+                        try:
+                            with Session(engine) as session:
+                                starting.set()
+                                output.append(db_clean(session))
+                        except BaseException as exc:
+                            failures.append(exc)
+                        finally:
+                            completed.set()
+
+                    try:
+                        SQLModel.metadata.create_all(builder)
+                        with Session(builder) as session:
+                            snippet_add(session, "fixture", "MOV EAX, 1\nRET")
+                            candidates, _matches = snippet_find_matches(session, "MOV EAX, 1\nRET")
+                            self.assertGreater(candidates, 0)
+                            session.rollback()
+                            with index_build_lock(session):
+                                worker = threading.Thread(
+                                    target=run_clean,
+                                    args=(cleaner, started, results, errors, cleaned),
+                                    daemon=True,
+                                )
+                                worker.start()
+                                self.assertTrue(started.wait(timeout=5))
+                                finished_while_locked = cleaned.wait(timeout=2)
+                            worker.join(timeout=30)
+                            self.assertFalse(worker.is_alive())
+                            self.assertEqual(errors, [])
+                            self.assertTrue(results[0]["vacuum_success"])
+                            self.assertEqual(
+                                session.execute(text("SELECT COUNT(*) FROM lsh_bucket")).scalar(), 0
+                            )
+                            self.assertFalse(
+                                finished_while_locked,
+                                "clean dropped rows while another engine held the rebuild fence",
+                            )
+                    finally:
+                        cleaner.dispose()
+                        builder.dispose()
+
     def test_db_reindex_empty_db(self):
         """Test reindexing an empty database."""
         result = db_reindex(self.session)

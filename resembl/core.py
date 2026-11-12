@@ -1633,11 +1633,12 @@ def db_reindex(
     commits periodically.  If *progress* is given it is called as
     ``progress(done, total)`` with snippets processed so far.
 
-    The whole run holds the database's index-rebuild lock: a reindex clears
-    the LSH index up front and rewrites every fingerprint, so two of them at
-    once (the ``serve`` process runs one handler thread per request) would
+    The whole run holds the database's process-local index-rebuild lock: a
+    reindex clears the LSH index up front and rewrites every fingerprint, so
+    two of them at once (``serve`` runs one handler thread per request) would
     interleave their clears and leave ``lsh_meta`` advertising a complete
-    index over half-written rows.  See :func:`resembl.lsh.index_build_lock`.
+    index over half-written rows. Separate processes are not serialized.
+    See :func:`resembl.lsh.index_build_lock`.
     """
     with index_build_lock(session):
         return _db_reindex(session, ngram_size, batch_size, jobs, num_perm, progress)

@@ -24,6 +24,7 @@ The band-slicing behavior derived from datasketch is MIT-licensed
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import weakref
 from collections.abc import Iterator, Sequence
@@ -299,19 +300,19 @@ def _ensure_tables_once(session: Session) -> None:
             _TABLES_ENSURED.add(engine)
 
 
-#: One lock per database, serializing the index rebuilds a process performs
-#: against it (a full build and a fingerprint reindex, which clears the index
-#: up front).  Keyed by engine, like ``_TABLES_ENSURED``, so two databases in
-#: one process do not block each other; the registry is weak so a disposed
-#: engine (and its pool) stays collectable.  ``_BUILD_LOCKS_GUARD`` is held
-#: only for the registry lookup, never across a build.
-_BUILD_LOCKS: weakref.WeakKeyDictionary[object, threading.RLock] = weakref.WeakKeyDictionary()
+#: Process-local rebuild locks; weak values release idle database keys.
+#: The guard covers registry access only, never SQL or a rebuild.
+_BUILD_LOCKS: weakref.WeakValueDictionary[object, threading.RLock] = weakref.WeakValueDictionary()
 _BUILD_LOCKS_GUARD = threading.Lock()
 
 
 @contextmanager
 def index_build_lock(session: Session) -> Iterator[None]:
-    """Hold the per-database index-rebuild lock for *session*'s database.
+    """Hold a process-local index-rebuild lock for *session*'s database.
+
+    SQLite file databases share a lock by the main database's real path, even
+    across engines and path aliases. Private in-memory and non-SQLite databases
+    use the bind identity. This does not serialize separate processes.
 
     A rebuild is destructive by design: it drops ``lsh_bucket`` and repopulates
     it.  Two rebuilds running at once in the same process interleave their
@@ -324,10 +325,18 @@ def index_build_lock(session: Session) -> Iterator[None]:
     not deadlock against itself.
     """
     bind = session.get_bind()
+    key: object = bind
+    if bind.dialect.name == "sqlite":
+        for _sequence, name, filename in (
+            session.connection().exec_driver_sql("PRAGMA database_list").all()
+        ):
+            if name == "main" and filename:
+                key = os.path.realpath(filename)
+                break
     with _BUILD_LOCKS_GUARD:
-        lock = _BUILD_LOCKS.get(bind)
+        lock = _BUILD_LOCKS.get(key)
         if lock is None:
-            lock = _BUILD_LOCKS[bind] = threading.RLock()
+            lock = _BUILD_LOCKS[key] = threading.RLock()
     with lock:
         yield
 
