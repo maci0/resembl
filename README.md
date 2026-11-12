@@ -51,7 +51,7 @@ and the backends, drivers and the DuckDB extra are in
 
 ### 3. Usage
 
-The CLI can be invoked through uv or by running the module directly after activating the shell.
+Run the CLI through uv or invoke `resembl` directly after activating the virtual environment.
 
 **Examples:**
 ```bash
@@ -283,7 +283,7 @@ resembl/
 
 A simple benchmarking script is included to measure the performance of the `import` and `find` commands.
 
-To run the benchmark, execute the following command from the root of the project:
+Run from the repository root in a disposable checkout. The script writes to `data/` and `benchmark.db`, then deletes both, including any pre-existing contents:
 
 ```bash
 uv run --locked python benchmarks/benchmark.py

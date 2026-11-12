@@ -1,8 +1,6 @@
 # Using a Custom Database with resembl
 
-The `resembl` library can run on your own application's database. Instead of the default `sqlite:///assembly.db` file, you can provide your own database engine. This is possible because all core `resembl` functions operate on a `Session` object that you provide, a design principle known as **Dependency Injection**.
-
-This guide will walk you through the process of using `resembl` with a custom database managed by your application.
+Pass a SQLModel `Session` to the core functions to use your application's database instead of the default `sqlite:///assembly.db`.
 
 ## Supported Databases
 
@@ -17,7 +15,7 @@ upserts, DDL) is selected automatically; the sampled average similarity in
 | SQLite      | `sqlite:///assembly.db` (default)                           | WAL mode, band-major builds: the reference backend. |
 | PostgreSQL  | `postgresql+pg8000://user:pass@host:5432/db`                | `ON CONFLICT DO NOTHING`; integration-tested in CI.  Any PG driver works (`psycopg2`, `pg8000`, …). |
 | MySQL/MariaDB | `mysql+pymysql://user:pass@host:3306/db`                   | `INSERT IGNORE` / `ON DUPLICATE KEY UPDATE`.  Bucket keys are stored as indexable hex strings (a raw `BLOB` cannot be a primary key on MySQL).  Integration-tested in CI. |
-| DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | Needs the `duckdb` extra: `uv sync --extra duckdb` (or `pip install "resembl[duckdb]"` outside a uv checkout).  `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas.  Bulk paths use multi-row `VALUES` (its `executemany` path is several times slower, measured ~7–13x depending on the table); verified live at 100k snippets. |
+| DuckDB      | `duckdb:///file.db` (via `duckdb-engine`)                   | Needs the `duckdb` extra: `uv sync --locked --extra duckdb` (or `pip install "resembl[duckdb]"` outside a uv checkout).  `ON CONFLICT DO NOTHING`; skips the SQLite-only pragmas.  Bulk paths use multi-row `VALUES` (its `executemany` path is several times slower, measured ~7–13x depending on the table); verified live at 100k snippets. |
 
 The `pg8000` and `pymysql` drivers ship with the package; only DuckDB needs the
 extra. The development lock pins DuckDB 2.0.0. By default, DuckDB 2.0 creates
@@ -29,7 +27,7 @@ covers files that older readers must open. DuckDB is file-backed, so
 the corpus file itself is the backup unit; `resembl backup` does not
 cover it, so copy the file only when no DuckDB process has it open and
 prove the restore by opening the copy with the DuckDB version that
-wrote it — see `docs/restore.md`.
+wrote it; see the [restore runbook](restore.md).
 
 The schema is portable: string primary keys carry explicit lengths and long
 text columns use `TEXT`, so `SQLModel.metadata.create_all` emits valid DDL on
@@ -37,19 +35,19 @@ all of the above (pinned by `tests/test_pg_dialect.py`).
 
 ## The Key Principle: SQLModel Metadata
 
-The magic behind this flexibility lies in how `SQLModel` manages database schemas. When you import a model class that inherits from `SQLModel`, it registers its schema with a central `SQLModel.metadata` object. Importing `resembl.models` registers every table class defined there (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`, `app_meta`) — importing one name runs the whole module.
+Importing `resembl.models`, including a single name from it, registers all six table classes with `SQLModel.metadata`: `snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta` and `app_meta`.
 
-When you are ready to create your database tables, you call `SQLModel.metadata.create_all(your_engine)`. This command iterates through all registered models (both yours and `resembl`'s) and creates the corresponding tables in the database pointed to by your engine.
+`SQLModel.metadata.create_all(your_engine)` creates tables for all registered models, including your application's models, in that engine's database.
 
 ## Step-by-Step Example
 
-Here is a complete example of how an external application can set up its own database and use `resembl` to manage assembly snippets within it.
+Create an in-memory SQLite database and add a snippet:
 
 ```python
 # main_app.py
 from sqlmodel import SQLModel, create_engine, Session
 
-# 1. Import the resembl models — this is the crucial step: importing
+# 1. Import the resembl models: importing
 #    `resembl.models` registers every table class it defines
 #    (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`,
 #    `app_meta`) with SQLModel's central metadata catalog.
@@ -87,7 +85,7 @@ with Session(my_custom_engine) as session:
         code="mov eax, 1\nret",
     )
 
-    print(f"Snippet added! Checksum: {new_snippet.checksum}")
+    print(f"Snippet added. Checksum: {new_snippet.checksum}")
 
     # Verify the snippet was added to our custom database
     all_snippets = snippet_list(session)
@@ -95,17 +93,6 @@ with Session(my_custom_engine) as session:
     print(f"Retrieved from custom DB: {all_snippets[0].name_list}")
 
 ```
-
-## Summary of the Workflow
-
-To use your own database with `resembl`, follow these steps:
-
-1.  **Import Models:** Before creating your tables, import `resembl.models` (e.g., `from resembl.models import Snippet`). Importing the module registers every table class it defines; one import registers all of them.
-2.  **Create Your Engine:** Instantiate your own `create_engine()` with the desired database URL.
-3.  **Create Tables:** Call `SQLModel.metadata.create_all(your_engine)` to create the tables for all registered models in your database.
-4.  **Create and Pass the Session:** Whenever you need to call an `resembl` core function, create a `Session` from your engine and pass it as the `session` argument.
-
-By following this pattern, you can integrate `resembl`'s functionality into any application while maintaining full control over the database.
 
 ## Scaling to Millions of Snippets and Beyond
 
