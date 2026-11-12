@@ -100,6 +100,7 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .diagnostics import db_stats
+from .find_client import _find_payload_validate
 from .find_client import _read_bounded_response as _read_bounded_server_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .paths import (
@@ -771,6 +772,29 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
             "Server request to %s was refused (%s); falling back to the in-process path.",
             path,
             payload.get("error"),
+        )
+        return None
+    valid = True
+    if path == "/find":
+        valid = _find_payload_validate(payload)
+    elif path == "/find-batch":
+        rows = payload.get("results")
+        queries = body["queries"]
+        valid = (
+            isinstance(rows, list)
+            and len(rows) == len(queries)
+            and all(
+                isinstance(row, dict)
+                and row.get("query") == query
+                and (
+                    isinstance(row["error"], str) if "error" in row else _find_payload_validate(row)
+                )
+                for row, query in zip(rows, queries, strict=True)
+            )
+        )
+    if not valid:
+        logger.warning(
+            "Server returned a malformed find response; falling back to the in-process path."
         )
         return None
     return payload

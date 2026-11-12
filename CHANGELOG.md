@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Find clients reject malformed result columns and non-finite scores before rendering or reporting JSON success. Batch replies must also preserve the requested queries and entry count; the CLI falls back to its local query on an invalid reply.
+
 - The Go service rejects request bodies containing invalid UTF-8 with 400 instead of silently replacing query bytes, and rejects invalid UTF-8 engine results with 502 instead of forwarding malformed JSON text.
 
 - The Go pinned batch adapter returns the same `results` envelope and per-entry `query` fields as the Python batch endpoint. Invalid query entries report their own error while valid entries continue. Transport and snapshot-proof failures still fail closed.

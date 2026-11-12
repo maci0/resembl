@@ -76,6 +76,36 @@ _CFG_DEFAULTS: dict[str, float] = {
 }
 
 
+def _find_payload_validate(payload: object) -> bool:
+    """Return whether a find payload's columns can be rendered safely."""
+    if not isinstance(payload, dict):
+        return False
+    candidates = payload.get("lsh_candidates")
+    matches = payload.get("matches")
+    if (
+        not isinstance(candidates, int)
+        or isinstance(candidates, bool)
+        or candidates < 0
+        or not isinstance(matches, list)
+    ):
+        return False
+    for match in matches:
+        if not isinstance(match, dict) or not isinstance(match.get("checksum"), str):
+            return False
+        names = match.get("names")
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+            return False
+        score = match.get("score")
+        if not isinstance(score, (int, float)) or isinstance(score, bool):
+            return False
+        try:
+            if not math.isfinite(score):
+                return False
+        except OverflowError:
+            return False
+    return True
+
+
 def _load_config() -> dict:
     """Read the whole CLI config.toml, if present.
 
@@ -446,10 +476,8 @@ def _main(argv: list[str] | None = None) -> int:
         return _fail("server returned a malformed find response", 1, json_on=json_on)
     if "error" in payload:
         return _fail(str(payload["error"]), 1, json_on=json_on)
-    if "lsh_candidates" not in payload or "matches" not in payload:
-        # A server answer without the promised fields is a malformed
-        # response, not an empty result: indexing into it would raise
-        # KeyError and lose the result table entirely.
+    if not _find_payload_validate(payload):
+        # Validate before text rendering or forwarding a JSON success.
         return _fail("server returned a malformed find response", 1, json_on=json_on)
 
     if json_on:

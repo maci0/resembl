@@ -830,6 +830,91 @@ class TestServerMode(_ServeTestCase):
                             self.assertIsNone(cli._server_request("/find", {"query": "ret"}, 5))
                     self.assertTrue(os.path.exists(port_file))
 
+    def test_clients_refuse_malformed_match_payloads(self):
+        """Invalid result columns must not crash rendering or be emitted as success."""
+        import contextlib
+        import io
+
+        from resembl import cli
+        from resembl.find_client import _main
+
+        self._start_server()
+        match = {"checksum": "a" * 64, "names": ["ret"], "score": 1.0}
+        payloads = [
+            {"lsh_candidates": 0, "matches": None},
+            {"lsh_candidates": 0, "matches": [None]},
+            {"lsh_candidates": "bad", "matches": []},
+            *(
+                {"lsh_candidates": 1, "matches": [{**match, key: value}]}
+                for key, value in (
+                    ("checksum", None),
+                    ("names", None),
+                    ("names", [7]),
+                    ("score", "bad"),
+                    ("score", float("nan")),
+                    ("score", 10**400),
+                )
+            ),
+        ]
+        for payload in payloads:
+            for mode in ("text", "json", "cli", "batch"):
+                with self.subTest(payload=payload, mode=mode):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    opener = self._opener_with(
+                        lambda request, timeout=5, payload=payload, mode=mode: io.BytesIO(
+                            json.dumps(
+                                {"results": [{"query": "ret", **payload}]}
+                                if mode == "batch"
+                                else payload
+                            ).encode()
+                        )
+                    )
+                    with (
+                        contextlib.redirect_stdout(stdout),
+                        contextlib.redirect_stderr(stderr),
+                        patch("urllib.request.build_opener", return_value=opener),
+                        patch.object(cli.state, "session", self._session, create=True),
+                    ):
+                        if mode == "batch":
+                            self.assertIsNone(
+                                cli._server_request("/find-batch", {"queries": ["ret"]}, 5)
+                            )
+                        elif mode == "cli":
+                            self.assertIsNone(cli._server_request("/find", {"query": "ret"}, 5))
+                        else:
+                            args = ["--query", "ret"] + (["--json"] if mode == "json" else [])
+                            self.assertEqual(_main(args), 1)
+                            self.assertIn("malformed find response", stderr.getvalue())
+                            self.assertEqual(stdout.getvalue(), "")
+
+    def test_batch_reply_preserves_queries_and_error_rows(self):
+        """Missing or mislabelled rows fall back; a valid per-query error remains usable."""
+        import io
+
+        from resembl import cli
+
+        self._start_server()
+        replies = [
+            ({"results": None}, False),
+            ({"results": []}, False),
+            ({"results": [{"query": "other", "lsh_candidates": 0, "matches": []}]}, False),
+            ({"results": [{"query": "ret", "error": 7}]}, False),
+            ({"results": [{"query": "ret", "error": "query has no tokens"}]}, True),
+        ]
+        for payload, valid in replies:
+            with self.subTest(payload=payload):
+                opener = self._opener_with(
+                    lambda request, timeout=5, payload=payload: io.BytesIO(
+                        json.dumps(payload).encode()
+                    )
+                )
+                with (
+                    patch("urllib.request.build_opener", return_value=opener),
+                    patch.object(cli.state, "session", self._session, create=True),
+                ):
+                    result = cli._server_request("/find-batch", {"queries": ["ret"]}, 5)
+                self.assertEqual(result, payload if valid else None)
+
     def test_thin_client_table_output(self):
         """Without --json, the client prints a ranked table and exits 0."""
         import contextlib
