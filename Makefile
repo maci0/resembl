@@ -263,9 +263,9 @@ backup-restore-drill:  ## Prove the full restore path on a throwaway database (d
 # Python-only contributor needs no Go toolchain.
 # The Docker build honors SOURCE_DATE_EPOCH (see service/Dockerfile), so the
 # commit-time epoch is passed through for a reproducible image.
-service-check:  ## Run gofmt, go vet, go test -race and both binary builds in service/ (needs Go 1.26+)
+service-check:  ## Run gofmt, go vet, go test -race and both binary builds in service/ (needs Go 1.27+)
 	@if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then \
-		echo "make service-check needs Go 1.26+ (go and gofmt on PATH; see service/go.mod)."; \
+		echo "make service-check needs Go 1.27+ (go and gofmt on PATH; see service/go.mod)."; \
 		echo "Install Go from https://go.dev/dl/ and re-run 'make service-check'."; \
 		exit 1; \
 	fi
@@ -288,7 +288,7 @@ service-check:  ## Run gofmt, go vet, go test -race and both binary builds in se
 # Atheris one. FUZZER names a target (e.g. FuzzServeHTTP); FUZZ_SECONDS bounds it.
 service-fuzz:  ## Fuzz the Go service targets for FUZZ_SECONDS, or one via FUZZER=<name>
 	@if ! command -v go >/dev/null 2>&1; then \
-		echo "make service-fuzz needs Go 1.26+ (see service/go.mod)."; \
+		echo "make service-fuzz needs Go 1.27+ (see service/go.mod)."; \
 		exit 1; \
 	fi
 	@for t in $(if $(FUZZER),$(FUZZER),FuzzHandle FuzzServeHTTP); do \

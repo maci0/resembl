@@ -13,6 +13,14 @@ project follows [Semantic Versioning](https://semver.org/).
 - The Go service treats truncated or oversized engine error bodies as transport failures instead of completed rejections.
 - The Go service waits for graceful shutdown to finish draining queries before exiting, so a stop signal does not interrupt active requests and orphan their custody slots.
 - JSON scalars and arrays returned by a warm server no longer crash find clients. `resembl-find` reports a malformed response, and the CLI falls back to its local query without removing the server advertisement.
+### Changed
+
+- Dependencies refreshed to their latest releases, with the declared minimums
+  raised to match (among them `sqlalchemy` 2.1.8, `duckdb` 2.0.0, `typer`
+  0.29.1, `pylint` 4.1.3 and `black` 26.10.1). The Go service moves to Go
+  1.27 (`golang:1.27-alpine`, go1.27.4, in the image and the `Go service`
+  workflow) and `aws-lambda-go` 1.55.1; `make service-check` now needs Go
+  1.27 or newer.
 
 ## [5.0.0] - 2026-11-09
 

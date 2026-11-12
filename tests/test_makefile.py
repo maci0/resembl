@@ -85,7 +85,7 @@ class MakefileShellTests(unittest.TestCase):
         self.assertIn("--benchmark-enable", result.stdout)
 
     def test_service_check_names_missing_go(self) -> None:
-        """Without Go on PATH, service-check names Go 1.26+ instead of a bare shell error."""
+        """Without Go on PATH, service-check names Go 1.27+ instead of a bare shell error."""
         make = shutil.which("make")
         if make is None:
             self.skipTest("make is required")
@@ -102,7 +102,7 @@ class MakefileShellTests(unittest.TestCase):
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("needs Go 1.26+", result.stdout + result.stderr)
+        self.assertIn("needs Go 1.27+", result.stdout + result.stderr)
         self.assertIn("https://go.dev/dl/", result.stdout + result.stderr)
 
     def test_install_names_missing_uv(self) -> None:

@@ -31,7 +31,7 @@ The experimental `PinnedSQLiteEngine` calls `/find-pinned` on a compatible warm 
 
 `/v1/find-batch` fans each query through the pinned `/find-pinned` path (one upstream call per query, preserving the snapshot proof per result); it answers `501` only when the configured engine is not a `BatchEngine`.
 
-Run the checks with `make service-check` from the repository root (needs Go 1.26 or newer).
+Run the checks with `make service-check` from the repository root (needs Go 1.27 or newer).
 
 ## Container image
 

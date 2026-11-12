@@ -271,7 +271,7 @@ Before opening a pull request, run through this checklist.
     ```bash
     make check
     ```
-    A change under `service/` (the experimental Go query service) also needs `make service-check`, which needs Go 1.26 or newer; the `Go service` workflow runs it.
+    A change under `service/` (the experimental Go query service) also needs `make service-check`, which needs Go 1.27 or newer; the `Go service` workflow runs it.
 2.  **Update Your Branch:** Make sure your branch is up-to-date with the
     latest changes from the `resembl` main branch. This helps avoid merge
     conflicts.
