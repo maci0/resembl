@@ -85,7 +85,7 @@ func TestSuppliedRequestIDIsAdopted(t *testing.T) {
 
 func TestOversizedOrControlCharRequestIDIsReminted(t *testing.T) {
 	s := requestIDService(t, nil)
-	for _, bad := range []string{strings.Repeat("x", 65), "bad\x7fid", "bad\nid"} {
+	for _, bad := range []string{strings.Repeat("x", 65), "bad\x7fid", "bad\nid", "bad\u0085id", "bad\u2028id", "bad\u2029id"} {
 		req := httptest.NewRequest("POST", "/v1/find", strings.NewReader(`{"query":"ret"}`))
 		req.Header.Set("X-Request-Id", bad)
 		w := httptest.NewRecorder()

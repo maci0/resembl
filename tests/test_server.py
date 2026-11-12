@@ -2659,7 +2659,7 @@ class TestServerObservability(_ServeTestCase):
 
     def test_oversized_or_control_char_request_id_is_reminted(self):
         port = self._start_server()
-        for bad in ("x" * 65, "bad\x7fid"):  # DEL is a control char a client can send
+        for bad in ("x" * 65, "bad\x7fid", "bad\x85id"):
             request = urllib.request.Request(
                 f"http://127.0.0.1:{port}/find",
                 data=json.dumps({"query": "push ebx"}).encode(),

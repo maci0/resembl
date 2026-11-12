@@ -57,14 +57,12 @@ type custodyHolder struct {
 // safeLogPath strips control characters (including CR/LF) from a request path
 // so a crafted URL cannot forge log entries when logged via log.Printf.
 func safeLogPath(p string) string {
-	out := make([]byte, 0, len(p))
-	for i := 0; i < len(p); i++ {
-		c := p[i]
-		if c >= 0x20 && c != 0x7f {
-			out = append(out, c)
+	return strings.Map(func(ch rune) rune {
+		if ch < 0x20 || (ch >= 0x7f && ch <= 0x9f) || ch == '\u2028' || ch == '\u2029' {
+			return -1
 		}
-	}
-	return string(out)
+		return ch
+	}, p)
 }
 
 // latency buckets mirror the Python server's histogram bounds so both

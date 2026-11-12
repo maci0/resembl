@@ -814,7 +814,7 @@ def _loopback_allowed_hosts(host: str, port: int) -> frozenset[str]:
 
 #: C0 and DEL, dropped from a logged request line so a crafted path cannot
 #: end the record and append forged lines to the log.
-_LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), 0x7F])
+_LOG_CONTROL_CHARS = dict.fromkeys([*range(0x20), *range(0x7F, 0xA0), 0x2028, 0x2029])
 
 
 def _has_lone_surrogate(text: str) -> bool:
@@ -1325,7 +1325,7 @@ class _FindHandler(BaseHTTPRequestHandler):
                 and len(supplied.encode("utf-8", errors="surrogatepass"))
                 <= self._MAX_REQUEST_ID_CHARS
             ):
-                if all(0x20 <= ord(ch) != 0x7F for ch in supplied):
+                if not any(ord(ch) in _LOG_CONTROL_CHARS for ch in supplied):
                     return supplied
         return self.request_id
 
