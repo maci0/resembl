@@ -78,6 +78,11 @@ def parse_sections(text: str) -> list[tuple[str, str, str]]:
     return sections
 
 
+def audited_break_notes_read(text: str) -> str:
+    """Return the changelog notes owning the audited behavior changes."""
+    return next(body for version, _, body in parse_sections(text) if version == "5.0.0")
+
+
 def breaking_major_violations(sections: list[tuple[str, str, str]]) -> list[str]:
     """Return a complaint per released section whose break needs a major bump.
 
@@ -390,8 +395,15 @@ class TestChangelog(unittest.TestCase):
             self.assertNotIn(bullet, seen, f"duplicate [Unreleased] bullet: {bullet[:80]!r}")
             seen.add(bullet)
 
-    def test_unreleased_notes_cover_shipped_behavior_breaks(self):
-        """Shipped behavior changes in this tree are noted as breaking.
+    def test_audited_break_notes_are_not_shadowed_by_unreleased(self):
+        """A later unrelated fix must not hide the release that shipped the breaks."""
+        text = self.text.replace(
+            "## [Unreleased]", "## [Unreleased]\n\n### Fixed\n\n- An unrelated fix.", 1
+        )
+        self.assertEqual(audited_break_notes_read(text), audited_break_notes_read(self.text))
+
+    def test_release_notes_cover_shipped_behavior_breaks(self):
+        """Audited behavior changes shipped in 5.0.0 are noted as breaking.
 
         Regression guard for three audited breaks that shipped without a
         note: the Go metrics authorization (403 without the query
@@ -400,9 +412,9 @@ class TestChangelog(unittest.TestCase):
         runtime manifest in serve and backup, and merge and collection
         delete honoring --force (prompting on a terminal, refusing off a
         terminal without it).  Each must carry the Breaking marker so the
-        next release inherits it as a major.
+        owning release records the break.
         """
-        body = unreleased_body(self.text) or (self.sections[0][2] if self.sections else "")
+        body = audited_break_notes_read(self.text)
         for phrase in (
             "resembl-service",
             "/metrics",
@@ -413,7 +425,7 @@ class TestChangelog(unittest.TestCase):
             "collection delete",
             "--force",
         ):
-            self.assertIn(phrase, body, f"[Unreleased] is missing the note naming {phrase!r}")
+            self.assertIn(phrase, body, f"[5.0.0] is missing the note naming {phrase!r}")
         for bullet, _category in parse_bullets(body):
             if (
                 "403" in bullet
