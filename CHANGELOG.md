@@ -12,7 +12,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 - Preserve both UTF-8 bytes when escaping C1 controls in YARA patterns instead of matching a different single byte.
 - Preserve shutdown interrupts arriving as a request thread starts, so SIGTERM cannot be replaced by a duplicate semaphore release that keeps the server alive.
-- Skip corrupt stored alias JSON consistently in name lookup, search and rendering, preserving the original metadata and allowing valid rows to remain searchable.
+- Skip corrupt stored alias JSON in name lookup and search while preserving the original metadata and refusing mutations until malformed aliases are repaired.
 - Refuse timestamp offsets that would normalize outside Python's UTC date range, preserving the original stored text instead of raising an overflow.
 - Keep portability fixtures on one Windows drive, close restored test databases before cleanup, run recipes with a POSIX shell, and emit backup candidate paths with LF line endings. Fuzz tail checks now mutate unused values within the fingerprint rather than append malformed bytes.
 - MySQL can create the snippet history timestamp index by indexing a bounded TEXT prefix without limiting stored timestamps.

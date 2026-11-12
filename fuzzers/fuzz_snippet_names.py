@@ -6,13 +6,14 @@ The ``names`` column of a snippet row is a JSON-encoded string list that
 a hostile ``merge`` source or a hand-edited database file supplies
 verbatim. The shared string-list decoder used by ``Snippet.name_list``,
 ``Snippet.get_by_name`` and ``core.snippet_search_by_name`` must refuse
-malformed values without rewriting them or crashing the caller.
+malformed values without rewriting them. Direct property reads refuse bad
+metadata so mutations cannot overwrite it; read-only lookups skip corrupt rows.
 
 The harness drives the three real readers over one in-memory database
 with structure-aware inputs and asserts the invariants the callers
 rely on, not just the absence of a crash:
 
-* the readers never raise for any stored text: a missing, malformed,
+* lookup and search never raise for any stored text: a missing, malformed,
   deeply nested, non-list, or list-of-non-strings value is the row's
   fault, not a crash;
 * a value that *is* read back is a list of ``str`` that survives a
@@ -119,7 +120,15 @@ def _build_document(fdp: atheris.FuzzedDataProvider) -> str:
 def _check_snippet_names(stored: str) -> list[str]:
     """Assert the three readers hold their contracts for one stored value."""
     snippet = Snippet(checksum="fuzz-checksum", code="ret", names=stored, minhash=b"", tags="[]")
-    names = snippet.name_list
+    try:
+        names = snippet.name_list
+    except ValueError:
+        try:
+            document = json.loads(stored)
+        except ValueError, RecursionError:
+            return []
+        assert not isinstance(document, list) or any(not isinstance(name, str) for name in document)
+        return []
     assert isinstance(names, list), f"name_list returned non-list: {names!r}"
     assert all(isinstance(item, str) for item in names), f"non-string name: {names!r}"
     # Persistence round trip: what the reader read must survive the

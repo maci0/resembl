@@ -87,13 +87,23 @@ def name_json_escape(text: str) -> str:
     return json.dumps(text)[1:-1]
 
 
-def name_list_parse(value: str) -> list[str]:
-    """Read stored aliases, refusing malformed rows without rewriting their bytes."""
+def _name_list_decode(value: str) -> list[str]:
+    """Validate aliases before a mutation can replace their stored representation."""
     try:
         names = json.loads(value)
-    except ValueError, TypeError, RecursionError:
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise ValueError("stored aliases are not a JSON string list") from exc
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        raise ValueError("stored aliases are not a JSON string list")
+    return names
+
+
+def name_list_parse(value: str) -> list[str]:
+    """Read-only scans skip corrupt aliases without rewriting their stored bytes."""
+    try:
+        return _name_list_decode(value)
+    except ValueError:
         return []
-    return names if isinstance(names, list) and all(isinstance(name, str) for name in names) else []
 
 
 class Collection(SQLModel, table=True):
@@ -227,7 +237,7 @@ class Snippet(SQLModel, table=True):
     @property
     def name_list(self) -> list[str]:
         """Return the list of alias names for the snippet."""
-        return name_list_parse(self.names)
+        return _name_list_decode(self.names)
 
     @property
     def tag_list(self) -> list[str]:

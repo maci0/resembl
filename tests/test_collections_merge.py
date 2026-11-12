@@ -254,7 +254,12 @@ class TestSearch(BaseDBTest):
             with self.subTest(stored=stored[:40]):
                 corrupt.names = stored
                 self.session.commit()
-                self.assertEqual(corrupt.name_list, [])
+                with self.assertRaises(ValueError):
+                    _ = corrupt.name_list
+                from resembl.core import snippet_name_add
+
+                with self.assertRaises(ValueError):
+                    snippet_name_add(self.session, corrupt.checksum, "new-alias")
                 self.assertIsNone(Snippet.get_by_name(self.session, "needle"))
                 self.assertEqual(snippet_search_by_name(self.session, "", limit=1), [good])
                 self.assertEqual(corrupt.names, stored)
