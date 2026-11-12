@@ -162,6 +162,32 @@ def test_oversized_manifest_is_refused(tmp_path: Path) -> None:
         verify_runtime(str(path), hashlib.sha256(path.read_bytes()).hexdigest())
 
 
+def test_manifest_read_stops_at_its_byte_limit(tmp_path: Path) -> None:
+    """A refused oversized manifest must not first be loaded whole into memory."""
+    path = tmp_path / "oversized.json"
+    limit = 2 * 1024 * 1024
+    with path.open("wb") as output:
+        output.seek(3 * limit - 1)
+        output.write(b" ")
+    transferred = 0
+    with path.open("rb") as source:
+        real_read = source.read
+
+        def counted_read(size: int = -1) -> bytes:
+            nonlocal transferred
+            data = real_read(size)
+            transferred += len(data)
+            return data
+
+        with (
+            patch.object(Path, "open", return_value=source),
+            patch.object(source, "read", side_effect=counted_read),
+            pytest.raises(ValueError, match="manifest mismatch"),
+        ):
+            verify_runtime(str(path), "0" * 64)
+    assert transferred == limit + 1
+
+
 @pytest.mark.parametrize(
     ("raw", "message"),
     [

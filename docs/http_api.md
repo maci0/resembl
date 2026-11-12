@@ -282,6 +282,8 @@ and echoes the three values with the result:
 | `503` | `RESEMBL_RUNTIME_MANIFEST` is unset, `artifact_sha256` or `generation` is missing or stale, the manifest check failed, the database is not SQLite, or the index needs a rebuild. The index is never rebuilt under the proof. |
 
 The digest scan is limited to one million rows and 64 MiB of encoded data.
+The runtime manifest is limited to 2 MiB; its reader stops at one byte past
+that limit before hashing or decoding, rather than loading an oversized file.
 This is file integrity under a trusted supervisor, not remote attestation; see
 `service/README.md`.
 

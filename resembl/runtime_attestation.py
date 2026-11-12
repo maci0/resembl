@@ -15,10 +15,14 @@ from pathlib import Path
 
 MAX_FILES = 10000
 MAX_BYTES = 512 * 1024 * 1024
+_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 
 
 def verify_runtime(manifest_path: str, expected: str) -> None:
     """Require the pinned manifest to cover interpreter and all loaded modules.
+
+    Read at most 2 MiB plus one overflow byte from the manifest, refusing an
+    oversized file before hashing or decoding it.
 
     Every rejection is a :class:`ValueError`: the ``/find-pinned``
     handler answers any other exception as a ``503`` with internal text
@@ -29,10 +33,11 @@ def verify_runtime(manifest_path: str, expected: str) -> None:
     can produce without ever being a valid manifest.
     """
     try:
-        raw = Path(manifest_path).read_bytes()
+        with Path(manifest_path).open("rb") as source:
+            raw = source.read(_MAX_MANIFEST_BYTES + 1)
     except OSError as exc:
         raise ValueError("runtime manifest unreadable") from exc
-    if len(raw) > 2 * 1024 * 1024 or hashlib.sha256(raw).hexdigest() != expected:
+    if len(raw) > _MAX_MANIFEST_BYTES or hashlib.sha256(raw).hexdigest() != expected:
         raise ValueError("runtime manifest mismatch")
     try:
         document = json.loads(raw)
