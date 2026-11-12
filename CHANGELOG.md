@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Both warm find clients handle JSON decoder recursion failures as malformed replies: the thin client reports its usual error and the CLI falls back to the local query without deleting the server's port file. This also covers recursion failures while reading HTTP error bodies.
+
 - The Go service now refuses to dispatch when persisting a custody claim fails, retains the occupied slot for operator repair, and reports release persistence failures. Windows directory sync remains best effort; directory open and close errors propagate on every platform.
 
 - The Go service releases an in-process query slot after a completed engine response even when client cancellation races with completion. Later requests no longer remain stuck at 429; uncertain timed-out executions still retain capacity.

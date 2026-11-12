@@ -1043,6 +1043,30 @@ class TestServerFallback(unittest.TestCase):
         self.assertIsNone(result)
         self.assertTrue(os.path.exists(self.port_file), "port file must survive a reset")
 
+    def test_deep_json_response_keeps_port_file(self):
+        """An over-nested reply falls back without losing the advertisement."""
+        import resembl.cli as cli
+
+        depth = sys.getrecursionlimit() * 2
+        body = b'{"matches":' + b"[" * depth + b"0" + b"]" * depth + b"}"
+        decoder = json.JSONDecoder()
+        decoder.scan_once = json.scanner.py_make_scanner(decoder)
+        for path, request_body in (
+            ("/find", {"query": "ret"}),
+            ("/find-batch", {"queries": ["ret"]}),
+        ):
+            with self.subTest(path=path):
+                with (
+                    patch("json._default_decoder", decoder),
+                    patch(
+                        "urllib.request.build_opener",
+                        return_value=self._opener_with(lambda request, timeout=5: io.BytesIO(body)),
+                    ),
+                ):
+                    result = cli._server_request(path, request_body, 5)
+                self.assertIsNone(result)
+                self.assertTrue(os.path.exists(self.port_file))
+
     def test_malformed_response_keeps_port_file(self):
         """A malformed JSON reply does not delete a live server's advertisement."""
         import resembl.cli as cli

@@ -964,6 +964,44 @@ class TestServerMode(_ServeTestCase):
                         json.loads(stdout.getvalue())["matches"][0]["names"], [hostile]
                     )
 
+    def test_thin_client_rejects_deep_json_responses(self):
+        """Decoder recursion errors use the client failure envelope."""
+        from contextlib import redirect_stderr, redirect_stdout
+
+        from resembl.find_client import _main
+
+        self._start_server()
+        # Exercise the recursive stdlib decoder even on Python with an
+        # iterative C decoder; supported Python builds can use either.
+        decoder = json.JSONDecoder()
+        decoder.scan_once = json.scanner.py_make_scanner(decoder)
+        depth = sys.getrecursionlimit() * 2
+        body = b'{"error":' + b"[" * depth + b"0" + b"]" * depth + b"}"
+        for status in (200, 400):
+            for json_mode in (False, True):
+                with self.subTest(status=status, json_mode=json_mode):
+                    reply = (
+                        (lambda request, timeout=5: io.BytesIO(body))
+                        if status == 200
+                        else urllib.error.HTTPError(
+                            "http://127.0.0.1/find", status, "Bad Request", {}, io.BytesIO(body)
+                        )
+                    )
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with (
+                        redirect_stdout(stdout),
+                        redirect_stderr(stderr),
+                        patch("json._default_decoder", decoder),
+                        patch("urllib.request.build_opener", return_value=self._opener_with(reply)),
+                    ):
+                        rc = _main(["--query", "ret"] + (["--json"] if json_mode else []))
+                    self.assertEqual(rc, 1)
+                    self.assertEqual(stdout.getvalue(), "")
+                    if json_mode:
+                        self.assertEqual(json.loads(stderr.getvalue())["error"]["kind"], "failure")
+                    else:
+                        self.assertTrue(stderr.getvalue().startswith("error: "))
+
     def test_thin_client_table_output(self):
         """Without --json, the client prints a ranked table and exits 0."""
         import contextlib

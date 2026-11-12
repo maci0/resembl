@@ -468,10 +468,10 @@ def _main(argv: list[str] | None = None) -> int:
         # tells the caller nothing about which parameter was refused.
         try:
             detail = json.loads(_read_bounded_response(exc).decode("utf-8")).get("error", "")
-        except ValueError, OSError, AttributeError:
+        except ValueError, OSError, AttributeError, RecursionError:
             detail = ""
         return _fail(str(detail or exc.reason), 1, json_on=json_on)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, OSError, ValueError, RecursionError) as exc:
         return _fail(f"server unreachable: {exc}", 1, json_on=json_on)
     if not isinstance(payload, dict):
         return _fail("server returned a malformed find response", 1, json_on=json_on)

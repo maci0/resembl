@@ -713,7 +713,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
             getattr(exc, "code", "?"),
         )
         return None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except (urllib.error.URLError, OSError, ValueError, RecursionError) as exc:
         # Only a verifiably dead server (connection refused: nothing is
         # listening on the advertised port) loses its port file.  Resets,
         # read timeouts, and malformed responses all occur against a

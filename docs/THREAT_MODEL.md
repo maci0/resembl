@@ -242,7 +242,10 @@ the Go service now closes/drains request bodies (`399bf78`,
 `service/service.go`, `service/pinned_engine.go`); the two bounded
 response readers are shared (`d0deec8`,
 `_read_bounded_response` in `resembl/find_client.py`, imported as
-`_read_bounded_server_response` in `resembl/cli.py`); `serve --port`
+`_read_bounded_server_response` in `resembl/cli.py`); JSON decoder recursion
+failures in both clients use their normal malformed-reply paths, including
+the thin client's HTTP error-body reader, without deleting the port file;
+`serve --port`
 outside 0-65535 now exits 2 without a traceback (`0a9d121`,
 `serve` in `resembl/cli.py`); the full HTTP surface is fuzzed
 (`73c0eac`, `fuzzers/fuzz_http_handler.py`); `db_backup` warns when
