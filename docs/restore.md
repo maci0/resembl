@@ -4,17 +4,17 @@
 
 | State | Location | Backed up? | Rebuildable? |
 | --- | --- | --- | --- |
-| Snippet corpus (`snippet`, `collection`, `snippetversion` tables) | SQLite file named by `RESEMBL_DATABASE_URL` / `DATABASE_URL`, default `assembly.db` — or, on a DuckDB backend, the `duckdb:///file.db` file | Yes (SQLite) — `resembl backup DIR` (online backup API, single file). DuckDB and other non-SQLite backends: use the backend's own tooling (see below); `resembl backup` refuses non-SQLite URLs | No — this *is* the corpus. `export` to `.asm` files is a second, human-readable copy |
-| LSH index (`lsh_bucket`, `lsh_meta`) + fingerprint stamps (`app_meta`) | Same file as the corpus (SQLite or DuckDB) | Yes (SQLite) — included in the backup copy; DuckDB/server backends copy with the corpus via the backend's own tooling | Yes — `reindex` / next `find` rebuilds from snippet code + fingerprints |
-| Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite) — copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable — defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
-| Legacy pickle cache, port file | `~/.cache/resembl/` | **No** | Yes — cache, never loaded; port file rewritten by `serve` |
-| Export files + export manifest | Export directory chosen at `export` time (`DIRECTORY/.resembl-export.json`) | **No** (the export itself is the copy) | Yes — re-export from restored corpus; manifest rewritten by next `export` |
-| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | Yes (SQLite) — copied verbatim to `<backup-stem>.runtime-manifest.json` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `runtime_sha256`, cross-checked by `verify-backup` | Regenerable only by regenerating hashes of interpreter + loaded modules; copy + SHA-256 (`artifact_sha256`) with backup set, write-protected — writable manifest can attest tampered code |
+| Snippet corpus (`snippet`, `collection`, `snippetversion` tables) | SQLite file named by `RESEMBL_DATABASE_URL` / `DATABASE_URL`, default `assembly.db`, or, on a DuckDB backend, the `duckdb:///file.db` file | Yes (SQLite): `resembl backup DIR` (online backup API, single file). DuckDB and other non-SQLite backends: use the backend's own tooling (see below); `resembl backup` refuses non-SQLite URLs | No, this *is* the corpus. `export` to `.asm` files is a second, human-readable copy |
+| LSH index (`lsh_bucket`, `lsh_meta`) + fingerprint stamps (`app_meta`) | Same file as the corpus (SQLite or DuckDB) | Yes (SQLite): included in the backup copy; DuckDB/server backends copy with the corpus via the backend's own tooling | Yes: `reindex` / next `find` rebuilds from snippet code + fingerprints |
+| Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite): copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable: defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
+| Legacy pickle cache, port file | `~/.cache/resembl/` | **No** | Yes: cache, never loaded; port file rewritten by `serve` |
+| Export files + export manifest | Export directory chosen at `export` time (`DIRECTORY/.resembl-export.json`) | **No** (the export itself is the copy) | Yes: re-export from restored corpus; manifest rewritten by next `export` |
+| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | Yes (SQLite): copied verbatim to `<backup-stem>.runtime-manifest.json` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `runtime_sha256`, cross-checked by `verify-backup` | Regenerable only by regenerating hashes of interpreter + loaded modules; copy + SHA-256 (`artifact_sha256`) with backup set, write-protected, writable manifest can attest tampered code |
 
 Non-SQLite backends (PostgreSQL/MySQL/DuckDB) are **not** covered by
 `resembl backup`: use that backend's own tooling (`pg_dump`, etc.) and test
 its restore the same way. DuckDB is file-backed, so a file copy is a
-viable backup — but never a live copy: stop every DuckDB process first. A
+viable backup, but never a live copy: stop every DuckDB process first. A
 DuckDB 2.0 file is not readable by DuckDB before 2.0, so keep the copy
 with the DuckDB version that wrote it and prove the restore by opening
 the copy with that version (see `docs/custom_database.md`).
@@ -36,7 +36,7 @@ when the published copy fails verification, so a cron job that never
 ran is visible instead of a silent gap in the restore points.
 
 A backup that has never been restored is a hypothesis: run a restore drill
-at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>` —
+at least quarterly with `make backup-drill BACKUP_DIR=<off-host-dir>`:
 it copies the newest verified backup to a scratch path, `verify-backup`
 proves it there, and records (date, backup filename, verify result) in
 `<off-host-dir>/.restore-drill.log` beside the backup directory.
@@ -57,7 +57,7 @@ readable manifest".
 PostgreSQL, or MySQL there is no `resembl backup` to drill: stop every
 DuckDB process, copy the `duckdb:///file.db` file to scratch, and open the
 copy with the DuckDB version that wrote it (a DuckDB 2.0 file is not
-readable before 2.0) — see `docs/custom_database.md`.  For PostgreSQL use
+readable before 2.0), see `docs/custom_database.md`.  For PostgreSQL use
 `pg_dump`/`pg_restore` and for MySQL `mysqldump`/`mysql` on the same
 scratch-copy-then-open pattern.  A drill that only ever ran against SQLite
 proves nothing about those backends; record the backend-specific drill
@@ -65,7 +65,7 @@ result in the same `.restore-drill.log` so the gap is visible.
 ## RPO / RTO
 
 - **RPO** = time since the last *verified* backup. No backup job runs
-  automatically — `resembl backup` and `resembl verify-backup` are manual /
+  automatically; `resembl backup` and `resembl verify-backup` are manual /
   cron-wrapped by the operator. Run `backup` after any bulk import, merge,
   or reindex.
 - **RTO** = copy the backup back + `verify` (minutes for small corpora;
@@ -76,7 +76,7 @@ result in the same `.restore-drill.log` so the gap is visible.
 
 The SQLite engine runs WAL with `synchronous=NORMAL`
 (`resembl/database.py`). That is durable across a process crash, but an
-OS/power loss can lose the last committed transactions — a write the
+OS/power loss can lose the last committed transactions: a write the
 CLI reported as done may not survive the machine going down. Treat the
 backup, not the live file, as the durability boundary: run
 `resembl backup` after any bulk import, merge, or reindex that you
@@ -90,7 +90,7 @@ runbook does not change it.
 ```bash
 # 1. Stop every process using the database (serve, other CLI sessions).
 #    The live DB path is the sqlite:// URL in RESEMBL_DATABASE_URL /
-#    DATABASE_URL (default: assembly.db in the working directory) — every
+#    DATABASE_URL (default: assembly.db in the working directory); every
 #    path below is relative to that file, not necessarily "assembly.db".
 DB=<live-db-path>   # e.g. /srv/resembl/assembly.db
 # 2. Pick the newest backup that verifies:
@@ -114,7 +114,7 @@ opened or removed.
 
 Restore `config.toml` from the sidecar written beside the backup
 (`<backup-stem>.config.toml`, mode `0600`).  When the manifest records
-`config_sha256: null` there was no config at backup time — defaults
+`config_sha256: null` there was no config at backup time; defaults
 apply, or re-apply overrides with `resembl config set`.  The sidecar's
 hash is cross-checked by `verify-backup`; a missing or mismatched
 sidecar fails verification.
@@ -132,7 +132,7 @@ by `verify-backup`); a backup taken before that sidecar existed leaves
 `/find-pinned` unrestorable even though the corpus restores cleanly, so
 re-take it rather than restoring an old copy alone.
 
-## Restore (logical corruption — bad code wrote bad data for hours)
+## Restore (logical corruption: bad code wrote bad data for hours)
 
 Retention is by count, not by age: a long-running corruption can flood
 the window with post-corruption copies and age out the pre-corruption
@@ -164,12 +164,12 @@ issue (contents still verify); a count mismatch, content-hash mismatch,
 config mismatch, `integrity_check` failure, missing table, or wal sidecar is a hard failure.
 
 Before any destructive operation in the next section, run the backup and
-`verify-backup` on the result — a backup that has never been verified is
+`verify-backup` on the result: a backup that has never been verified is
 not a pre-delete snapshot. `resembl backup` exits 1 when the published
 copy fails verification or its manifest could not be written
 (`manifest_written: false` / `verified: false` in JSON output), or when
 the backup directory shares a volume with the live database
-(`shared_volume: true` — see Failure-domain notes below); treat
+(`shared_volume: true`, see Failure-domain notes below); treat
 any non-zero exit, or `verified: false`, as "no backup was taken" and
 do not proceed:
 

@@ -219,7 +219,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
     `<backup-stem>.runtime-manifest.json` (`runtime_sha256` in the
     manifest, cross-checked by `verify-backup`).  Uses
     SQLite's online backup API, so the copy is a single database file
-    the current binary can open — not a raw copy of `assembly.db`
+    the current binary can open, not a raw copy of `assembly.db`
     paired with a stale WAL.  Also writes a manifest (snippet count,
     fingerprint version, content hash, creation time, config and
     runtime SHA-256) beside it.  SQLite only; other backends use
@@ -227,7 +227,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
     Exits 1 when the backup file is complete but its manifest could not
     be written, the published copy fails verification, or the backup
     directory shares a volume with the live database (`shared_volume:
-    true` in JSON output; `--force` accepts the risk) — such a backup
+    true` in JSON output; `--force` accepts the risk); such a backup
     is unverified, not safe.  RPO is the time
     since the last verified backup;
     RTO is the time to copy the file back to `assembly.db` and run
@@ -241,7 +241,7 @@ Global options go before the subcommand: `resembl --format json find ...`.
     restorable.  `--max-age-days N` fails a backup whose manifest
     `created_at` is older than *N* days, so a directory whose newest
     copy silently ages past the RPO target does not pass on contents
-    alone.  Run this after a restore to prove the copy is good —
+    alone.  Run this after a restore to prove the copy is good:
     a backup never restored is a hypothesis, not a backup.
 
 **restore** *PATH* [**--dest** *PATH*] [--force]

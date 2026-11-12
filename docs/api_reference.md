@@ -291,14 +291,14 @@ as unset for every one. The full manual-page reference is in
 | Variable | Default | Used for |
 |---|---|---|
 | `RESEMBL_DATABASE_URL` | `sqlite:///assembly.db` | Database URL; falls back to `DATABASE_URL` when unset |
-| `DATABASE_URL` | — | Fallback for `RESEMBL_DATABASE_URL` only |
+| `DATABASE_URL` | (none) | Fallback for `RESEMBL_DATABASE_URL` only |
 | `RESEMBL_CONFIG_DIR` | `~/.config/resembl` | Config directory; falls back to `$XDG_CONFIG_HOME/resembl` |
 | `RESEMBL_CACHE_DIR` | `~/.cache/resembl` | Cache directory (port file); falls back to `$XDG_CACHE_HOME/resembl` |
-| `RESEMBL_RUNTIME_MANIFEST` | — | Path to the runtime manifest `serve` checks for `/find-pinned`; unset refuses that endpoint, set-but-unreadable fails `serve` startup and `backup` |
+| `RESEMBL_RUNTIME_MANIFEST` | (none) | Path to the runtime manifest `serve` checks for `/find-pinned`; unset refuses that endpoint, set-but-unreadable fails `serve` startup and `backup` |
 | `RESEMBL_ENGINE_URL` | `http://127.0.0.1:8081` | Loopback engine URL the Lambda bootstrap dials (Go service only) |
 | `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
 | `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |
-| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | — | Non-blank value except `0`/`false`/`no`/`off` (case-insensitive) authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
+| `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | (none) | Non-blank value except `0`/`false`/`no`/`off` (case-insensitive) authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
 | `RESEMBL_LOG_LEVEL` | `INFO` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`); `-v`/`-q` win when set; invalid aborts the command |
 
 Database URLs may carry credentials (`postgresql+pg8000://user:pass@host/db`);
@@ -309,7 +309,7 @@ unmasked for the port file. No secret is stored in `config.toml` (mode
 ## Database
 
 ### `create_db_engine(url: str | None = None)`
-Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`); `synchronous=NORMAL` survives a process crash but an OS/power loss can lose the last committed transactions — see `docs/restore.md` "Write durability". Pass a PostgreSQL URL for team use.
+Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`); `synchronous=NORMAL` survives a process crash but an OS/power loss can lose the last committed transactions, see `docs/restore.md` "Write durability". Pass a PostgreSQL URL for team use.
 
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
 Database statistics (count, avg snippet size, vocabulary estimated from a sample of up to 2000 snippets, sampled avg Jaccard; all SQL-aggregated or sampled, safe at scale; sampling is seeded via `RESEMBL_SEED`, see `resembl.diagnostics.sample_rng`); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
@@ -329,7 +329,7 @@ live in `resembl.lsh`; the index lifecycle helpers (`lsh_index_build`,
 `lsh_cache_save`, `lsh_cache_load`) live in `resembl.cache`. `lsh_cache_save`
 only stamps the metadata row and removes any legacy pickle cache file;
 `lsh_cache_load` returns the database-backed index when its metadata
-matches the requested parameters and `None` otherwise — legacy pickle cache
+matches the requested parameters and `None` otherwise; legacy pickle cache
 files are deliberately never loaded (unpickling is arbitrary code execution).
 `index_build_lock` serializes rebuilds, reindex and clean within one process.
 SQLite file databases share the lock across engines by the real path of their

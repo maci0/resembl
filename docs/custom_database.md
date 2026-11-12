@@ -47,7 +47,7 @@ Create an in-memory SQLite database and add a snippet:
 # main_app.py
 from sqlmodel import SQLModel, create_engine, Session
 
-# 1. Import the resembl models: importing
+# 1. Import the resembl models. Importing
 #    `resembl.models` registers every table class it defines
 #    (`snippet`, `collection`, `snippetversion`, `lsh_bucket`, `lsh_meta`,
 #    `app_meta`) with SQLModel's central metadata catalog.
