@@ -617,12 +617,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "custody unavailable", reqID)
 		return
 	}
-	dispatched := false
+	dispatched, completed := false, false
 	select {
 	case s.slots <- struct{}{}:
 		defer func() {
-			// A canceled transport cannot prove remote compute stopped.
-			if !dispatched || ctx.Err() == nil {
+			// A completed response proves compute stopped even after cancellation.
+			if completed || !dispatched || ctx.Err() == nil {
 				<-s.slots
 			}
 		}()
@@ -668,7 +668,6 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	completed := false
 	defer func() {
 		if (completed || !dispatched) && release != nil {
 			// Error paths only: the success path releases inline below so

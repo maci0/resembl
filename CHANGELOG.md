@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Go service releases an in-process query slot after a completed engine response even when client cancellation races with completion. Later requests no longer remain stuck at 429; uncertain timed-out executions still retain capacity.
+
 - `resembl-find` strips terminal controls from displayed match names, checksums and error messages, matching the main CLI. JSON output preserves the original values with normal JSON escaping.
 
 - Find clients reject malformed result columns and non-finite scores before rendering or reporting JSON success. Batch replies must also preserve the requested queries and entry count; the CLI falls back to its local query on an invalid reply.

@@ -176,3 +176,36 @@ func TestInvalidUTF8EngineResponseIsRejected(t *testing.T) {
 		t.Fatalf("bad gateway envelope: %s, %v", response.Body, err)
 	}
 }
+
+type completedCancelEngine struct{ cancel context.CancelFunc }
+
+func (e completedCancelEngine) Find(context.Context, json.RawMessage) (json.RawMessage, error) {
+	e.cancel()
+	return json.RawMessage(`{"matches":[]}`), nil
+}
+
+func TestCompletedEngineResponseReleasesCancelledRequestSlot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), completedCancelEngine{cancel}, "index", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCustody(testCustody{}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/find", strings.NewReader(`{"query":"ret"}`)).WithContext(ctx)
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("completed query: %d %s", response.Code, response.Body)
+	}
+	second := httptest.NewRecorder()
+	s.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/v1/find", strings.NewReader(`{"query":"ret"}`)))
+	if second.Code != http.StatusOK {
+		t.Fatalf("completed request quarantined capacity: next status=%d body=%s", second.Code, second.Body)
+	}
+	if len(s.slots) != 0 {
+		t.Fatal("completed request retained an in-memory slot after cancellation")
+	}
+}
