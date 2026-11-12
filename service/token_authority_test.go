@@ -29,7 +29,15 @@ func TestTokenAuthorityRequiresExactCredentialAndScope(t *testing.T) {
 		{"Bearer " + strings.Repeat("a2", 32), "index-A", "query", false},
 		{"Bearer " + token, "index-B", "query", false},
 		{"Bearer " + token, "index-A", "write", false},
-		{"bearer " + token, "index-A", "query", false},
+		{"bearer " + token, "index-A", "query", true},
+		{"BEARER " + token, "index-A", "query", true},
+		{"bEaReR " + token, "index-A", "query", true},
+		{"Basic " + token, "index-A", "query", false},
+		{"Bеarer " + token, "index-A", "query", false},
+		{"Bearer " + strings.ToUpper(token), "index-A", "query", false},
+		{"Bearer  " + token, "index-A", "query", false},
+		{"Bearer\t" + token, "index-A", "query", false},
+		{" Bearer " + token, "index-A", "query", false},
 	} {
 		got, err := auth.Allow(context.Background(), tc.credential, tc.resource, tc.verb)
 		if err != nil || got != tc.want {
@@ -79,7 +87,19 @@ func TestTokenAuthorityProtectsHTTPQueries(t *testing.T) {
 	for _, tc := range []struct {
 		credential string
 		status     int
-	}{{"", 403}, {"Bearer " + token, 200}} {
+	}{
+		{"", 403},
+		{"Bearer " + token, 200},
+		{"bearer " + token, 200},
+		{"BEARER " + token, 200},
+		{"bEaReR " + token, 200},
+		{"Bearer " + strings.ToUpper(token), 403},
+		{"Basic " + token, 403},
+		{"Bеarer " + token, 403},
+		{"Bearer  " + token, 403},
+		{"Bearer\t" + token, 403},
+		{" Bearer " + token, 403},
+	} {
 		req := httptest.NewRequest("POST", "/v1/find", strings.NewReader(`{"query":"ret"}`))
 		req.Header.Set("Authorization", tc.credential)
 		result := httptest.NewRecorder()

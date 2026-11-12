@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Go service accepts ASCII case variants of the Bearer authentication scheme, as HTTP requires. Credential bytes, resource and verb remain exact, and the existing whitespace policy is unchanged.
+
 - SQLite engines over the same database file now share the process-local rebuild lock, including relative paths and symlinks. A concurrent clean through another engine can no longer erase rows during a rebuild and leave an incomplete index marked complete. Separate processes remain outside this lock.
 
 - Go service error logs apply the existing path filter to backend and adapter errors, so CR/LF and ASCII terminal controls cannot escape their log record.

@@ -51,9 +51,10 @@ func (a *TokenAuthority) Allow(ctx context.Context, credential, resource, verb s
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if resource != a.resource || verb != "query" || !strings.HasPrefix(credential, "Bearer ") {
+	scheme, token, present := strings.Cut(credential, " ")
+	if resource != a.resource || verb != "query" || !present || !isASCII(scheme) || !strings.EqualFold(scheme, "Bearer") {
 		return false, nil
 	}
-	candidate := sha256.Sum256([]byte(strings.TrimPrefix(credential, "Bearer ")))
+	candidate := sha256.Sum256([]byte(token))
 	return subtle.ConstantTimeCompare(candidate[:], a.digest[:]) == 1, nil
 }
