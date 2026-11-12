@@ -2,6 +2,8 @@ package lambdaproxy
 
 import (
 	"context"
+	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,5 +52,43 @@ func TestHeadCarriesNoBodyFile(t *testing.T) {
 	}
 	if out.Headers["Content-Length"] == "" || out.Headers["Content-Length"] == "0" {
 		t.Fatalf("head Content-Length missing: %q", out.Headers["Content-Length"])
+	}
+}
+
+func TestOnlyExactHeadSuppressesTheHTTPBody(t *testing.T) {
+	e := &engine{}
+	handler, err := service.New(service.DenyAll{}, e, "fixture", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	for _, method := range []string{"HEAD", "head", "Head", "hEaD"} {
+		t.Run(method, func(t *testing.T) {
+			request, err := http.NewRequest(method, server.URL+"/v1/find", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			direct, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, readErr := io.ReadAll(direct.Body)
+			closeErr := direct.Body.Close()
+			if readErr != nil || closeErr != nil {
+				t.Fatalf("direct response body: %v %v", readErr, closeErr)
+			}
+			adapted, err := Handle(context.Background(), handler, event(method, "/v1/find"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := base64.StdEncoding.DecodeString(adapted.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if adapted.StatusCode != direct.StatusCode || string(decoded) != string(body) || adapted.Headers["Allow"] != direct.Header.Get("Allow") {
+				t.Fatalf("method %q: adapter %d/%q differs from HTTP %d/%q", method, adapted.StatusCode, decoded, direct.StatusCode, body)
+			}
+		})
 	}
 }

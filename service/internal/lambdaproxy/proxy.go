@@ -47,7 +47,7 @@ func (r *response) Write(p []byte) (int, error) {
 // Handle preserves the handler's authorization and request cancellation. It never
 // treats API Gateway identity claims as a grant and does not establish durable stop.
 func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	isHead := strings.EqualFold(event.RequestContext.HTTP.Method, http.MethodHead)
+	isHead := event.RequestContext.HTTP.Method == http.MethodHead
 	bad := func(code int) (events.APIGatewayV2HTTPResponse, error) {
 		// Same JSON error envelope as the HTTP service's writeError, so
 		// an API Gateway caller parses one shape on every path instead

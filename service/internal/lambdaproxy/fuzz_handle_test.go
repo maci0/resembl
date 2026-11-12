@@ -41,6 +41,9 @@ func fuzzHandler() http.Handler {
 func FuzzHandle(f *testing.F) {
 	f.Add("POST", "/v1/find", "x=1", `{"query":"ret"}`, false, "Authorization", "Bearer test")
 	f.Add("GET", "/healthz", "", "", false, "", "")
+	f.Add("HEAD", "/healthz", "", "", false, "", "")
+	f.Add("head", "/healthz", "", "", false, "", "")
+	f.Add("Head", "/healthz", "", "", false, "", "")
 	f.Add("POST", "//evil", "", "", false, "", "")
 	f.Add("POST", "/v1/find", "", "!!!not-base64!!!", true, "", "")
 	f.Add("GET", "/v1/find", "x=1", "", false, "bad\nheader", "x")
@@ -83,8 +86,16 @@ func FuzzHandle(f *testing.F) {
 			if !out.IsBase64Encoded {
 				t.Fatalf("handler response body was not base64-encoded")
 			}
-			if _, err := base64.StdEncoding.DecodeString(out.Body); err != nil {
+			decoded, err := base64.StdEncoding.DecodeString(out.Body)
+			if err != nil {
 				t.Fatalf("response body does not round-trip base64: %v", err)
+			}
+			if method == http.MethodHead {
+				if len(decoded) != 0 {
+					t.Fatal("HEAD leaked a response body")
+				}
+			} else if string(decoded) != `{"ok":true}` {
+				t.Fatalf("method %q lost the handler body: %q", method, decoded)
 			}
 			// http.Request.URL.Path is the percent-decoded form of the
 			// raw path, so compare against that, not the raw bytes.

@@ -8,6 +8,8 @@ Build an artifact without deploying it:
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -o bootstrap ./cmd/resembl-lambda
 ```
 
+HTTP method names retain their case; only exact `HEAD` suppresses the response body.
+
 The adapter handles HTTP API v2 only; WebSocket, API Gateway REST API v1 and streaming responses are unsupported. Input is limited to 8 MiB at this boundary and output to 4 MiB before base64 encoding; actual Lambda/API Gateway payload and header limits may be lower. A separately provisioned loopback engine is required; this bootstrap does not create one, guarantee durable work or prove physical stop after cancellation. Lambda integration and native tenant authorization remain unqualified, so this is a deployable deny-by-default transport slice, not a production deployment or a portability parity claim.
 
 HEAD responses contain no body and preserve the handler's explicit `Content-Length`, including when it describes content the handler did not write for HEAD. If the handler writes a body without declaring its length, the adapter derives the length before discarding the body.
