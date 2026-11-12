@@ -1359,6 +1359,10 @@ class _FindHandler(BaseHTTPRequestHandler):
         # mints before dispatch and adopts in send_response (see there),
         # which every answer passes through.
         self.request_id = _seeded_uuid_hex()[:12]
+        # Parser errors can answer before replacing the previous request's metadata.
+        if hasattr(self, "headers"):
+            del self.headers
+        self.path = ""
         self._request_start = monotonic_now()
         self._body_read = False
         super().handle_one_request()

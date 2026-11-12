@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Malformed requests on a reused HTTP connection no longer inherit the previous request's correlation ID or route in metrics. Failures before the target is parsed get a fresh ID and count under `other`.
+
 - Very large integer settings no longer crash configuration loading or the thin client during a float conversion. Bounded settings warn and keep their defaults; `top_n` keeps its documented unbounded positive integer range.
 
 - The Python HTTP server rejects duplicate Content-Length and all Transfer-Encoding fields with 400 and a closed connection before reading a body or dispatching a route. Conflicting framing can no longer be ignored while a request runs.

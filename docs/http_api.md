@@ -381,6 +381,9 @@ bounded and printable, and anything else falls back to the minted one. A
 request's own DEBUG line all quote the same one, so a client report that
 carries an id (or a timestamp and a peer) reaches the rest. The id is also
 echoed on the response as `X-Request-Id`.
+A malformed request on a reused connection cannot inherit the preceding
+request's id or path. If parsing fails before the target is read, the error
+gets a fresh id and counts under `other` in metrics.
 
 At the default level the server records two things: a `500`, with its
 traceback, and a request slower than a second. A served find is ~1.4 ms, so

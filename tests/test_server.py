@@ -3064,6 +3064,44 @@ class TestServerObservability(_ServeTestCase):
         self.assertTrue(header_id and header_id != "-")
         self.assertTrue(any(f"[{header_id}]" in line for line in captured.output))
 
+    def test_keepalive_parser_error_does_not_reuse_the_prior_request(self):
+        """An early parse error has its own correlation id and unknown-path metric."""
+        import http.client
+        import socket
+
+        port = self._start_server()
+        health_series = 'resembl_server_requests_total{path="/health",status="400"}'
+        other_series = 'resembl_server_requests_total{path="other",status="400"}'
+        before = self._get(port, "/metrics")[2]
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+            connection.sendall(
+                f"GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                "X-Request-Id: previous-request\r\n\r\n".encode("ascii")
+            )
+            with http.client.HTTPResponse(connection) as response:
+                response.begin()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.getheader("X-Request-Id"), "previous-request")
+                response.read()
+            connection.sendall(b"GET /unparsed HTTP/not-a-version\r\n\r\n")
+            with http.client.HTTPResponse(connection) as response:
+                response.begin()
+                self.assertEqual(response.status, 400)
+                error_id = response.getheader("X-Request-Id")
+                self.assertIn("error", json.loads(response.read()))
+        with self.subTest(context="correlation"):
+            self.assertTrue(error_id)
+            self.assertNotEqual(error_id, "previous-request")
+        after = self._get(port, "/metrics")[2]
+        with self.subTest(context="metrics"):
+            self.assertEqual(
+                self._series_total(after, health_series), self._series_total(before, health_series)
+            )
+            self.assertEqual(
+                self._series_total(after, other_series),
+                self._series_total(before, other_series) + 1,
+            )
+
     def test_supplied_request_id_is_adopted_not_reminted(self):
         port = self._start_server()
         request = urllib.request.Request(
