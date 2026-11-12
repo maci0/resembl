@@ -55,8 +55,8 @@ type custodyHolder struct {
 	custody Custody
 }
 
-// safeLogPath strips control characters (including CR/LF) from a request path
-// so a crafted URL cannot forge log entries when logged via log.Printf.
+// safeLogPath strips control characters from paths and error text so neither
+// can forge log entries when logged via log.Printf.
 func safeLogPath(p string) string {
 	return strings.Map(func(ch rune) rune {
 		if ch < 0x20 || (ch >= 0x7f && ch <= 0x9f) || ch == '\u2028' || ch == '\u2029' {
@@ -198,7 +198,7 @@ func writeError(w http.ResponseWriter, status int, message string, reqID string)
 	// Encode writes to w; a failure means the client is gone. Log it
 	// rather than discarding silently, but the status is already sent.
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
-		log.Printf("[%s] writeError failed: %v", reqID, err)
+		log.Printf("[%s] writeError failed: %s", reqID, safeLogPath(fmt.Sprint(err)))
 	}
 }
 
@@ -550,7 +550,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer metricsCancel()
 		allowed, err := s.Authority.Allow(metricsCtx, r.Header.Get("Authorization"), s.Resource, "query")
 		if err != nil {
-			log.Printf("[%s] authority unavailable: %v", reqID, err)
+			log.Printf("[%s] authority unavailable: %s", reqID, safeLogPath(fmt.Sprint(err)))
 			writeError(w, http.StatusServiceUnavailable, "authority unavailable", reqID)
 			return
 		}
@@ -602,7 +602,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	allowed, err := s.Authority.Allow(ctx, r.Header.Get("Authorization"), s.Resource, "query")
 	if err != nil {
-		log.Printf("[%s] authority unavailable: %v", reqID, err)
+		log.Printf("[%s] authority unavailable: %s", reqID, safeLogPath(fmt.Sprint(err)))
 		writeError(w, http.StatusServiceUnavailable, "authority unavailable", reqID)
 		return
 	}
@@ -663,7 +663,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if custody != nil {
 		release, err = custody.Claim()
 		if err != nil {
-			log.Printf("[%s] capacity unavailable: %v", reqID, err)
+			log.Printf("[%s] capacity unavailable: %s", reqID, safeLogPath(fmt.Sprint(err)))
 			writeError(w, http.StatusServiceUnavailable, "capacity unavailable", reqID)
 			return
 		}
@@ -674,7 +674,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// its failure still changes the status. Here the response is
 			// already decided; a failed release is logged, not swallowed.
 			if err := release(); err != nil {
-				log.Printf("[%s] capacity release failed: %v", reqID, err)
+				log.Printf("[%s] capacity release failed: %s", reqID, safeLogPath(fmt.Sprint(err)))
 			}
 		}
 	}()
@@ -741,11 +741,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				writeError(w, engErr.Status, msg, reqID)
 				return
 			}
-			log.Printf("[%s] engine unavailable: %v", reqID, err)
+			log.Printf("[%s] engine unavailable: %s", reqID, safeLogPath(fmt.Sprint(err)))
 			writeError(w, http.StatusServiceUnavailable, "engine unavailable", reqID)
 			return
 		}
-		log.Printf("[%s] engine unavailable: %v", reqID, err)
+		log.Printf("[%s] engine unavailable: %s", reqID, safeLogPath(fmt.Sprint(err)))
 		writeError(w, http.StatusServiceUnavailable, "engine unavailable", reqID)
 		return
 	}
@@ -761,14 +761,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := release()
 		release = nil
 		if err != nil {
-			log.Printf("[%s] capacity release failed: %v", reqID, err)
+			log.Printf("[%s] capacity release failed: %s", reqID, safeLogPath(fmt.Sprint(err)))
 			writeError(w, http.StatusServiceUnavailable, "capacity release failed", reqID)
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if _, err := w.Write(result); err != nil {
-		log.Printf("[%s] response write failed: %v", reqID, err)
+		log.Printf("[%s] response write failed: %s", reqID, safeLogPath(fmt.Sprint(err)))
 		// Response may be truncated on the wire; the claim is already
 		// released, so the client must retry against fresh capacity.
 		// Headers/status are already committed by the partial write;
