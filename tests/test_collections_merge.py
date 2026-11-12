@@ -252,6 +252,15 @@ class TestSearch(BaseDBTest):
 class TestTimestampNormalize(unittest.TestCase):
     """Tests for the canonical created_at form used for string ordering."""
 
+    def test_offsets_outside_the_utc_range_are_preserved(self):
+        """An unrepresentable UTC instant is refused without rewriting stored text."""
+        from resembl.clock import parse_instant
+
+        for value in ("0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"):
+            with self.subTest(value=value):
+                self.assertIsNone(parse_instant(value))
+                self.assertEqual(timestamp_normalize(value), value)
+
     def test_aware_utc_passthrough(self):
         """Already-canonical UTC values round-trip unchanged."""
         self.assertEqual(

@@ -73,8 +73,11 @@ def parse_instant(value: str) -> datetime | None:
     if text.endswith(("-00:00", "-0000", "-00", "-00:00:00")):
         return None
     try:
-        return datetime.fromisoformat(text)
-    except ValueError:
+        moment = datetime.fromisoformat(text)
+        if moment.tzinfo is not None:
+            moment.astimezone(UTC)
+        return moment
+    except ValueError, OverflowError:
         return None
 
 
