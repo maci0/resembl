@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Go service releases durable execution capacity after completed engine validation rejections (400 and 413), preventing malformed parameters from exhausting all slots. Other engine errors and transport failures still retain capacity.
+
 - The Go service treats truncated or oversized engine error bodies as transport failures instead of completed rejections.
 
 ## [5.0.0] - 2026-11-09

@@ -11,7 +11,8 @@ import (
 var ErrCapacity = errors.New("no execution capacity")
 
 // Custody durably claims capacity before dispatch. Release is valid only after a
-// definite completed response; failed and interrupted calls retain their claim.
+// definite completed response, including validation rejections (400 and 413).
+// Other engine errors and interrupted calls retain their claim.
 type Custody interface{ Claim() (func() error, error) }
 
 // FileCustody is a single-host shared-filesystem adapter. The directory must be

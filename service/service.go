@@ -728,6 +728,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var engErr *EngineError
 		if errors.As(err, &engErr) {
+			// The warm engine returns these only for validation failures.
+			completed = engErr.Status == http.StatusBadRequest || engErr.Status == http.StatusRequestEntityTooLarge
 			if engErr.Status >= 400 && engErr.Status < 500 {
 				// A client-caused rejection from the warm engine (bad
 				// parameter, index mismatch) is the caller's 4xx,
