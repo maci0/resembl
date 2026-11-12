@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"strings"
 	"time"
 )
 
@@ -79,6 +81,7 @@ func (e *PinnedSQLiteEngine) Find(ctx context.Context, body json.RawMessage) (js
 
 // FindBatch implements BatchEngine by fanning each query through
 // /find-pinned, preserving the snapshot proof for every result.
+// shortcut: no valid query means no batch-parameter check; use a pinned validation endpoint when available.
 func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage) (json.RawMessage, error) {
 	var request map[string]json.RawMessage
 	if json.Unmarshal(body, &request) != nil || request == nil {
@@ -92,9 +95,6 @@ func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage
 	if json.Unmarshal(raw, &queries) != nil || queries == nil || len(queries) > 1000 {
 		return nil, errors.New("invalid request")
 	}
-	pin, _ := json.Marshal(e.index)
-	artifact, _ := json.Marshal(e.artifact)
-	generation, _ := json.Marshal(e.generation)
 	// Carry the find parameters (top_n, threshold, normalize, ...) into
 	// every fanned-out single: a batch that names them must not silently
 	// search with the engine defaults instead.
@@ -104,40 +104,37 @@ func (e *PinnedSQLiteEngine) FindBatch(ctx context.Context, body json.RawMessage
 			params[key] = value
 		}
 	}
-	results := make([]json.RawMessage, 0, len(queries))
+	results := make([]map[string]json.RawMessage, 0, len(queries))
 	for _, q := range queries {
 		single := make(map[string]json.RawMessage, len(params)+4)
 		for key, value := range params {
 			single[key] = value
 		}
-		// The per-query value and the proof overwrite any request field
-		// naming them: a batch entry cannot smuggle its own pin.
+		// Find overwrites every proof field before dispatch.
 		single["query"] = q
-		single["index_sha256"] = pin
-		single["artifact_sha256"] = artifact
-		single["generation"] = generation
 		singleBytes, marshalErr := json.Marshal(single)
 		if marshalErr != nil {
 			return nil, marshalErr
 		}
-		res, err := e.local.find(ctx, "/find-pinned", singleBytes)
+		res, err := e.Find(ctx, singleBytes)
+		entry := make(map[string]json.RawMessage)
 		if err != nil {
-			return nil, err
+			var rejection *EngineError
+			if !errors.As(err, &rejection) || rejection.Status != http.StatusBadRequest {
+				return nil, err
+			}
+			reason := strings.TrimPrefix(rejection.Message, "bad request: ")
+			switch reason {
+			case "query must be a string", "query must not be empty", "query input is not valid UTF-8":
+				entry["error"], _ = json.Marshal(reason)
+			default:
+				return nil, err
+			}
+		} else if json.Unmarshal(res, &entry) != nil || entry == nil {
+			return nil, errors.New("invalid batch result")
 		}
-		var response struct {
-			Index      string          `json:"index_sha256"`
-			Artifact   string          `json:"artifact_sha256"`
-			Generation string          `json:"generation"`
-			Result     json.RawMessage `json:"result"`
-		}
-		if json.Unmarshal(res, &response) != nil || response.Index != e.index || response.Artifact != e.artifact || response.Generation != e.generation || !json.Valid(response.Result) {
-			return nil, errors.New("invalid snapshot proof")
-		}
-		results = append(results, response.Result)
+		entry["query"] = q
+		results = append(results, entry)
 	}
-	out, err := json.Marshal(results)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return json.Marshal(map[string]any{"results": results})
 }

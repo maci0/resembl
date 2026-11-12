@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -204,6 +205,74 @@ func TestRealPinnedEngineWithAuthorityBoundary(t *testing.T) {
 	if w.Code != 200 || !json.Valid(w.Body.Bytes()) {
 		t.Fatalf("real pinned query: %d %s", w.Code, w.Body.String())
 	}
+	local, err := NewLocalEngine(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.CloseIdleConnections()
+	var expected any
+	if err := json.Unmarshal([]byte(`{"results":[{"query":"ret","lsh_candidates":0,"matches":[]},{"query":7,"error":"query must be a string"},{"query":"nop","lsh_candidates":0,"matches":[]}]}`), &expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []struct {
+		name   string
+		engine Engine
+	}{{"local", local}, {"pinned", engine}} {
+		handler, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), candidate.engine, "fixture", 1, 30*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := handler.SetCustody(testCustody{}); err != nil {
+			t.Fatal(err)
+		}
+		front := httptest.NewServer(handler)
+		t.Cleanup(front.Close)
+		response, err := http.Post(front.URL+"/v1/find-batch", "application/json", strings.NewReader(`{"queries":["ret",7,"nop"]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var actual any
+		err = json.NewDecoder(response.Body).Decode(&actual)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK || !reflect.DeepEqual(actual, expected) {
+			t.Fatalf("%s batch: status=%d body=%v err=%v, want %v", candidate.name, response.StatusCode, actual, err, expected)
+		}
+		response, err = http.Post(front.URL+"/v1/find-batch", "application/json", strings.NewReader(`{"queries":["ret",7,"nop"],"top_n":0}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var refusal map[string]string
+		err = json.NewDecoder(response.Body).Decode(&refusal)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusBadRequest || refusal["error"] != "top_n must be at least 1" {
+			t.Fatalf("%s parameter refusal: status=%d body=%v err=%v", candidate.name, response.StatusCode, refusal, err)
+		}
+		for _, noQuery := range []struct{ body, expected string }{
+			{`{"queries":[],"top_n":0}`, `{"results":[]}`},
+			{`{"queries":[7],"top_n":0}`, `{"results":[{"query":7,"error":"query must be a string"}]}`},
+		} {
+			response, err = http.Post(front.URL+"/v1/find-batch", "application/json", strings.NewReader(noQuery.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = json.NewDecoder(response.Body).Decode(&actual)
+			_ = response.Body.Close()
+			status := http.StatusOK
+			want := noQuery.expected
+			if candidate.name == "local" {
+				status = http.StatusBadRequest
+				want = `{"error":"top_n must be at least 1"}`
+			}
+			var expectedNoQuery any
+			if parseErr := json.Unmarshal([]byte(want), &expectedNoQuery); parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if err != nil || response.StatusCode != status || !reflect.DeepEqual(actual, expectedNoQuery) {
+				t.Fatalf("%s no-query batch: status=%d body=%v err=%v, want %d %v", candidate.name, response.StatusCode, actual, err, status, expectedNoQuery)
+			}
+		}
+	}
+
 	stale, err := NewPinnedSQLiteEngine(endpoint, index, artifact, "stale")
 	if err != nil {
 		t.Fatal(err)

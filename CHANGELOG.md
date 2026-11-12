@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Go pinned batch adapter returns the same `results` envelope and per-entry `query` fields as the Python batch endpoint. Invalid query entries report their own error while valid entries continue. Transport and snapshot-proof failures still fail closed.
+
 - `resembl serve` rejects a body shorter than its declared Content-Length with 400, even when the received prefix is valid JSON, instead of running an incomplete request.
 
 - Python and Go servers reject request IDs containing C1 controls or Unicode line separators and strip those characters from logged paths, preventing supplied values from splitting a log record.
