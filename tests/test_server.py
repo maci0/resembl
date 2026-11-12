@@ -652,6 +652,23 @@ class TestServerMode(_ServeTestCase):
         self.assertIn("no server running", stderr.getvalue())
         self.assertIn("resembl serve", stderr.getvalue())
 
+    def test_thin_client_masks_password_with_empty_username(self):
+        """Password-only database credentials remain private in failures."""
+        from contextlib import redirect_stderr
+
+        from resembl.find_client import _main
+
+        stderr = io.StringIO()
+        with (
+            patch.dict(os.environ, {"RESEMBL_DATABASE_URL": "postgresql://:test-password@host/db"}),
+            redirect_stderr(stderr),
+        ):
+            rc = _main(["--query", "ret", "--json"])
+        self.assertEqual(rc, 1)
+        message = json.loads(stderr.getvalue())["error"]["message"]
+        self.assertNotIn("test-password", message)
+        self.assertIn("postgresql://:***@host/db", message)
+
     def test_thin_client_unreachable_server_connection_refused(self):
         """Connection-refused reaches the clean 'unreachable' exit path."""
         import contextlib

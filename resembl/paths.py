@@ -40,7 +40,7 @@ DB_URL_ENV_VARS = ("RESEMBL_DATABASE_URL", "DATABASE_URL")
 #: Matches the credentials component of ``scheme://user:password@host/...``.
 #: The password run stops at the first character a URL may not carry bare;
 #: percent-encoded passwords round-trip untouched.
-_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]+:)([^@/\s]+)(@)")
+_DB_URL_CREDENTIALS = re.compile(r"(://[^:/?#\s]*:)([^@/\s]+)(@)")
 
 #: Cache directory used when the environment names none.
 DEFAULT_CACHE_DIR = "~/.cache/resembl"
@@ -121,7 +121,7 @@ def db_url_mask(url: str) -> str:
     Display helper for messages that echo a database URL (connection
     failures, merge progress): URLs like
     ``postgresql+pg8000://user:pass@host/db`` must not print the password.
-    URLs without credentials are returned unchanged.
+    An empty username is allowed. URLs without credentials are returned unchanged.
     """
     return _DB_URL_CREDENTIALS.sub(r"\1***\3", url)
 

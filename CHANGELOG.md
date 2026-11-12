@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Database URL passwords are masked in messages and logs even when the URL has an empty username, so password-only credentials are not printed by client failures or merge progress.
+
 - A server bound to a custom loopback IP such as `127.0.0.2` now accepts that exact IP in the Host header, with or without its port. Only that literal is added to the existing allowlist; IPv6 bind literals use brackets.
 
 - A write committed during a warm find no longer leaves the pre-write result cached as current. The next lookup sees the changed corpus instead of serving stale candidates until another write.
