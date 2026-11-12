@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The Python HTTP server rejects duplicate Content-Length and all Transfer-Encoding fields with 400 and a closed connection before reading a body or dispatching a route. Conflicting framing can no longer be ignored while a request runs.
+
 - Restore copies through an exclusively created private temporary file instead of a predictable PID filename, so a planted file link cannot redirect the copy and overwrite another file.
 
 - Runtime verification now stops reading a manifest at its 2 MiB limit plus one detection byte. An oversized manifest is refused without first allocating memory for the whole file.

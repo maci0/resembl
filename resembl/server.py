@@ -1328,6 +1328,24 @@ class _FindHandler(BaseHTTPRequestHandler):
                     return supplied
         return self.request_id
 
+    def parse_request(self) -> bool:
+        """Parse headers, refusing ambiguous or unsupported framing before dispatch."""
+        if not super().parse_request():
+            return False
+        if (
+            len(self.headers.get_all("Content-Length", [])) > 1
+            or self.headers.get_all("Transfer-Encoding") is not None
+        ):
+            self.close_connection = True
+            self._respond(
+                400,
+                {"error": "bad request framing"},
+                extra_headers={"Connection": "close"},
+                send_body=self.command != "HEAD",
+            )
+            return False
+        return True
+
     def handle_one_request(self) -> None:
         """Run one request, draining any body the handler left unread.
 

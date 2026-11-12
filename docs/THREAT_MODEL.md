@@ -604,6 +604,12 @@ range, and a non-loopback bind is refused without `--allow-unauthenticated`
 (`6cbddc6`, `serve` in `resembl/cli.py`); when allowed, it is reached by
 whatever name resolves to it. A verb the handler does not implement is answered with the JSON `405` envelope instead: `__getattr__` resolves any unhandled `do_*` name to the shared not-allowed answer (`resembl/server.py:1209`), and `send_error` answers stdlib errors, including malformed request lines, through `_respond` (`resembl/server.py:1712`), so no response skips the hardening header block. Earlier revisions of this model carried the stdlib's header-less HTML `501` as a live finding; the code no longer emits it.
 
+*Request framing.* `_FindHandler.parse_request` rejects every duplicate
+`Content-Length` (including identical values) and every `Transfer-Encoding`
+field before dispatch or body reads, with a JSON `400` and `Connection: close`.
+The server has no chunked decoder; conflicting lengths or coding cannot select
+a different message boundary from the one the JSON reader uses.
+
 *Denial of service.* `ThreadingHTTPServer` spawns a thread per connection, and `_FindServer` bounds that with a 96-slot semaphore (`_MAX_HANDLER_THREADS`, `resembl/server.py:121`, acquired in `process_request` at `resembl/server.py:1872`): excess connections wait in the listen backlog rather than pinning a thread. The acquire is bounded to 30 seconds (`_HANDLER_SLOT_TIMEOUT_SECONDS`, `7c10336`), so a stalled handler cannot wedge the accept loop and `shutdown`; a timed-out slot closes the queued connection. Each thread holds a 30-second idle timeout (`resembl/server.py:1104`). The engine pool is 32 plus 64 overflow (`resembl/server.py:1885`). A client that opens connections faster than requests complete therefore exhausts pool connections and file descriptors, but not handler threads; there is still no per-caller rate limit or request accounting, so the backlog and the pool are the policy.
 
 *Repudiation.* `log_message`/`log_request` write at DEBUG

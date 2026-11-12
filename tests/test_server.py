@@ -479,6 +479,40 @@ class TestServerMode(_ServeTestCase):
         finally:
             conn.close()
 
+    def test_conflicting_framing_is_refused_before_dispatch(self):
+        """Conflicting lengths or transfer coding must not choose a JSON prefix."""
+        import http.client
+
+        port = self._start_server()
+        body = b'{"query":"ret"}'
+        for name, value in (
+            ("Content-Length", str(len(body) + 1)),
+            ("Content-Length", str(len(body))),
+            ("Transfer-Encoding", "chunked"),
+            ("Transfer-Encoding", "gzip"),
+            ("tRaNsFeR-EnCoDiNg", ""),
+        ):
+            for method, path in (("POST", "/find"), ("GET", "/health")):
+                for sent_body in (body, None):
+                    with self.subTest(header=name, value=value, method=method, body=sent_body):
+                        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                        try:
+                            connection.putrequest(method, path)
+                            connection.putheader("Content-Type", "application/json")
+                            connection.putheader("Content-Length", str(len(body)))
+                            connection.putheader(name, value)
+                            connection.endheaders(sent_body)
+                            response = connection.getresponse()
+                            payload = json.loads(response.read())
+                            self.assertEqual(response.status, 400)
+                            self.assertIn("error", payload)
+                            self.assertTrue(response.will_close)
+                        finally:
+                            connection.close()
+        status, payload = _post_json_status(port, "/find", {"query": "ret"})
+        self.assertEqual(status, 200)
+        self.assertIn("matches", payload)
+
     def test_port_file_written(self):
         """serve writes a discoverable port file in the cache dir."""
         from resembl.paths import cache_dir_get, server_port_path

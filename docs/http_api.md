@@ -136,6 +136,10 @@ client needs no changes).
 
 Unknown fields are ignored. `Content-Type` must be `application/json` when
 present, and the body must be a JSON object no larger than 8 MiB.
+On every route, `Content-Length` may occur only once and `Transfer-Encoding`
+is unsupported. Any duplicate length (even identical values) or any transfer
+encoding field (even empty) answers `400` with `Connection: close` before the
+body is read. Without either framing header, the request body is empty.
 
 Response `200`:
 
@@ -348,7 +352,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 
 | Status | When |
 | ------ | ---- |
-| `400` | Unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. The message names the field. |
+| `400` | Duplicate `Content-Length` or any `Transfer-Encoding` (with a closed connection), an unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. Parameter errors name the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
 | `405` | A known path addressed with the wrong verb (including `HEAD` and `OPTIONS`, which carry the same headers without a body), with an `Allow` header naming the verb the path serves. |
