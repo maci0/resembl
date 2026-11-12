@@ -375,7 +375,7 @@ class TestEncodingBoundaries(unittest.TestCase):
         for name in ("find", "find-batch"):
             sub = command.commands[name]
             file_param = next(p for p in sub.params if p.name == "file")
-            self.assertEqual(getattr(file_param.type, "encoding", None), "utf-8", name)
+            self.assertEqual(file_param.type_descriptor.parameter_info.encoding, "utf-8", name)
 
     def test_a_utf8_query_file_matches_the_imported_snippet(self):
         """End to end, with the child's locale defaulting to plain ASCII."""
