@@ -55,6 +55,12 @@ jobs:
       - name: Build the sdist and the wheel, twice, and compare
         run: make dist-verify
 
+      - name: Export the locked runtime versions as install constraints
+        # uv pip reads requirements syntax, not uv.lock itself.
+        run: |
+          uv export --locked --no-dev --no-emit-project --no-hashes \
+            --format requirements-txt > "$RUNNER_TEMP/constraints.txt"
+
       - name: Install the wheel and run the entry point
         run: |
           set -euo pipefail
@@ -66,7 +72,7 @@ jobs:
           # test runs the exact versions a release ships instead of
           # whatever the index serves that day.
           uv pip install --python dist/wheel-venv/bin/python \
-            --constraint uv.lock dist/*.whl
+            --constraint "$RUNNER_TEMP/constraints.txt" dist/*.whl
           dist/wheel-venv/bin/resembl --help
           dist/wheel-venv/bin/resembl-find --help
 
@@ -75,7 +81,7 @@ jobs:
           set -euo pipefail
           uv venv --python 3.15.2 dist/sdist-venv
           uv pip install --python dist/sdist-venv/bin/python \
-            --constraint uv.lock dist/*.tar.gz
+            --constraint "$RUNNER_TEMP/constraints.txt" dist/*.tar.gz
           dist/sdist-venv/bin/resembl --help
           dist/sdist-venv/bin/resembl-find --help
 
