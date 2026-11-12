@@ -355,7 +355,7 @@ Every error is `{"error": "<message>"}` with a `4xx` or `5xx` status:
 | `400` | Duplicate `Content-Length` or any `Transfer-Encoding` (with a closed connection), an unparseable body, a body nested deeper than the JSON decoder's recursion limit, a missing, wrongly typed or blank required field, a parameter outside its documented range, or a `threshold` / `ngram_size` / `num_permutations` other than the ones the server's index was built for. Parameter errors name the field. |
 | `403` | A loopback bind and a `Host` header that does not name it. |
 | `404` | Unknown path. |
-| `405` | A known path addressed with the wrong verb (including `HEAD` and `OPTIONS`, which carry the same headers without a body), with an `Allow` header naming the verb the path serves. |
+| `405` | A known path addressed with the wrong verb, with an `Allow` header naming the verb the path serves. `HEAD` suppresses the error body; `OPTIONS` includes the JSON error envelope. |
 | `413` | A request body larger than 8 MiB (the same status the Go service answers for the same cap). |
 | `415` | An explicit `Content-Type` other than `application/json`. |
 | `500` | An unexpected server-side failure. The message is generic; the details are in the server log. |

@@ -8,7 +8,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Correct the HTTP reference: an unsupported OPTIONS request includes a JSON error body; only HEAD suppresses it.
+
 - The Lambda adapter preserves a handler's explicit `Content-Length` on HEAD responses instead of replacing it with zero when the handler correctly omits the body.
+
 - The Lambda HTTP adapter keeps the handler's JSON error body for `head` and other case variants. Only the exact `HEAD` method suppresses a response body, matching the HTTP service.
 
 - Malformed requests on a reused HTTP connection no longer inherit the previous request's correlation ID or route in metrics. Failures before the target is parsed get a fresh ID and count under `other`.
