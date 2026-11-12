@@ -62,3 +62,5 @@ the image carries neither, and startup fails without `-custody`. The
 `-engine` URL stays loopback relative to the container, so the `resembl
 serve` backend must run in the same container or an adjacent one sharing a
 network namespace.
+
+The VM/container command waits for active requests to drain on SIGINT or SIGTERM before exiting, with a 30-second shutdown budget. A request still running when that budget expires retains its durable custody claim.

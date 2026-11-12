@@ -35,7 +35,9 @@ func main() {
 	// platform has no SIGTERM; NotifyContext then works unchanged.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, shutdownSIGTERM)
 	defer stop()
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -52,6 +54,8 @@ func main() {
 		engine.CloseIdleConnections()
 		log.Fatal(err)
 	}
+	// ListenAndServe returns when the listener closes, before handlers drain.
+	<-shutdownDone
 	engine.CloseIdleConnections()
 }
 
