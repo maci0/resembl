@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // Authorizer authenticates the caller and checks a server-selected resource and verb.
@@ -653,7 +654,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]json.RawMessage
-	if json.Unmarshal(raw, &body) != nil || body == nil {
+	if !utf8.Valid(raw) || json.Unmarshal(raw, &body) != nil || body == nil {
 		writeError(w, http.StatusBadRequest, "bad request body", reqID)
 		return
 	}
@@ -750,7 +751,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	completed = true
-	if !json.Valid(result) {
+	if !utf8.Valid(result) || !json.Valid(result) {
 		log.Printf("[%s] invalid engine response", reqID)
 		writeError(w, http.StatusBadGateway, "invalid engine response", reqID)
 		return

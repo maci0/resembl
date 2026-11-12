@@ -121,3 +121,58 @@ func TestEngineServerErrorStays503(t *testing.T) {
 		t.Fatalf("503 envelope differs: %s", w.Body.String())
 	}
 }
+
+func TestInvalidUTF8BodyIsRejected(t *testing.T) {
+	s, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), fuzzEngine{}, "index", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCustody(testCustody{}); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		"/v1/find":       "{\"query\":\"ret\xff\"}",
+		"/v1/find-batch": "{\"queries\":[\"ret\xff\"]}",
+	} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			response := httptest.NewRecorder()
+			s.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("invalid UTF-8: status=%d body=%s", response.Code, response.Body)
+			}
+			var envelope map[string]string
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope["error"] != "bad request body" {
+				t.Fatalf("bad request envelope: %s, %v", response.Body, err)
+			}
+		})
+	}
+}
+
+func TestInvalidUTF8EngineResponseIsRejected(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("{\"matches\":[],\"note\":\"\xff\"}"))
+	}))
+	defer backend.Close()
+	engine, err := NewLocalEngine(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.CloseIdleConnections()
+	s, err := New(authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }), engine, "index", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCustody(testCustody{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/find", strings.NewReader(`{"query":"ret"}`)))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("invalid UTF-8 result: status=%d body=%q", response.Code, response.Body.Bytes())
+	}
+	var envelope map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || envelope["error"] != "invalid engine response" {
+		t.Fatalf("bad gateway envelope: %s, %v", response.Body, err)
+	}
+}

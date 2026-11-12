@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // fuzzEngine is a bounded stand-in for the wrapped engine: it returns a
@@ -42,6 +43,8 @@ func FuzzServeHTTP(f *testing.F) {
 	f.Add("POST", "/unknown", "text/plain", "not json", "Bearer valid")
 	f.Add("POST", "/v1/find", "application/json", `{"query":`, "Bearer valid")
 	f.Add("", "", "application/json", "", "Bearer valid")
+
+	f.Add("POST", "/v1/find", "application/json", "{\"query\":\"ret\xff\"}", "Bearer valid")
 
 	svc, err := New(
 		authFunc(func(context.Context, string, string, string) (bool, error) { return true, nil }),
@@ -105,7 +108,7 @@ func FuzzServeHTTP(f *testing.F) {
 		// it must still be valid JSON. Other 2xx paths (/healthz 204,
 		// /metrics text) carry no JSON obligation.
 		if w.Code < 300 && (path == "/v1/find" || path == "/v1/find-batch") {
-			if !json.Valid(w.Body.Bytes()) {
+			if !utf8.Valid(w.Body.Bytes()) || !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("find success body is not valid JSON: %q", w.Body.String())
 			}
 		}
