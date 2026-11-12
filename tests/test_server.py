@@ -1924,11 +1924,11 @@ class TestServerMode(_ServeTestCase):
             first = _find_one(self._session, {"top_n": 5}, query)
         # The computing caller still gets its answer...
         self.assertIn("matches", first)
-        # ...but the payload filed for the pre-write version is not served
-        # back: the entry carries the stale version and misses, so the
-        # next request recomputes against the new one.
+        # ...but it is not cached after the concurrent commit, so the next
+        # request recomputes against the new version and sees the new row.
         second = _find_one(self._session, {"top_n": 5}, query)
         self.assertIn("matches", second)
+        self.assertGreater(second["lsh_candidates"], first["lsh_candidates"])
         # The freshly computed entry is the current one.
         self.assertEqual(len(_RESULT_CACHE), 1)
         (entry,) = _RESULT_CACHE.values()
@@ -2008,6 +2008,8 @@ class TestServerMode(_ServeTestCase):
         self.addCleanup(_RESULT_CACHE.clear)
         params = ResemblConfig()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
+        # Build the index before testing cache entries for a stable corpus.
+        snippet_find_matches(self._session, query, top_n=5)
         first = _find_one(self._session, {"top_n": 5}, query, params)
         self.assertGreater(first["lsh_candidates"], 0)
         self.assertEqual(len(_RESULT_CACHE), 1)
@@ -2071,6 +2073,9 @@ class TestServerMode(_ServeTestCase):
 
         params = ResemblConfig()
         query = "push ebx\nmov eax, 5\npop ebx\nret"
+        # Each cold index build commits; the following reads must be stable.
+        snippet_find_matches(self._session, query, top_n=5)
+        snippet_find_matches(session_b, query, top_n=5)
         payload_a = _find_one(self._session, {"top_n": 5}, query, params)
         payload_b = _find_one(session_b, {"top_n": 5}, query, params)
 

@@ -905,7 +905,10 @@ however many requests are waiting for it: the per-key compute lock
 (`resembl/server.py:121`) collapses a burst of identical queries onto one
 find, so a caller cannot multiply the work by opening connections, and the
 lock registry it uses holds only the keys currently being computed, not every
-query ever asked for.
+query ever asked for. A computed payload enters the cache only if the database
+version stayed unchanged during the find; otherwise the next request recomputes
+instead of receiving an old payload labelled with the newer version. A find
+that commits a cold-start index build also leaves its payload uncached.
 
 ## Abuse cases
 
