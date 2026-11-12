@@ -6,6 +6,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-12
+
 ### Fixed
 
 - Pinned batch queries enforce the same 8 MiB response cap as the local adapter while assembling results, including query labels and JSON overhead, preventing individually bounded replies from accumulating into an oversized batch.
@@ -1393,7 +1395,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v5.1.0...HEAD
+[5.1.0]: https://github.com/maci0/resembl/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/maci0/resembl/compare/v4.0.0...v5.0.0
 [4.0.0]: https://github.com/maci0/resembl/compare/v3.12.0...v4.0.0
 [3.12.0]: https://github.com/maci0/resembl/compare/v3.11.0...v3.12.0
