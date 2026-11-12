@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `resembl-find` strips terminal controls from displayed match names, checksums and error messages, matching the main CLI. JSON output preserves the original values with normal JSON escaping.
+
 - Find clients reject malformed result columns and non-finite scores before rendering or reporting JSON success. Batch replies must also preserve the requested queries and entry count; the CLI falls back to its local query on an invalid reply.
 
 - The Go service rejects request bodies containing invalid UTF-8 with 400 instead of silently replacing query bytes, and rejects invalid UTF-8 engine results with 502 instead of forwarding malformed JSON text.

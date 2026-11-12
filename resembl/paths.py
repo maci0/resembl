@@ -7,7 +7,7 @@ file ``resembl serve`` writes.  The CLI, the server and the standalone
 rules or the port-file naming cannot leave the client looking for a file the
 server never wrote.  The output encoding of the process goes here too, for
 the same reason: it is another environment-derived setting both entry points
-have to agree on.
+have to agree on. Terminal-bound text also shares one control-character filter.
 
 Standard library only, and importing it pulls in nothing from this package:
 ``resembl.find_client`` resolves its paths through this module instead of
@@ -343,3 +343,27 @@ def console_utf8_reconfigure() -> None:
             # A stream the caller already closed or detached cannot be
             # reconfigured, and nothing will be written to it either.
             continue
+
+
+#: Code points dropped from text before it is shown on a terminal: C0 controls
+#: except tab and newline (so a multi-line query still reads), carriage return
+#: (it overwrites the line so far, which spoofs what was printed before it),
+#: DEL, and the C1 range.  ESC goes with them, which is what stops a stored
+#: name from smuggling ANSI sequences (clear screen, write a fake prompt, set
+#: the window title) into the viewer's terminal.
+_DISPLAY_STRIP = dict.fromkeys(
+    [*range(0x09), 0x0B, 0x0C, 0x0D, *range(0x0E, 0x20), 0x7F, *range(0x80, 0xA0)],
+    None,
+)
+
+
+def terminal_text_clean(text: str) -> str:
+    """Return *text* with terminal control characters removed.
+
+    Names and other database text are untrusted on the way out as well as in:
+    a shared or merged database can carry a name with raw ESC bytes that would
+    rewrite the viewer's screen.  Tab and newline survive (they are how
+    multi-line queries render); everything else below a space, carriage
+    return, DEL and the C1 range go.
+    """
+    return text.translate(_DISPLAY_STRIP)

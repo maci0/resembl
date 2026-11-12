@@ -32,6 +32,7 @@ from .paths import (
     db_url_get,
     db_url_mask,
     server_port_path,
+    terminal_text_clean,
 )
 
 #: The find defaults this client falls back to, mirroring
@@ -249,7 +250,7 @@ def _fail(
         payload = {"error": {"kind": resolved, "message": message, "hint": hint}}
         sys.stderr.write(json.dumps(payload, separators=(",", ":")) + "\n")
     else:
-        print(f"error: {message}", file=sys.stderr)
+        print(f"error: {terminal_text_clean(message)}", file=sys.stderr)
     return code
 
 
@@ -487,8 +488,8 @@ def _main(argv: list[str] | None = None) -> int:
     if not args.quiet:
         print(f"Found {payload['lsh_candidates']} candidates via LSH.", file=sys.stderr)
     for i, match in enumerate(payload["matches"], 1):
-        names = ", ".join(match["names"])
-        print(f"{i}. {match['checksum'][:12]}…  {names}  {match['score']:.2f}")
+        names = ", ".join(terminal_text_clean(name) for name in match["names"])
+        print(f"{i}. {terminal_text_clean(match['checksum'])[:12]}…  {names}  {match['score']:.2f}")
     return 0
 
 

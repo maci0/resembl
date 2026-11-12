@@ -26,6 +26,7 @@ from resembl import cli, database
 from resembl.cli import _format_created_at, _zone_get
 from resembl.core import snippet_add
 from resembl.models import Snippet
+from resembl.paths import terminal_text_clean
 
 
 class BaseCLITest(unittest.TestCase):
@@ -1044,16 +1045,16 @@ class TestDisplaySanitization(unittest.TestCase):
 
     def test_ansi_and_carriage_return_are_dropped(self):
         hostile = "a" + chr(27) + "[31mRED" + chr(27) + "[0m" + chr(13) + "b" + chr(7)
-        cleaned = cli._strip_controls(hostile)
+        cleaned = terminal_text_clean(hostile)
         self.assertEqual(cleaned, "a[31mRED[0mb")
         self.assertNotIn(chr(27), cleaned)
         self.assertNotIn(chr(13), cleaned)
         self.assertNotIn(chr(7), cleaned)
 
     def test_plain_text_and_newlines_survive(self):
-        self.assertEqual(cli._strip_controls("plain name"), "plain name")
+        self.assertEqual(terminal_text_clean("plain name"), "plain name")
         self.assertEqual(
-            cli._strip_controls("a" + chr(9) + "b" + chr(10) + "c"),
+            terminal_text_clean("a" + chr(9) + "b" + chr(10) + "c"),
             "a" + chr(9) + "b" + chr(10) + "c",
         )
         self.assertEqual(cli._display("plain"), "plain")

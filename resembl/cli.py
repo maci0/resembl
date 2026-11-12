@@ -115,6 +115,7 @@ from .paths import (
     port_file_cleanup,
     serve_allow_unauthenticated_get,
     server_port_path,
+    terminal_text_clean,
 )
 from .scoring import MAX_NUM_PERM
 from .theme import ACCENT, RICH_STYLES, score_color
@@ -364,38 +365,14 @@ def _echo(message: object, **kwargs: Any) -> None:
         console.print(message, **kwargs)
 
 
-#: Code points dropped from text before it is shown on a terminal: C0 controls
-#: except tab and newline (so a multi-line query still reads), carriage return
-#: (it overwrites the line so far, which spoofs what was printed before it),
-#: DEL, and the C1 range.  ESC goes with them, which is what stops a stored
-#: name from smuggling ANSI sequences (clear screen, write a fake prompt, set
-#: the window title) into the viewer's terminal.
-_DISPLAY_STRIP = dict.fromkeys(
-    [*range(0x09), 0x0B, 0x0C, 0x0D, *range(0x0E, 0x20), 0x7F, *range(0x80, 0xA0)],
-    None,
-)
-
-
-def _strip_controls(text: str) -> str:
-    """Return *text* with terminal control characters removed.
-
-    Names and other database text are untrusted on the way out as well as in:
-    a shared or merged database can carry a name with raw ESC bytes that would
-    rewrite the viewer's screen.  Tab and newline survive (they are how
-    multi-line queries render); everything else below a space, carriage
-    return, DEL and the C1 range go.
-    """
-    return text.translate(_DISPLAY_STRIP)
-
-
 def _display(text: str) -> str:
     """Return *text* safe to embed in a rich-markup string.
 
-    Drops terminal controls (see :func:`_strip_controls`) and escapes rich's
+    Drops terminal controls (see :func:`terminal_text_clean`) and escapes rich's
     bracket markup, so a stored name like ``[bold]`` reaches the terminal as
     literal text instead of restyling the output it ships in.
     """
-    return _markup_escape(_strip_controls(text))
+    return _markup_escape(terminal_text_clean(text))
 
 
 def _zone_get(name: str | None) -> tzinfo | None:
@@ -1097,7 +1074,7 @@ def _confirm(prompt: str, force: bool) -> None:
             kind="confirmation_required",
             hint="Pass --force to proceed without a prompt.",
         )
-    typer.confirm(_strip_controls(prompt), abort=True)
+    typer.confirm(terminal_text_clean(prompt), abort=True)
 
 
 def _backup_before_delete(backup_dir: str, no_backup: bool, *, label: str = "Pre-delete") -> None:

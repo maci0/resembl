@@ -915,6 +915,55 @@ class TestServerMode(_ServeTestCase):
                     result = cli._server_request("/find-batch", {"queries": ["ret"]}, 5)
                 self.assertEqual(result, payload if valid else None)
 
+    def test_thin_client_text_strips_terminal_controls(self):
+        """A server-supplied name or refusal must not execute terminal escapes."""
+        import contextlib
+        import io
+
+        from resembl.find_client import _main
+
+        self._start_server()
+        hostile = "x\x1b[2J\r\x07\x9by"
+        replies = [
+            {
+                "lsh_candidates": 1,
+                "matches": [{"checksum": "a" * 64, "names": [hostile], "score": 1}],
+            },
+            {"error": hostile},
+        ]
+        for payload in replies:
+            with self.subTest(payload=payload):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                opener = self._opener_with(
+                    lambda request, timeout=5, payload=payload: io.BytesIO(
+                        json.dumps(payload).encode()
+                    )
+                )
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                    patch("urllib.request.build_opener", return_value=opener),
+                ):
+                    rc = _main(["--query", "ret"])
+                self.assertEqual(rc, 1 if "error" in payload else 0)
+                rendered = stdout.getvalue() + stderr.getvalue()
+                self.assertIn("x[2Jy", rendered)
+                for control in ("\x1b", "\r", "\x07", "\x9b"):
+                    self.assertNotIn(control, rendered)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    contextlib.redirect_stdout(stdout),
+                    contextlib.redirect_stderr(stderr),
+                    patch("urllib.request.build_opener", return_value=opener),
+                ):
+                    _main(["--query", "ret", "--json"])
+                if "error" in payload:
+                    self.assertEqual(json.loads(stderr.getvalue())["error"]["message"], hostile)
+                else:
+                    self.assertEqual(
+                        json.loads(stdout.getvalue())["matches"][0]["names"], [hostile]
+                    )
+
     def test_thin_client_table_output(self):
         """Without --json, the client prints a ranked table and exits 0."""
         import contextlib

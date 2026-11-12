@@ -3,7 +3,7 @@
 """A fuzzer for the CLI output sanitizers.
 
 ``resembl.cli._csv_safe`` / ``_csv_safe_tree`` and ``_display`` /
-``_strip_controls`` sit on the path from a snippet's stored name to a
+``terminal_text_clean`` sit on the path from a snippet's stored name to a
 spreadsheet cell and to a terminal.  A name that evades the CSV
 formula guard opens as a live formula (``=HYPERLINK`` exfiltration,
 DDE command execution) when the operator opens the export in a
@@ -27,7 +27,7 @@ the callers rely on, not just the absence of a crash:
 * ``_csv_safe_tree`` applies the same guard at every depth, so a
   name smuggled into a nested find-batch payload is neutralized
   like a top-level cell;
-* ``_strip_controls`` output carries no C0 control except tab and
+* ``terminal_text_clean`` output carries no C0 control except tab and
   newline, no CR, no DEL, and no C1 control, so no ANSI sequence can
   survive;
 * ``_display`` output carries no unescaped ``[`` bracket markup, so
@@ -47,7 +47,8 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from resembl.cli import _csv_safe, _csv_safe_tree, _display, _strip_controls
+    from resembl.cli import _csv_safe, _csv_safe_tree, _display
+    from resembl.paths import terminal_text_clean
 
 #: Spreadsheet-visible formula triggers plus the characters the guard
 #: strips before the check (whitespace classes and the invisible set).
@@ -222,7 +223,7 @@ def _check_tree(value: object) -> None:
 
 def _check_display(text: str) -> None:
     """Assert display output cannot inject ANSI or rich markup."""
-    stripped = _strip_controls(text)
+    stripped = terminal_text_clean(text)
     assert isinstance(stripped, str)
     for ch in stripped:
         code = ord(ch)
@@ -230,7 +231,7 @@ def _check_display(text: str) -> None:
             code == 0x09
             or code == 0x0A
             or not (code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F)
-        ), f"control survived _strip_controls: {text!r} -> {stripped!r}"
+        ), f"control survived terminal_text_clean: {text!r} -> {stripped!r}"
     assert "\x1b" not in stripped, f"ESC survived: {text!r}"
     displayed = _display(text)
     assert isinstance(displayed, str)
