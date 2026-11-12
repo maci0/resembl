@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Go service treats truncated or oversized engine error bodies as transport failures instead of completed rejections.
+
 ## [5.0.0] - 2026-11-09
 
 ### Added

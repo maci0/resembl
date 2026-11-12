@@ -134,7 +134,13 @@ func (e *LocalEngine) find(ctx context.Context, path string, body json.RawMessag
 		// reusable. Surface its detail: callers and operators relay
 		// this error, and a generic message hides bad-request reasons
 		// the engine already sent.
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > 1<<20 {
+			return nil, errors.New("invalid engine response")
+		}
 		var detail string
 		var probe struct {
 			Error string `json:"error"`

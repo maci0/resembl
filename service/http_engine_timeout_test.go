@@ -1,6 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -28,5 +34,24 @@ func TestLocalEngineDefaultTimeoutIs30s(t *testing.T) {
 	}
 	if e.client.Timeout != 30*time.Second {
 		t.Fatalf("default client timeout = %v, want 30s", e.client.Timeout)
+	}
+}
+
+func TestLocalEngineTruncatedRejectionIsTransportFailure(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid query"}`))
+	}))
+	defer backend.Close()
+	engine, err := NewLocalEngine(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.CloseIdleConnections()
+	_, err = engine.Find(context.Background(), json.RawMessage(`{"query":"ret"}`))
+	var rejection *EngineError
+	if !errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &rejection) {
+		t.Fatalf("truncated rejection = %v, want transport failure", err)
 	}
 }
