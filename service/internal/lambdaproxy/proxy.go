@@ -76,7 +76,7 @@ func Handle(ctx context.Context, h http.Handler, event events.APIGatewayV2HTTPRe
 			IsBase64Encoded: true,
 		}, nil
 	}
-	if h == nil || event.Version != "2.0" || !strings.HasPrefix(event.RawPath, "/") || strings.HasPrefix(event.RawPath, "//") || strings.ContainsAny(event.RawPath, "?#\r\n") || strings.ContainsAny(event.RawQueryString, "\r\n#") {
+	if h == nil || event.Version != "2.0" || event.RequestContext.HTTP.Method == "" || !strings.HasPrefix(event.RawPath, "/") || strings.HasPrefix(event.RawPath, "//") || strings.ContainsAny(event.RawPath, "?#\r\n") || strings.ContainsAny(event.RawQueryString, "\r\n#") {
 		return bad(http.StatusBadRequest)
 	}
 	target := event.RawPath

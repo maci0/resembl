@@ -48,15 +48,13 @@ func FuzzHandle(f *testing.F) {
 	f.Add("POST", "/v1/find", "", "!!!not-base64!!!", true, "", "")
 	f.Add("GET", "/v1/find", "x=1", "", false, "bad\nheader", "x")
 	f.Add("", "", "", "", false, "", "")
+	f.Add("", "/healthz", "", "", false, "", "")
 	h := fuzzHandler()
 	f.Fuzz(func(t *testing.T, method, path, query, body string, isBase64 bool, headerName, headerValue string) {
 		// Keep the corpus on the interesting side of the size guards: a
 		// multi-megabyte body is a length-check case, not a parser case.
 		if len(body) > 4096 || len(path) > 4096 || len(query) > 4096 {
 			t.Skip("oversized input")
-		}
-		if method == "" {
-			method = http.MethodGet
 		}
 		event := events.APIGatewayV2HTTPRequest{
 			Version:         "2.0",
@@ -71,9 +69,17 @@ func FuzzHandle(f *testing.F) {
 		if headerName != "" {
 			event.Headers = map[string]string{headerName: headerValue}
 		}
-		out, err := Handle(context.Background(), h, event)
+		dispatched := false
+		observed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			dispatched = true
+			h.ServeHTTP(w, r)
+		})
+		out, err := Handle(context.Background(), observed, event)
 		if err != nil {
 			t.Fatalf("Handle returned an error: %v", err)
+		}
+		if method == "" && (out.StatusCode != http.StatusBadRequest || dispatched) {
+			t.Fatalf("missing method: status=%d dispatched=%v", out.StatusCode, dispatched)
 		}
 		if out.StatusCode < 100 || out.StatusCode > 599 {
 			t.Fatalf("Handle returned status %d", out.StatusCode)

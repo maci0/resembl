@@ -167,3 +167,34 @@ func TestGatewayThroughHandlerAndLoopbackEngine(t *testing.T) {
 		t.Fatalf("adapter/handler/engine path failed: status=%d calls=%d", out.StatusCode, calls)
 	}
 }
+
+func TestMissingEventMethodDoesNotDispatchAsGet(t *testing.T) {
+	e := &engine{}
+	serviceHandler, err := service.New(service.DenyAll{}, e, "fixture", 1, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	seenMethod := ""
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		seenMethod = r.Method
+		serviceHandler.ServeHTTP(w, r)
+	})
+	out, err := Handle(context.Background(), handler, event("", "/healthz"))
+	if err != nil || out.StatusCode != http.StatusBadRequest || calls != 0 {
+		t.Fatalf("missing method dispatched as %q: status=%d calls=%d error=%v", seenMethod, out.StatusCode, calls, err)
+	}
+	body, err := base64.StdEncoding.DecodeString(out.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope map[string]string
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope["error"] != "bad request" {
+		t.Fatalf("invalid request envelope: %q %v", body, err)
+	}
+	out, err = Handle(context.Background(), handler, event(http.MethodGet, "/healthz"))
+	if err != nil || out.StatusCode != http.StatusNoContent || calls != 1 || seenMethod != http.MethodGet {
+		t.Fatalf("valid GET changed: status=%d calls=%d method=%q error=%v", out.StatusCode, calls, seenMethod, err)
+	}
+}
