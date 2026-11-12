@@ -2850,9 +2850,17 @@ class TestStatelessServe(unittest.TestCase):
             encoding="utf-8",
             **serve_stop_flags(),
         )
-        # Drain captured diagnostics so a full pipe cannot block shutdown.
-        self.addCleanup(server.communicate, timeout=10)
-        self.addCleanup(process_stop, server)
+
+        def stop_server():
+            process_stop(server)
+            try:
+                server.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                _, errors = server.communicate(timeout=10)
+                self.fail(f"stateless server failed to stop: {errors}")
+
+        self.addCleanup(stop_server)
         assert server.stdout is not None
         line = ""
         for line in server.stdout:

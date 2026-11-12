@@ -359,7 +359,7 @@ def test_one_input(data):
         # /metrics is a pre-rendered Prometheus string, not JSON;
         # every other answer is the JSON envelope, and an HTML page
         # means a stdlib fallback escaped the handler.
-        if path.split("?", 1)[0] == "/metrics":
+        if status == 200 and path.split("?", 1)[0] == "/metrics":
             assert text.startswith(
                 "# HELP resembl_server_up"
             ), f"/metrics answer lost its exposition: {text[:80]!r}"
