@@ -8,6 +8,8 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Restore copies through an exclusively created private temporary file instead of a predictable PID filename, so a planted file link cannot redirect the copy and overwrite another file.
+
 - Runtime verification now stops reading a manifest at its 2 MiB limit plus one detection byte. An oversized manifest is refused without first allocating memory for the whole file.
 
 - The Go service accepts ASCII case variants of the Bearer authentication scheme, as HTTP requires. Credential bytes, resource and verb remain exact, and the existing whitespace policy is unchanged.

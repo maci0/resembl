@@ -2579,8 +2579,8 @@ def db_restore(session: Session, backup_path: str, dest_path: str | None = None)
     unverifiable copy is never copied over the live database. The copy
     is a single file (``db_verify_backup`` refuses ``-wal``/``-shm``
     sidecars for exactly this reason), published atomically via a
-    same-directory temp file, fsynced, and renamed over the
-    destination. Stale ``-wal``/``-shm`` sidecars beside the destination
+    private, exclusively created same-directory temp file, fsynced, and
+    renamed over the destination. Stale ``-wal``/``-shm`` sidecars beside it
     are removed and the destination directory is fsynced.
 
     The caller must have stopped every process using the live
@@ -2633,9 +2633,12 @@ def db_restore(session: Session, backup_path: str, dest_path: str | None = None)
         pass
     dest_dir = os.path.dirname(dest_abs) or "."
     os.makedirs(dest_dir, exist_ok=True)
-    tmp = os.path.join(dest_dir, f".{os.path.basename(dest_abs)}.restore.{os.getpid()}.tmp")
+    fd, tmp = tempfile.mkstemp(
+        dir=dest_dir, prefix=f".{os.path.basename(dest_abs)}.restore.", suffix=".tmp"
+    )
     try:
-        shutil.copyfile(backup_abs, tmp)
+        with open(fd, "wb") as destination, open(backup_abs, "rb") as source:
+            shutil.copyfileobj(source, destination)
         _fsync_quiet(tmp)
         os.replace(tmp, dest_abs)
         _fsync_quiet(dest_dir)

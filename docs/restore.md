@@ -107,6 +107,11 @@ resembl restore backups/assembly-<stamp>.db --dest "$DB" --force
 # change to the database URL, backend, or backup tooling.
 ```
 
+Restore copies through an exclusively created private temporary file in the
+destination directory, keeping its descriptor open for the copy before the
+atomic rename. A link planted at the former predictable temporary name is not
+opened or removed.
+
 Restore `config.toml` from the sidecar written beside the backup
 (`<backup-stem>.config.toml`, mode `0600`).  When the manifest records
 `config_sha256: null` there was no config at backup time — defaults

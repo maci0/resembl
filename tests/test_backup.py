@@ -933,6 +933,56 @@ class TestDbRestore(FileDBTest):
         self.assertEqual(names, ["foo"])
         engine.dispose()
 
+    def test_restore_does_not_overwrite_a_linked_temp_victim(self):
+        """A planted hardlink at the former PID temp name cannot redirect restore."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup = db_backup(self.session, os.path.join(self._tmpdir.name, "backups"))["backup"]
+        dest = os.path.join(self._tmpdir.name, "restored.db")
+        victim = os.path.join(self._tmpdir.name, "keep.txt")
+        with open(victim, "wb") as output:
+            output.write(b"keep this file")
+        planted = os.path.join(self._tmpdir.name, f".restored.db.restore.{os.getpid()}.tmp")
+        os.link(victim, planted)
+
+        result = db_restore(self.session, backup, dest)
+
+        with open(victim, "rb") as source:
+            self.assertEqual(source.read(), b"keep this file")
+        self.assertTrue(os.path.samefile(victim, planted))
+        self.assertFalse(os.path.samefile(victim, dest))
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["num_snippets"], 1)
+
+    def test_restore_cleans_temp_when_the_verified_source_disappears(self):
+        """A source-open failure closes the copy descriptor and preserves the destination."""
+        snippet_add(self.session, "foo", "mov eax, 1\nret")
+        backup = db_backup(self.session, os.path.join(self._tmpdir.name, "backups"))["backup"]
+        dest = os.path.join(self._tmpdir.name, "restored.db")
+        with open(dest, "wb") as output:
+            output.write(b"keep live contents")
+
+        def remove_after_verify(session, path):
+            checked = db_verify_backup(session, path)
+            self.assertTrue(checked["ok"])
+            os.remove(path)
+            return checked
+
+        with (
+            mock.patch("resembl.core.db_verify_backup", side_effect=remove_after_verify),
+            self.assertRaises(FileNotFoundError),
+        ):
+            db_restore(self.session, backup, dest)
+        with open(dest, "rb") as source:
+            self.assertEqual(source.read(), b"keep live contents")
+        self.assertEqual(
+            [
+                name
+                for name in os.listdir(self._tmpdir.name)
+                if name.startswith(".restored.db.restore.")
+            ],
+            [],
+        )
+
     def test_restore_refuses_unverified_backup(self):
         """A corrupt backup is never copied over the live path."""
         snippet_add(self.session, "foo", "mov eax, 1\nret")
