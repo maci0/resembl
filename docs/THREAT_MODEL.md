@@ -99,7 +99,7 @@ client guards the narrower ephemeral 1024-65535 range (`cdabd39`,
 query-text-capture abuse case below; both loopback clients now bypass
 `http_proxy` via `ProxyHandler({})` (`456e464`, `resembl/cli.py`,
 `resembl/find_client.py`) and bound the response body they read at 16 MiB
-(`709d31b`, `_MAX_RESPONSE_BYTES` / `_MAX_SERVER_RESPONSE_BYTES`). Both clients
+(`709d31b`, `_MAX_RESPONSE_BYTES` in the shared reader). Both clients
 reject non-object JSON responses and validate result columns before rendering or
 forwarding JSON; batch replies must retain the requested queries and entry count.
 Malformed replies fail the thin client cleanly or trigger the CLI local fallback
@@ -152,8 +152,8 @@ cache's database-file fingerprint pair is removed (`d190380`,
 `data_version` integer — the pair never caught a replaced file, so
 a replaced database file under a running server is now documented
 as requiring a restart), and the scheme-id cache is removed
-(`d190380`, `_scheme_id` in `resembl/server.py` is uncached,
-`_SCHEME_CACHE_MAX = 0`); the Go service now propagates a
+(`d190380`, `_scheme_id` in `resembl/server.py` is uncached); the Go service
+now propagates a
 per-request correlation id to the engine (`26e95cf`,
 `service/service.go` mints it and `service/http_engine.go`
 `LocalEngine` forwards it as `X-Request-Id`; the Python server
@@ -241,8 +241,8 @@ threads with `block_on_close=False` (`399bf78`, `_FindServer` in
 the Go service now closes/drains request bodies (`399bf78`,
 `service/service.go`, `service/pinned_engine.go`); the two bounded
 response readers are shared (`d0deec8`,
-`_read_bounded_response` in `resembl/find_client.py`, imported as
-`_read_bounded_server_response` in `resembl/cli.py`); JSON decoder recursion
+`_read_bounded_response` in `resembl/find_client.py`, imported directly by
+`resembl/cli.py`); JSON decoder recursion
 failures in both clients use their normal malformed-reply paths, including
 the thin client's HTTP error-body reader, without deleting the port file;
 `serve --port`
@@ -309,7 +309,7 @@ Every entry point below is present in the code at the cited location.
 | `POST /find-pinned`, `GET /runtime-generation` | `_handle_find_pinned` in `resembl/server.py` | Experimental, unauthenticated like the other routes; the Go service in `service/` is the intended caller. `/find-pinned` reads the whole SQLite index to hash it, bounded by `resembl/pinned_snapshot.py` (1,000,000 rows, 64 MiB) while holding a writer fence, so a caller that reaches it can stall writers. Keep it on loopback behind the service. |
 | `POST /find-batch` | `do_POST` in `resembl/server.py:1316` | Unauthenticated, up to 1000 queries per request (`MAX_BATCH_QUERIES` in `resembl/server.py:652`, enforced at `resembl/server.py:1653`). |
 | `POST /score`, `POST /band-keys` | `_score_payload`, `_band_keys_payload` in `resembl/server.py` | Unauthenticated, read no database. At most 1000 listings per request in the 8 MiB body; each is tokenized and fingerprinted, so the list length bounds the work. |
-| `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are computed per request and deliberately uncached (`_SCHEME_CACHE_MAX = 0`, `d190380`), so a client cycling `normalize`, `bands` and `rows` cannot grow process memory. |
+| `GET /scheme`, the `scheme` of `/score` and `/band-keys` | `_scheme_payload`, `_scheme_id` in `resembl/server.py` | Unauthenticated, reads no database. Each distinct parameter set fingerprints one fixed probe listing; the ids are computed per request and deliberately uncached (`_scheme_id`, `d190380`), so a client cycling `normalize`, `bands` and `rows` cannot grow process memory. |
 | `X-Request-Id` header (Python and Go) | `_correlation_id` in `resembl/server.py` (`26e95cf`; byte-counted in `ef333e8`), `requestIDFromContext` in `service/service.go`, `LocalEngine.find` in `service/http_engine.go` | A caller-supplied id is adopted only when bounded to 64 UTF-8 bytes and free of C0/C1 controls and Unicode line separators; otherwise the server remints. The Go service forwards its minted id so one id spans both hops and the `X-Request-Id` response header echoes the id the logs record. |
 | `POST /v1/find`, `POST /v1/find-batch` (Go) | `service/service.go:175` (`ServeHTTP`) | Experimental portable boundary in `service/`. Requires an `Authorizer` (`service/service.go:23`); the shipped binary defaults to deny-all (`service/service.go:36`, `cmd/resembl-service/main.go`) unless `-token-file` supplies a bearer credential (`service/token_authority.go:54`). 8 MiB body cap (`service/service.go:277`), concurrency 1..64 (`service/service.go:123`), per-request timeout. `PinnedSQLiteEngine` implements `FindBatch` by fanning each query through `/find-pinned` (`service/pinned_engine.go`), and a `LocalEngine` backend implements `FindBatch` directly (`service/http_engine.go:37`); a non-batch engine answers `501`. Not a deployable public service (`service/README.md:3`). |
 | `GET /health` (Python) | `_handle_health` in `resembl/server.py:1413` | Unauthenticated; probes the served database with `SELECT 1` and returns `status`, `mode`, `database` reachability, `uptime_seconds`, and `latency_ms` (on success). A stateless server answers `ok` with no database check. |
@@ -778,7 +778,7 @@ workflow does not re-run either.
 | `top_n` bounds, 1 to 1000 | `resembl/server.py:426`, `resembl/server.py:469`, clamped default at `resembl/server.py:1950` | One response returning the whole corpus (upper bound), or a `200` with an empty `matches` read as "no duplicates" (lower bound). A sequence of requests is not bounded |
 | Index-parameter match check | `resembl/server.py:502` | A request rebuilding the shared LSH index mid-serve |
 | Per-count MinHash template cap, 8 | `resembl/scoring.py:72` | An unbounded dict grown by cycling permutation counts |
-| Scheme ids uncached | `_scheme_id` in `resembl/server.py` (`d190380`, `_SCHEME_CACHE_MAX = 0`) | A client cycling `normalize`/`bands`/`rows` growing process memory with distinct parameter sets |
+| Scheme ids uncached | `_scheme_id` in `resembl/server.py` (`d190380`) | A client cycling `normalize`/`bands`/`rows` growing process memory with distinct parameter sets |
 | `MinHash`/`minhash_pack` count bounds | `resembl/minhash.py` (`9aeab2b` rejects `2**32` in `MinHash`; `1f210e7` rejects counts outside 2..`MAX_NUM_PERM` in `minhash_pack`) | An over-wide count reaching the stored packed format |
 | Result-cache key is a query digest | `resembl/server.py:618` | Query text retained by the result cache, and an entry count standing in for a memory bound |
 | Result-cache key is a digest of the full database URL | `_db_cache_id` in `resembl/server.py` (`91c7aa1`, superseding the masked-URL key of `6273fa0`) | Credentials retained verbatim in the long-lived cache keys; two databases differing only in password sharing entries when their version counters matched |
@@ -811,7 +811,7 @@ workflow does not re-run either.
 | Result-cache version guard is the counter alone | `_db_version` in `resembl/server.py` (`d190380`) | A replaced database file restarting `data_version` at the same value and serving payloads computed for the previous corpus — the old file-fingerprint pair never caught it either, so a replaced file under a running server now requires a restart |
 | Correlation id adopted only when bounded and printable | `_correlation_id` in `resembl/server.py` (`26e95cf`, `_MAX_REQUEST_ID_CHARS = 64` UTF-8 bytes, `ef333e8`), `requestIDFromContext` in `service/service.go`, `LocalEngine.find` in `service/http_engine.go` | An unbounded or control-character-bearing `X-Request-Id` inflating the response or forging log lines; the Go service's minted id is forwarded so one id names a request across both hops |
 | Log control-character stripping | `_LOG_CONTROL_CHARS` in `resembl/server.py` (`709d31b`), `safeLogPath` in `service/service.go` | A crafted request path/method forging log lines (log injection) via CR/LF in `logger.exception`/`log.Printf` output and the 404 `unknown path` body |
-| Bounded client response reads, 16 MiB | `_MAX_RESPONSE_BYTES` in `resembl/find_client.py`, `_MAX_SERVER_RESPONSE_BYTES` in `resembl/cli.py` (`709d31b`; reader shared in `d0deec8`) | A port-file swap or compromised loopback server pinning unbounded memory via `response.read()` with no size |
+| Bounded client response reads, 16 MiB | `_MAX_RESPONSE_BYTES` in the shared `resembl.find_client._read_bounded_response` reader (`709d31b`; reader shared in `d0deec8`) | A port-file swap or compromised loopback server pinning unbounded memory via `response.read()` with no size |
 | Loopback proxy bypass | `ProxyHandler({})` in `resembl/cli.py` (`456e464`) and `resembl/find_client.py`, opened via `OpenerDirector.open` (`599923a`): passing the opener as `urlopen`'s context left the default opener's env `ProxyHandler` in charge | A proxied loopback request failing or sending the corpus query to a third party via `http_proxy` |
 | On-disk manifest RecursionError guard | `_export_manifest_read`, `_db_backup_reuse`, `db_verify_backup` in `resembl/core.py` (`99c4f3a`) | A deeply nested manifest aborting export/backup/verify instead of being treated as unreadable |
 | Loopback bind 127.0.0.0/8 | `_is_loopback_bind` in `resembl/cli.py` (`709d31b`) | A loopback bind (127.0.0.2, 127.1.2.3, …) misclassified as non-loopback and demanding `--allow-unauthenticated`, diverging from the server's own Host allow-list |

@@ -100,8 +100,7 @@ from .core import (
 )
 from .database import db_create, get_engine
 from .diagnostics import db_stats
-from .find_client import _find_payload_validate
-from .find_client import _read_bounded_response as _read_bounded_server_response
+from .find_client import _find_payload_validate, _read_bounded_response
 from .lsh import banding_params, lsh_meta_get, lsh_meta_matches
 from .paths import (
     _ASCII_LOWER_TABLE,
@@ -652,14 +651,6 @@ def _session_db_url(session: Session) -> str:
     return url.render_as_string(hide_password=False)
 
 
-#: Hard ceiling on a warm-server response the CLI will buffer.  Mirrors
-#: ``resembl.find_client._MAX_RESPONSE_BYTES``: a port-file swap or a
-#: compromised loopback server must not pin unbounded memory via
-#: ``response.read()`` with no size.  Kept as the name callers use; the
-#: reader is shared so the two copies cannot drift.
-_MAX_SERVER_RESPONSE_BYTES = 16 * 1024 * 1024
-
-
 def _server_request(path: str, body: dict, timeout: float) -> dict | None:
     """Send one JSON request to the running ``serve`` process.
 
@@ -700,7 +691,7 @@ def _server_request(path: str, body: dict, timeout: float) -> dict | None:
         # OpenerDirector.open() is the opener-aware path.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(request, timeout=timeout) as response:
-            payload = json.loads(_read_bounded_server_response(response).decode("utf-8"))
+            payload = json.loads(_read_bounded_response(response).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # A 4xx/5xx answer is a decision, not an outage: the server is
         # healthy and deliberately refused this request.  Fall back to the

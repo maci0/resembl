@@ -909,17 +909,12 @@ _SCHEME_PROBE = (
 #: Hex digits of the SHA-256 kept as the scheme id.
 _SCHEME_ID_HEX = 32
 
-#: Scheme ids are deliberately uncached: each id costs one probe
-#: fingerprint, and retaining it per parameter set would let a client that
-#: cycles ``normalize``, ``bands`` and ``rows`` grow process memory with the
-#: number of distinct parameter sets it invents.  Recomputing per request
-#: keeps the cost at one probe fingerprint, which the request already pays,
-#: with no retained state.
-_SCHEME_CACHE_MAX = 0
-
 
 def _scheme_id(canonical: str) -> str:
     """Return the id of the scheme whose fields are the JSON *canonical*.
+
+    Computed per request so a client cycling ``normalize``, ``bands`` and
+    ``rows`` cannot grow process memory with distinct cached parameter sets.
 
     The digest covers the fields and what they produce: the probe listing's
     packed fingerprint and, for a band layout, its band keys.  Two schemes
