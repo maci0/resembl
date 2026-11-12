@@ -93,10 +93,15 @@ class TestDbBackup(FileDBTest):
         # Restore: point a new engine at the backup file and read it back
         # through the normal query path.
         restored_engine = create_engine(f"sqlite:///{result['backup']}")
-        with Session(restored_engine) as restored:
-            from resembl.core import snippet_list
+        try:
+            with Session(restored_engine) as restored:
+                from resembl.core import snippet_list
 
-            names = sorted(name for snippet in snippet_list(restored) for name in snippet.name_list)
+                names = sorted(
+                    name for snippet in snippet_list(restored) for name in snippet.name_list
+                )
+        finally:
+            restored_engine.dispose()
         self.assertEqual(names, ["bar", "foo"])
 
     def test_backup_file_permissions_are_private(self):

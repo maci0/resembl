@@ -11,19 +11,15 @@
 # exit code as the verdict.  The Makefile writes no files itself, only checks
 # and builds.
 #
-# SHELL is left at make's own default (/bin/sh) rather than pinned to
-# /bin/bash: CONTRIBUTING.md and docs/tutorial.md document this Makefile as the
-# command list on Windows (GnuWin32 Make) as well as macOS and Linux, and
-# neither a /bin/bash path nor a bash-only shell flag exists there.  The
-# recipes below use no bashism (POSIX `[ ]`, `for`, `$${VAR:-}` throughout),
-# so the default shell runs them unchanged.
+# Recipes require a POSIX sh on PATH (Git for Windows supplies one). Callers
+# can select another shell with make SHELL=/path/to/sh.
 #
 # `-o pipefail` is not POSIX: dash and busybox `sh` reject the flag outright,
 # which would abort every recipe on a system where /bin/sh is dash.  It is
 # probed once here and prepended only when the shell accepts it, keeping the
 # fail-fast pipeline semantics (`tar | gzip`) on bash while leaving a
 # non-pipefail shell running the same commands with `-eu`.
-SHELL ?= /bin/sh
+SHELL := sh
 .SHELLFLAGS := -eu -c
 PIPEFAIL := $(shell (set -o pipefail) >/dev/null 2>&1 && echo pipefail)
 ifneq ($(PIPEFAIL),)
@@ -221,7 +217,7 @@ backup-drill:  ## Prove the newest backup restores (docs/restore.md)
 	for candidate in "$(BACKUP_DIR)"/assembly-*.db; do [ -e "$$candidate" ] && found=1 && break; done; \
 	if [ "$$found" -eq 0 ]; then echo "backup-drill: no assembly-*.db in $(BACKUP_DIR)"; exit 1; fi; \
 	candidates_file=$$(mktemp); \
-	uv run --locked python -c "import sys, os; from resembl.core import _db_backup_candidates; d=sys.argv[1]; names=[n for n in os.listdir(d) if n.startswith('assembly-') and n.endswith('.db')]; c=_db_backup_candidates(d, names); print(chr(10).join(os.path.join(d, n) for n in reversed(c)))" "$(BACKUP_DIR)" > "$$candidates_file"; \
+	uv run --locked python -c "import sys, os; from resembl.core import _db_backup_candidates; d=sys.argv[1]; names=[n for n in os.listdir(d) if n.startswith('assembly-') and n.endswith('.db')]; c=_db_backup_candidates(d, names); sys.stdout.buffer.write((chr(10).join(os.path.join(d, n) for n in reversed(c)) + chr(10)).encode())" "$(BACKUP_DIR)" > "$$candidates_file"; \
 	while IFS= read -r candidate; do \
 		[ -n "$$candidate" ] || continue; \
 		scratch=$$(mktemp -d); \

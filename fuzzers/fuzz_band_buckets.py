@@ -121,7 +121,8 @@ def _check_tail_ignored(fdp: atheris.FuzzedDataProvider) -> None:
     b_value, r_value = banding_params(threshold, num_perm)
     if b_value * r_value >= num_perm:
         return  # No ignored tail to compare.
-    extended = _CONTROL + b"\xde\xad\xbe\xef" * 8
+    used = 8 + 4 * b_value * r_value
+    extended = _CONTROL[:used] + bytes(value ^ 0xFF for value in _CONTROL[used:])
     assert band_buckets(_CONTROL, num_perm, b_value, r_value) == band_buckets(
         extended, num_perm, b_value, r_value
     ), "an ignored tail changed the bucket keys"

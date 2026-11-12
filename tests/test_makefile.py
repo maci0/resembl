@@ -94,7 +94,7 @@ class MakefileShellTests(unittest.TestCase):
             env = dict(os.environ)
             env["PATH"] = directory
             result = subprocess.run(
-                [make, "service-check"],
+                [make, "service-check", f"SHELL={shutil.which('sh')}"],
                 cwd=root,
                 env=env,
                 capture_output=True,
@@ -115,7 +115,7 @@ class MakefileShellTests(unittest.TestCase):
             env = dict(os.environ)
             env["PATH"] = directory
             result = subprocess.run(
-                [make, "install"],
+                [make, "install", f"SHELL={shutil.which('sh')}"],
                 cwd=root,
                 env=env,
                 capture_output=True,

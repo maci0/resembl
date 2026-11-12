@@ -430,7 +430,7 @@ class TestDBCoreFunctions(_IsolatedDBTest):
         """Two engines over one SQLite file must share the rebuild fence."""
         for relative in (False, True):
             with self.subTest(relative=relative):
-                with tempfile.TemporaryDirectory() as directory:
+                with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
                     url = f"sqlite:///{os.path.join(directory, 'shared.db')}"
                     builder = create_engine(url)
                     cleaner_path = os.path.join(directory, "shared.db")

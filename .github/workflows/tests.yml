@@ -98,7 +98,7 @@ jobs:
         run: uv run --locked black --check .
 
       - name: Run tests
-        run: uv run --locked pytest -q
+        run: uv run --locked python -m pytest -q
 
   # README.md, CONTRIBUTING.md and docs/tutorial.md all document Windows
   # (and macOS is implied by the POSIX install path), so those platforms are
@@ -138,7 +138,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run tests
-        run: uv run --locked pytest -q
+        run: uv run --locked python -m pytest -q
 
   fuzz:
     # Pinned, not ubuntu-latest: the floating label migrates OS versions

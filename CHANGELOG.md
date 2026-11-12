@@ -10,6 +10,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Keep portability fixtures on one Windows drive, close restored test databases before cleanup, run recipes with a POSIX shell, and emit backup candidate paths with LF line endings. Fuzz tail checks now mutate unused values within the fingerprint rather than append malformed bytes.
 - MySQL can create the snippet history timestamp index by indexing a bounded TEXT prefix without limiting stored timestamps.
 
 ### Changed
