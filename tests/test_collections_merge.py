@@ -245,6 +245,20 @@ class TestSearch(BaseDBTest):
         self.assertEqual(results, [])
         self.assertEqual(snippet_search_by_name(self.session, "mem", limit=0), [])
 
+    def test_malformed_alias_rows_do_not_hide_valid_search_results(self):
+        """Corrupt aliases neither crash readers nor consume a verified result slot."""
+        good = snippet_add(self.session, "healthy", "RET")
+        corrupt = Snippet(checksum="0" * 64, code="bad", names="[]", minhash=b"")
+        self.session.add(corrupt)
+        for stored in ("", "null", '"needle"', '["needle", 1]', "[" * 2000 + "]" * 2000):
+            with self.subTest(stored=stored[:40]):
+                corrupt.names = stored
+                self.session.commit()
+                self.assertEqual(corrupt.name_list, [])
+                self.assertIsNone(Snippet.get_by_name(self.session, "needle"))
+                self.assertEqual(snippet_search_by_name(self.session, "", limit=1), [good])
+                self.assertEqual(corrupt.names, stored)
+
 
 # Timestamp normalization tests
 

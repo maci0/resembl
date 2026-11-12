@@ -87,6 +87,15 @@ def name_json_escape(text: str) -> str:
     return json.dumps(text)[1:-1]
 
 
+def name_list_parse(value: str) -> list[str]:
+    """Read stored aliases, refusing malformed rows without rewriting their bytes."""
+    try:
+        names = json.loads(value)
+    except ValueError, TypeError, RecursionError:
+        return []
+    return names if isinstance(names, list) and all(isinstance(name, str) for name in names) else []
+
+
 class Collection(SQLModel, table=True):
     """A named group of snippets (e.g., 'libc patterns', 'crypto routines')."""
 
@@ -218,7 +227,7 @@ class Snippet(SQLModel, table=True):
     @property
     def name_list(self) -> list[str]:
         """Return the list of alias names for the snippet."""
-        return json.loads(self.names)
+        return name_list_parse(self.names)
 
     @property
     def tag_list(self) -> list[str]:
@@ -278,7 +287,7 @@ class Snippet(SQLModel, table=True):
             for checksum, names in candidates:
                 if any(
                     needle == (stored if stored.isascii() else name_normalize(stored))
-                    for stored in json.loads(names)
+                    for stored in name_list_parse(names)
                 ):
                     return session.get(cls, checksum)
         return None

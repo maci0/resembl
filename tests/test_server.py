@@ -2975,6 +2975,50 @@ class TestServerObservability(_ServeTestCase):
         self.assertIn('resembl_server_result_cache_total{result="miss"}', body)
         self.assertIn("resembl_server_handler_rejected_total", body)
 
+    def test_thread_creation_failure_returns_its_handler_slot(self):
+        """An ordinary startup failure still returns the slot to the accept loop."""
+        from http.server import ThreadingHTTPServer
+
+        from resembl.server import serve
+
+        httpd = serve(None, port=0)
+        self.addCleanup(httpd.server_close)
+        httpd._handler_slots = threading.BoundedSemaphore(1)
+        with (
+            patch.object(ThreadingHTTPServer, "process_request", side_effect=RuntimeError("spawn")),
+            self.assertRaisesRegex(RuntimeError, "spawn"),
+        ):
+            httpd.process_request(object(), ("127.0.0.1", 1))
+        self.assertTrue(httpd._handler_slots.acquire(blocking=False))
+        self.assertFalse(httpd._handler_slots.acquire(blocking=False))
+        httpd._handler_slots.release()
+
+    def test_started_handler_does_not_replace_a_shutdown_interrupt(self):
+        """SIGTERM during Thread.start must retain KeyboardInterrupt after slot release."""
+        from http.server import ThreadingHTTPServer
+
+        from resembl.server import serve
+
+        httpd = serve(None, port=0)
+        self.addCleanup(httpd.server_close)
+        httpd._handler_slots = threading.BoundedSemaphore(1)
+
+        def finished_then_interrupted(request, address):
+            httpd.process_request_thread(request, address)
+            raise KeyboardInterrupt
+
+        with (
+            patch.object(ThreadingHTTPServer, "process_request_thread"),
+            patch.object(
+                ThreadingHTTPServer, "process_request", side_effect=finished_then_interrupted
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            httpd.process_request(object(), ("127.0.0.1", 1))
+        self.assertTrue(httpd._handler_slots.acquire(blocking=False))
+        self.assertFalse(httpd._handler_slots.acquire(blocking=False))
+        httpd._handler_slots.release()
+
     def test_handler_slot_rejection_is_logged_and_counted(self):
         from unittest.mock import MagicMock
 

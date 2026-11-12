@@ -67,6 +67,7 @@ from .models import (
     LSHBucket,
     Snippet,
     SnippetVersion,
+    name_list_parse,
     name_normalize,
 )
 from .paths import (
@@ -1504,7 +1505,7 @@ def _yara_string_escape(text: str) -> str:
         code = ord(ch)
         if 0x20 <= code and not 0x7F <= code <= 0x9F and not 0xD800 <= code <= 0xDFFF:
             parts.append(ch)
-        elif code < 0x100:
+        elif code < 0x80:
             # YARA ``\xNN`` takes exactly two hex digits: ``f"\x{ord:02x}"``
             # on a surrogate (e.g. U+DCFF) would parse as ``\xdc`` plus the
             # literal ``ff``, corrupting the pattern.
@@ -2069,7 +2070,7 @@ def snippet_search_by_name(session: Session, pattern: str, limit: int = 50) -> l
         for checksum, names in rows:
             if any(
                 folded_target in (stored if stored.isascii() else name_normalize(stored)).casefold()
-                for stored in json.loads(names)
+                for stored in name_list_parse(names)
             ):
                 checksums.append(checksum)
                 if len(checksums) >= limit:

@@ -2258,7 +2258,8 @@ class _FindServer(
             return
         try:
             super().process_request(request, client_address)
-        except BaseException:
+        # Shutdown interrupts may arrive after the worker has released its slot.
+        except Exception:
             self._handler_slots.release()
             raise
 

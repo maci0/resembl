@@ -297,9 +297,9 @@ class TestYaraStringEscape(unittest.TestCase):
 
         The printable check only excluded DEL, so a C1 control passed
         through raw and was written to the rule file as its two UTF-8
-        bytes, the same raw-control leak the C0 escapes exist to stop.
+        bytes. Escape both bytes so the pattern still matches the stored text.
         """
-        self.assertEqual(_yara_string_escape("a\x85b\x9fc"), "a\\x85b\\x9fc")
+        self.assertEqual(_yara_string_escape("a\x85b\x9fc"), "a\\xc2\\x85b\\xc2\\x9fc")
 
     def test_tab_is_escaped(self):
         self.assertEqual(_yara_string_escape("a\tb"), "a\\tb")
