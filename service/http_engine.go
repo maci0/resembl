@@ -19,15 +19,12 @@ import (
 type LocalEngine struct {
 	endpoint string
 	client   *http.Client
-	// timeout is the per-request client timeout, exposed for tests and
-	// for callers that construct with NewLocalEngineWithTimeout.
-	timeout time.Duration
 	// transport is kept so CloseIdleConnections can retire pooled
 	// connections when the engine is discarded.
 	transport *http.Transport
 }
 
-// EngineError is a non-2xx answer from the warm engine. Status is its HTTP
+// EngineError is a non-200 answer from the warm engine. Status is its HTTP
 // status and Message its JSON error envelope text, so Service can relay a
 // client-caused rejection (400/409/...) instead of masking every rejection
 // as 503 "engine unavailable".
@@ -73,11 +70,7 @@ func newLocalEngine(endpoint string, timeout time.Duration) (*LocalEngine, error
 			return nil, errors.New("engine must be loopback")
 		}
 	}
-	// Bounded transport: the default http.Transport pools up to 100 idle
-	// connections per host with no idle timeout, so a long-lived service
-	// whose engine is slow to answer accumulates half-dead idle sockets
-	// that fail on next use.  Cap idle per host and time them out; the
-	// request timeout still bounds an in-flight call.
+	// Bound idle connections separately from the in-flight request timeout.
 	transport := &http.Transport{
 		MaxIdleConns:        16,
 		MaxIdleConnsPerHost: 8,
@@ -86,7 +79,6 @@ func newLocalEngine(endpoint string, timeout time.Duration) (*LocalEngine, error
 	return &LocalEngine{
 		endpoint:  strings.TrimRight(u.String(), "/"),
 		client:    &http.Client{Timeout: timeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		timeout:   timeout,
 		transport: transport,
 	}, nil
 }

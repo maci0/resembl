@@ -22,9 +22,6 @@ func TestLocalEngineTimeoutIsCallerChosen(t *testing.T) {
 	if e.client.Timeout != 5*time.Second {
 		t.Fatalf("client timeout = %v, want 5s", e.client.Timeout)
 	}
-	if e.timeout != 5*time.Second {
-		t.Fatalf("engine timeout = %v, want 5s", e.timeout)
-	}
 }
 
 func TestLocalEngineDefaultTimeoutIs30s(t *testing.T) {
