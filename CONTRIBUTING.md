@@ -317,5 +317,3 @@ Releases are cut by a maintainer from `main`. Every release is a single `release
 6. **Publish, then check the artifact.** Push the tag, publish, and confirm the published version imports and runs. A published version is immutable: if something is wrong, cut a new patch. Never re-upload over an existing version. Pushing the tag also starts the `attest` job in the `Build` workflow, which records a Sigstore-backed provenance attestation for the sdist and the wheel; `gh attestation verify resembl-X.Y.Z-py3-none-any.whl --repo maci0/resembl` checks a downloaded artifact against it. Publish the artifacts that job attested, so the attestation names the bytes a consumer actually received.
 
 Nothing reaches a release without a changelog entry. If a change cannot be described for a consumer in one bullet, it is not ready to ship.
-
-Congratulations, and thank you! Your contribution is now part of the `resembl` project. We deeply appreciate your time and effort.
