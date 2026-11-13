@@ -9,7 +9,7 @@
 | Config (`config.toml`) | `~/.config/resembl/` (or `$RESEMBL_CONFIG_DIR`) | Yes (SQLite): copied verbatim to `<backup-stem>.config.toml` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `config_sha256`, cross-checked by `verify-backup` | Regenerable: defaults are sane; when no config existed at backup time the manifest records `config_sha256: null` and no sidecar is written |
 | Legacy pickle cache, port file | `~/.cache/resembl/` | **No** | Yes: cache, never loaded; port file rewritten by `serve` |
 | Export files + export manifest | Export directory chosen at `export` time (`DIRECTORY/.resembl-export.json`) | **No** (the export itself is the copy) | Yes: re-export from restored corpus; manifest rewritten by next `export` |
-| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | Yes (SQLite): copied verbatim to `<backup-stem>.runtime-manifest.json` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `runtime_sha256`, cross-checked by `verify-backup` | Regenerable only by regenerating hashes of interpreter + loaded modules; copy + SHA-256 (`artifact_sha256`) with backup set, write-protected, writable manifest can attest tampered code |
+| Runtime manifest (`RESEMBL_RUNTIME_MANIFEST`) | Path named by `RESEMBL_RUNTIME_MANIFEST`, required by `serve` for `/find-pinned` | Yes (SQLite): copied verbatim to `<backup-stem>.runtime-manifest.json` beside `assembly-<stamp>.db`, SHA-256 in the manifest as `runtime_sha256`, cross-checked by `verify-backup` | Regenerable only by regenerating hashes of interpreter + loaded modules; copy + SHA-256 (`artifact_sha256`) with backup set, write-protected; a writable manifest can attest tampered code |
 
 Non-SQLite backends (PostgreSQL/MySQL/DuckDB) are **not** covered by
 `resembl backup`: use that backend's own tooling (`pg_dump`, etc.) and test
@@ -57,7 +57,7 @@ readable manifest".
 PostgreSQL, or MySQL there is no `resembl backup` to drill: stop every
 DuckDB process, copy the `duckdb:///file.db` file to scratch, and open the
 copy with the DuckDB version that wrote it (a DuckDB 2.0 file is not
-readable before 2.0), see `docs/custom_database.md`.  For PostgreSQL use
+readable before 2.0). See [custom databases](custom_database.md).  For PostgreSQL use
 `pg_dump`/`pg_restore` and for MySQL `mysqldump`/`mysql` on the same
 scratch-copy-then-open pattern.  A drill that only ever ran against SQLite
 proves nothing about those backends; record the backend-specific drill

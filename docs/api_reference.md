@@ -309,7 +309,7 @@ unmasked for the port file. No secret is stored in `config.toml` (mode
 ## Database
 
 ### `create_db_engine(url: str | None = None)`
-Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`); `synchronous=NORMAL` survives a process crash but an OS/power loss can lose the last committed transactions, see `docs/restore.md` "Write durability". Pass a PostgreSQL URL for team use.
+Create a SQLAlchemy engine, defaulting to `db_url_get()`. SQLite pragmas applied automatically (WAL, `synchronous=NORMAL`, `busy_timeout`); `synchronous=NORMAL` survives a process crash but an OS/power loss can lose the last committed transactions. See the [write durability notes](restore.md#write-durability-power-loss--os-crash). Pass a PostgreSQL URL for team use.
 
 ### `db_stats(session) → dict` / `db_clean(session) → dict` / `db_merge(session, source_db_path: str) → dict`
 Database statistics (count, avg snippet size, vocabulary estimated from a sample of up to 2000 snippets, sampled avg Jaccard; all SQL-aggregated or sampled, safe at scale; sampling is seeded via `RESEMBL_SEED`, see `resembl.diagnostics.sample_rng`); clean (index wipe + `VACUUM` on SQLite only); and merge another database's snippets, deduplicating by checksum while keeping the LSH index in sync.
