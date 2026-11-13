@@ -6,7 +6,7 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [5.2.0] - 2026-11-13
+## [5.3.0] - 2026-11-13
 
 ### Fixed
 
@@ -16,6 +16,10 @@ project follows [Semantic Versioning](https://semver.org/).
 - Refuse timestamp offsets that would normalize outside Python's UTC date range, preserving the original stored text instead of raising an overflow.
 - Keep portability fixtures on one Windows drive, close restored test databases before cleanup, run recipes with a POSIX shell, and emit backup candidate paths with LF line endings. Fuzz tail checks now mutate unused values within the fingerprint rather than append malformed bytes.
 - MySQL can create the snippet history timestamp index by indexing a bounded TEXT prefix without limiting stored timestamps.
+
+- Clarify database setup, benchmark cleanup, durability warnings and restore documentation.
+
+## [5.2.0] - 2026-11-13
 
 ### Changed
 
@@ -1410,7 +1414,8 @@ entry covers the changes a 0.x consumer needs to know about, not the full
 Initial release: content-addressed snippet store, database-backed LSH index,
 and the `resembl find` matching pipeline.
 
-[Unreleased]: https://github.com/maci0/resembl/compare/v5.2.0...HEAD
+[Unreleased]: https://github.com/maci0/resembl/compare/v5.3.0...HEAD
+[5.3.0]: https://github.com/maci0/resembl/compare/v5.2.0...v5.3.0
 [5.2.0]: https://github.com/maci0/resembl/compare/v5.1.0...v5.2.0
 [5.1.0]: https://github.com/maci0/resembl/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/maci0/resembl/compare/v4.0.0...v5.0.0

@@ -58,7 +58,7 @@ The repository is <https://github.com/maci0/resembl>.
 | 5.x (current release line) | yes |
 | 4.x and earlier | no |
 
-The current release is 5.2.0. Older lines receive no fixes; upgrade to the
+The current release is 5.3.0. Older lines receive no fixes; upgrade to the
 current line before reporting an issue against them.
 
 ## Threat model
