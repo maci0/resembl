@@ -216,7 +216,7 @@ The MinHash algorithm is a technique for quickly estimating how similar two sets
 
 5.  **Signature:** The collection of these 128 minimum hash values becomes the "MinHash signature" for the snippet.
 
-The key insight is that the similarity of two MinHash signatures is a good estimate of the Jaccard similarity of the original shingle sets. This allows us to compare fingerprints instead of the full code, which is significantly faster.
+The key insight is that the similarity of two MinHash signatures is a good estimate of the Jaccard similarity of the original shingle sets. Comparing fingerprints instead of the full code is much faster.
 
 #### The RapidFuzz Algorithm
 
