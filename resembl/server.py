@@ -19,9 +19,11 @@ from __future__ import annotations
 import atexit
 import functools
 import hashlib
+import hmac
 import json
 import logging
 import os
+import re
 import socket
 import socketserver
 import sys
@@ -139,6 +141,13 @@ _MAX_HANDLER_THREADS = 96
 #: longer than that cannot recover by waiting further; the queued
 #: connection is closed instead of wedging the accept loop.
 _HANDLER_SLOT_TIMEOUT_SECONDS = 30.0
+
+#: Shape of a ``RESEMBL_SERVE_TOKEN``: an RFC 6750 ``b64token`` (what a
+#: client can send verbatim after ``Bearer``), 32 to 256 characters, so a
+#: guessable or header-breaking value fails startup instead of serving.
+_SERVE_TOKEN_RE = re.compile(r"[A-Za-z0-9._~+/-]+=*")
+_SERVE_TOKEN_MIN = 32
+_SERVE_TOKEN_MAX = 256
 
 
 def _query_cache_key(query: str) -> str:
@@ -1563,17 +1572,50 @@ class _FindHandler(BaseHTTPRequestHandler):
             return True
         return ascii_fold_lower((self.headers.get("Host") or "").strip()) in allowed
 
+    def _token_refused(self) -> bool:
+        """Answer ``401`` when the server has a token and the request lacks it.
+
+        Returns whether it answered.  A server started with
+        ``RESEMBL_SERVE_TOKEN`` requires ``Authorization: Bearer <token>`` on
+        every path but ``/health``, which probes read without one.  The scheme
+        name is matched ASCII case-insensitively and the token in constant
+        time.
+        """
+        token: str | None = getattr(self.server, "token", None)
+        if token is None or self.route == "/health":
+            return False
+        scheme, _, given = (self.headers.get("Authorization") or "").partition(" ")
+        if ascii_fold_lower(scheme) == "bearer" and hmac.compare_digest(
+            given.encode("utf-8", "surrogateescape"), token.encode("utf-8")
+        ):
+            return False
+        logger.warning(
+            "[%s] %s %s refused: no valid bearer token",
+            self.request_id,
+            (self.command or "").translate(_LOG_CONTROL_CHARS),
+            (self.route or "").translate(_LOG_CONTROL_CHARS),
+        )
+        self._respond(
+            401,
+            {"error": "a valid bearer token is required"},
+            extra_headers={"WWW-Authenticate": "Bearer"},
+        )
+        return True
+
     def _non_loopback_refused(self) -> bool:
         """Whether this request hits an endpoint gated on non-loopback binds.
 
         A non-loopback bind is reachable by any host that can route to the
-        port and the server has no authentication.  The stateless computed
-        endpoints (``/score``, ``/band-keys``, ``/scheme``) and ``/metrics``
-        are therefore refused there; ``/health`` stays open for probes and
-        ``/find*``/``/find-pinned`` keep their existing operator gate.
-        Loopback binds answer normally.
+        port.  Without a token the server has no authentication, so the
+        stateless computed endpoints (``/score``, ``/band-keys``, ``/scheme``)
+        and ``/metrics`` are refused there; ``/health`` stays open for probes
+        and ``/find*``/``/find-pinned`` keep their existing operator gate.
+        Loopback binds, and a server whose token :meth:`_token_refused` has
+        already checked, answer normally.
         """
         if not getattr(self.server, "is_non_loopback", False):
+            return False
+        if getattr(self.server, "token", None) is not None:
             return False
         if self.route in ("/score", "/band-keys", "/scheme", "/metrics"):
             logger.warning(
@@ -1595,6 +1637,8 @@ class _FindHandler(BaseHTTPRequestHandler):
                 (self.route or "").translate(_LOG_CONTROL_CHARS),
             )
             self._respond(403, {"error": "host not allowed"})
+            return
+        if self._token_refused():
             return
         if self.route in _GET_PATHS:
             self._method_not_allowed()
@@ -1695,6 +1739,8 @@ class _FindHandler(BaseHTTPRequestHandler):
                 (self.route or "").translate(_LOG_CONTROL_CHARS),
             )
             self._respond(403, {"error": "host not allowed"})
+            return
+        if self._token_refused():
             return
         if self._non_loopback_refused():
             return
@@ -2188,10 +2234,13 @@ class _FindServer(
     #: (a non-loopback bind — see :func:`_loopback_allowed_hosts`).
     allowed_hosts: frozenset[str] = frozenset()
     #: Whether bound to a non-loopback interface.  Such a bind is reachable
-    #: by any host that can route to it and the server has no authentication,
-    #: so computed/metrics endpoints are refused there unless the operator
-    #: opted into unauthenticated exposure (see :func:`_FindHandler`).
+    #: by any host that can route to it, so without :attr:`token` the
+    #: computed and metrics endpoints are refused there (see
+    #: :meth:`_FindHandler._non_loopback_refused`).
     is_non_loopback: bool = False
+    #: The bearer token every path but ``/health`` requires, or None for an
+    #: unauthenticated server.  Only a stateless server carries one.
+    token: str | None = None
     #: This generation's exit-hook callback, set by :func:`serve`.
     #: ``server_close`` runs it (retiring the port file) and unregisters it,
     #: so a process cycling servers accumulates neither stale advertisements
@@ -2360,7 +2409,30 @@ def _find_defaults_load() -> ResemblConfig:
     )
 
 
-def _stateless_serve(host: str, port: int) -> ThreadingHTTPServer:
+def serve_token_check(token: str | None, *, stateless: bool) -> None:
+    """Raise :class:`ValueError` unless *token* can gate this server.
+
+    A token must be an RFC 6750 ``b64token`` of 32 to 256 characters, and
+    only a stateless server takes one: a database server is reached by
+    ``resembl find``, which sends none.  The message never carries the token.
+    """
+    if token is None:
+        return
+    if not (
+        _SERVE_TOKEN_MIN <= len(token) <= _SERVE_TOKEN_MAX and _SERVE_TOKEN_RE.fullmatch(token)
+    ):
+        raise ValueError(
+            f"RESEMBL_SERVE_TOKEN must be {_SERVE_TOKEN_MIN} to {_SERVE_TOKEN_MAX} "
+            "characters of A-Z, a-z, 0-9 and -._~+/ (optionally ending in =)"
+        )
+    if not stateless:
+        raise ValueError(
+            "RESEMBL_SERVE_TOKEN applies to serve --stateless only; a database "
+            "server is reached by resembl find, which sends no token"
+        )
+
+
+def _stateless_serve(host: str, port: int, token: str | None) -> ThreadingHTTPServer:
     """Bind a server that holds no database; see :func:`serve`."""
     find_defaults = _find_defaults_load()
     httpd = _FindServer((host, port), _FindHandler)
@@ -2368,6 +2440,7 @@ def _stateless_serve(host: str, port: int) -> ThreadingHTTPServer:
     httpd.find_defaults = find_defaults
     httpd.allowed_hosts = _loopback_allowed_hosts(host, int(httpd.server_address[1]))
     httpd.is_non_loopback = not _loopback_allowed_hosts(host, int(httpd.server_address[1]))
+    httpd.token = token
     logger.debug(
         "serving without a database on %s:%d, find defaults %s",
         host,
@@ -2377,7 +2450,9 @@ def _stateless_serve(host: str, port: int) -> ThreadingHTTPServer:
     return httpd
 
 
-def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+def serve(
+    db_url: str | None, host: str = "127.0.0.1", port: int = 0, *, token: str | None = None
+) -> ThreadingHTTPServer:
     """Start the find server for *db_url* and return the bound HTTP server.
 
     The fingerprint migration (if any) and the LSH index build run once at
@@ -2388,7 +2463,14 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
     --stateless``): nothing is opened, migrated or advertised, ``/score``,
     ``/band-keys``, ``/scheme``, ``/health`` and ``/metrics`` answer, and the
     find paths answer ``501``.  Replicas of such a server share no state.
+
+    *token* (``RESEMBL_SERVE_TOKEN``) makes a stateless server require
+    ``Authorization: Bearer <token>`` on every path but ``/health``, and
+    lets it answer the computed endpoints and ``/metrics`` on a non-loopback
+    bind.  :func:`serve_token_check` refuses a malformed token, or one with a
+    *db_url*, before anything is opened.
     """
+    serve_token_check(token, stateless=db_url is None)
     # Fail fast on a set-but-unusable runtime manifest, before any other
     # startup work: the operator configured /find-pinned, so a server that
     # binds and then answers 503 for every pinned request would read as
@@ -2405,7 +2487,7 @@ def serve(db_url: str | None, host: str = "127.0.0.1", port: int = 0) -> Threadi
                 f"RESEMBL_RUNTIME_MANIFEST={manifest_path!r} is not readable: {e}"
             ) from e
     if db_url is None:
-        return _stateless_serve(host, port)
+        return _stateless_serve(host, port, token)
     from .database import create_db_engine
 
     # Refuse to double-serve: if a port file exists for this database and a

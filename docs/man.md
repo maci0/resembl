@@ -174,13 +174,15 @@ Global options go before the subcommand: `resembl --format json find ...`.
     onto 127.0.0.1 cannot reach the endpoints.  A non-loopback `--host`
     is refused unless `--allow-unauthenticated` is given (with the flag,
     it warns that the server is unauthenticated and proceeds). On a
-    non-loopback bind those four computed endpoints answer `403`; loopback
-    binds answer normally.
+    non-loopback bind without a token, `/score`, `/band-keys`, `/scheme`
+    and `/metrics` answer `403`; loopback binds answer normally.
     `--stateless` opens no database and writes no port file: the server
-    answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` on a
-    loopback bind, and
+    answers `/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, and
     `501` to the find paths, so replicas behind a load balancer share no
-    state.
+    state. With `RESEMBL_SERVE_TOKEN` set it requires
+    `Authorization: Bearer <token>` on every path but `/health` (`401`
+    otherwise), and a non-loopback bind needs no `--allow-unauthenticated`
+    and answers those endpoints.
     The HTTP endpoints themselves (`POST /find`, `POST /find-batch`, `GET
     /health`, `GET /metrics`, JSON requests, `{"error": ...}` bodies) are
     documented in [http_api.md](http_api.md).
@@ -396,6 +398,14 @@ Linux or Windows are one name.
     through the environment. A blank value counts as unset, and
     `0`/`false`/`no`/`off` (case-insensitive) count as an explicit
     opt-out. The flag and this variable are an OR: either opts in.
+
+**RESEMBL_SERVE_TOKEN**
+:   Bearer token `serve --stateless` requires on every path but
+    `/health`; with it a non-loopback bind needs no
+    `--allow-unauthenticated`. 32 to 256 characters of `A-Z`, `a-z`,
+    `0-9` and `-._~+/`, optionally ending in `=`. A blank value counts as
+    unset; a malformed value, or a token without `--stateless`, fails
+    startup.
 
 **RESEMBL_LOG_LEVEL**
 :   Log level for every command: `DEBUG`, `INFO`, `WARNING`,

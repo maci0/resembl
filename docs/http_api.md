@@ -5,18 +5,18 @@ a warm engine and LSH index, and scores listings a caller sends. `resembl find`
 and `resembl find-batch` use it automatically when it is running; the
 endpoints are documented here so other clients can use the same server.
 
-The server has no authentication: it is a single-user local tool, not a
+A database server has no authentication: it is a single-user local tool, not a
 service. It binds `127.0.0.1` by default. A non-loopback `--host` is refused
 unless `--allow-unauthenticated` is given, in which case it prints a warning
 and proceeds. Any process that can reach the port can read the whole snippet
 corpus. Do not expose the port; only use `--allow-unauthenticated` behind a
-network gate that provides authentication. On a non-loopback bind the
-computed endpoints `POST /score`, `POST /band-keys`, `POST /scheme` and
-`GET /metrics` answer `403` with `{"error": "endpoint not exposed on
-non-loopback bind"}`: a non-loopback bind is reachable by any host that can
-route to the port and the server has no authentication, so only `/health`
-and the `/find` family (which keeps its existing operator gate) answer
-there. Loopback binds answer normally.
+network gate that provides authentication. On a non-loopback bind without a
+token the computed endpoints `POST /score`, `POST /band-keys`, `GET /scheme`
+and `GET /metrics` answer `403` with `{"error": "endpoint not exposed on
+non-loopback bind"}`: such a bind is reachable by any host that can route to
+the port, so only `/health` and the `/find` family (which keeps its existing
+operator gate) answer there. Loopback binds answer normally. A stateless
+server can require a token instead (see "Stateless mode").
 
 A loopback bind additionally checks the request's `Host` header and answers
 `403` to anything but `127.0.0.1`, `localhost`, `::1` or the exact configured
@@ -62,16 +62,33 @@ post to `http://127.0.0.1:<port>/find` with any HTTP client (for example
 
 `resembl serve --stateless` opens no database: no migration, no LSH index
 build, no port file, and `resembl find` never discovers it. It answers
-`/score`, `/band-keys`, `/scheme`, `/health` and `/metrics` on a loopback
-bind, which read no
+`/score`, `/band-keys`, `/scheme`, `/health` and `/metrics`, which read no
 database; `/find`, `/find-batch`, `/find-pinned` and `GET /runtime-generation`
-answer `501`. On a non-loopback bind `--stateless` still refuses the four
-computed endpoints with `403` (see "HTTP API" above). The fingerprint defaults still come from `config.toml`. Replicas
-share no state, so a load balancer can spread `/score` and `/band-keys` over
-any number of them, and `/health` reports only that the process answers.
+answer `501`. The fingerprint defaults still come from `config.toml`.
+
+Set `RESEMBL_SERVE_TOKEN` (environment only, never a flag) to require
+`Authorization: Bearer <token>` on every path but `GET /health`. A request
+without it, or with another token, is answered `401` with
+`{"error": "a valid bearer token is required"}` and `WWW-Authenticate:
+Bearer`; the scheme name is matched case-insensitively and the token in
+constant time. With a token, a non-loopback `--host` needs no
+`--allow-unauthenticated` and answers the computed endpoints and `/metrics`.
+The token is 32 to 256 characters of `A-Z`, `a-z`, `0-9` and `-._~+/`,
+optionally ending in `=` (an RFC 6750 `b64token`, so `openssl rand -hex 32`
+works); another value, or a token without `--stateless`, fails startup with
+exit code 1 and a message that does not carry it. Without a token, a
+non-loopback stateless bind needs `--allow-unauthenticated` and still refuses
+the four computed endpoints with `403` (see "HTTP API" above).
+
+Replicas share no state, so a load balancer can spread `/score` and
+`/band-keys` over any number of token-holding replicas, and `/health` reports
+only that the process answers.
 
 ```bash
-resembl serve --stateless --host 0.0.0.0 --port 8080 --allow-unauthenticated
+export RESEMBL_SERVE_TOKEN="$(openssl rand -hex 32)"
+resembl serve --stateless --host 0.0.0.0 --port 8080
+printf 'Authorization: Bearer %s\n' "$RESEMBL_SERVE_TOKEN" |
+  curl -s http://127.0.0.1:8080/scheme -H @-
 ```
 
 ## Endpoints

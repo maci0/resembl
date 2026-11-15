@@ -57,6 +57,12 @@ DEFAULT_CONFIG_DIR = "~/.config/resembl"
 #: counts as unset, matching every other ``RESEMBL_*`` override.
 SERVE_ALLOW_UNAUTHENTICATED_ENV_VAR = "RESEMBL_SERVE_ALLOW_UNAUTHENTICATED"
 
+#: Environment variable holding the bearer token ``serve --stateless``
+#: requires on every endpoint but ``/health``.  Read from the environment
+#: only, never a flag, so the secret stays out of the process table.  Blank
+#: counts as unset.
+SERVE_TOKEN_ENV_VAR = "RESEMBL_SERVE_TOKEN"
+
 #: Environment variable that sets the log level for every command,
 #: for deployments that configure the process through the environment
 #: instead of ``-v``/``-q``.  Accepted values are the standard level
@@ -217,6 +223,19 @@ def serve_allow_unauthenticated_get() -> bool:
     if value is None or not value.strip():
         return False
     return value.strip().casefold() not in ("0", "false", "no", "off")
+
+
+def serve_token_get() -> str | None:
+    """Return the token named by ``RESEMBL_SERVE_TOKEN``, or None when unset.
+
+    Read at call time, like :func:`db_url_get`.  Blank counts as unset;
+    surrounding whitespace is stripped.  The format is checked by
+    :func:`resembl.server.serve`, which refuses a malformed value at startup.
+    """
+    value = os.environ.get(SERVE_TOKEN_ENV_VAR)
+    if value is None or not value.strip():
+        return None
+    return value.strip()
 
 
 def runtime_manifest_path_get() -> str | None:

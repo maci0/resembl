@@ -682,6 +682,21 @@ class TestCLIServeWarnings(BaseCLITest):
         self.assertIn("non-loopback", result.stdout)
         self.assertIn("unauthenticated", result.stdout)
 
+    def test_token_is_refused_without_stateless(self):
+        """RESEMBL_SERVE_TOKEN gates the stateless server only.
+
+        A database serve refuses it at startup, before the bind, rather than
+        serving a corpus the token was meant to protect without it.
+        """
+        token = "k" * 40
+        result = self.run_command(
+            "serve --host 0.0.0.0 --port 0", extra_env={"RESEMBL_SERVE_TOKEN": token}
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("RESEMBL_SERVE_TOKEN applies to serve --stateless only", result.stderr)
+        self.assertNotIn(token, result.stderr + result.stdout)
+        self.assertNotIn("listening", result.stdout)
+
     def test_loopback_bind_does_not_warn(self):
         """The default loopback bind is the safe one, so it stays quiet."""
         result = self.run_serve("127.0.0.1")

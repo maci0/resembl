@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `resembl serve --stateless` reads a bearer token from `RESEMBL_SERVE_TOKEN` (environment only). With it set, every path but `/health` answers `401` without `Authorization: Bearer <token>`, and a non-loopback bind needs no `--allow-unauthenticated` and answers `/score`, `/band-keys`, `/scheme` and `/metrics`, so stateless replicas can run behind a load balancer again: since 5.0.0 a non-loopback bind refused those four endpoints with `403` whatever the opt-in, which left the documented replica mode serving only `/health`. The token is 32 to 256 RFC 6750 `b64token` characters; a malformed value, or a token without `--stateless`, fails startup. To run replicas, set the variable from a secret and send the header from the client.
+
+### Fixed
+
+- `docs/http_api.md` listed `POST /scheme` (the endpoint is `GET /scheme`) and showed a non-loopback stateless example that answered `403` to every computed endpoint.
+
 ## [5.3.0] - 2026-11-13
 
 ### Fixed

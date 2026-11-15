@@ -95,7 +95,9 @@ relies on, not configuration options.
   the whole snippet corpus to that network, printing a warning that does
   not stop the bind. Do not put it behind a reverse proxy that does not
   authenticate. The Go `resembl-service` likewise requires `-token-file`
-  for a non-loopback `-listen`.
+  for a non-loopback `-listen`. `resembl serve --stateless` (no corpus) can
+  require a bearer token from `RESEMBL_SERVE_TOKEN` instead, which lets it
+  answer off loopback without `--allow-unauthenticated`.
 - **The cache directory is private to the user.** The port file in it is
   read as an unauthenticated port number by every `find` client, which then
   dials that port on `127.0.0.1`. The standalone client `resembl-find`

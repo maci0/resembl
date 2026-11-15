@@ -299,6 +299,7 @@ as unset for every one. The full manual-page reference is in
 | `RESEMBL_SEED` | OS-drawn (logged) | Integer seed for sampled values (`stats`); unparseable aborts the command |
 | `RESEMBL_NOW` | wall clock | ISO 8601 instant pinning `created_at` and duration metrics; unparseable aborts the command |
 | `RESEMBL_SERVE_ALLOW_UNAUTHENTICATED` | (none) | Non-blank value except `0`/`false`/`no`/`off` (case-insensitive) authorizes a non-loopback `serve --host` bind without `--allow-unauthenticated` |
+| `RESEMBL_SERVE_TOKEN` | (none) | Bearer token `serve --stateless` requires on every path but `/health` (32 to 256 `b64token` characters); lets a non-loopback bind answer without `--allow-unauthenticated`; malformed, or set without `--stateless`, fails startup |
 | `RESEMBL_LOG_LEVEL` | `INFO` | Log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`); `-v`/`-q` win when set; invalid aborts the command |
 
 Database URLs may carry credentials (`postgresql+pg8000://user:pass@host/db`);

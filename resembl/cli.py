@@ -113,6 +113,7 @@ from .paths import (
     log_level_get,
     port_file_cleanup,
     serve_allow_unauthenticated_get,
+    serve_token_get,
     server_port_path,
     terminal_text_clean,
 )
@@ -888,7 +889,10 @@ def serve(
         "--stateless",
         help=(
             "Open no database: serve only /score, /band-keys, /scheme, /health and "
-            "/metrics, for replicas that share no state. Find paths answer 501."
+            "/metrics, for replicas that share no state. Find paths answer 501. "
+            "With RESEMBL_SERVE_TOKEN set, every path but /health needs "
+            "Authorization: Bearer <token>, and a non-loopback bind needs no "
+            "--allow-unauthenticated."
         ),
     ),
     allow_unauthenticated: bool = typer.Option(
@@ -906,12 +910,15 @@ def serve(
     Start this once per database; ``resembl find`` then talks to it over
     localhost instead of paying ~450 ms of interpreter startup per query.
     The port is written to the cache directory and removed on exit.
-    With ``--stateless`` no database is opened and no port file is written.
+    With ``--stateless`` no database is opened and no port file is written,
+    and ``RESEMBL_SERVE_TOKEN`` (environment only) makes it require a bearer
+    token.
     """
     if not 0 <= port <= 65535:
         err_console.print(f"[red]Error:[/red] --port must be between 0 and 65535 (got {port}).")
         raise typer.Exit(code=USAGE_ERROR)
     from .server import serve as serve_start
+    from .server import serve_token_check
 
     # ``-v`` is also a global (callback-level) option, which click only
     # accepts before the subcommand name.  serve has no other work to do in
@@ -930,6 +937,15 @@ def serve(
         _env_level = log_level_get()
         if _env_level is not None:
             logging.getLogger().setLevel(getattr(logging, _env_level))
+
+    # Refused before the database is opened: a token with a database serve
+    # or a malformed one must not leave a created database behind.
+    token = serve_token_get()
+    try:
+        serve_token_check(token, stateless=stateless)
+    except ValueError as e:
+        err_console.print(f"[red]Error:[/red] {_display(str(e))}")
+        raise typer.Exit(code=1) from e
 
     db_url: str | None = None
     if not stateless:
@@ -958,13 +974,14 @@ def serve(
         except ValueError:
             return False
 
-    if not _is_loopback_bind(host):
+    if token is None and not _is_loopback_bind(host):
         if not allow_unauthenticated and not serve_allow_unauthenticated_get():
             err_console.print(
                 "[red]Error:[/red] refusing to bind non-loopback "
                 f"{_display(host)} without --allow-unauthenticated: the "
                 "server has no authentication and anyone who can reach the "
-                "port can read the corpus. Bind loopback, or put an "
+                "port can read the corpus. Bind loopback, set "
+                "RESEMBL_SERVE_TOKEN for --stateless, or put an "
                 "authenticating gate in front of the port."
             )
             raise typer.Exit(code=1)
@@ -975,7 +992,7 @@ def serve(
     if not stateless:
         _echo("[dim]Warming up index (first serve can take a moment)…[/dim]")
     try:
-        httpd = serve_start(db_url, host=host, port=port)
+        httpd = serve_start(db_url, host=host, port=port, token=token)
     except (ValueError, IndexBuildError) as e:
         # ValueError: another serve process already owns this database;
         # IndexBuildError: the warm-up migration/index build failed.

@@ -2876,6 +2876,139 @@ class TestStatelessServe(unittest.TestCase):
         self.assertEqual((status, payload["mode"]), (200, "stateless"))
         self.assertFalse(os.path.exists(os.path.dirname(self._db)))
 
+    _TOKEN = "t" * 40
+
+    def _cli_serve(self, *args: str, token: str | None) -> subprocess.Popen:
+        """Start ``resembl serve --stateless *args`` with ``RESEMBL_SERVE_TOKEN``."""
+        env = {
+            **os.environ,
+            "PYTHONPATH": os.path.abspath("."),
+            "DATABASE_URL": f"sqlite:///{self._db}",
+            "RESEMBL_CACHE_DIR": self._cache_dir,
+        }
+        env.pop("RESEMBL_SERVE_TOKEN", None)
+        env.pop("RESEMBL_SERVE_ALLOW_UNAUTHENTICATED", None)
+        if token is not None:
+            env["RESEMBL_SERVE_TOKEN"] = token
+        server = subprocess.Popen(
+            [sys.executable, "-m", "resembl.cli", "serve", "--stateless", *args],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            **serve_stop_flags(),
+        )
+
+        def stop_server():
+            if server.poll() is None:
+                process_stop(server)
+            try:
+                server.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.communicate(timeout=10)
+
+        self.addCleanup(stop_server)
+        return server
+
+    def _listening_port(self, server: subprocess.Popen) -> tuple[int, str]:
+        """Return the port *server* prints and the output before that line."""
+        assert server.stdout is not None and server.stderr is not None
+        printed = ""
+        line = ""
+        for line in server.stdout:
+            if "listening on" in line:
+                break
+            printed += line
+        if "listening on" not in line:
+            server.wait(timeout=10)
+            self.fail(f"serve --stateless did not start: {server.stderr.read()}")
+        return int(line.strip().rsplit(":", 1)[1]), printed
+
+    def _request(
+        self, port: int, method: str, path: str, authorization: str | None
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Send one request; return ``(status, headers, body)`` for any status."""
+        payloads = {
+            "/score": {"source": "ret", "candidates": ["ret"]},
+            "/band-keys": {"texts": ["push ebx\nret"], "bands": 4, "rows": 2},
+        }
+        body = json.dumps(payloads[path]).encode("utf-8") if path in payloads else None
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        if authorization is not None:
+            headers["Authorization"] = authorization
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}{path}", data=body, headers=headers, method=method
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, dict(exc.headers), exc.read()
+
+    def test_cli_serve_stateless_with_token_answers_on_a_non_loopback_bind(self):
+        """A token replaces the opt-in and opens the computed endpoints off loopback.
+
+        The replica topology (``--stateless --host 0.0.0.0`` behind a load
+        balancer) serves /score, /band-keys, /scheme and /metrics to a caller
+        holding the token, and /health to a probe without one.
+        """
+        server = self._cli_serve("--host", "0.0.0.0", "--port", "0", token=self._TOKEN)
+        port, printed = self._listening_port(server)
+        self.assertNotIn("unauthenticated", printed)
+        bearer = f"Bearer {self._TOKEN}"
+        for method, path in (
+            ("POST", "/score"),
+            ("POST", "/band-keys"),
+            ("GET", "/scheme"),
+            ("GET", "/metrics"),
+        ):
+            with self.subTest(path=path):
+                status, _, body = self._request(port, method, path, bearer)
+                self.assertEqual(status, 200, body)
+                status, headers, body = self._request(port, method, path, None)
+                self.assertEqual(status, 401, body)
+                self.assertEqual(json.loads(body), {"error": "a valid bearer token is required"})
+                self.assertEqual(headers.get("WWW-Authenticate"), "Bearer")
+                status, _, _ = self._request(port, method, path, f"Bearer {'u' * 40}")
+                self.assertEqual(status, 401)
+        status, _, body = self._request(port, "POST", "/score", bearer)
+        self.assertEqual(json.loads(body)["scores"], [100.0])
+        status, _, body = self._request(port, "GET", "/scheme", f"bearer {self._TOKEN}")
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["scheme"]["id"])
+        status, _, body = self._request(port, "GET", "/health", None)
+        self.assertEqual((status, json.loads(body)["mode"]), (200, "stateless"))
+
+    def test_cli_serve_stateless_with_token_requires_it_on_loopback(self):
+        """A configured token is required on every bind, not only a routable one."""
+        server = self._cli_serve("--port", "0", token=self._TOKEN)
+        port, _ = self._listening_port(server)
+        status, _, _ = self._request(port, "POST", "/score", None)
+        self.assertEqual(status, 401)
+        status, _, body = self._request(port, "POST", "/score", f"Bearer {self._TOKEN}")
+        self.assertEqual(status, 200, body)
+
+    def test_cli_serve_refuses_a_malformed_token(self):
+        """A short or non-token value fails startup and is never echoed back."""
+        for token in ("short", "x" * 31, "a b" + "c" * 40, "c" * 257):
+            with self.subTest(length=len(token)):
+                server = self._cli_serve("--port", "0", token=token)
+                _, errors = server.communicate(timeout=30)
+                self.assertEqual(server.returncode, 1, errors)
+                self.assertIn("RESEMBL_SERVE_TOKEN", errors)
+                self.assertNotIn(token, errors)
+
+    def test_token_is_refused_for_a_database_server(self):
+        """The token gates the stateless server only; a database serve refuses it."""
+        from resembl.server import serve
+
+        with self.assertRaises(ValueError) as caught:
+            serve(f"sqlite:///{self._db}", port=0, token=self._TOKEN)
+        self.assertIn("--stateless", str(caught.exception))
+        self.assertFalse(os.path.exists(os.path.dirname(self._db)))
+
 
 class TestServerObservability(_ServeTestCase):
     """Health, metrics and the per-request trail a served query leaves."""
