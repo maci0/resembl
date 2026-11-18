@@ -1,0 +1,9 @@
+resembl.schema.json is a verbatim copy of contracts/dispatch/resembl.schema.json
+from the ai.relumea.app.backend-go tree, generated with `go run ./cmd/surface-tracker`.
+Backend commit: 7b4fb323 (last change to the file; copied at c52001de, release 0.11.4).
+SHA-256: 56ac7e8fa27758fd522d39b082a99421101c4ac3f65a9717f3a71ea3ba425acc.
+The backend's adapter (internal/engines/resembl/target.go) sends each op's request as the body of
+`resembl serve`'s endpoint (resembl.score: POST /score, resembl.band_keys: POST /band-keys,
+resembl.scheme: GET /scheme) and answers the endpoint's reply as the op's reply.
+tests/test_dispatch_contract.py validates a request per op and the stateless server's reply against it.
+Replace this copy when the backend contract changes; do not edit it here.

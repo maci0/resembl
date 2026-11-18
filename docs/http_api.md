@@ -84,6 +84,13 @@ Replicas share no state, so a load balancer can spread `/score` and
 `/band-keys` over any number of token-holding replicas, and `/health` reports
 only that the process answers.
 
+The relumea backend reaches a stateless server through its dispatch ops
+`resembl.score`, `resembl.band_keys` and `resembl.scheme`, whose bodies are
+those of `POST /score`, `POST /band-keys` and `GET /scheme`.
+`tests/fixtures/dispatch/resembl.schema.json` is a byte-identical copy of the
+backend's schema for them, and `tests/test_dispatch_contract.py` validates a
+request and the server's reply for each op against it.
+
 ```bash
 export RESEMBL_SERVE_TOKEN="$(openssl rand -hex 32)"
 resembl serve --stateless --host 0.0.0.0 --port 8080
