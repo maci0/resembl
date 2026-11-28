@@ -67,7 +67,7 @@ runs:
       # a mutable URL, and pinning only the version in the URL does not stop a
       # compromised mirror from serving different bytes for the same version.
       env:
-        UV_VERSION: "0.13.6"
+        UV_VERSION: "0.13.10"
         UV_INSTALLER_SHA256: "f7a56e7afaec49a3bcbc3ac3cdbe917e7c6ce30e0d815308a12e531aa5ef23b7"
         UV_PYTHON_REQUESTED: ${{ inputs.python-version }}
       run: |

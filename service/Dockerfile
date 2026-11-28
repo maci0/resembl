@@ -11,7 +11,7 @@
 # SOURCE_DATE_EPOCH pins the image's created timestamp and the binary's
 # embedded build time; TZ=UTC and LC_ALL=C keep the build from depending
 # on the host's timezone or locale (reproducible-builds.org).
-ARG GO_IMAGE=golang:1.27-alpine@sha256:eb61c3873c97416fff0116553fff65d67a3549f72e11d9758849a689cdd8b523
+ARG GO_IMAGE=golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
 COPY service/go.mod service/go.sum ./

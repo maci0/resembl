@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.4.1 - 2026-11-28
+
+- Refresh the Python dependency graph, CI action pins, and Go service build image.
+
 All notable user-visible changes to resembl are recorded here.  The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/).
